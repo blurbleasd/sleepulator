@@ -1,0 +1,93 @@
+# SLEEPULATOR — Phone Install Guide
+
+## What changed
+
+Your app is now a proper **Progressive Web App (PWA)** with:
+- ✅ Background audio that keeps playing when your screen locks
+- ✅ Lock screen controls (play/pause/skip) for both podcasts AND ambient noise
+- ✅ Offline support — app shell cached by Service Worker
+- ✅ 8 noise/soundscape types (brown, pink, green, white, fan, rain, ocean, forest)
+- ✅ Safe-area padding for iPhone notch and home indicator
+- ✅ No-zoom touch target sizing for comfortable phone use
+
+---
+
+## Files
+
+```
+SLEEPULATOR/
+├── index.html      ← The app (open this)
+├── manifest.json   ← PWA identity & icons
+├── sw.js           ← Service Worker (offline + caching)
+└── sleepulator.jsx ← Original source (for future edits)
+```
+
+The three files (`index.html`, `manifest.json`, `sw.js`) **must stay in the same folder** and be served from the same web server.
+
+---
+
+## Option A: Free hosting with GitHub Pages (Recommended)
+
+1. Create a free account at [github.com](https://github.com)
+2. Create a new **public** repository (e.g. `sleepulator`)
+3. Upload all three files (`index.html`, `manifest.json`, `sw.js`)
+4. Go to **Settings → Pages → Source → main branch → / (root) → Save**
+5. Your URL will be: `https://yourusername.github.io/sleepulator/`
+6. Open that URL in **Safari (iPhone)** or **Chrome (Android)**
+7. Follow the install step below
+
+---
+
+## Option B: Free hosting with Netlify
+
+1. Go to [netlify.com](https://netlify.com) → "Add new site → Deploy manually"
+2. Drag the entire SLEEPULATOR folder onto the drop zone
+3. You'll get a URL like `https://random-name.netlify.app`
+4. Open it on your phone and install
+
+---
+
+## Option C: Local network (same Wi-Fi)
+
+If you have Python installed on your Mac/PC:
+```bash
+cd /path/to/SLEEPULATOR
+python3 -m http.server 8080
+```
+Then open `http://YOUR-COMPUTER-IP:8080` on your phone.
+⚠️  Service Worker won't activate over plain HTTP (only localhost or HTTPS).
+
+---
+
+## Installing on your phone
+
+### iPhone (Safari only — Chrome won't allow install on iOS)
+1. Open the hosted URL in **Safari**
+2. Tap the **Share** button (box with arrow)
+3. Scroll down and tap **"Add to Home Screen"**
+4. Tap **Add** — the 🌙 icon appears on your home screen
+5. Launch from home screen — it opens fullscreen with no browser UI
+
+### Android (Chrome)
+1. Open the URL in **Chrome**
+2. Tap the three-dot menu → **"Add to Home Screen"** or **"Install app"**
+3. Tap Install
+
+---
+
+## Background audio & lock screen
+
+Once installed and running:
+- Audio plays continuously when you lock the screen
+- The lock screen shows **Now Playing** controls (play/pause, skip for podcasts)
+- Ambient noise and binaural beats show as "Ambient Noise" / "Binaural Beats" on the lock screen
+- The **Still Awake? (+15 min)** button fires before the timer cuts audio
+
+### iOS note
+iOS requires the user to interact with the page before audio can start (Apple policy). Tap any Play button once while the screen is on — after that, audio continues in the background indefinitely.
+
+---
+
+## Editing the app later
+
+Edit `sleepulator.jsx` for your changes, then copy the relevant React code back into the `<script type="text/babel">` section of `index.html`. The JSX is compiled in the browser by Babel, so no build step is needed.

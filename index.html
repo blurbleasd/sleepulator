@@ -1,0 +1,1483 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>SLEEPULATOR</title>
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Sleepulator" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="theme-color" content="#000000" />
+  <link rel="manifest" href="manifest.json" />
+  <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png" />
+  <link rel="icon" type="image/png" sizes="32x32" href="favicon.png" />
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.js"></script>
+  <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+
+  <!-- Lucide — individual SVG sprites via jsdelivr (UMD createElement API is broken) -->
+  <script src="https://cdn.jsdelivr.net/npm/lucide@0.263.1/dist/umd/lucide.min.js"></script>
+
+  <style>
+    :root {
+      --c-bg:       #030712;
+      --c-surface:  #0f172a;
+      --c-border:   #1e293b;
+      --c-border2:  #334155;
+      --c-text:     #e2e8f0;
+      --c-muted:    #94a3b8;
+      --c-dim:      #475569;
+      --c-indigo:   #818cf8;
+      --c-orange:   #fb923c;
+      --c-blue:     #60a5fa;
+      --c-purple:   #c084fc;
+      --c-teal:     #2dd4bf;
+      --c-red:      #f87171;
+      --safe-top:   env(safe-area-inset-top, 0px);
+      --safe-bot:   env(safe-area-inset-bottom, 0px);
+    }
+
+    * { -webkit-tap-highlight-color: transparent; box-sizing: border-box; }
+    html, body { height: 100%; overscroll-behavior: none; margin: 0; }
+    body { background: var(--c-bg); color: var(--c-text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+
+    /* ── Layout helpers ── */
+    #root { min-height: 100dvh; }
+    .pad-top    { padding-top:    max(1.5rem, var(--safe-top)); }
+    .pad-bottom { padding-bottom: max(5rem,   var(--safe-bot)); }
+
+    /* ── Cards ── */
+    .card {
+      background: var(--c-surface);
+      border: 1px solid var(--c-border);
+      border-radius: 1.25rem;
+      padding: 1.25rem;
+    }
+    .card-inner {
+      background: var(--c-bg);
+      border: 1px solid var(--c-border);
+      border-radius: .875rem;
+      padding: 1rem;
+    }
+
+    /* ── Buttons ── */
+    .btn-icon {
+      min-width: 44px; min-height: 44px;
+      border-radius: 50%;
+      display: inline-flex; align-items: center; justify-content: center;
+      border: none; cursor: pointer; transition: background .15s, color .15s;
+      background: #1e293b; color: var(--c-muted);
+    }
+    .btn-icon:active { opacity: .7; }
+    .btn-icon.active-orange { background: rgba(251,146,60,.15); color: var(--c-orange); }
+    .btn-icon.active-blue   { background: rgba(96,165,250,.15); color: var(--c-blue); }
+    .btn-icon.active-purple { background: rgba(192,132,252,.15); color: var(--c-purple); }
+    .btn-icon.active-indigo { background: rgba(129,140,248,.15); color: var(--c-indigo); }
+
+    .btn-pill {
+      display: inline-flex; align-items: center; gap: .375rem;
+      padding: .5rem .875rem; border-radius: 9999px;
+      font-size: .75rem; font-weight: 700; cursor: pointer;
+      border: 1px solid; transition: all .15s;
+    }
+    .btn-primary {
+      width: 100%; padding: .875rem; border-radius: .875rem;
+      font-size: .9rem; font-weight: 700; cursor: pointer;
+      border: none; transition: all .15s;
+    }
+    .btn-primary:active { opacity: .85; }
+
+    /* ── Toggle switch ── */
+    .toggle {
+      width: 52px; height: 30px; min-width: 52px; min-height: 30px;
+      border-radius: 9999px; border: none; cursor: pointer;
+      position: relative; transition: background .2s;
+      background: #1e293b;
+    }
+    .toggle.on { background: var(--c-purple); }
+    .toggle-knob {
+      width: 22px; height: 22px; border-radius: 50%; background: #fff;
+      position: absolute; top: 4px; left: 4px;
+      transition: transform .2s; pointer-events: none;
+    }
+    .toggle.on .toggle-knob { transform: translateX(22px); }
+
+    /* ── Range inputs ── */
+    input[type=range] {
+      -webkit-appearance: none; appearance: none;
+      width: 100%; height: 6px; border-radius: 3px;
+      background: var(--c-border2); outline: none; cursor: pointer;
+    }
+    input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none; appearance: none;
+      width: 22px; height: 22px; border-radius: 50%;
+      background: currentColor; border: none; cursor: pointer;
+    }
+    input[type=range].orange { color: var(--c-orange); }
+    input[type=range].blue   { color: var(--c-blue); }
+    input[type=range].purple { color: var(--c-purple); }
+    input[type=range].indigo { color: var(--c-indigo); }
+    input[type=range].muted  { color: var(--c-dim); }
+
+    /* ── Inputs / selects ── */
+    input[type=text], input[type=url], select, textarea {
+      font-size: 16px !important; /* prevent iOS zoom */
+      background: var(--c-bg); color: var(--c-text);
+      border: 1px solid var(--c-border2); border-radius: .625rem;
+      padding: .5rem .75rem; outline: none; width: 100%;
+      -webkit-appearance: none; appearance: none;
+    }
+    input[type=text]:focus, input[type=url]:focus, select:focus { border-color: var(--c-indigo); }
+    select { padding-right: 1.5rem; }
+
+    /* ── Scrollbar ── */
+    .scroll-y { overflow-y: auto; }
+    .scroll-y::-webkit-scrollbar { width: 3px; }
+    .scroll-y::-webkit-scrollbar-track { background: transparent; }
+    .scroll-y::-webkit-scrollbar-thumb { background: var(--c-border2); border-radius: 3px; }
+
+    /* ── Glow pulse on active card edge ── */
+    @keyframes glowOrange { 0%,100%{opacity:.4;box-shadow:0 0 6px rgba(251,146,60,.3)} 50%{opacity:1;box-shadow:0 0 18px rgba(251,146,60,.9)} }
+    @keyframes glowBlue   { 0%,100%{opacity:.4;box-shadow:0 0 6px rgba(96,165,250,.3)} 50%{opacity:1;box-shadow:0 0 18px rgba(96,165,250,.9)} }
+    @keyframes glowPurple { 0%,100%{opacity:.4;box-shadow:0 0 6px rgba(192,132,252,.3)} 50%{opacity:1;box-shadow:0 0 18px rgba(192,132,252,.9)} }
+    .glow-orange { animation: glowOrange 3s ease-in-out infinite; }
+    .glow-blue   { animation: glowBlue   3s ease-in-out infinite; }
+    .glow-purple { animation: glowPurple 3s ease-in-out infinite; }
+
+    /* ── Breathing circles ── */
+    @keyframes breathe478 {
+      0%   { transform: scale(.25); opacity: .2; }
+      21%  { transform: scale(1);   opacity: .9; }
+      58%  { transform: scale(1.05);opacity: 1;  }
+      100% { transform: scale(.25); opacity: .2; }
+    }
+    @keyframes breatheBox {
+      0%,100% { transform: scale(.25); opacity: .2; }
+      25%     { transform: scale(1);   opacity: .9; }
+      50%     { transform: scale(1.05);opacity: 1;  }
+      75%     { transform: scale(.25); opacity: .2; }
+    }
+    .anim-478 { animation: breathe478 19s ease-in-out infinite; }
+    .anim-box { animation: breatheBox 16s ease-in-out infinite; }
+
+    /* ── Bedtime mode overrides ── */
+    .bm body, .bm { background: #000 !important; }
+    .bm .card     { background: #050505; border-color: #111; }
+    .bm .card-inner { background: #020202; border-color: #111; }
+    .bm input[type=text], .bm input[type=url], .bm select { background: #050505; border-color: #111; color: #9ca3af; }
+    .bm .btn-icon  { background: #0a0a0a; color: #4b5563; }
+    .bm .toggle    { background: #111; }
+    .bm .toggle.on { background: #374151; }
+    .bm .toggle-knob { background: #6b7280; }
+
+    /* ── Floating mute button ── */
+    #mute-btn {
+      position: fixed; bottom: calc(1.5rem + var(--safe-bot));
+      right: 1.25rem; z-index: 100;
+      width: 56px; height: 56px; border-radius: 50%;
+      background: #1e293b; border: 1px solid #334155;
+      display: flex; align-items: center; justify-content: center;
+      box-shadow: 0 4px 24px rgba(0,0,0,.6);
+      cursor: pointer; transition: all .15s;
+    }
+    #mute-btn:active { transform: scale(.92); }
+    #mute-btn.muted  { background: rgba(248,113,113,.15); border-color: rgba(248,113,113,.4); }
+
+    /* ── Offline banner ── */
+    #offline-banner {
+      display: none; position: fixed; bottom: 0; left: 0; right: 0;
+      background: #4f46e5; color: #fff; text-align: center;
+      padding: 10px; font-size: 13px; z-index: 9999;
+    }
+
+    /* ── Chip tabs ── */
+    .tab-bar { display: flex; gap: .375rem; padding: .25rem; background: var(--c-bg); border: 1px solid var(--c-border); border-radius: .875rem; }
+    .tab-btn { flex: 1; padding: .5rem; border: none; border-radius: .625rem; cursor: pointer; font-size: .7rem; font-weight: 600; transition: all .15s; background: transparent; color: var(--c-dim); }
+    .tab-btn.active { background: var(--c-surface); color: var(--c-text); }
+    .tab-btn.active-purple { background: #581c87; color: var(--c-purple); }
+
+    /* ── Episode row ── */
+    .ep-row { display: flex; align-items: center; gap: .5rem; padding: .625rem .75rem; border-radius: .875rem; transition: background .1s; }
+    .ep-row:active { opacity: .8; }
+
+    /* ── Speed chips ── */
+    .speed-chip { flex: 1; padding: .5rem; border-radius: .5rem; font-size: .7rem; font-weight: 600; border: 1px solid var(--c-border); background: transparent; color: var(--c-dim); cursor: pointer; transition: all .15s; }
+    .speed-chip.on { background: #581c87; border-color: #7e22ce; color: var(--c-purple); }
+
+    /* ── Section label ── */
+    .section-label { font-size: .65rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--c-dim); margin-bottom: .5rem; }
+
+    /* ── Overlay ── */
+    .overlay { position: fixed; inset: 0; z-index: 200; display: flex; flex-direction: column; }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+<button id="mute-btn" title="Mute all" style="display:none">
+  <!-- icon injected by JS -->
+</button>
+<div id="offline-banner">⚡ Offline — app &amp; audio still work</div>
+
+<script type="text/babel">
+const { useState, useEffect, useRef, useCallback } = React;
+
+// ─── Lucide helper (works with the UMD build) ─────────────────────────────────
+// The UMD lucide build exposes window.lucide as an object of { IconName: [[path,attrs],...] }
+// We render SVGs directly from those path data.
+function LucideIcon({ name, size = 20, color = 'currentColor', strokeWidth = 2, className = '', style = {} }) {
+  const iconData = window.lucide?.[name];
+  if (!iconData) return <span style={{display:'inline-block',width:size,height:size}} />;
+  // iconData is [[tag, attrs], ...]
+  const children = iconData[2] || [];
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width={size} height={size} viewBox="0 0 24 24"
+      fill="none" stroke={color} strokeWidth={strokeWidth}
+      strokeLinecap="round" strokeLinejoin="round"
+      className={className} style={style}
+    >
+      {children.map((child, i) => {
+        const [tag, attrs] = child;
+        if (tag === 'path')   return <path key={i} {...attrs} />;
+        if (tag === 'circle') return <circle key={i} {...attrs} />;
+        if (tag === 'rect')   return <rect key={i} {...attrs} />;
+        if (tag === 'line')   return <line key={i} {...attrs} />;
+        if (tag === 'polyline') return <polyline key={i} {...attrs} />;
+        if (tag === 'polygon')  return <polygon key={i} {...attrs} />;
+        return null;
+      })}
+    </svg>
+  );
+}
+
+// ─── Stable episode ID from URL hash ─────────────────────────────────────────
+function hashUrl(str) {
+  let h = 0;
+  for (let i = 0; i < str.length; i++) h = (Math.imul(31, h) + str.charCodeAt(i)) | 0;
+  return 'ep_' + Math.abs(h).toString(36);
+}
+
+const FEED_TIMEOUT_MS = 8000;
+
+function clamp01(value) {
+  return Math.max(0, Math.min(1, value));
+}
+
+function fetchWithTimeout(input, init = {}, timeoutMs = FEED_TIMEOUT_MS) {
+  if (typeof AbortController === 'undefined') return fetch(input, init);
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+  return fetch(input, { ...init, signal: controller.signal }).finally(() => {
+    window.clearTimeout(timer);
+  });
+}
+
+function safeJsonParse(text) {
+  try { return JSON.parse(text); }
+  catch { return null; }
+}
+
+function firstText(root, selectors) {
+  for (const selector of selectors) {
+    const value = root.querySelector(selector)?.textContent?.trim();
+    if (value) return value;
+  }
+  return '';
+}
+
+function firstAttr(root, selectorPairs) {
+  for (const [selector, attr] of selectorPairs) {
+    const value = root.querySelector(selector)?.getAttribute(attr)?.trim();
+    if (value) return value;
+  }
+  return '';
+}
+
+function resolveMaybeUrl(value, baseUrl) {
+  if (!value) return '';
+  try { return new URL(value, baseUrl).href; }
+  catch { return value; }
+}
+
+function parseFeedEpisodes(raw, feedUrl) {
+  const xml = new DOMParser().parseFromString(raw, 'text/xml');
+  if (xml.querySelector('parsererror')) throw new Error('parsererror');
+
+  let fallbackTitle = 'Podcast';
+  try { fallbackTitle = new URL(feedUrl, window.location.href).hostname.replace(/^www\./, ''); }
+  catch {}
+  const podcastTitle =
+    firstText(xml, ['channel > title', 'feed > title']) ||
+    fallbackTitle;
+
+  const items = Array.from(xml.querySelectorAll('item, entry')).slice(0, 40);
+  return items.map(item => {
+    const title = firstText(item, ['title']) || 'Untitled';
+    const audioUrl = resolveMaybeUrl(firstAttr(item, [
+      ['enclosure[url]', 'url'],
+      ['media\\:content[url]', 'url'],
+      ['content[url]', 'url'],
+      ['link[rel="enclosure"][href]', 'href'],
+      ['link[type^="audio/"][href]', 'href'],
+      ['link[href$=".mp3"]', 'href'],
+      ['link[href$=".m4a"]', 'href'],
+      ['link[href$=".aac"]', 'href'],
+      ['link[href$=".mp4"]', 'href'],
+    ]), feedUrl);
+
+    if (!audioUrl) return null;
+    return {
+      id: hashUrl(audioUrl),
+      title: `[${podcastTitle}] ${title}`,
+      url: audioUrl,
+    };
+  }).filter(Boolean);
+}
+
+function isIOSDevice() {
+  const ua = navigator.userAgent || '';
+  return /iP(hone|ad|od)/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+}
+
+function isStandaloneWebApp() {
+  return window.matchMedia?.('(display-mode: standalone)')?.matches || window.navigator.standalone === true;
+}
+
+// ─── Noise generators (all use sr param — no hardcoded 44100) ─────────────────
+function generateBrown(L, R, n) {
+  let lL=0,lR=0;
+  for (let i=0;i<n;i++) { const wL=Math.random()*2-1,wR=Math.random()*2-1; lL=(lL+.02*wL)/1.02; lR=(lR+.02*wR)/1.02; L[i]=lL*3.5; R[i]=lR*3.5; }
+}
+function generatePink(L, R, n) {
+  let b0L=0,b1L=0,b2L=0,b3L=0,b4L=0,b5L=0,b6L=0,b0R=0,b1R=0,b2R=0,b3R=0,b4R=0,b5R=0,b6R=0;
+  for (let i=0;i<n;i++) {
+    const wL=Math.random()*2-1,wR=Math.random()*2-1;
+    b0L=.99886*b0L+wL*.0555179;b1L=.99332*b1L+wL*.0750759;b2L=.969*b2L+wL*.153852;b3L=.8665*b3L+wL*.310486;b4L=.55*b4L+wL*.532952;b5L=-.7616*b5L-wL*.016898;
+    L[i]=(b0L+b1L+b2L+b3L+b4L+b5L+b6L+wL*.5362)*.11;b6L=wL*.115926;
+    b0R=.99886*b0R+wR*.0555179;b1R=.99332*b1R+wR*.0750759;b2R=.969*b2R+wR*.153852;b3R=.8665*b3R+wR*.310486;b4R=.55*b4R+wR*.532952;b5R=-.7616*b5R-wR*.016898;
+    R[i]=(b0R+b1R+b2R+b3R+b4R+b5R+b6R+wR*.5362)*.11;b6R=wR*.115926;
+  }
+}
+function generateGreen(L, R, n) {
+  let g0L=0,g1L=0,g0R=0,g1R=0;
+  for (let i=0;i<n;i++) { const wL=Math.random()*2-1,wR=Math.random()*2-1; g0L=.994*g0L+wL*.05;g1L=.9*g1L+wL*.05;L[i]=(g0L-g1L)*3;g0R=.994*g0R+wR*.05;g1R=.9*g1R+wR*.05;R[i]=(g0R-g1R)*3; }
+}
+function generateWhite(L, R, n) {
+  for (let i=0;i<n;i++) { L[i]=(Math.random()*2-1)*.5;R[i]=(Math.random()*2-1)*.5; }
+}
+function generateFan(L, R, n, sr) {
+  let lL=0,lR=0;
+  for (let i=0;i<n;i++) {
+    const wL=Math.random()*2-1,wR=Math.random()*2-1;
+    lL=(lL+.015*wL)/1.015;lR=(lR+.015*wR)/1.015;
+    const hum=Math.sin(2*Math.PI*60*i/sr)*.15;
+    L[i]=lL*4.5+hum;R[i]=lR*4.5+hum;
+  }
+}
+function generateRain(L, R, n) {
+  let b0L=0,b1L=0,b0R=0,b1R=0;
+  for (let i=0;i<n;i++) {
+    const wL=Math.random()*2-1,wR=Math.random()*2-1;
+    b0L=.8*b0L+wL*.12;L[i]=(wL*.7+b0L*.2+b1L*.1)*.75;b1L=wL;
+    b0R=.8*b0R+wR*.12;R[i]=(wR*.7+b0R*.2+b1R*.1)*.75;b1R=wR;
+  }
+}
+function generateOcean(L, R, n, sr) {
+  let lL=0,lR=0;
+  for (let i=0;i<n;i++) {
+    const wL=Math.random()*2-1,wR=Math.random()*2-1;
+    lL=(lL+.022*wL)/1.022;lR=(lR+.022*wR)/1.022;
+    const lfo=Math.pow((Math.sin(2*Math.PI*.10*i/sr)+1)/2,1.8);
+    L[i]=lL*4.5*lfo;R[i]=lR*4.5*lfo;
+  }
+}
+function generateForest(L, R, n, sr) {
+  let b0L=0,b1L=0,b0R=0,b1R=0,phase=0;
+  for (let i=0;i<n;i++) {
+    const wL=Math.random()*2-1,wR=Math.random()*2-1;
+    b0L=.88*b0L+wL*.2;L[i]=(wL*.5-b0L*.5+b1L*.22)*.85;b1L=wL;
+    b0R=.88*b0R+wR*.2;R[i]=(wR*.5-b0R*.5+b1R*.22)*.85;b1R=wR;
+    phase+=2*Math.PI*4.2*(1+(Math.random()-.5)*.15)/sr;
+    if(phase>2*Math.PI)phase-=2*Math.PI;
+    const e=.35+.65*Math.abs(Math.sin(phase));
+    L[i]*=e;R[i]*=e;
+  }
+}
+
+const NOISE_TYPES = {
+  brown:  { label:'🌊 Brown (Deep Waterfall)',  fn: (L,R,n,sr)=>generateBrown(L,R,n)  },
+  pink:   { label:'🌧 Pink (Steady Rain)',       fn: (L,R,n,sr)=>generatePink(L,R,n)   },
+  green:  { label:'💧 Green (Rushing River)',    fn: (L,R,n,sr)=>generateGreen(L,R,n)  },
+  white:  { label:'📻 White (Classic Static)',   fn: (L,R,n,sr)=>generateWhite(L,R,n)  },
+  fan:    { label:'🌀 Fan (Box Fan Hum)',         fn: generateFan  },
+  rain:   { label:'☔ Rain (Gentle Shower)',      fn: (L,R,n,sr)=>generateRain(L,R,n)   },
+  ocean:  { label:'🌊 Ocean (Rolling Waves)',     fn: generateOcean },
+  forest: { label:'🌲 Forest (Night Crickets)',   fn: generateForest},
+};
+
+const BINAURAL = {
+  delta: { name:'Deep Sleep (4 Hz)',  beat:4,  carrier:180 },
+  theta: { name:'Meditation (6 Hz)', beat:6,  carrier:200 },
+  alpha: { name:'Relaxation (10 Hz)',beat:10, carrier:220 },
+};
+
+const ARTWORK = [{ src:'icon-512.png', sizes:'512x512', type:'image/png' }];
+const LOOP_SAMPLE_RATE = 12000;
+const AMBIENT_LOOP_SECONDS = 60;
+const BINAURAL_LOOP_SECONDS = 30;
+const LOOP_URL_CACHE = {
+  ambient: new Map(),
+  binaural: new Map(),
+};
+
+function writeAscii(view, offset, text) {
+  for (let i = 0; i < text.length; i++) view.setUint8(offset + i, text.charCodeAt(i));
+}
+
+function buildStereoWavUrl(left, right, sampleRate) {
+  const frames = Math.min(left.length, right.length);
+  const bytesPerSample = 2;
+  const numChannels = 2;
+  const dataSize = frames * numChannels * bytesPerSample;
+  const buffer = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(buffer);
+  writeAscii(view, 0, 'RIFF');
+  view.setUint32(4, 36 + dataSize, true);
+  writeAscii(view, 8, 'WAVE');
+  writeAscii(view, 12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, numChannels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * numChannels * bytesPerSample, true);
+  view.setUint16(32, numChannels * bytesPerSample, true);
+  view.setUint16(34, bytesPerSample * 8, true);
+  writeAscii(view, 36, 'data');
+  view.setUint32(40, dataSize, true);
+
+  let offset = 44;
+  for (let i = 0; i < frames; i++) {
+    const l = Math.max(-1, Math.min(1, left[i] || 0));
+    const r = Math.max(-1, Math.min(1, right[i] || 0));
+    view.setInt16(offset, l < 0 ? l * 0x8000 : l * 0x7fff, true);
+    view.setInt16(offset + 2, r < 0 ? r * 0x8000 : r * 0x7fff, true);
+    offset += 4;
+  }
+  return URL.createObjectURL(new Blob([buffer], { type: 'audio/wav' }));
+}
+
+function getAmbientLoopUrl(type) {
+  if (LOOP_URL_CACHE.ambient.has(type)) return LOOP_URL_CACHE.ambient.get(type);
+  const frames = LOOP_SAMPLE_RATE * AMBIENT_LOOP_SECONDS;
+  const left = new Float32Array(frames);
+  const right = new Float32Array(frames);
+  NOISE_TYPES[type].fn(left, right, frames, LOOP_SAMPLE_RATE);
+  const url = buildStereoWavUrl(left, right, LOOP_SAMPLE_RATE);
+  LOOP_URL_CACHE.ambient.set(type, url);
+  return url;
+}
+
+function getBinauralLoopUrl(presetKey) {
+  if (LOOP_URL_CACHE.binaural.has(presetKey)) return LOOP_URL_CACHE.binaural.get(presetKey);
+  const frames = LOOP_SAMPLE_RATE * BINAURAL_LOOP_SECONDS;
+  const left = new Float32Array(frames);
+  const right = new Float32Array(frames);
+  const { beat, carrier } = BINAURAL[presetKey];
+  const leftFreq = carrier - beat / 2;
+  const rightFreq = carrier + beat / 2;
+  for (let i = 0; i < frames; i++) {
+    const t = i / LOOP_SAMPLE_RATE;
+    left[i] = Math.sin(2 * Math.PI * leftFreq * t) * 0.32;
+    right[i] = Math.sin(2 * Math.PI * rightFreq * t) * 0.32;
+  }
+  const url = buildStereoWavUrl(left, right, LOOP_SAMPLE_RATE);
+  LOOP_URL_CACHE.binaural.set(presetKey, url);
+  return url;
+}
+
+function configureHiddenAudioElement(audio) {
+  audio.playsInline = true;
+  audio.loop = true;
+  audio.preload = 'auto';
+  audio.setAttribute('playsinline', '');
+  audio.setAttribute('webkit-playsinline', '');
+  audio.setAttribute('x-webkit-airplay', 'deny');
+  if ('disableRemotePlayback' in audio) audio.disableRemotePlayback = true;
+  Object.assign(audio.style, {
+    position: 'fixed',
+    width: '1px',
+    height: '1px',
+    bottom: '0',
+    left: '0',
+    opacity: '0.001',
+    pointerEvents: 'none',
+  });
+}
+
+// ─── App ──────────────────────────────────────────────────────────────────────
+function App() {
+  const [bm, setBm]               = useState(false); // bedtime mode
+  const [muted, setMuted]         = useState(false);
+  const [breathMode, setBreathMode]= useState(null); // null | '478' | 'box'
+  const [masterVol, setMasterVol] = useState(()=>+localStorage.getItem('masterVolume')||1);
+
+  // Ambient
+  const [ambientOn,  setAmbientOn]  = useState(false);
+  const [ambientVol, setAmbientVol] = useState(()=>+localStorage.getItem('brownVolume')||.5);
+  const [noiseType,  setNoiseType]  = useState(()=>localStorage.getItem('noiseType')||'brown');
+  const [ambientBypass, setAmbientBypass] = useState(()=>localStorage.getItem('ambientBypass')==='true');
+
+  // Binaural
+  const [binOn,  setBinOn]  = useState(false);
+  const [binVol, setBinVol] = useState(()=>+localStorage.getItem('binauralVolume')||.5);
+  const [binPreset, setBinPreset] = useState(()=>localStorage.getItem('binauralPreset')||'delta');
+  const [binBypass, setBinBypass] = useState(()=>localStorage.getItem('binauralBypass')==='true');
+
+  // Timer
+  const [timerMins,   setTimerMins]  = useState(()=>parseInt(localStorage.getItem('timerMinutes'))||30);
+  const [timerActive, setTimerActive]= useState(false);
+  const [timeLeft,    setTimeLeft]   = useState(null);
+  const timerEndRef  = useRef(null);
+  const timerTickRef = useRef(null); // setInterval handle (not rAF — works in background)
+
+  // Podcast
+  const [episodes,      setEpisodes]      = useState([]);
+  const [playlist,      setPlaylist]      = useState(()=>JSON.parse(localStorage.getItem('comedyPlaylist')||'[]'));
+  const [activeTab,     setActiveTab]     = useState('feed');
+  const [playingSrc,    setPlayingSrc]    = useState('feed');
+  const [curEp,         setCurEp]         = useState(null);
+  const [podPlaying,    setPodPlaying]    = useState(false);
+  const [podVol,        setPodVol]        = useState(()=>+localStorage.getItem('comedyVolume')||.8);
+  const [podSpeed,      setPodSpeed]      = useState(()=>+localStorage.getItem('playbackSpeed')||1);
+  const [autoPlay,      setAutoPlay]      = useState(()=>localStorage.getItem('autoPlayEnabled')!=='false');
+  const [shuffle,       setShuffle]       = useState(()=>localStorage.getItem('shuffleEnabled')==='true');
+  const [rssUrl,        setRssUrl]        = useState(()=>localStorage.getItem('rssUrl')||'https://feeds.simplecast.com/tOaZvgCO');
+  const [loading,       setLoading]       = useState(false);
+  const [feedErr,       setFeedErr]       = useState('');
+  const [subs,          setSubs]          = useState(()=>JSON.parse(localStorage.getItem('feedSubs')||'[]'));
+  const [showSubs,      setShowSubs]      = useState(false);
+  const [subName,       setSubName]       = useState('');
+
+  // Audio refs
+  const ambientAudio = useRef(null);
+  const binAudio     = useRef(null);
+  const podAudio = useRef(null);
+  const playNextRef   = useRef(null);
+  const progInterval  = useRef(null);
+  const wakeLock      = useRef(null);
+  const iosAdvanceLock = useRef(false);
+  const podStateRef    = useRef({});
+  const iosPwaAudio    = useRef(isIOSDevice() && isStandaloneWebApp());
+  const syncPodVolume = useCallback((scale = 1, muteState = muted) => {
+    if (podAudio.current) {
+      podAudio.current.volume = clamp01(podVol * masterVol * (muteState ? 0 : 1) * scale);
+    }
+  }, [podVol, masterVol, muted]);
+  const syncAmbientVolume = useCallback((scale = 1, muteState = muted) => {
+    if (ambientAudio.current) {
+      ambientAudio.current.volume = clamp01(ambientVol * masterVol * (muteState ? 0 : 1) * scale);
+    }
+  }, [ambientVol, masterVol, muted]);
+  const syncBinVolume = useCallback((scale = 1, muteState = muted) => {
+    if (binAudio.current) {
+      binAudio.current.volume = clamp01(binVol * masterVol * (muteState ? 0 : 1) * scale);
+    }
+  }, [binVol, masterVol, muted]);
+  const setPlaybackAudioSession = useCallback(() => {
+    try {
+      if (navigator.audioSession && navigator.audioSession.type !== 'playback') {
+        navigator.audioSession.type = 'playback';
+      }
+    } catch(e){}
+  }, []);
+  const syncMediaPositionState = useCallback(() => {
+    if (!('mediaSession' in navigator) || typeof navigator.mediaSession.setPositionState !== 'function') return;
+    const audio = podAudio.current;
+    if (!audio || !Number.isFinite(audio.duration) || audio.duration <= 0) return;
+    try {
+      navigator.mediaSession.setPositionState({
+        duration: audio.duration,
+        playbackRate: audio.playbackRate || 1,
+        position: Math.min(audio.currentTime, audio.duration),
+      });
+    } catch(e){}
+  }, []);
+  const resumeSoundscapeAudio = useCallback(() => {
+    if (ambientOn) {
+      syncAmbientVolume(1, false);
+      ambientAudio.current?.play().catch(()=>{});
+    }
+    if (binOn) {
+      syncBinVolume(1, false);
+      binAudio.current?.play().catch(()=>{});
+    }
+  }, [ambientOn, binOn, syncAmbientVolume, syncBinVolume]);
+  const pauseSoundscapeAudio = useCallback(() => {
+    ambientAudio.current?.pause();
+    binAudio.current?.pause();
+  }, []);
+
+  useEffect(()=>{
+    podStateRef.current = { autoPlay, shuffle, playingSrc, episodes, playlist, curEp };
+  },[autoPlay, shuffle, playingSrc, episodes, playlist, curEp]);
+
+  // ── Persist settings ──────────────────────────────────────────────────────
+  useEffect(()=>{
+    try {
+      localStorage.setItem('masterVolume',            masterVol);
+      localStorage.setItem('brownVolume',             ambientVol);
+      localStorage.setItem('noiseType',               noiseType);
+      localStorage.setItem('ambientBypass',           ambientBypass);
+      localStorage.setItem('binauralVolume',          binVol);
+      localStorage.setItem('binauralPreset',          binPreset);
+      localStorage.setItem('binauralBypass',          binBypass);
+      localStorage.setItem('comedyVolume',            podVol);
+      localStorage.setItem('playbackSpeed',           podSpeed);
+      localStorage.setItem('autoPlayEnabled',         autoPlay);
+      localStorage.setItem('shuffleEnabled',          shuffle);
+      localStorage.setItem('timerMinutes',            timerMins);
+      localStorage.setItem('rssUrl',                  rssUrl);
+      localStorage.setItem('comedyPlaylist',          JSON.stringify(playlist));
+      localStorage.setItem('feedSubs',                JSON.stringify(subs));
+    } catch(e){}
+  },[masterVol,ambientVol,noiseType,ambientBypass,binVol,binPreset,binBypass,
+     podVol,podSpeed,autoPlay,shuffle,
+     timerMins,rssUrl,playlist,subs]);
+
+  // ── Service Worker ────────────────────────────────────────────────────────
+  useEffect(()=>{
+    if('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(()=>{});
+    const show=()=>document.getElementById('offline-banner').style.display='block';
+    const hide=()=>document.getElementById('offline-banner').style.display='none';
+    window.addEventListener('offline',show); window.addEventListener('online',hide);
+    return ()=>{ window.removeEventListener('offline',show); window.removeEventListener('online',hide); };
+  },[]);
+
+  // ── Bedtime mode class on root ────────────────────────────────────────────
+  useEffect(()=>{
+    document.documentElement.classList.toggle('bm', bm);
+  },[bm]);
+
+  // ── Wake Lock (keeps screen awake while audio plays) ─────────────────────
+  const anyPlaying = ambientOn || binOn || podPlaying;
+  useEffect(()=>{
+    if (!('wakeLock' in navigator)) return;
+    if (anyPlaying && !muted) {
+      setPlaybackAudioSession();
+      navigator.wakeLock.request('screen').then(wl=>{ wakeLock.current=wl; }).catch(()=>{});
+    } else {
+      wakeLock.current?.release().catch(()=>{});
+      wakeLock.current = null;
+    }
+    return ()=>{ wakeLock.current?.release().catch(()=>{}); };
+  },[anyPlaying, muted, setPlaybackAudioSession]);
+
+  // Re-acquire wake lock after visibility change (it's released automatically on hide)
+  useEffect(()=>{
+    const handler = async () => {
+      if (document.visibilityState==='visible' && anyPlaying && !muted && 'wakeLock' in navigator) {
+        try { wakeLock.current = await navigator.wakeLock.request('screen'); } catch(e){}
+      }
+    };
+    document.addEventListener('visibilitychange', handler);
+    return ()=> document.removeEventListener('visibilitychange', handler);
+  },[anyPlaying, muted]);
+
+  // ── Headphone disconnect ──────────────────────────────────────────────────
+  useEffect(()=>{
+    if (!navigator.mediaDevices?.addEventListener) return;
+    const handler = async () => {
+      const devs = await navigator.mediaDevices.enumerateDevices().catch(()=>[]);
+      const hasHP = devs.some(d=>d.kind==='audiooutput' && /head|ear|airpod|bluetooth/i.test(d.label));
+      if (!hasHP && (podPlaying||ambientOn||binOn)) {
+        ambientAudio.current?.pause();
+        binAudio.current?.pause();
+        podAudio.current?.pause();
+        setPodPlaying(false);
+      }
+    };
+    navigator.mediaDevices.addEventListener('devicechange', handler);
+    return ()=> navigator.mediaDevices.removeEventListener('devicechange', handler);
+  },[podPlaying, ambientOn, binOn]);
+
+  // ── Floating mute button wiring ───────────────────────────────────────────
+  useEffect(()=>{
+    const btn = document.getElementById('mute-btn');
+    if (!btn) return;
+    btn.style.display = anyPlaying ? 'flex' : 'none';
+    btn.classList.toggle('muted', muted);
+    // render SVG icon
+    const icon = muted ? 'VolumeX' : 'Volume2';
+    const iconData = window.lucide?.[icon];
+    if (iconData) {
+      const children = iconData[2]||[];
+      const paths = children.map(([tag,attrs],i)=>{
+        const aStr = Object.entries(attrs).map(([k,v])=>`${k}="${v}"`).join(' ');
+        return `<${tag} ${aStr}/>`;
+      }).join('');
+      btn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="${muted?'#f87171':'#94a3b8'}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${paths}</svg>`;
+    }
+    const handler = () => setMuted(m=>!m);
+    btn.addEventListener('click', handler);
+    return ()=> btn.removeEventListener('click', handler);
+  },[anyPlaying, muted]);
+
+  // ── Mute: volume-only across all active audio ─────────────────────────────
+  useEffect(()=>{
+    syncAmbientVolume();
+    syncBinVolume();
+    syncPodVolume();
+  },[muted, syncAmbientVolume, syncBinVolume, syncPodVolume]);
+
+  // ── Media Session: ambient/binaural ──────────────────────────────────────
+  useEffect(()=>{
+    if (!('mediaSession' in navigator)) return;
+    if ((ambientOn||binOn) && !podPlaying) {
+      const label = ambientOn && binOn
+        ? `${NOISE_TYPES[noiseType].label.replace(/^.{2}\s*/, '')} + ${BINAURAL[binPreset].name}`
+        : ambientOn
+          ? NOISE_TYPES[noiseType].label.replace(/^.{2}\s*/, '')
+          : BINAURAL[binPreset].name;
+      const sub = ambientOn && binOn
+        ? 'Ambient Noise + Binaural Beats'
+        : ambientOn
+          ? 'Ambient Noise'
+          : 'Binaural Beats';
+      navigator.mediaSession.metadata = new MediaMetadata({title:label,artist:sub,album:'SLEEPULATOR',artwork:ARTWORK});
+      navigator.mediaSession.playbackState = 'playing';
+      navigator.mediaSession.setActionHandler('play',  ()=>{
+        setPlaybackAudioSession();
+        setMuted(false);
+        resumeSoundscapeAudio();
+        navigator.mediaSession.playbackState='playing';
+      });
+      navigator.mediaSession.setActionHandler('pause', ()=>{
+        pauseSoundscapeAudio();
+        setMuted(true);
+        navigator.mediaSession.playbackState='paused';
+      });
+      navigator.mediaSession.setActionHandler('stop',  ()=>{ stopAmbient(); stopBin(); });
+      navigator.mediaSession.setActionHandler('seekbackward', null);
+      navigator.mediaSession.setActionHandler('seekforward',  null);
+      navigator.mediaSession.setActionHandler('previoustrack',null);
+      navigator.mediaSession.setActionHandler('nexttrack',    null);
+    } else if (!ambientOn && !binOn && !podPlaying) {
+      navigator.mediaSession.playbackState = 'none';
+    }
+  },[ambientOn, binOn, noiseType, binPreset, podPlaying, setPlaybackAudioSession, resumeSoundscapeAudio, pauseSoundscapeAudio]);
+
+  // ── Media Session: podcast ────────────────────────────────────────────────
+  useEffect(()=>{
+    if (!('mediaSession' in navigator)) return;
+    if (!curEp || (!podPlaying && (ambientOn || binOn))) return;
+    const m = curEp.title.match(/^\[(.*?)\] (.*)$/);
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: m?m[2]:curEp.title, artist: m?m[1]:'Podcast', album:'SLEEPULATOR', artwork: ARTWORK
+    });
+    navigator.mediaSession.playbackState = podPlaying ? 'playing' : 'paused';
+    navigator.mediaSession.setActionHandler('play',         ()=>{
+      setPlaybackAudioSession();
+      setMuted(false);
+      syncPodVolume(1, false);
+      podAudio.current?.play().catch(()=>{});
+    });
+    navigator.mediaSession.setActionHandler('pause',        ()=>{ podAudio.current?.pause(); });
+    navigator.mediaSession.setActionHandler('seekbackward', ()=>skipPod(-15));
+    navigator.mediaSession.setActionHandler('seekforward',  ()=>skipPod(15));
+    navigator.mediaSession.setActionHandler('previoustrack',()=>{
+      const list = playingSrc==='playlist'?playlist:episodes;
+      const idx = list.findIndex(e=>e.id===curEp?.id);
+      if(idx>0) playEp(list[idx-1], playingSrc);
+    });
+    navigator.mediaSession.setActionHandler('nexttrack', ()=>{ if(playNextRef.current) playNextRef.current(); });
+    syncMediaPositionState();
+  },[curEp, playlist, episodes, playingSrc, podPlaying, ambientOn, binOn, syncPodVolume, setPlaybackAudioSession, syncMediaPositionState]);
+
+  const ensureAmbientAudio = () => {
+    if (ambientAudio.current) return ambientAudio.current;
+    const audio = document.createElement('audio');
+    configureHiddenAudioElement(audio);
+    document.body.appendChild(audio);
+    ambientAudio.current = audio;
+    syncAmbientVolume();
+    return audio;
+  };
+
+  const ensureBinAudio = () => {
+    if (binAudio.current) return binAudio.current;
+    const audio = document.createElement('audio');
+    configureHiddenAudioElement(audio);
+    document.body.appendChild(audio);
+    binAudio.current = audio;
+    syncBinVolume();
+    return audio;
+  };
+
+  // ── 1. Ambient Noise ──────────────────────────────────────────────────────
+  const startAmbient = () => {
+    const audio = ensureAmbientAudio();
+    setPlaybackAudioSession();
+    audio.src = getAmbientLoopUrl(noiseType);
+    audio.currentTime = 0;
+    syncAmbientVolume();
+    audio.play().catch(()=>{});
+    setAmbientOn(true);
+  };
+  const stopAmbient = () => {
+    if (ambientAudio.current) {
+      ambientAudio.current.pause();
+      ambientAudio.current.currentTime = 0;
+    }
+    setAmbientOn(false);
+  };
+  const toggleAmbient = () => {
+    if (ambientOn) stopAmbient();
+    else {
+      setMuted(false);
+      startAmbient();
+    }
+  };
+
+  useEffect(()=>{ if(ambientOn) startAmbient(); },[noiseType]);
+  useEffect(()=>{ syncAmbientVolume(); },[ambientVol, masterVol, muted, syncAmbientVolume]);
+
+  // ── 2. Binaural Beats ─────────────────────────────────────────────────────
+  const startBin = () => {
+    const audio = ensureBinAudio();
+    setPlaybackAudioSession();
+    audio.src = getBinauralLoopUrl(binPreset);
+    audio.currentTime = 0;
+    syncBinVolume();
+    audio.play().catch(()=>{});
+    setBinOn(true);
+  };
+  const stopBin = () => {
+    if (binAudio.current) {
+      binAudio.current.pause();
+      binAudio.current.currentTime = 0;
+    }
+    setBinOn(false);
+  };
+  const toggleBin = () => {
+    if (binOn) stopBin();
+    else {
+      setMuted(false);
+      startBin();
+    }
+  };
+  useEffect(()=>{ if(binOn) startBin(); },[binPreset]);
+  useEffect(()=>{ syncBinVolume(); },[binVol, masterVol, muted, syncBinVolume]);
+
+  // ── 3. Podcast ────────────────────────────────────────────────────────────
+  const loadFeed = async (urlOverride) => {
+    const url = (urlOverride||rssUrl).trim();
+    if(!url) return setFeedErr('Please enter a valid RSS URL.');
+    setLoading(true); setFeedErr('');
+    const SOURCES = [
+      { url, read: text => text },
+      {
+        url: `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`,
+        read: text => {
+          const parsed = safeJsonParse(text);
+          return parsed?.contents || parsed?.data || '';
+        }
+      },
+      { url: `https://corsproxy.io/?${encodeURIComponent(url)}`, read: text => text },
+    ];
+    let raw=null;
+    for (const source of SOURCES) {
+      try {
+        const r = await fetchWithTimeout(source.url);
+        if (!r.ok) continue;
+        raw = source.read(await r.text());
+        if(raw) break;
+      } catch(e){}
+    }
+    if(!raw) { setFeedErr('Feed unavailable. Check URL or try again.'); setLoading(false); return; }
+    try {
+      const parsed = parseFeedEpisodes(raw, url);
+      setEpisodes(parsed); setActiveTab('feed');
+      if(urlOverride) setRssUrl(urlOverride);
+      if(!parsed.length) setFeedErr('No playable audio found in this feed.');
+    } catch { setFeedErr('Could not parse feed XML.'); }
+    setLoading(false);
+  };
+
+  const addToPlaylist    = ep => { if(!playlist.find(p=>p.id===ep.id)) setPlaylist(prev=>[...prev,ep]); };
+  const removeFromPlaylist=id => setPlaylist(prev=>prev.filter(ep=>ep.id!==id));
+  const saveSub = () => {
+    const name = subName.trim() || rssUrl.replace(/^https?:\/\//,'').split('/')[0];
+    if(!rssUrl.trim()||subs.find(s=>s.url===rssUrl.trim())) return;
+    setSubs(prev=>[...prev,{name,url:rssUrl.trim()}]);
+    setSubName('');
+  };
+
+  const ensurePodAudio = () => {
+    if (podAudio.current) return podAudio.current;
+    const audio = document.createElement('audio');
+    configureHiddenAudioElement(audio);
+    audio.loop = false;
+    audio.preload = 'metadata';
+    audio.addEventListener('play', () => {
+      setPodPlaying(true);
+      if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
+      syncMediaPositionState();
+    });
+    audio.addEventListener('pause', () => {
+      setPodPlaying(false);
+      if ('mediaSession' in navigator) navigator.mediaSession.playbackState = audio.ended ? 'none' : 'paused';
+    });
+    audio.addEventListener('ended', () => {
+      iosAdvanceLock.current = false;
+      setPodPlaying(false);
+      if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'none';
+      if (playNextRef.current) playNextRef.current();
+    });
+    audio.addEventListener('error', () => {
+      setFeedErr('Could not play this episode. The source may be unavailable or block streaming.');
+      setPodPlaying(false);
+    });
+    audio.addEventListener('loadedmetadata', syncMediaPositionState);
+    audio.addEventListener('ratechange', syncMediaPositionState);
+    audio.addEventListener('timeupdate', () => {
+      syncMediaPositionState();
+      if (!iosPwaAudio.current || document.visibilityState === 'visible') return;
+      const state = podStateRef.current;
+      if (!state.autoPlay || !state.curEp) return;
+      if (!Number.isFinite(audio.duration) || audio.duration <= 0) return;
+      const remaining = audio.duration - audio.currentTime;
+      if (remaining > 1.5) iosAdvanceLock.current = false;
+      if (remaining > 0 && remaining < 0.35 && !iosAdvanceLock.current) {
+        iosAdvanceLock.current = true;
+        playNextRef.current?.({ iosHandoff: true });
+      }
+    });
+    document.body.appendChild(audio);
+    podAudio.current = audio;
+    syncPodVolume();
+    return audio;
+  };
+
+  useEffect(()=>{ syncPodVolume(); },[syncPodVolume]);
+
+  const playEp = (ep, source='feed', opts={}) => {
+    const audio = ensurePodAudio();
+    const iosHandoff = !!opts.iosHandoff;
+    setPlayingSrc(source);
+    if(curEp?.id===ep.id){
+      if(podPlaying){ audio.pause(); }
+      else{
+        setPlaybackAudioSession();
+        setMuted(false);
+        audio.volume = clamp01(podVol * masterVol);
+        audio.play().catch(()=>{ setFeedErr('Could not resume this episode.'); });
+      }
+    } else {
+      const prog=JSON.parse(localStorage.getItem('podcastProgress')||'{}');
+      const resumeAt = prog[ep.id] ? Math.max(0, prog[ep.id]-90) : 0;
+      if (!iosHandoff) audio.pause();
+      audio.src=ep.url;
+      audio.playbackRate=podSpeed;
+      audio.load();
+      if (resumeAt > 0) {
+        const onMeta = () => {
+          try {
+            const maxTime = Number.isFinite(audio.duration) && audio.duration > 1 ? audio.duration - 1 : resumeAt;
+            audio.currentTime = Math.max(0, Math.min(resumeAt, maxTime));
+          } catch(e){}
+        };
+        audio.addEventListener('loadedmetadata', onMeta, { once: true });
+      }
+      setCurEp(ep);
+      setPlaybackAudioSession();
+      setMuted(false);
+      audio.volume = clamp01(podVol * masterVol);
+      audio.play().catch(()=>{
+        setFeedErr('Could not play this episode. The source may be unavailable or block streaming.');
+        setPodPlaying(false);
+      });
+    }
+  };
+
+  useEffect(()=>{ if(podAudio.current) podAudio.current.playbackRate=podSpeed; },[podSpeed,curEp]);
+
+  useEffect(()=>{
+    playNextRef.current = (opts={})=>{
+      const list=playingSrc==='playlist'?playlist:episodes;
+      if(!autoPlay||!list.length){ setPodPlaying(false); return false; }
+      const nextIdx=shuffle?Math.floor(Math.random()*list.length):(list.findIndex(e=>e.id===curEp?.id)+1)%list.length;
+      const nextEp = list[nextIdx];
+      if (!nextEp) { setPodPlaying(false); return false; }
+      playEp(nextEp, playingSrc, opts);
+      return true;
+    };
+  },[autoPlay,shuffle,episodes,playlist,curEp,playingSrc]);
+
+  // Progress save
+  useEffect(()=>{
+    if(podPlaying&&curEp){
+      progInterval.current=setInterval(()=>{
+        if(!podAudio.current) return;
+        try{ const p=JSON.parse(localStorage.getItem('podcastProgress')||'{}'); p[curEp.id]=podAudio.current.currentTime; localStorage.setItem('podcastProgress',JSON.stringify(p)); }catch(e){}
+      },5000);
+    } else clearInterval(progInterval.current);
+    return ()=>clearInterval(progInterval.current);
+  },[podPlaying,curEp]);
+
+  const skipPod = s => { if(podAudio.current) podAudio.current.currentTime+=s; };
+
+  // ── 4. Sleep Timer (setInterval — works in background, unlike rAF) ────────
+  const tickTimer = useCallback(()=>{
+    const rem = Math.max(0, Math.round((timerEndRef.current-Date.now())/1000));
+    setTimeLeft(rem);
+    if(rem<=60&&rem>0){
+      const r=Math.pow(rem/60,2);
+      if(podAudio.current) podAudio.current.volume = clamp01(podVol*masterVol*(muted?0:1)*r);
+      if(!ambientBypass&&ambientAudio.current) ambientAudio.current.volume = clamp01(ambientVol*masterVol*(muted?0:1)*r);
+      if(!binBypass&&binAudio.current) binAudio.current.volume = clamp01(binVol*masterVol*(muted?0:1)*r);
+    }
+    if(rem<=0){
+      clearInterval(timerTickRef.current);
+      setTimerActive(false); setTimeLeft(null);
+      podAudio.current?.pause(); setPodPlaying(false);
+      if(!ambientBypass) stopAmbient();
+      if(!binBypass&&binOn) stopBin();
+    }
+  },[podVol,masterVol,ambientVol,binVol,ambientBypass,binBypass,binOn,muted]);
+
+  // Rebuild ticker when deps change
+  useEffect(()=>{
+    if(timerActive){ clearInterval(timerTickRef.current); timerTickRef.current=setInterval(tickTimer,1000); }
+  },[timerActive,tickTimer]);
+
+  const toggleTimer = ()=>{
+    if(timerActive){
+      clearInterval(timerTickRef.current); setTimerActive(false); setTimeLeft(null);
+      syncPodVolume();
+      syncAmbientVolume();
+      syncBinVolume();
+    } else {
+      timerEndRef.current=Date.now()+timerMins*60000;
+      setTimerActive(true);
+      timerTickRef.current=setInterval(tickTimer,1000);
+    }
+  };
+
+  const bumpTimer = ()=>{
+    timerEndRef.current+=15*60000;
+    syncPodVolume();
+    if(!ambientBypass) syncAmbientVolume();
+    if(!binBypass) syncBinVolume();
+  };
+
+  const fmt = s=>s===null?'':String(Math.floor(s/60))+':'+String(s%60).padStart(2,'0');
+
+  useEffect(()=>()=>{
+    clearInterval(timerTickRef.current); clearInterval(progInterval.current);
+    ambientAudio.current?.pause();
+    binAudio.current?.pause();
+    if (podAudio.current) {
+      podAudio.current.pause();
+      podAudio.current.remove();
+      podAudio.current = null;
+    }
+    if (ambientAudio.current) {
+      ambientAudio.current.remove();
+      ambientAudio.current = null;
+    }
+    if (binAudio.current) {
+      binAudio.current.remove();
+      binAudio.current = null;
+    }
+  },[]);
+
+  // ── Breathing config ──────────────────────────────────────────────────────
+  const BC = {
+    '478':{label:'4-7-8 Relaxation',sub:'Inhale 4s · Hold 7s · Exhale 8s',cls:'anim-478',col:'#6366f1'},
+    'box': {label:'Box Breathing',  sub:'In 4s · Hold 4s · Out 4s · Hold 4s',cls:'anim-box',col:'#14b8a6'},
+  };
+  const bc = breathMode ? BC[breathMode] : null;
+
+  // ── Render helpers ────────────────────────────────────────────────────────
+  const c_text  = bm?'#9ca3af':'#e2e8f0';
+  const c_sub   = bm?'#6b7280':'#94a3b8';
+  const c_head  = bm?'#d1d5db':'#ffffff';
+  const c_card  = bm?'#050505':'#0f172a';
+  const c_bord  = bm?'#111827':'#1e293b';
+  const c_inner = bm?'#030712':'#030712';
+
+  const cardStyle = { background:c_card, border:`1px solid ${c_bord}`, borderRadius:'1.25rem', padding:'1.25rem' };
+  const innerStyle= { background:c_inner, border:`1px solid ${c_bord}`, borderRadius:'.875rem', padding:'1rem' };
+
+  // ── Render ────────────────────────────────────────────────────────────────
+  return (
+    <div style={{minHeight:'100dvh',background:bm?'#000':'#030712',color:c_text,transition:'background .4s,color .4s'}}>
+
+      {/* ── Breathing overlay ── */}
+      {breathMode && bc && (
+        <div className="overlay" style={{background:bm?'#000':'rgba(3,7,18,.97)',alignItems:'center',justifyContent:'center'}}>
+          <button onClick={()=>setBreathMode(null)}
+            style={{position:'absolute',top:'max(2rem,var(--safe-top))',right:'1.25rem',background:'#1e293b',border:'none',borderRadius:'50%',width:44,height:44,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',color:'#94a3b8'}}>
+            <LucideIcon name="X" size={20}/>
+          </button>
+          <div style={{display:'flex',gap:'.75rem',marginBottom:'2rem'}}>
+            {['478','box'].map(m=>(
+              <button key={m} onClick={()=>setBreathMode(m)}
+                style={{padding:'.5rem 1.25rem',borderRadius:'9999px',border:'none',fontWeight:700,fontSize:'.8rem',cursor:'pointer',
+                  background:breathMode===m?(bm?'#1f2937':'#4f46e5'):(bm?'#111':'#1e293b'),
+                  color:breathMode===m?'#fff':(bm?'#6b7280':'#94a3b8')}}>
+                {m==='478'?'4-7-8':'Box 4-4-4-4'}
+              </button>
+            ))}
+          </div>
+          <h2 style={{fontSize:'1.2rem',fontWeight:800,letterSpacing:'.08em',color:bm?'#9ca3af':bc.col,marginBottom:'.25rem'}}>{bc.label}</h2>
+          <p style={{fontSize:'.85rem',color:c_sub,marginBottom:'5rem',textAlign:'center',padding:'0 2rem'}}>{bc.sub}</p>
+          <div style={{position:'relative',width:220,height:220,display:'flex',alignItems:'center',justifyContent:'center'}}>
+            <div style={{position:'absolute',inset:0,borderRadius:'50%',background:bc.col,opacity:.1}}/>
+            <div className={bc.cls} style={{width:'100%',height:'100%',borderRadius:'50%',background:bc.col,opacity:.85,boxShadow:bm?'none':`0 0 60px ${bc.col}40`}}/>
+          </div>
+        </div>
+      )}
+
+      {/* ── Saved feeds overlay ── */}
+      {showSubs && (
+        <div className="overlay" style={{background:bm?'#000':'#030712',paddingTop:'var(--safe-top)'}}>
+          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'1.25rem'}}>
+            <h2 style={{fontSize:'1.1rem',fontWeight:800,color:c_head,margin:0}}>Saved Feeds</h2>
+            <button onClick={()=>setShowSubs(false)}
+              style={{background:'#1e293b',border:'none',borderRadius:'50%',width:44,height:44,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',color:'#94a3b8'}}>
+              <LucideIcon name="X" size={18}/>
+            </button>
+          </div>
+
+          <div style={{...cardStyle,margin:'0 1rem 1rem',padding:'1rem'}}>
+            <p style={{fontSize:'.7rem',color:c_sub,margin:'0 0 .5rem'}}>Save current URL as a named feed</p>
+            <div style={{display:'flex',gap:'.5rem'}}>
+              <input type="text" value={subName} onChange={e=>setSubName(e.target.value)} placeholder="Feed name (optional)…"
+                style={{flex:1,background:c_inner,border:`1px solid ${c_bord}`,borderRadius:'.5rem',padding:'.5rem .75rem',color:c_text,fontSize:'14px'}}/>
+              <button onClick={saveSub}
+                style={{padding:'.5rem 1rem',borderRadius:'.5rem',background:'#6d28d9',color:'#fff',border:'none',fontWeight:700,cursor:'pointer',whiteSpace:'nowrap'}}>
+                Save
+              </button>
+            </div>
+          </div>
+
+          <div className="scroll-y" style={{flex:1,padding:'0 1rem',display:'flex',flexDirection:'column',gap:'.5rem'}}>
+            {subs.length===0 && <p style={{textAlign:'center',padding:'2rem',color:c_sub,fontSize:'.85rem'}}>No saved feeds yet.</p>}
+            {subs.map((s,i)=>(
+              <div key={i} style={{...cardStyle,padding:'1rem',display:'flex',alignItems:'center',gap:'.75rem'}}>
+                <div style={{flex:1,minWidth:0}}>
+                  <p style={{margin:0,fontSize:'.85rem',fontWeight:600,color:c_head,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{s.name}</p>
+                  <p style={{margin:0,fontSize:'.7rem',color:c_sub,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{s.url}</p>
+                </div>
+                <button onClick={()=>{loadFeed(s.url);setShowSubs(false);}}
+                  style={{padding:'.4rem .875rem',borderRadius:'.5rem',background:'rgba(139,92,246,.2)',color:'#c084fc',border:'none',fontSize:'.75rem',fontWeight:700,cursor:'pointer',whiteSpace:'nowrap'}}>
+                  Load
+                </button>
+                <button onClick={()=>setSubs(prev=>prev.filter(x=>x.url!==s.url))}
+                  style={{background:'none',border:'none',cursor:'pointer',color:'#4b5563',padding:'.25rem',display:'flex',alignItems:'center'}}
+                  onMouseOver={e=>e.currentTarget.style.color='#f87171'}
+                  onMouseOut={e=>e.currentTarget.style.color='#4b5563'}>
+                  <LucideIcon name="Trash2" size={16}/>
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Main ── */}
+      <div style={{maxWidth:500,margin:'0 auto',padding:'0 1rem'}} className="pad-top pad-bottom">
+
+        {/* Header */}
+        <header style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'1.25rem'}}>
+          <div style={{display:'flex',alignItems:'center',gap:'.625rem'}}>
+            <LucideIcon name="Moon" size={26} color={bm?'#374151':'#818cf8'}/>
+            <h1 style={{margin:0,fontSize:'1.4rem',fontWeight:900,letterSpacing:'.12em',
+              background:bm?'none':'linear-gradient(135deg,#818cf8,#c084fc)',
+              WebkitBackgroundClip:bm?'unset':'text',WebkitTextFillColor:bm?'#6b7280':'transparent',
+              color:bm?'#6b7280':'transparent'}}>
+              SLEEPULATOR
+            </h1>
+          </div>
+          <div style={{display:'flex',gap:'.5rem',alignItems:'center'}}>
+            <button onClick={()=>setBreathMode(v=>v?null:'478')} title="Breathing Guide"
+              className={`btn-icon${breathMode?' active-indigo':''}`}>
+              <LucideIcon name="Wind" size={18}/>
+            </button>
+            <button onClick={()=>setBm(v=>!v)}
+              style={{display:'flex',alignItems:'center',gap:'.375rem',padding:'.5rem .875rem',borderRadius:'9999px',
+                border:`1px solid ${bm?'#1f2937':'rgba(129,140,248,.3)'}`,
+                background:bm?'#0a0a0a':'rgba(129,140,248,.08)',
+                color:bm?'#6b7280':'#818cf8',cursor:'pointer',fontSize:'.75rem',fontWeight:700}}>
+              <LucideIcon name={bm?'Sun':'MoonStar'} size={14}/>
+              {bm?'Wake':'Bedtime'}
+            </button>
+          </div>
+        </header>
+
+        {/* Master Volume */}
+        <div style={{...cardStyle,display:'flex',alignItems:'center',gap:'.875rem',marginBottom:'1rem'}}>
+          <LucideIcon name="Settings2" size={18} color={bm?'#4b5563':'#818cf8'}/>
+          <span style={{fontSize:'.8rem',fontWeight:700,color:c_head,whiteSpace:'nowrap'}}>Master</span>
+          <input type="range" min="0" max="1" step=".01" value={masterVol} className="indigo"
+            onChange={e=>setMasterVol(+e.target.value)} style={{flex:1}}/>
+          <span style={{fontSize:'.7rem',fontFamily:'monospace',color:c_sub,width:32,textAlign:'right'}}>{Math.round(masterVol*100)}%</span>
+        </div>
+
+        <div style={{display:'flex',flexDirection:'column',gap:'1rem'}}>
+
+          {/* Sleep Timer */}
+          <div style={cardStyle}>
+            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'1rem'}}>
+              <div style={{display:'flex',alignItems:'center',gap:'.5rem',color:bm?'#6b7280':'#a5b4fc'}}>
+                <LucideIcon name="Clock" size={18}/>
+                <span style={{fontWeight:700,fontSize:'.9rem'}}>Sleep Timer</span>
+              </div>
+              {timerActive && <span style={{fontFamily:'monospace',fontSize:'1.3rem',fontWeight:700,color:bm?'#9ca3af':'#818cf8',letterSpacing:'.04em'}}>{fmt(timeLeft)}</span>}
+            </div>
+            <div style={{display:'flex',alignItems:'center',gap:'.75rem',marginBottom:'1rem'}}>
+              <span style={{fontSize:'.7rem',color:c_sub}}>5m</span>
+              <input type="range" min="5" max="120" step="5" value={timerMins} className="indigo"
+                disabled={timerActive} onChange={e=>setTimerMins(+e.target.value)} style={{flex:1,opacity:timerActive?.4:1}}/>
+              <span style={{fontSize:'.75rem',color:c_sub,width:36,textAlign:'right'}}>{timerMins}m</span>
+            </div>
+            {timerActive&&timeLeft!==null&&timeLeft<=60&&timeLeft>0 ? (
+              <button onClick={bumpTimer} className="btn-primary"
+                style={{background:bm?'#1f2937':'#4f46e5',color:bm?'#d1d5db':'#fff',animation:'pulse 1.5s ease-in-out infinite',
+                  boxShadow:bm?'none':'0 0 20px rgba(79,70,229,.4)'}}>
+                Still Awake? (+15 min)
+              </button>
+            ):(
+              <button onClick={toggleTimer} className="btn-primary"
+                style={{background:timerActive?(bm?'rgba(255,255,255,.04)':'rgba(248,113,113,.1)'):(bm?'#1f2937':'#4f46e5'),
+                  color:timerActive?(bm?'#6b7280':'#f87171'):(bm?'#d1d5db':'#fff'),
+                  border:timerActive?`1px solid ${bm?'#1f2937':'rgba(248,113,113,.3)'}`:'none',
+                  boxShadow:timerActive?'none':(bm?'none':'0 4px 20px rgba(79,70,229,.3)')}}>
+                {timerActive?'Cancel Timer':`Start ${timerMins} Min Timer`}
+              </button>
+            )}
+            <p style={{fontSize:'.7rem',color:c_sub,textAlign:'center',margin:'.75rem 0 0'}}>Audio fades out over the last 60 seconds</p>
+          </div>
+
+          {/* Ambient + Binaural */}
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'1rem'}}>
+
+            {/* Ambient */}
+            <div style={{...cardStyle,position:'relative',overflow:'hidden'}}>
+              {ambientOn && !bm && <div className="glow-orange" style={{position:'absolute',top:0,left:0,width:3,height:'100%',background:'#fb923c',borderRadius:2}}/>}
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:'.875rem'}}>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontSize:'.8rem',fontWeight:700,color:c_head,marginBottom:'.5rem'}}>Ambient</div>
+                  <select value={noiseType} onChange={e=>setNoiseType(e.target.value)}
+                    style={{fontSize:'12px',background:c_inner,border:`1px solid ${c_bord}`,borderRadius:'.5rem',color:c_sub,padding:'.25rem .375rem',width:'100%'}}>
+                    {Object.entries(NOISE_TYPES).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
+                  </select>
+                </div>
+                <button onClick={toggleAmbient} className={`btn-icon${ambientOn?' active-orange':''}`} style={{marginLeft:'.5rem',flexShrink:0}}>
+                  <LucideIcon name={ambientOn?'Square':'Play'} size={18}/>
+                </button>
+              </div>
+              <div style={{display:'flex',alignItems:'center',gap:'.5rem'}}>
+                <LucideIcon name="Volume2" size={14} color={c_sub}/>
+                <input type="range" min="0" max="1" step=".01" value={ambientVol} className="orange"
+                  onChange={e=>setAmbientVol(+e.target.value)} style={{flex:1}}/>
+              </div>
+              <label style={{display:'flex',alignItems:'center',gap:'.5rem',fontSize:'.7rem',color:c_sub,marginTop:'.75rem',cursor:'pointer'}}>
+                <input type="checkbox" checked={ambientBypass} onChange={e=>setAmbientBypass(e.target.checked)}/>
+                All night (bypass timer)
+              </label>
+            </div>
+
+            {/* Binaural */}
+            <div style={{...cardStyle,position:'relative',overflow:'hidden'}}>
+              {binOn && !bm && <div className="glow-blue" style={{position:'absolute',top:0,left:0,width:3,height:'100%',background:'#60a5fa',borderRadius:2}}/>}
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:'.875rem'}}>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontSize:'.8rem',fontWeight:700,color:c_head,marginBottom:'.5rem'}}>Binaural</div>
+                  <select value={binPreset} onChange={e=>setBinPreset(e.target.value)}
+                    style={{fontSize:'12px',background:c_inner,border:`1px solid ${c_bord}`,borderRadius:'.5rem',color:c_sub,padding:'.25rem .375rem',width:'100%'}}>
+                    {Object.entries(BINAURAL).map(([k,v])=><option key={k} value={k}>{v.name}</option>)}
+                  </select>
+                </div>
+                <button onClick={toggleBin} className={`btn-icon${binOn?' active-blue':''}`} style={{marginLeft:'.5rem',flexShrink:0}}>
+                  <LucideIcon name={binOn?'Square':'Play'} size={18}/>
+                </button>
+              </div>
+              <div style={{display:'flex',alignItems:'center',gap:'.5rem'}}>
+                <LucideIcon name="Volume2" size={14} color={c_sub}/>
+                <input type="range" min="0" max="1" step=".01" value={binVol} className="blue"
+                  onChange={e=>setBinVol(+e.target.value)} style={{flex:1}}/>
+              </div>
+              <label style={{display:'flex',alignItems:'center',gap:'.5rem',fontSize:'.7rem',color:c_sub,marginTop:'.75rem',cursor:'pointer'}}>
+                <input type="checkbox" checked={binBypass} onChange={e=>setBinBypass(e.target.checked)}/>
+                All night (bypass timer)
+              </label>
+            </div>
+          </div>
+
+          {/* Podcast */}
+          <div style={{...cardStyle,position:'relative',overflow:'hidden'}}>
+            {podPlaying && !bm && <div className="glow-purple" style={{position:'absolute',top:0,left:0,width:3,height:'100%',background:'#c084fc',borderRadius:2}}/>}
+
+            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'1rem'}}>
+              <div style={{display:'flex',alignItems:'center',gap:'.5rem',color:bm?'#7c3aed':'#c084fc'}}>
+                <LucideIcon name="Rss" size={18}/>
+                <span style={{fontWeight:700,fontSize:'.9rem'}}>Podcast Stream</span>
+              </div>
+              <button onClick={()=>setShowSubs(true)} className="btn-icon" title="Saved Feeds">
+                <LucideIcon name="BookMarked" size={16}/>
+              </button>
+            </div>
+
+            {/* URL input */}
+            <div style={{display:'flex',gap:'.5rem',marginBottom:'.875rem'}}>
+              <input type="url" value={rssUrl} onChange={e=>setRssUrl(e.target.value)}
+                onKeyDown={e=>{ if(e.key==='Enter'){ e.target.blur(); loadFeed(); } }}
+                placeholder="Paste RSS feed URL…"
+                style={{flex:1,background:c_inner,border:`1px solid ${c_bord}`,borderRadius:'.625rem',padding:'.5rem .75rem',color:c_text,fontSize:'14px'}}/>
+              <button onClick={()=>{ document.activeElement?.blur(); loadFeed(); }} disabled={loading}
+                style={{padding:'.5rem 1rem',borderRadius:'.625rem',background:bm?'#1f2937':'#7e22ce',color:bm?'#9ca3af':'#fff',border:'none',fontWeight:700,cursor:'pointer',whiteSpace:'nowrap',minWidth:60,opacity:loading?.6:1}}>
+                {loading?'…':'Load'}
+              </button>
+            </div>
+
+            {/* Tabs */}
+            <div className="tab-bar" style={{marginBottom:'.875rem'}}>
+              <button className={`tab-btn${activeTab==='feed'?' active':''}`} onClick={()=>setActiveTab('feed')}>Browse Feed</button>
+              <button className={`tab-btn${activeTab==='playlist'?' active-purple':''}`} onClick={()=>setActiveTab('playlist')}>
+                Playlist {playlist.length>0&&`(${playlist.length})`}
+              </button>
+            </div>
+
+            {/* Controls */}
+            <div style={{...innerStyle,marginBottom:'.875rem',display:'flex',flexDirection:'column',gap:'.875rem'}}>
+              <div style={{display:'flex',alignItems:'center',gap:'.75rem'}}>
+                <LucideIcon name="Volume2" size={16} color={bm?'#7c3aed':'#c084fc'}/>
+                <span style={{fontSize:'.7rem',fontWeight:700,color:c_sub,whiteSpace:'nowrap'}}>Pod Mix</span>
+                <input type="range" min="0" max="1" step=".01" value={podVol} className="purple"
+                  onChange={e=>setPodVol(+e.target.value)} style={{flex:1}}/>
+              </div>
+
+              <div style={{borderTop:`1px solid ${c_bord}`}}/>
+
+              <div style={{display:'flex',gap:'1.25rem',alignItems:'center'}}>
+                <label style={{display:'flex',alignItems:'center',gap:'.375rem',fontSize:'.7rem',color:c_sub,cursor:'pointer'}}>
+                  <input type="checkbox" checked={autoPlay} onChange={e=>setAutoPlay(e.target.checked)}/> Auto-play
+                </label>
+                <label style={{display:'flex',alignItems:'center',gap:'.375rem',fontSize:'.7rem',color:c_sub,cursor:'pointer'}}>
+                  <input type="checkbox" checked={shuffle} onChange={e=>setShuffle(e.target.checked)}/><LucideIcon name="Shuffle" size={12}/> Shuffle
+                </label>
+              </div>
+
+              <div style={{paddingTop:'.125rem'}}>
+                <div style={{fontSize:'.75rem',fontWeight:600,color:c_head,marginBottom:'.25rem'}}>Background-safe playback</div>
+                <div style={{fontSize:'.65rem',color:c_sub,lineHeight:1.5}}>
+                  Feed episodes now use the device audio path directly so lock-screen and background playback stay reliable across more podcast hosts.
+                </div>
+              </div>
+
+              <div>
+                <div className="section-label">Lethargic Speed</div>
+                <div style={{display:'flex',gap:'.375rem'}}>
+                  {[1,.85,.75].map(s=>(
+                    <button key={s} onClick={()=>setPodSpeed(s)} className={`speed-chip${podSpeed===s?' on':''}`}>
+                      {s===1?'Normal':`${s}×`}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {feedErr && <p style={{color:'#f87171',fontSize:'.8rem',marginBottom:'.75rem'}}>{feedErr}</p>}
+
+            {/* Episode list */}
+            {activeTab==='feed'&&!episodes.length&&!loading&&!feedErr ? (
+              <EmptyState text="Paste an RSS link and tap Load" color={c_sub}/>
+            ) : activeTab==='playlist'&&!playlist.length ? (
+              <EmptyState text={"Playlist is empty.\nBrowse a feed and tap + to add episodes."} color={c_sub}/>
+            ) : (
+              <div className="scroll-y" style={{maxHeight:288,display:'flex',flexDirection:'column',gap:'.375rem'}}>
+                {(activeTab==='feed'?episodes:playlist).map(ep=>{
+                  const playing=curEp?.id===ep.id&&podPlaying;
+                  return (
+                    <div key={ep.id}>
+                      <div className="ep-row"
+                        style={{background:playing?(bm?'rgba(139,92,246,.12)':'rgba(192,132,252,.08)'):(bm?'rgba(255,255,255,.02)':'rgba(255,255,255,.02)'),
+                          border:playing?`1px solid ${bm?'rgba(139,92,246,.2)':'rgba(192,132,252,.2)'}`:undefined}}>
+                        <span style={{flex:1,fontSize:'.72rem',color:playing?c_head:c_sub,
+                          display:'-webkit-box',WebkitLineClamp:2,WebkitBoxOrient:'vertical',overflow:'hidden'}}>
+                          {ep.title}
+                        </span>
+                        <div style={{display:'flex',gap:'.375rem',flexShrink:0}}>
+                          {activeTab==='feed' ? (
+                            <button onClick={()=>addToPlaylist(ep)} className="btn-icon"
+                              style={{width:36,height:36,minWidth:36,minHeight:36,
+                                color:playlist.find(p=>p.id===ep.id)?'#4ade80':c_sub,
+                                background:playlist.find(p=>p.id===ep.id)?'rgba(74,222,128,.12)':'transparent'}}>
+                              <LucideIcon name="Plus" size={15}/>
+                            </button>
+                          ) : (
+                            <button onClick={()=>removeFromPlaylist(ep.id)} className="btn-icon"
+                              style={{width:36,height:36,minWidth:36,minHeight:36,background:'transparent',color:c_sub}}>
+                              <LucideIcon name="X" size={15}/>
+                            </button>
+                          )}
+                          <button onClick={()=>playEp(ep,activeTab)}
+                            className={`btn-icon${playing?' active-purple':''}`}
+                            style={{width:36,height:36,minWidth:36,minHeight:36,
+                              ...(playing?{background:'rgba(192,132,252,.2)',color:'#c084fc'}:{})}}>
+                            <LucideIcon name={playing?'Pause':'Play'} size={15}/>
+                          </button>
+                        </div>
+                      </div>
+                      {curEp?.id===ep.id && (
+                        <div style={{display:'flex',justifyContent:'flex-end',gap:'.375rem',padding:'.25rem .375rem .375rem'}}>
+                          {[{s:-15,icon:'RotateCcw'},{s:15,icon:'RotateCw'}].map(({s,icon})=>(
+                            <button key={s} onClick={()=>skipPod(s)}
+                              style={{display:'flex',alignItems:'center',gap:'.25rem',padding:'.375rem .625rem',borderRadius:'.5rem',
+                                background:bm?'rgba(255,255,255,.04)':'rgba(192,132,252,.08)',
+                                color:bm?'#6b7280':'#c084fc',border:'none',cursor:'pointer',fontSize:'.7rem'}}>
+                              <LucideIcon name={icon} size={13}/>{Math.abs(s)}s
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Install hint */}
+          <div style={{textAlign:'center',fontSize:'.7rem',color:c_sub,padding:'.5rem 0 .25rem',lineHeight:1.7}}>
+            <p style={{margin:0}}><strong style={{color:c_sub}}>iPhone:</strong> Safari → Share → "Add to Home Screen"</p>
+            <p style={{margin:0}}><strong style={{color:c_sub}}>Android:</strong> Chrome → ⋮ → "Add to Home Screen"</p>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function EmptyState({text,color}) {
+  return (
+    <div style={{textAlign:'center',padding:'2rem 1rem',color,display:'flex',flexDirection:'column',alignItems:'center',gap:'.75rem'}}>
+      <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity=".3">
+        <path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>
+      </svg>
+      <p style={{margin:0,fontSize:'.8rem',whiteSpace:'pre-line'}}>{text}</p>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>
