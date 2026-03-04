@@ -262,9 +262,25 @@ function hashUrl(str) {
 }
 
 const FEED_TIMEOUT_MS = 8000;
+const FEED_ACCEPT_HEADER = 'application/rss+xml, application/atom+xml, application/xml, text/xml;q=0.9, text/plain;q=0.7, */*;q=0.1';
 
 function clamp01(value) {
   return Math.max(0, Math.min(1, value));
+}
+
+function mergeHeaders(...headerSets) {
+  const merged = new Headers();
+  headerSets.filter(Boolean).forEach(headerSet => {
+    new Headers(headerSet).forEach((value, key) => merged.set(key, value));
+  });
+  return merged;
+}
+
+function withFeedHeaders(init = {}) {
+  return {
+    ...init,
+    headers: mergeHeaders({ Accept: FEED_ACCEPT_HEADER }, init.headers),
+  };
 }
 
 function fetchWithTimeout(input, init = {}, timeoutMs = FEED_TIMEOUT_MS) {
@@ -279,6 +295,47 @@ function fetchWithTimeout(input, init = {}, timeoutMs = FEED_TIMEOUT_MS) {
 function safeJsonParse(text) {
   try { return JSON.parse(text); }
   catch { return null; }
+}
+
+function localNameOf(node) {
+  return (node?.localName || node?.nodeName || '').replace(/^.*:/, '').toLowerCase();
+}
+
+function directElements(node) {
+  return Array.from(node?.children || []);
+}
+
+function directMatches(node, names) {
+  const wanted = new Set(names.map(v => v.toLowerCase()));
+  return directElements(node).filter(child => wanted.has(localNameOf(child)));
+}
+
+function descendantMatches(node, names) {
+  const wanted = new Set(names.map(v => v.toLowerCase()));
+  return Array.from(node?.getElementsByTagName?.('*') || []).filter(child => wanted.has(localNameOf(child)));
+}
+
+function firstDirectText(node, names) {
+  for (const child of directMatches(node, names)) {
+    const text = child.textContent?.trim();
+    if (text) return text;
+  }
+  return '';
+}
+
+function firstDescendantText(node, names) {
+  return firstDirectText(node, names) || descendantMatches(node, names).map(el => el.textContent?.trim()).find(Boolean) || '';
+}
+
+function firstAttrFromElements(elements, attrs, predicate = () => true) {
+  for (const element of elements) {
+    if (!predicate(element)) continue;
+    for (const attr of attrs) {
+      const value = element.getAttribute?.(attr)?.trim();
+      if (value) return value;
+    }
+  }
+  return '';
 }
 
 function firstText(root, selectors) {
@@ -303,31 +360,140 @@ function resolveMaybeUrl(value, baseUrl) {
   catch { return value; }
 }
 
-function parseFeedEpisodes(raw, feedUrl) {
-  const xml = new DOMParser().parseFromString(raw, 'text/xml');
-  if (xml.querySelector('parsererror')) throw new Error('parsererror');
+function sniffMarkupType(raw) {
+  const text = (raw || '')
+    .replace(/^\uFEFF/, '')
+    .trimStart()
+    .replace(/^(?:<!--[\s\S]*?-->\s*)+/, '');
+  if (!text) return 'empty';
+  if (/^<(?:\?xml\b|rss\b|feed\b|rdf:RDF\b)/i.test(text)) return 'xml';
+  if (/^<(?:!doctype\s+html\b|html\b)/i.test(text)) return 'html';
+  return 'unknown';
+}
 
+function looksLikeXmlFeed(raw) {
+  if (sniffMarkupType(raw) !== 'xml') return false;
+  const xml = new DOMParser().parseFromString(raw, 'text/xml');
+  if (xml.querySelector('parsererror')) return false;
+  const root = xml.documentElement;
+  if (!root) return false;
+  const rootName = localNameOf(root);
+  return ['rss', 'feed', 'rdf'].includes(rootName) || !!descendantMatches(root, ['item', 'entry']).length;
+}
+
+function extractEmbeddedFeedMarkup(raw) {
+  if (sniffMarkupType(raw) !== 'html') return '';
+  const html = new DOMParser().parseFromString(raw, 'text/html');
+  const body = html.body;
+  const candidates = [
+    ...(Array.from(html.querySelectorAll('pre, code, textarea')).map(node => node.textContent || '')),
+    body?.textContent || '',
+    body?.innerText || '',
+  ];
+  for (const candidate of candidates) {
+    if (looksLikeXmlFeed(candidate)) return candidate.trim();
+  }
+  const bodyMarkup = body?.innerHTML || '';
+  const inlineMarkup = bodyMarkup.match(/<(?:\?xml\b|rss\b|feed\b|rdf:RDF\b)[\s\S]*$/i)?.[0] || '';
+  if (looksLikeXmlFeed(inlineMarkup)) return inlineMarkup.trim();
+  return '';
+}
+
+function discoverAlternateFeedUrl(raw, baseUrl) {
+  if (sniffMarkupType(raw) !== 'html') return '';
+  const html = new DOMParser().parseFromString(raw, 'text/html');
+  const alternate = Array.from(html.querySelectorAll('link[rel~="alternate"][href]')).find(link => {
+    const type = (link.getAttribute('type') || '').toLowerCase();
+    return /rss|atom|xml/.test(type);
+  })?.getAttribute('href');
+  if (alternate) return resolveMaybeUrl(alternate, baseUrl);
+
+  const candidate = Array.from(html.querySelectorAll('a[href]')).find(link => {
+    const href = (link.getAttribute('href') || '').toLowerCase();
+    return /(?:rss|feed|atom|xml)/.test(href);
+  })?.getAttribute('href');
+  return resolveMaybeUrl(candidate, baseUrl);
+}
+
+function normalizeFeedUrl(input) {
+  const trimmed = (input || '').trim();
+  const normalized = { originalUrl: trimmed, fetchUrl: trimmed, authHeader: '' };
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.username || parsed.password) {
+      const user = decodeURIComponent(parsed.username);
+      const pass = decodeURIComponent(parsed.password);
+      normalized.authHeader = `Basic ${btoa(`${user}:${pass}`)}`;
+      parsed.username = '';
+      parsed.password = '';
+      normalized.fetchUrl = parsed.toString();
+    }
+  } catch {}
+  return normalized;
+}
+
+function makeFeedError(code, details = {}) {
+  const error = new Error(code);
+  error.code = code;
+  Object.assign(error, details);
+  return error;
+}
+
+function formatFeedError(error, fallbackUrl) {
+  if (!error) return 'Feed unavailable. Check URL or try again.';
+  if (error.code === 'html-auth') {
+    return 'This URL returned a login or web page instead of a feed. Private feeds often block browser/proxy access.';
+  }
+  if (error.code === 'alternate-feed' && error.alternateUrl) {
+    return `This URL looks like a webpage, not a feed. Try the discovered feed URL: ${error.alternateUrl}`;
+  }
+  if (error.code === 'empty-feed') {
+    return 'The feed loaded, but no episodes with playable audio were found.';
+  }
+  if (error.code === 'auth-cors') {
+    return 'This private feed likely needs auth or blocks browser access. If it uses username/password, the host must allow direct browser requests.';
+  }
+  if (error.code === 'parsererror') {
+    return 'The response was not valid RSS/Atom XML.';
+  }
+  return `Could not load this feed from ${fallbackUrl}.`;
+}
+
+function parseFeedEpisodes(raw, feedUrl) {
+  const embeddedFeed = extractEmbeddedFeedMarkup(raw);
+  const source = embeddedFeed || raw;
+  const markupType = sniffMarkupType(source);
+  if (markupType === 'html') {
+    const alternateUrl = discoverAlternateFeedUrl(source, feedUrl);
+    if (alternateUrl && alternateUrl !== feedUrl) throw makeFeedError('alternate-feed', { alternateUrl });
+    throw makeFeedError('html-auth');
+  }
+  const xml = new DOMParser().parseFromString(source, 'text/xml');
+  if (xml.querySelector('parsererror')) throw makeFeedError('parsererror');
+
+  const root = xml.documentElement;
+  const container = directMatches(root, ['channel', 'feed'])[0] || root;
   let fallbackTitle = 'Podcast';
   try { fallbackTitle = new URL(feedUrl, window.location.href).hostname.replace(/^www\./, ''); }
   catch {}
-  const podcastTitle =
-    firstText(xml, ['channel > title', 'feed > title']) ||
-    fallbackTitle;
+  const podcastTitle = firstDirectText(container, ['title']) || firstDescendantText(container, ['title']) || fallbackTitle;
 
-  const items = Array.from(xml.querySelectorAll('item, entry')).slice(0, 40);
-  return items.map(item => {
-    const title = firstText(item, ['title']) || 'Untitled';
-    const audioUrl = resolveMaybeUrl(firstAttr(item, [
-      ['enclosure[url]', 'url'],
-      ['media\\:content[url]', 'url'],
-      ['content[url]', 'url'],
-      ['link[rel="enclosure"][href]', 'href'],
-      ['link[type^="audio/"][href]', 'href'],
-      ['link[href$=".mp3"]', 'href'],
-      ['link[href$=".m4a"]', 'href'],
-      ['link[href$=".aac"]', 'href'],
-      ['link[href$=".mp4"]', 'href'],
-    ]), feedUrl);
+  const items = directMatches(container, ['item', 'entry']);
+  const itemNodes = (items.length ? items : descendantMatches(container, ['item', 'entry'])).slice(0, 40);
+  const episodes = itemNodes.map(item => {
+    const title = firstDirectText(item, ['title']) || firstDescendantText(item, ['title']) || 'Untitled';
+    const directAudio = firstAttrFromElements(directMatches(item, ['enclosure']), ['url']);
+    const mediaAudio = firstAttrFromElements(descendantMatches(item, ['content']), ['url', 'href', 'src'], el => {
+      const type = (el.getAttribute('type') || '').toLowerCase();
+      return !type || type.startsWith('audio/');
+    });
+    const linkAudio = firstAttrFromElements(descendantMatches(item, ['link']), ['href', 'url'], el => {
+      const rel = (el.getAttribute('rel') || '').toLowerCase();
+      const type = (el.getAttribute('type') || '').toLowerCase();
+      const href = (el.getAttribute('href') || '').toLowerCase();
+      return rel === 'enclosure' || type.startsWith('audio/') || /\.(mp3|m4a|aac|mp4|m4b)([?#].*)?$/.test(href);
+    });
+    const audioUrl = resolveMaybeUrl(directAudio || mediaAudio || linkAudio, feedUrl);
 
     if (!audioUrl) return null;
     return {
@@ -336,6 +502,8 @@ function parseFeedEpisodes(raw, feedUrl) {
       url: audioUrl,
     };
   }).filter(Boolean);
+  if (!episodes.length) throw makeFeedError('empty-feed');
+  return episodes;
 }
 
 function isIOSDevice() {
@@ -874,37 +1042,78 @@ function App() {
 
   // ── 3. Podcast ────────────────────────────────────────────────────────────
   const loadFeed = async (urlOverride) => {
-    const url = (urlOverride||rssUrl).trim();
-    if(!url) return setFeedErr('Please enter a valid RSS URL.');
+    const requestedUrl = (urlOverride||rssUrl).trim();
+    if(!requestedUrl) return setFeedErr('Please enter a valid RSS URL.');
     setLoading(true); setFeedErr('');
-    const SOURCES = [
-      { url, read: text => text },
-      {
-        url: `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`,
-        read: text => {
-          const parsed = safeJsonParse(text);
-          return parsed?.contents || parsed?.data || '';
-        }
-      },
-      { url: `https://corsproxy.io/?${encodeURIComponent(url)}`, read: text => text },
-    ];
-    let raw=null;
-    for (const source of SOURCES) {
-      try {
-        const r = await fetchWithTimeout(source.url);
-        if (!r.ok) continue;
-        raw = source.read(await r.text());
-        if(raw) break;
-      } catch(e){}
-    }
-    if(!raw) { setFeedErr('Feed unavailable. Check URL or try again.'); setLoading(false); return; }
+    const normalized = normalizeFeedUrl(requestedUrl);
+    let currentUrl = normalized.fetchUrl;
+    let resolvedFeedUrl = requestedUrl;
+    let lastError = null;
+
     try {
-      const parsed = parseFeedEpisodes(raw, url);
-      setEpisodes(parsed); setActiveTab('feed');
-      if(urlOverride) setRssUrl(urlOverride);
-      if(!parsed.length) setFeedErr('No playable audio found in this feed.');
-    } catch { setFeedErr('Could not parse feed XML.'); }
-    setLoading(false);
+      for (let hop = 0; hop < 3; hop++) {
+        const sources = [
+          {
+            url: currentUrl,
+            init: withFeedHeaders(normalized.authHeader && hop === 0 ? { headers: { Authorization: normalized.authHeader } } : {}),
+            read: text => text,
+          },
+          {
+            url: `https://api.allorigins.win/get?url=${encodeURIComponent(currentUrl)}`,
+            init: withFeedHeaders(),
+            read: text => {
+              const parsed = safeJsonParse(text);
+              return parsed?.contents || parsed?.data || '';
+            }
+          },
+          {
+            url: `https://corsproxy.io/?${encodeURIComponent(currentUrl)}`,
+            init: withFeedHeaders(),
+            read: text => text,
+          },
+        ];
+
+        let raw = '';
+        for (const source of sources) {
+          try {
+            const response = await fetchWithTimeout(source.url, source.init);
+            if (!response.ok) continue;
+            raw = source.read(await response.text());
+            if (raw) break;
+          } catch (error) {
+            lastError = error;
+          }
+        }
+
+        if (!raw) {
+          throw makeFeedError(normalized.authHeader ? 'auth-cors' : 'network');
+        }
+
+        try {
+          const parsed = parseFeedEpisodes(raw, currentUrl);
+          setEpisodes(parsed);
+          setActiveTab('feed');
+          setRssUrl(currentUrl);
+          return;
+        } catch (error) {
+          lastError = error;
+          if (error.code === 'alternate-feed' && error.alternateUrl) {
+            currentUrl = error.alternateUrl;
+            resolvedFeedUrl = error.alternateUrl;
+            continue;
+          }
+          throw error;
+        }
+      }
+      throw lastError || makeFeedError('network');
+    } catch (error) {
+      if (error?.code === 'alternate-feed' && error.alternateUrl) {
+        setRssUrl(error.alternateUrl);
+      }
+      setFeedErr(formatFeedError(error, resolvedFeedUrl));
+    } finally {
+      setLoading(false);
+    }
   };
 
   const addToPlaylist    = ep => { if(!playlist.find(p=>p.id===ep.id)) setPlaylist(prev=>[...prev,ep]); };
