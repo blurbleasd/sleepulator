@@ -1,11 +1,12 @@
-// SLEEPULATOR Service Worker — v1.0
+// SLEEPULATOR Service Worker — v1.1
 // Caches the app shell for offline use.
 // Audio from external podcast feeds is NOT cached (too large/dynamic).
 
-const CACHE_NAME  = 'sleepulator-v1';
+const CACHE_NAME  = 'sleepulator-v2';
 const SHELL_URLS  = [
   './',
   './index.html',
+  './config.js',
   './manifest.json',
   './apple-touch-icon.png',
   './icon-192.png',

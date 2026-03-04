@@ -17,6 +17,7 @@
   <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
   <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+  <script src="config.js"></script>
 
   <!-- Lucide — individual SVG sprites via jsdelivr (UMD createElement API is broken) -->
   <script src="https://cdn.jsdelivr.net/npm/lucide@0.263.1/dist/umd/lucide.min.js"></script>
@@ -223,6 +224,8 @@
 
 <script type="text/babel">
 const { useState, useEffect, useRef, useCallback } = React;
+const APP_CONFIG = window.SLEEPULATOR_CONFIG || {};
+const LEGACY_DEFAULT_FEED_URL = 'https://feeds.simplecast.com/tOaZvgCO';
 
 // ─── Lucide helper (works with the UMD build) ─────────────────────────────────
 // The UMD lucide build exposes window.lucide as an object of { IconName: [[path,attrs],...] }
@@ -266,6 +269,53 @@ const FEED_ACCEPT_HEADER = 'application/rss+xml, application/atom+xml, applicati
 
 function clamp01(value) {
   return Math.max(0, Math.min(1, value));
+}
+
+function shortenSecret(value, keepStart = 5, keepEnd = 3) {
+  if (!value) return '';
+  if (value.length <= keepStart + keepEnd + 3) return value;
+  return `${value.slice(0, keepStart)}...${value.slice(-keepEnd)}`;
+}
+
+function redactUrlForDisplay(value) {
+  const trimmed = (value || '').trim();
+  if (!trimmed) return '';
+  try {
+    const parsed = new URL(trimmed, window.location.href);
+    if (parsed.username) parsed.username = shortenSecret(parsed.username, 2, 1);
+    if (parsed.password) parsed.password = '***';
+    parsed.searchParams.forEach((paramValue, key) => {
+      if (/token|key|auth|sig|signature|secret|pass|password|expires/i.test(key)) {
+        parsed.searchParams.set(key, shortenSecret(paramValue));
+      }
+    });
+    return parsed.toString();
+  } catch {
+    return trimmed.length > 140 ? `${trimmed.slice(0, 137)}...` : trimmed;
+  }
+}
+
+function normalizeConfigUrl(input) {
+  const trimmed = (input || '').trim();
+  if (!trimmed) return '';
+  try { return new URL(trimmed, window.location.href).href; }
+  catch { return trimmed; }
+}
+
+function previewText(text, maxLength = 140) {
+  const normalized = (text || '').replace(/\s+/g, ' ').trim();
+  if (!normalized) return '';
+  return normalized.length > maxLength ? `${normalized.slice(0, maxLength - 3)}...` : normalized;
+}
+
+function describeError(error) {
+  if (!error) return '';
+  if (typeof error === 'string') return error;
+  const parts = [];
+  if (error.code) parts.push(error.code);
+  if (error.name && error.name !== 'Error' && error.name !== error.code) parts.push(error.name);
+  if (error.message && error.message !== error.code) parts.push(error.message);
+  return parts.join(': ') || 'Request failed.';
 }
 
 function mergeHeaders(...headerSets) {
@@ -432,6 +482,51 @@ function normalizeFeedUrl(input) {
   return normalized;
 }
 
+function buildFeedSources(feedUrl, options = {}) {
+  const proxyUrl = normalizeConfigUrl(options.proxyUrl);
+  const authHeader = options.authHeader || '';
+  const sources = [];
+
+  if (proxyUrl) {
+    sources.push({
+      label: 'Private Proxy',
+      url: proxyUrl,
+      init: withFeedHeaders({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: feedUrl, authHeader }),
+      }),
+      read: text => text,
+    });
+  }
+
+  sources.push(
+    {
+      label: 'Direct',
+      url: feedUrl,
+      init: withFeedHeaders(authHeader ? { headers: { Authorization: authHeader } } : {}),
+      read: text => text,
+    },
+    {
+      label: 'AllOrigins',
+      url: `https://api.allorigins.win/get?url=${encodeURIComponent(feedUrl)}`,
+      init: withFeedHeaders(),
+      read: text => {
+        const parsed = safeJsonParse(text);
+        return parsed?.contents || parsed?.data || '';
+      }
+    },
+    {
+      label: 'CORS Proxy',
+      url: `https://corsproxy.io/?${encodeURIComponent(feedUrl)}`,
+      init: withFeedHeaders(),
+      read: text => text,
+    }
+  );
+
+  return sources;
+}
+
 function makeFeedError(code, details = {}) {
   const error = new Error(code);
   error.code = code;
@@ -453,10 +548,19 @@ function formatFeedError(error, fallbackUrl) {
   if (error.code === 'auth-cors') {
     return 'This private feed likely needs auth or blocks browser access. If it uses username/password, the host must allow direct browser requests.';
   }
+  if (error.code === 'network') {
+    return error.hasProxy
+      ? 'No feed route succeeded, including your private proxy. Open Feed Debug for the failing step.'
+      : 'The browser could not read this feed directly. Member-only feeds usually need a private proxy URL.';
+  }
+  if (error.code === 'timeout') {
+    return 'The feed request timed out before any source returned XML.';
+  }
   if (error.code === 'parsererror') {
     return 'The response was not valid RSS/Atom XML.';
   }
-  return `Could not load this feed from ${fallbackUrl}.`;
+  const details = describeError(error);
+  return details || `Could not load this feed from ${fallbackUrl}.`;
 }
 
 function parseFeedEpisodes(raw, feedUrl) {
@@ -723,9 +827,18 @@ function App() {
   const [podSpeed,      setPodSpeed]      = useState(()=>+localStorage.getItem('playbackSpeed')||1);
   const [autoPlay,      setAutoPlay]      = useState(()=>localStorage.getItem('autoPlayEnabled')!=='false');
   const [shuffle,       setShuffle]       = useState(()=>localStorage.getItem('shuffleEnabled')==='true');
-  const [rssUrl,        setRssUrl]        = useState(()=>localStorage.getItem('rssUrl')||'https://feeds.simplecast.com/tOaZvgCO');
+  const [rssUrl,        setRssUrl]        = useState(()=>{
+    const stored = (localStorage.getItem('rssUrl') || '').trim();
+    return stored && stored !== LEGACY_DEFAULT_FEED_URL ? stored : '';
+  });
   const [loading,       setLoading]       = useState(false);
   const [feedErr,       setFeedErr]       = useState('');
+  const [feedProxyUrl,  setFeedProxyUrl]  = useState(()=>{
+    const stored = (localStorage.getItem('feedProxyUrl') || '').trim();
+    return stored || normalizeConfigUrl(APP_CONFIG.feedProxyUrl || '');
+  });
+  const [feedDebug,     setFeedDebug]     = useState(null);
+  const [showFeedDebug, setShowFeedDebug] = useState(()=>APP_CONFIG.feedDebug === true || localStorage.getItem('showFeedDebug') === 'true');
   const [subs,          setSubs]          = useState(()=>JSON.parse(localStorage.getItem('feedSubs')||'[]'));
   const [showSubs,      setShowSubs]      = useState(false);
   const [subName,       setSubName]       = useState('');
@@ -809,12 +922,14 @@ function App() {
       localStorage.setItem('shuffleEnabled',          shuffle);
       localStorage.setItem('timerMinutes',            timerMins);
       localStorage.setItem('rssUrl',                  rssUrl);
+      localStorage.setItem('feedProxyUrl',            feedProxyUrl);
+      localStorage.setItem('showFeedDebug',           showFeedDebug);
       localStorage.setItem('comedyPlaylist',          JSON.stringify(playlist));
       localStorage.setItem('feedSubs',                JSON.stringify(subs));
     } catch(e){}
   },[masterVol,ambientVol,noiseType,ambientBypass,binVol,binPreset,binBypass,
      podVol,podSpeed,autoPlay,shuffle,
-     timerMins,rssUrl,playlist,subs]);
+     timerMins,rssUrl,feedProxyUrl,showFeedDebug,playlist,subs]);
 
   // ── Service Worker ────────────────────────────────────────────────────────
   useEffect(()=>{
@@ -1043,50 +1158,97 @@ function App() {
   // ── 3. Podcast ────────────────────────────────────────────────────────────
   const loadFeed = async (urlOverride) => {
     const requestedUrl = (urlOverride||rssUrl).trim();
-    if(!requestedUrl) return setFeedErr('Please enter a valid RSS URL.');
+    const configuredProxyUrl = normalizeConfigUrl(feedProxyUrl);
+    if(!requestedUrl) {
+      setFeedErr('Please enter a valid RSS URL.');
+      setFeedDebug({
+        requestedUrl: '',
+        normalizedUrl: '',
+        proxyUrl: configuredProxyUrl,
+        attempts: [],
+        final: {
+          status: 'error',
+          code: 'empty-url',
+          message: 'No feed URL provided.',
+        },
+      });
+      return;
+    }
     setLoading(true); setFeedErr('');
     const normalized = normalizeFeedUrl(requestedUrl);
     let currentUrl = normalized.fetchUrl;
     let resolvedFeedUrl = requestedUrl;
     let lastError = null;
+    const debugState = {
+      requestedUrl,
+      normalizedUrl: normalized.fetchUrl,
+      proxyUrl: configuredProxyUrl,
+      startedAt: new Date().toISOString(),
+      attempts: [],
+      final: null,
+    };
+    setFeedDebug(debugState);
 
     try {
       for (let hop = 0; hop < 3; hop++) {
-        const sources = [
-          {
-            url: currentUrl,
-            init: withFeedHeaders(normalized.authHeader && hop === 0 ? { headers: { Authorization: normalized.authHeader } } : {}),
-            read: text => text,
-          },
-          {
-            url: `https://api.allorigins.win/get?url=${encodeURIComponent(currentUrl)}`,
-            init: withFeedHeaders(),
-            read: text => {
-              const parsed = safeJsonParse(text);
-              return parsed?.contents || parsed?.data || '';
-            }
-          },
-          {
-            url: `https://corsproxy.io/?${encodeURIComponent(currentUrl)}`,
-            init: withFeedHeaders(),
-            read: text => text,
-          },
-        ];
+        const sources = buildFeedSources(currentUrl, {
+          authHeader: hop === 0 ? normalized.authHeader : '',
+          proxyUrl: configuredProxyUrl,
+        });
 
         let raw = '';
+        let sourceLabel = '';
         for (const source of sources) {
+          const attempt = {
+            hop: hop + 1,
+            via: source.label,
+            targetUrl: currentUrl,
+            requestUrl: source.url,
+            method: source.init?.method || 'GET',
+          };
+          debugState.attempts.push(attempt);
           try {
             const response = await fetchWithTimeout(source.url, source.init);
-            if (!response.ok) continue;
-            raw = source.read(await response.text());
-            if (raw) break;
+            attempt.status = response.status;
+            attempt.ok = response.ok;
+            attempt.responseUrl = response.url || source.url;
+            attempt.contentType = response.headers.get('content-type') || '';
+
+            const responseText = await response.text();
+            if (!response.ok) {
+              attempt.error = `HTTP ${response.status}`;
+              attempt.preview = previewText(responseText);
+              continue;
+            }
+
+            raw = source.read(responseText);
+            attempt.bodyLength = raw?.length || 0;
+            attempt.markupType = sniffMarkupType(raw);
+            if (attempt.markupType === 'html') {
+              const embeddedFeed = extractEmbeddedFeedMarkup(raw);
+              if (embeddedFeed) {
+                attempt.embeddedFeed = true;
+                attempt.embeddedMarkupType = sniffMarkupType(embeddedFeed);
+              } else {
+                attempt.preview = previewText(raw);
+              }
+            }
+            if (raw) {
+              attempt.used = true;
+              sourceLabel = source.label;
+              break;
+            }
+            attempt.error = 'Empty response body.';
           } catch (error) {
-            lastError = error;
+            const attemptError = error?.name === 'AbortError' ? makeFeedError('timeout') : error;
+            lastError = attemptError;
+            attempt.errorCode = attemptError?.code || '';
+            attempt.error = describeError(attemptError);
           }
         }
 
         if (!raw) {
-          throw makeFeedError(normalized.authHeader ? 'auth-cors' : 'network');
+          throw lastError || makeFeedError(normalized.authHeader ? 'auth-cors' : 'network', { hasProxy: !!configuredProxyUrl });
         }
 
         try {
@@ -1094,10 +1256,27 @@ function App() {
           setEpisodes(parsed);
           setActiveTab('feed');
           setRssUrl(currentUrl);
+          setFeedDebug({
+            ...debugState,
+            attempts: [...debugState.attempts],
+            final: {
+              status: 'success',
+              via: sourceLabel,
+              feedUrl: currentUrl,
+              episodeCount: parsed.length,
+            },
+          });
           return;
         } catch (error) {
           lastError = error;
           if (error.code === 'alternate-feed' && error.alternateUrl) {
+            debugState.attempts.push({
+              hop: hop + 1,
+              via: 'Alternate Feed',
+              targetUrl: currentUrl,
+              requestUrl: error.alternateUrl,
+              message: `Retrying discovered feed URL ${redactUrlForDisplay(error.alternateUrl)}`,
+            });
             currentUrl = error.alternateUrl;
             resolvedFeedUrl = error.alternateUrl;
             continue;
@@ -1105,12 +1284,25 @@ function App() {
           throw error;
         }
       }
-      throw lastError || makeFeedError('network');
+      throw lastError || makeFeedError('network', { hasProxy: !!configuredProxyUrl });
     } catch (error) {
       if (error?.code === 'alternate-feed' && error.alternateUrl) {
         setRssUrl(error.alternateUrl);
       }
-      setFeedErr(formatFeedError(error, resolvedFeedUrl));
+      const message = formatFeedError(error, resolvedFeedUrl);
+      setShowFeedDebug(true);
+      setFeedDebug({
+        ...debugState,
+        attempts: [...debugState.attempts],
+        final: {
+          status: 'error',
+          code: error?.code || '',
+          message,
+          details: describeError(error),
+          feedUrl: resolvedFeedUrl,
+        },
+      });
+      setFeedErr(message);
     } finally {
       setLoading(false);
     }
@@ -1314,6 +1506,7 @@ function App() {
   // ── Render helpers ────────────────────────────────────────────────────────
   const c_text  = bm?'#9ca3af':'#e2e8f0';
   const c_sub   = bm?'#6b7280':'#94a3b8';
+  const c_dim   = bm?'#374151':'#475569';
   const c_head  = bm?'#d1d5db':'#ffffff';
   const c_card  = bm?'#050505':'#0f172a';
   const c_bord  = bm?'#111827':'#1e293b';
@@ -1547,12 +1740,102 @@ function App() {
             <div style={{display:'flex',gap:'.5rem',marginBottom:'.875rem'}}>
               <input type="url" value={rssUrl} onChange={e=>setRssUrl(e.target.value)}
                 onKeyDown={e=>{ if(e.key==='Enter'){ e.target.blur(); loadFeed(); } }}
-                placeholder="Paste RSS feed URL…"
+                placeholder="Paste podcast feed URL…"
                 style={{flex:1,background:c_inner,border:`1px solid ${c_bord}`,borderRadius:'.625rem',padding:'.5rem .75rem',color:c_text,fontSize:'14px'}}/>
               <button onClick={()=>{ document.activeElement?.blur(); loadFeed(); }} disabled={loading}
                 style={{padding:'.5rem 1rem',borderRadius:'.625rem',background:bm?'#1f2937':'#7e22ce',color:bm?'#9ca3af':'#fff',border:'none',fontWeight:700,cursor:'pointer',whiteSpace:'nowrap',minWidth:60,opacity:loading?.6:1}}>
                 {loading?'…':'Load'}
               </button>
+            </div>
+
+            <div style={{...innerStyle,marginBottom:'.875rem',display:'flex',flexDirection:'column',gap:'.625rem'}}>
+              <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',gap:'.75rem'}}>
+                <div>
+                  <div className="section-label" style={{marginBottom:'.25rem'}}>Private Feed Proxy</div>
+                  <div style={{fontSize:'.65rem',color:c_sub,lineHeight:1.5}}>
+                    Member-only feeds often need a private proxy because Safari and public proxies cannot always fetch them directly.
+                  </div>
+                </div>
+                <button
+                  onClick={()=>setShowFeedDebug(v=>!v)}
+                  style={{padding:'.4rem .65rem',borderRadius:'.625rem',border:`1px solid ${c_bord}`,background:'transparent',color:c_sub,fontSize:'.65rem',fontWeight:700,cursor:'pointer',whiteSpace:'nowrap'}}
+                >
+                  {showFeedDebug ? 'Hide Debug' : 'Feed Debug'}
+                </button>
+              </div>
+
+              <div style={{display:'flex',gap:'.5rem'}}>
+                <input
+                  type="url"
+                  value={feedProxyUrl}
+                  onChange={e=>setFeedProxyUrl(e.target.value)}
+                  placeholder="Optional proxy URL…"
+                  style={{flex:1,background:c_inner,border:`1px solid ${c_bord}`,borderRadius:'.625rem',padding:'.5rem .75rem',color:c_text,fontSize:'13px'}}
+                />
+                <button
+                  onClick={()=>setFeedProxyUrl('')}
+                  disabled={!feedProxyUrl}
+                  style={{padding:'.5rem .8rem',borderRadius:'.625rem',background:'transparent',color:feedProxyUrl?c_sub:c_dim,border:`1px solid ${c_bord}`,fontWeight:700,cursor:feedProxyUrl?'pointer':'default',whiteSpace:'nowrap',opacity:feedProxyUrl?1:.6}}
+                >
+                  Clear
+                </button>
+              </div>
+
+              {showFeedDebug && (
+                <div style={{background:c_inner,border:`1px solid ${c_bord}`,borderRadius:'.75rem',padding:'.75rem',display:'flex',flexDirection:'column',gap:'.5rem'}}>
+                  <div style={{fontSize:'.68rem',fontWeight:700,color:c_head}}>Feed Debug</div>
+                  <div style={{fontSize:'.65rem',color:c_sub,lineHeight:1.5}}>
+                    Requested: {feedDebug?.requestedUrl ? redactUrlForDisplay(feedDebug.requestedUrl) : 'No feed loaded yet.'}
+                  </div>
+                  <div style={{fontSize:'.65rem',color:c_sub,lineHeight:1.5}}>
+                    Proxy: {feedProxyUrl ? redactUrlForDisplay(feedProxyUrl) : 'Not configured'}
+                  </div>
+                  {feedDebug?.final && (
+                    <div style={{fontSize:'.65rem',color:feedDebug.final.status==='success'?'#86efac':'#fca5a5',lineHeight:1.5}}>
+                      Result: {feedDebug.final.status==='success'
+                        ? `Loaded ${feedDebug.final.episodeCount} episode${feedDebug.final.episodeCount===1?'':'s'} via ${feedDebug.final.via || 'feed loader'}.`
+                        : feedDebug.final.message}
+                    </div>
+                  )}
+                  {feedDebug?.attempts?.length ? (
+                    <div style={{display:'flex',flexDirection:'column',gap:'.5rem'}}>
+                      {feedDebug.attempts.map((attempt, idx)=>(
+                        <div key={`${attempt.hop}-${attempt.via}-${idx}`} style={{border:`1px solid ${c_bord}`,borderRadius:'.625rem',padding:'.625rem',display:'flex',flexDirection:'column',gap:'.2rem'}}>
+                          <div style={{display:'flex',justifyContent:'space-between',gap:'.5rem',fontSize:'.65rem'}}>
+                            <span style={{fontWeight:700,color:c_head}}>{attempt.via}</span>
+                            <span style={{color:c_sub}}>
+                              Hop {attempt.hop}
+                              {attempt.status ? ` · HTTP ${attempt.status}` : ''}
+                            </span>
+                          </div>
+                          <div style={{fontSize:'.62rem',color:c_sub,lineHeight:1.4,wordBreak:'break-all'}}>
+                            {redactUrlForDisplay(attempt.requestUrl || attempt.targetUrl || '')}
+                          </div>
+                          {attempt.contentType && (
+                            <div style={{fontSize:'.62rem',color:c_sub}}>Content-Type: {attempt.contentType}</div>
+                          )}
+                          {(attempt.markupType || attempt.embeddedFeed) && (
+                            <div style={{fontSize:'.62rem',color:c_sub}}>
+                              Detected: {attempt.markupType || 'unknown'}{attempt.embeddedFeed ? ` -> ${attempt.embeddedMarkupType || 'embedded feed'}` : ''}
+                            </div>
+                          )}
+                          {attempt.message && (
+                            <div style={{fontSize:'.62rem',color:'#86efac'}}>{attempt.message}</div>
+                          )}
+                          {attempt.error && (
+                            <div style={{fontSize:'.62rem',color:'#fca5a5'}}>{attempt.error}</div>
+                          )}
+                          {attempt.preview && (
+                            <div style={{fontSize:'.62rem',color:c_dim,lineHeight:1.4}}>{attempt.preview}</div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div style={{fontSize:'.62rem',color:c_dim}}>No request attempts recorded yet.</div>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Tabs */}
@@ -1606,7 +1889,7 @@ function App() {
 
             {/* Episode list */}
             {activeTab==='feed'&&!episodes.length&&!loading&&!feedErr ? (
-              <EmptyState text="Paste an RSS link and tap Load" color={c_sub}/>
+              <EmptyState text="Paste a podcast feed URL and tap Load" color={c_sub}/>
             ) : activeTab==='playlist'&&!playlist.length ? (
               <EmptyState text={"Playlist is empty.\nBrowse a feed and tap + to add episodes."} color={c_sub}/>
             ) : (

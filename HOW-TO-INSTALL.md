@@ -16,13 +16,14 @@ Your app is now a proper **Progressive Web App (PWA)** with:
 
 ```
 SLEEPULATOR/
-├── index.html      ← The app (open this)
+├── index.html      ← The app
+├── config.js       ← Optional shared app config
 ├── manifest.json   ← PWA identity & icons
 ├── sw.js           ← Service Worker (offline + caching)
-└── sleepulator.jsx ← Original source (for future edits)
+└── proxy/          ← Optional Cloudflare Worker for private feeds
 ```
 
-The three files (`index.html`, `manifest.json`, `sw.js`) **must stay in the same folder** and be served from the same web server.
+The app shell files (`index.html`, `config.js`, `manifest.json`, `sw.js`) should stay in the same folder and be served from the same web server.
 
 ---
 
@@ -30,7 +31,7 @@ The three files (`index.html`, `manifest.json`, `sw.js`) **must stay in the same
 
 1. Create a free account at [github.com](https://github.com)
 2. Create a new **public** repository (e.g. `sleepulator`)
-3. Upload all three files (`index.html`, `manifest.json`, `sw.js`)
+3. Upload the app shell files (`index.html`, `config.js`, `manifest.json`, `sw.js`)
 4. Go to **Settings → Pages → Source → main branch → / (root) → Save**
 5. Your URL will be: `https://yourusername.github.io/sleepulator/`
 6. Open that URL in **Safari (iPhone)** or **Chrome (Android)**
@@ -88,6 +89,28 @@ iOS requires the user to interact with the page before audio can start (Apple po
 
 ---
 
+## Private feeds
+
+If a member-only feed still fails in the app, that is usually a browser fetch restriction rather than an XML parsing problem.
+
+You now have two ways to configure the private proxy:
+- Paste the deployed Worker URL into the app's `Private Feed Proxy` field.
+- Set `feedProxyUrl` in `config.js` so every device uses the same proxy automatically.
+
+To deploy the included proxy:
+
+```bash
+cd /Users/melpools/Documents/_SITES/SLEEPULATOR/proxy
+npx wrangler login
+npx wrangler deploy
+```
+
+Before deploy, edit `proxy/wrangler.toml` and set:
+- `ALLOWED_ORIGINS`
+- `ALLOWED_FEED_HOSTS`
+
+---
+
 ## Editing the app later
 
-Edit `sleepulator.jsx` for your changes, then copy the relevant React code back into the `<script type="text/babel">` section of `index.html`. The JSX is compiled in the browser by Babel, so no build step is needed.
+Edit the `<script type="text/babel">` section of `index.html`. The JSX is compiled in the browser by Babel, so no build step is needed.
