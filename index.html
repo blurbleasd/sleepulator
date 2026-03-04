@@ -700,8 +700,10 @@ const BINAURAL = {
 
 const ARTWORK = [{ src:'icon-512.png', sizes:'512x512', type:'image/png' }];
 const LOOP_SAMPLE_RATE = 12000;
+const BINAURAL_LOOP_SAMPLE_RATE = 4000;
 const AMBIENT_LOOP_SECONDS = 60;
-const BINAURAL_LOOP_SECONDS = 30;
+// iOS media-element looping is not reliably gapless, so keep this much longer.
+const BINAURAL_LOOP_SECONDS = 300;
 const LOOP_SCALED_GAIN_EPSILON = 0.01;
 const LOOP_MUTED_GAIN_EPSILON = 0.001;
 const LOOP_SOURCE_TIME_FUZZ = 0.05;
@@ -776,18 +778,18 @@ function getAmbientLoopUrl(type, gain = 1) {
 
 function getBinauralLoopBuffer(presetKey) {
   if (LOOP_BUFFER_CACHE.binaural.has(presetKey)) return LOOP_BUFFER_CACHE.binaural.get(presetKey);
-  const frames = LOOP_SAMPLE_RATE * BINAURAL_LOOP_SECONDS;
+  const frames = BINAURAL_LOOP_SAMPLE_RATE * BINAURAL_LOOP_SECONDS;
   const left = new Float32Array(frames);
   const right = new Float32Array(frames);
   const { beat, carrier } = BINAURAL[presetKey];
   const leftFreq = carrier - beat / 2;
   const rightFreq = carrier + beat / 2;
   for (let i = 0; i < frames; i++) {
-    const t = i / LOOP_SAMPLE_RATE;
+    const t = i / BINAURAL_LOOP_SAMPLE_RATE;
     left[i] = Math.sin(2 * Math.PI * leftFreq * t) * 0.32;
     right[i] = Math.sin(2 * Math.PI * rightFreq * t) * 0.32;
   }
-  const buffer = { left, right, sampleRate: LOOP_SAMPLE_RATE };
+  const buffer = { left, right, sampleRate: BINAURAL_LOOP_SAMPLE_RATE };
   LOOP_BUFFER_CACHE.binaural.set(presetKey, buffer);
   return buffer;
 }
