@@ -1,8 +1,8 @@
-// SLEEPULATOR Service Worker — v1.1
+// SLEEPULATOR Service Worker — v1.2
 // Caches the app shell for offline use.
 // Audio from external podcast feeds is NOT cached (too large/dynamic).
 
-const CACHE_NAME  = 'sleepulator-v2';
+const CACHE_NAME  = 'sleepulator-v3';
 const SHELL_URLS  = [
   './',
   './index.html',
@@ -18,6 +18,7 @@ const SHELL_URLS  = [
 // External CDN origins we'll cache
 const CDN_ORIGINS = [
   'cdnjs.cloudflare.com',
+  'cdn.jsdelivr.net',
 ];
 
 // ── Install: pre-cache the app shell ────────────────────────────────────────
