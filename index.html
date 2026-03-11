@@ -348,6 +348,20 @@ function normalizeConfigUrl(input) {
   catch { return trimmed; }
 }
 
+function buildSleepSafeAudioUrl(sourceUrl, proxyUrl, profile = 'sleep-safe') {
+  const trimmedSource = (sourceUrl || '').trim();
+  const trimmedProxy = (proxyUrl || '').trim();
+  if (!trimmedSource || !trimmedProxy) return trimmedSource;
+  try {
+    const next = new URL(trimmedProxy, window.location.href);
+    next.searchParams.set('url', trimmedSource);
+    next.searchParams.set('profile', profile);
+    return next.toString();
+  } catch {
+    return trimmedSource;
+  }
+}
+
 function parseDuration(raw) {
   if (!raw) return '';
   const t = raw.trim();
@@ -959,6 +973,16 @@ function App() {
     const stored = (localStorage.getItem('feedProxyUrl') || '').trim();
     return stored || normalizeConfigUrl(APP_CONFIG.feedProxyUrl || '');
   });
+  const [audioProxyUrl, setAudioProxyUrl] = useState(()=>{
+    const stored = (localStorage.getItem('audioProxyUrl') || '').trim();
+    return stored || normalizeConfigUrl(APP_CONFIG.audioProxyUrl || '');
+  });
+  const [sleepSafeAudio, setSleepSafeAudio] = useState(()=>{
+    const stored = localStorage.getItem('sleepSafeAudioEnabled');
+    if (stored === 'true') return true;
+    if (stored === 'false') return false;
+    return APP_CONFIG.sleepSafeAudioEnabled === true;
+  });
   const [feedDebug,     setFeedDebug]     = useState(null);
   const [showFeedDebug, setShowFeedDebug] = useState(()=>APP_CONFIG.feedDebug === true || localStorage.getItem('showFeedDebug') === 'true');
   const [subs,          setSubs]          = useState(()=>JSON.parse(localStorage.getItem('feedSubs')||'[]'));
@@ -1147,13 +1171,15 @@ function App() {
       localStorage.setItem('timerMinutes',            timerMins);
       localStorage.setItem('rssUrl',                  rssUrl);
       localStorage.setItem('feedProxyUrl',            feedProxyUrl);
+      localStorage.setItem('audioProxyUrl',           audioProxyUrl);
+      localStorage.setItem('sleepSafeAudioEnabled',   sleepSafeAudio);
       localStorage.setItem('showFeedDebug',           showFeedDebug);
       localStorage.setItem('sleepulatorPlaylist',     JSON.stringify(playlist));
       localStorage.setItem('feedSubs',                JSON.stringify(subs));
     } catch(e){}
   },[masterVol,ambientVol,noiseType,ambientBypass,binVol,binPreset,binBypass,
      podVol,podSpeed,autoPlay,shuffle,
-     timerMins,rssUrl,feedProxyUrl,showFeedDebug,playlist,subs]);
+     timerMins,rssUrl,feedProxyUrl,audioProxyUrl,sleepSafeAudio,showFeedDebug,playlist,subs]);
 
   // ── Service Worker ────────────────────────────────────────────────────────
   useEffect(()=>{
@@ -1593,8 +1619,20 @@ function App() {
   const playEp = (ep, source='feed', opts={}) => {
     const audio = ensurePodAudio();
     const iosHandoff = !!opts.iosHandoff;
+    const normalizedAudioProxyUrl = normalizeConfigUrl(audioProxyUrl);
+    const useSleepSafeAudio = sleepSafeAudio && !!normalizedAudioProxyUrl;
+    if (sleepSafeAudio && !normalizedAudioProxyUrl) {
+      setFeedErr('Sleep Safe Audio is enabled, but no audio proxy URL is configured.');
+      return;
+    }
+    const playbackUrl = useSleepSafeAudio
+      ? buildSleepSafeAudioUrl(ep.url, normalizedAudioProxyUrl)
+      : ep.url;
+    const activeAudioUrl = audio.currentSrc || audio.src || '';
+    const sourceChangedForEpisode = curEp?.id === ep.id && activeAudioUrl !== playbackUrl;
+    setFeedErr('');
     setPlayingSrc(source);
-    if(curEp?.id===ep.id){
+    if(curEp?.id===ep.id && !sourceChangedForEpisode){
       if(podPlaying){ audio.pause(); }
       else{
         setPlaybackAudioSession();
@@ -1604,9 +1642,11 @@ function App() {
       }
     } else {
       const prog=JSON.parse(localStorage.getItem('podcastProgress')||'{}');
-      const resumeAt = prog[ep.id] ? Math.max(0, prog[ep.id]-90) : 0;
+      const resumeAt = sourceChangedForEpisode && Number.isFinite(audio.currentTime) && audio.currentTime > 0
+        ? audio.currentTime
+        : (prog[ep.id] ? Math.max(0, prog[ep.id]-90) : 0);
       if (!iosHandoff) audio.pause();
-      audio.src=ep.url;
+      audio.src=playbackUrl;
       audio.playbackRate=podSpeed;
       audio.load();
       if (resumeAt > 0) {
@@ -2023,6 +2063,46 @@ function App() {
                 >
                   Clear
                 </button>
+              </div>
+
+              <div style={{borderTop:`1px solid ${c_bord}`,marginTop:'.125rem',paddingTop:'.625rem',display:'flex',flexDirection:'column',gap:'.625rem'}}>
+                <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',gap:'.75rem'}}>
+                  <div>
+                    <div className="section-label" style={{marginBottom:'.25rem'}}>Sleep Safe Audio</div>
+                    <div style={{fontSize:'.65rem',color:c_sub,lineHeight:1.5}}>
+                      Optional server-side limiter and loudness normalization for podcast playback. Best for reducing abrupt spikes before sleep.
+                    </div>
+                  </div>
+                  <label style={{display:'flex',alignItems:'center',gap:'.5rem',fontSize:'.68rem',color:c_sub,cursor:'pointer',whiteSpace:'nowrap'}}>
+                    <input
+                      type="checkbox"
+                      checked={sleepSafeAudio}
+                      onChange={e=>setSleepSafeAudio(e.target.checked)}
+                    />
+                    Enabled
+                  </label>
+                </div>
+
+                <div style={{display:'flex',gap:'.5rem'}}>
+                  <input
+                    type="url"
+                    value={audioProxyUrl}
+                    onChange={e=>setAudioProxyUrl(e.target.value)}
+                    placeholder="Sleep Safe proxy URL…"
+                    style={{flex:1,background:c_inner,border:`1px solid ${c_bord}`,borderRadius:'.625rem',padding:'.5rem .75rem',color:c_text,fontSize:'13px'}}
+                  />
+                  <button
+                    onClick={()=>setAudioProxyUrl('')}
+                    disabled={!audioProxyUrl}
+                    style={{padding:'.5rem .8rem',borderRadius:'.625rem',background:'transparent',color:audioProxyUrl?c_sub:c_dim,border:`1px solid ${c_bord}`,fontWeight:700,cursor:audioProxyUrl?'pointer':'default',whiteSpace:'nowrap',opacity:audioProxyUrl?1:.6}}
+                  >
+                    Clear
+                  </button>
+                </div>
+
+                <div style={{fontSize:'.62rem',color:c_dim,lineHeight:1.5}}>
+                  Sleep Safe uses a server proxy, so scrubbing may be less precise than direct playback.
+                </div>
               </div>
 
               {showFeedDebug && (

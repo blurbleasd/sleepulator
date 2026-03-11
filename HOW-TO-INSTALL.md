@@ -21,6 +21,7 @@ SLEEPULATOR/
 ├── manifest.json   ← PWA identity & icons
 ├── sw.js           ← Service Worker (offline + caching)
 └── proxy/          ← Optional Cloudflare Worker for private feeds
+└── audio-proxy/    ← Optional server for Sleep Safe podcast playback
 ```
 
 The app shell files (`index.html`, `config.js`, `manifest.json`, `sw.js`) should stay in the same folder and be served from the same web server.
@@ -108,6 +109,21 @@ npx wrangler deploy
 Before deploy, edit `proxy/wrangler.toml` and set:
 - `ALLOWED_ORIGINS`
 - `ALLOWED_FEED_HOSTS`
+
+---
+
+## Sleep Safe podcast playback
+
+If you want server-side loudness normalization and peak limiting for podcast audio:
+
+1. Deploy the service in `audio-proxy/`
+2. Set:
+   - `ALLOWED_ORIGINS`
+   - `ALLOWED_AUDIO_HOSTS`
+3. Paste the deployed service URL into the app's `Sleep Safe proxy URL` field
+4. Turn on `Sleep Safe Audio`
+
+This mode keeps iPhone playback on a native media element, which is the background-safe path. The tradeoff is that seek/scrub can be less precise because the audio is transcoded as a live stream.
 
 ---
 

@@ -1,0 +1,10 @@
+{
+  "name": "sleepulator-audio-proxy",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Server-side podcast loudness normalization and peak limiting for Sleepulator.",
+  "scripts": {
+    "start": "node src/server.js",
+    "check": "node --check src/server.js"
+  }
+}
