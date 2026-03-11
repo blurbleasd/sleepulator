@@ -20,7 +20,7 @@ SLEEPULATOR/
 ├── config.js       ← Optional shared app config
 ├── manifest.json   ← PWA identity & icons
 ├── sw.js           ← Service Worker (offline + caching)
-└── proxy/          ← Optional Cloudflare Worker for private feeds
+├── proxy/          ← Optional Cloudflare Worker for private feeds
 └── audio-proxy/    ← Optional server for Sleep Safe podcast playback
 ```
 

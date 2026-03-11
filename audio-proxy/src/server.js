@@ -11,6 +11,8 @@ const DEFAULT_ALLOWED_ORIGINS = [
   'http://localhost:4173',
   'http://127.0.0.1:4177',
   'http://localhost:4177',
+  'http://127.0.0.1:4178',
+  'http://localhost:4178',
 ].join(',');
 
 const DEFAULT_ALLOWED_AUDIO_HOSTS = [
