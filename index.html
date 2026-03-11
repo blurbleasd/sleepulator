@@ -235,7 +235,7 @@ function LucideIcon({ name, size = 20, color = 'currentColor', strokeWidth = 2, 
   const iconData = window.lucide?.[name];
   if (!iconData) return <span style={{display:'inline-block',width:size,height:size}} />;
   // iconData is [[tag, attrs], ...]
-  const children = iconData[2] || [];
+  const children = iconData || [];
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
@@ -265,7 +265,7 @@ function hashUrl(str) {
   return 'ep_' + Math.abs(h).toString(36);
 }
 
-const FEED_TIMEOUT_MS = 8000;
+const FEED_TIMEOUT_MS = 15000;
 const FEED_ACCEPT_HEADER = 'application/rss+xml, application/atom+xml, application/xml, text/xml;q=0.9, text/plain;q=0.7, */*;q=0.1';
 
 function clamp01(value) {
@@ -301,6 +301,34 @@ function normalizeConfigUrl(input) {
   if (!trimmed) return '';
   try { return new URL(trimmed, window.location.href).href; }
   catch { return trimmed; }
+}
+
+function parseDuration(raw) {
+  if (!raw) return '';
+  const t = raw.trim();
+  let totalSeconds = NaN;
+  if (/^\d+$/.test(t)) {
+    totalSeconds = parseInt(t, 10);
+  } else {
+    const parts = t.split(':').map(part => Number(part));
+    if (parts.length >= 2 && parts.every(Number.isFinite)) {
+      totalSeconds = parts.reduce((sum, part) => (sum * 60) + part, 0);
+    }
+  }
+  if (!Number.isFinite(totalSeconds) || totalSeconds <= 0) return '';
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = totalSeconds % 60;
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return s > 0 ? `${m}m ${s}s` : `${m}m`;
+  return `${s}s`;
+}
+
+function fmtTime(s) {
+  if (!s || !isFinite(s) || s < 0) return '0:00';
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = Math.floor(s % 60);
+  if (h > 0) return `${h}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`;
+  return `${m}:${String(sec).padStart(2,'0')}`;
 }
 
 function previewText(text, maxLength = 140) {
@@ -601,10 +629,16 @@ function parseFeedEpisodes(raw, feedUrl) {
     const audioUrl = resolveMaybeUrl(directAudio || mediaAudio || linkAudio, feedUrl);
 
     if (!audioUrl) return null;
+    const rawDuration = firstDirectText(item, ['duration']) || firstDescendantText(item, ['duration']) || '';
+    const duration = parseDuration(rawDuration);
+    const rawDesc = firstDirectText(item, ['description','summary']) || firstDescendantText(item, ['description','summary']) || '';
+    const description = previewText(rawDesc.replace(/<[^>]+>/g,' ').replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').replace(/&#39;/g,"'").replace(/\s+/g,' ').trim(), 240);
     return {
       id: hashUrl(audioUrl),
       title: `[${podcastTitle}] ${title}`,
       url: audioUrl,
+      duration,
+      description,
     };
   }).filter(Boolean);
   if (!episodes.length) throw makeFeedError('empty-feed');
@@ -854,12 +888,19 @@ function App() {
 
   // Podcast
   const [episodes,      setEpisodes]      = useState([]);
-  const [playlist,      setPlaylist]      = useState(()=>JSON.parse(localStorage.getItem('comedyPlaylist')||'[]'));
+  const [playlist,      setPlaylist]      = useState(()=>{
+    // migrate legacy key
+    const v=localStorage.getItem('sleepulatorPlaylist');
+    if(v) return JSON.parse(v);
+    const leg=localStorage.getItem('comedyPlaylist');
+    if(leg){ localStorage.setItem('sleepulatorPlaylist',leg); localStorage.removeItem('comedyPlaylist'); return JSON.parse(leg); }
+    return [];
+  });
   const [activeTab,     setActiveTab]     = useState('feed');
   const [playingSrc,    setPlayingSrc]    = useState('feed');
   const [curEp,         setCurEp]         = useState(null);
   const [podPlaying,    setPodPlaying]    = useState(false);
-  const [podVol,        setPodVol]        = useState(()=>+localStorage.getItem('comedyVolume')||.8);
+  const [podVol,        setPodVol]        = useState(()=>+localStorage.getItem('podcastVolume')||+localStorage.getItem('comedyVolume')||.8);
   const [podSpeed,      setPodSpeed]      = useState(()=>+localStorage.getItem('playbackSpeed')||1);
   const [autoPlay,      setAutoPlay]      = useState(()=>localStorage.getItem('autoPlayEnabled')!=='false');
   const [shuffle,       setShuffle]       = useState(()=>localStorage.getItem('shuffleEnabled')==='true');
@@ -885,6 +926,10 @@ function App() {
   const [subs,          setSubs]          = useState(()=>JSON.parse(localStorage.getItem('feedSubs')||'[]'));
   const [showSubs,      setShowSubs]      = useState(false);
   const [subName,       setSubName]       = useState('');
+  const [expandedEp,    setExpandedEp]    = useState(null);
+  const [epFilter,      setEpFilter]      = useState('');
+  const [podProgress,   setPodProgress]   = useState({cur:0,dur:0});
+  const dragSrcRef = useRef(null);
 
   // Audio refs
   const ambientAudio = useRef(null);
@@ -1057,7 +1102,7 @@ function App() {
       localStorage.setItem('binauralVolume',          binVol);
       localStorage.setItem('binauralPreset',          binPreset);
       localStorage.setItem('binauralBypass',          binBypass);
-      localStorage.setItem('comedyVolume',            podVol);
+      localStorage.setItem('podcastVolume',           podVol);
       localStorage.setItem('playbackSpeed',           podSpeed);
       localStorage.setItem('autoPlayEnabled',         autoPlay);
       localStorage.setItem('shuffleEnabled',          shuffle);
@@ -1066,7 +1111,7 @@ function App() {
       localStorage.setItem('feedProxyUrl',            feedProxyUrl);
       localStorage.setItem('showFeedDebug',           showFeedDebug);
       localStorage.setItem('showAdvancedAudio',       showAdvancedAudio);
-      localStorage.setItem('comedyPlaylist',          JSON.stringify(playlist));
+      localStorage.setItem('sleepulatorPlaylist',     JSON.stringify(playlist));
       localStorage.setItem('feedSubs',                JSON.stringify(subs));
     } catch(e){}
   },[masterVol,ambientVol,noiseType,ambientBypass,binVol,binPreset,binBypass,
@@ -1139,7 +1184,7 @@ function App() {
     const icon = muted ? 'VolumeX' : 'Volume2';
     const iconData = window.lucide?.[icon];
     if (iconData) {
-      const children = iconData[2]||[];
+      const children = iconData||[];
       const paths = children.map(([tag,attrs],i)=>{
         const aStr = Object.entries(attrs).map(([k,v])=>`${k}="${v}"`).join(' ');
         return `<${tag} ${aStr}/>`;
@@ -1486,6 +1531,7 @@ function App() {
     audio.addEventListener('ratechange', syncMediaPositionState);
     audio.addEventListener('timeupdate', () => {
       syncMediaPositionState();
+      setPodProgress({cur: audio.currentTime||0, dur: audio.duration||0});
       if (!iosPwaAudio.current || document.visibilityState === 'visible') return;
       const state = podStateRef.current;
       if (!state.autoPlay || !state.curEp) return;
@@ -1534,6 +1580,7 @@ function App() {
         audio.addEventListener('loadedmetadata', onMeta, { once: true });
       }
       setCurEp(ep);
+      setPodProgress({cur:0,dur:0});
       setPlaybackAudioSession();
       setMuted(false);
       setNativeAudioLevel(audio, podVol * masterVol, false);
@@ -1797,6 +1844,15 @@ function App() {
               </div>
               {timerActive && <span style={{fontFamily:'monospace',fontSize:'1.3rem',fontWeight:700,color:bm?'#9ca3af':'#818cf8',letterSpacing:'.04em'}}>{fmt(timeLeft)}</span>}
             </div>
+            <div style={{display:'flex',gap:'.375rem',marginBottom:'.625rem'}}>
+              {[15,30,45,60].map(m=>(
+                <button key={m} onClick={()=>setTimerMins(m)} disabled={timerActive}
+                  className={`speed-chip${timerMins===m?' on':''}`}
+                  style={{opacity:timerActive?.4:1}}>
+                  {m}m
+                </button>
+              ))}
+            </div>
             <div style={{display:'flex',alignItems:'center',gap:'.75rem',marginBottom:'1rem'}}>
               <span style={{fontSize:'.7rem',color:c_sub}}>5m</span>
               <input type="range" min="5" max="120" step="5" value={timerMins} className="indigo"
@@ -2048,6 +2104,25 @@ function App() {
               )}
             </div>
 
+            {/* Now Playing strip */}
+            {curEp && (
+              <div style={{...innerStyle,marginBottom:'.875rem',background:bm?'rgba(139,92,246,.05)':'rgba(192,132,252,.07)',borderColor:bm?'rgba(139,92,246,.25)':'rgba(192,132,252,.25)'}}>
+                <div style={{fontSize:'.62rem',fontWeight:700,letterSpacing:'.07em',textTransform:'uppercase',color:bm?'#7c3aed':'#a78bfa',marginBottom:'.2rem'}}>
+                  {podPlaying ? '▶ Now Playing' : '⏸ Paused'}
+                </div>
+                <div style={{fontSize:'.73rem',color:c_head,lineHeight:1.4,marginBottom:'.5rem',display:'-webkit-box',WebkitLineClamp:2,WebkitBoxOrient:'vertical',overflow:'hidden'}}>
+                  {curEp.title}
+                </div>
+                <input type="range" min={0} max={podProgress.dur||1} step={1} value={podProgress.cur}
+                  onChange={e=>{ if(podAudio.current) podAudio.current.currentTime=+e.target.value; }}
+                  className="purple" style={{width:'100%',marginBottom:'.2rem'}}/>
+                <div style={{display:'flex',justifyContent:'space-between',fontSize:'.65rem',color:c_sub}}>
+                  <span>{fmtTime(podProgress.cur)}</span>
+                  <span>{podProgress.dur>0 ? fmtTime(podProgress.dur) : '--:--'}</span>
+                </div>
+              </div>
+            )}
+
             {/* Tabs */}
             <div className="tab-bar" style={{marginBottom:'.875rem'}}>
               <button className={`tab-btn${activeTab==='feed'?' active':''}`} onClick={()=>setActiveTab('feed')}>Browse Feed</button>
@@ -2106,24 +2181,83 @@ function App() {
 
             {feedErr && <p style={{color:'#f87171',fontSize:'.8rem',marginBottom:'.75rem'}}>{feedErr}</p>}
 
+            {/* Episode search filter — only show when there's a list to filter */}
+            {((activeTab==='feed'&&episodes.length>0)||(activeTab==='playlist'&&playlist.length>0)) && (
+              <div style={{position:'relative',marginBottom:'.625rem'}}>
+                <input type="text" value={epFilter} onChange={e=>setEpFilter(e.target.value)}
+                  placeholder="Filter episodes…"
+                  style={{width:'100%',background:c_inner,border:`1px solid ${c_bord}`,borderRadius:'.625rem',padding:'.45rem .75rem .45rem 2rem',color:c_text,fontSize:'14px'}}/>
+                <span style={{position:'absolute',left:'.6rem',top:'50%',transform:'translateY(-50%)',pointerEvents:'none',color:c_dim}}>
+                  <LucideIcon name="Search" size={14}/>
+                </span>
+                {epFilter && (
+                  <button onClick={()=>setEpFilter('')}
+                    style={{position:'absolute',right:'.5rem',top:'50%',transform:'translateY(-50%)',background:'none',border:'none',cursor:'pointer',color:c_dim,padding:'.2rem'}}>
+                    <LucideIcon name="X" size={13}/>
+                  </button>
+                )}
+              </div>
+            )}
+
             {/* Episode list */}
             {activeTab==='feed'&&!episodes.length&&!loading&&!feedErr ? (
               <EmptyState text="Paste a podcast feed URL and tap Load" color={c_sub}/>
             ) : activeTab==='playlist'&&!playlist.length ? (
               <EmptyState text={"Playlist is empty.\nBrowse a feed and tap + to add episodes."} color={c_sub}/>
             ) : (
-              <div className="scroll-y" style={{maxHeight:288,display:'flex',flexDirection:'column',gap:'.375rem'}}>
-                {(activeTab==='feed'?episodes:playlist).map(ep=>{
+              <div className="scroll-y" style={{maxHeight:'min(420px,45dvh)',display:'flex',flexDirection:'column',gap:'.375rem'}}>
+                {(activeTab==='feed'?episodes:playlist)
+                  .filter(ep=>!epFilter||ep.title.toLowerCase().includes(epFilter.toLowerCase()))
+                  .map((ep,idx,arr)=>{
                   const playing=curEp?.id===ep.id&&podPlaying;
+                  const isExpanded=expandedEp===ep.id;
                   return (
-                    <div key={ep.id}>
+                    <div key={ep.id}
+                      draggable={activeTab==='playlist'}
+                      onDragStart={()=>{ dragSrcRef.current=ep.id; }}
+                      onDragEnd={()=>{ dragSrcRef.current=null; }}
+                      onDragOver={e=>e.preventDefault()}
+                      onDrop={()=>{
+                        if(!dragSrcRef.current||dragSrcRef.current===ep.id) return;
+                        setPlaylist(prev=>{
+                          const from=prev.findIndex(e=>e.id===dragSrcRef.current);
+                          const to=prev.findIndex(e=>e.id===ep.id);
+                          if(from<0||to<0||from===to) return prev;
+                          const next=[...prev];
+                          const [moved]=next.splice(from,1);
+                          const insertAt=from<to?to-1:to;
+                          next.splice(insertAt,0,moved);
+                          return next;
+                        });
+                        dragSrcRef.current=null;
+                      }}>
                       <div className="ep-row"
                         style={{background:playing?(bm?'rgba(139,92,246,.12)':'rgba(192,132,252,.08)'):(bm?'rgba(255,255,255,.02)':'rgba(255,255,255,.02)'),
-                          border:playing?`1px solid ${bm?'rgba(139,92,246,.2)':'rgba(192,132,252,.2)'}`:undefined}}>
-                        <span style={{flex:1,fontSize:'.72rem',color:playing?c_head:c_sub,
-                          display:'-webkit-box',WebkitLineClamp:2,WebkitBoxOrient:'vertical',overflow:'hidden'}}>
-                          {ep.title}
-                        </span>
+                          border:playing?`1px solid ${bm?'rgba(139,92,246,.2)':'rgba(192,132,252,.2)'}`:undefined,
+                          cursor:activeTab==='playlist'?'grab':'default'}}>
+                        {/* Drag handle on playlist */}
+                        {activeTab==='playlist' && (
+                          <span style={{color:c_dim,marginRight:'.25rem',flexShrink:0}}>
+                            <LucideIcon name="GripVertical" size={14}/>
+                          </span>
+                        )}
+                        <div style={{flex:1,minWidth:0}}>
+                          <span
+                            onClick={()=>setExpandedEp(isExpanded?null:ep.id)}
+                            style={{display:isExpanded?'block':'-webkit-box',fontSize:'.72rem',color:playing?c_head:c_sub,
+                              WebkitLineClamp:isExpanded?undefined:2,WebkitBoxOrient:'vertical',overflow:'hidden',
+                              cursor:ep.description?'pointer':'default'}}>
+                            {ep.title}
+                          </span>
+                          {ep.duration && (
+                            <span style={{fontSize:'.62rem',color:c_dim,display:'block',marginTop:'.15rem'}}>{ep.duration}</span>
+                          )}
+                          {isExpanded && ep.description && (
+                            <p style={{margin:'.375rem 0 0',fontSize:'.68rem',color:c_sub,lineHeight:1.5}}>
+                              {ep.description}
+                            </p>
+                          )}
+                        </div>
                         <div style={{display:'flex',gap:'.375rem',flexShrink:0}}>
                           {activeTab==='feed' ? (
                             <button onClick={()=>addToPlaylist(ep)} className="btn-icon"
