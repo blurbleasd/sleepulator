@@ -786,11 +786,6 @@ const BINAURAL_LOOP_SECONDS = 300;
 const LOOP_SCALED_GAIN_EPSILON = 0.01;
 const LOOP_MUTED_GAIN_EPSILON = 0.001;
 const LOOP_SOURCE_TIME_FUZZ = 0.05;
-const SOUND_FX_DEFAULTS = Object.freeze({
-  highpassHz: 0,
-  lowpassHz: 0,
-  compression: 0,
-});
 const LOOP_BUFFER_CACHE = {
   ambient: new Map(),
   binaural: new Map(),
@@ -836,113 +831,6 @@ function buildStereoWavUrl(left, right, sampleRate, gain = 1) {
   return URL.createObjectURL(new Blob([buffer], { type: 'audio/wav' }));
 }
 
-function normalizeSoundFx(settings = {}, sampleRate = LOOP_SAMPLE_RATE) {
-  const maxCutoff = Math.max(120, Math.floor(sampleRate * 0.45));
-  const highpassHz = Math.max(0, Math.min(maxCutoff - 20, Math.round(Number(settings.highpassHz) || 0)));
-  let lowpassHz = Math.max(0, Math.min(maxCutoff, Math.round(Number(settings.lowpassHz) || 0)));
-  if (lowpassHz && highpassHz && lowpassHz <= highpassHz + 20) {
-    lowpassHz = Math.min(maxCutoff, highpassHz + 20);
-  }
-  const compression = Math.max(0, Math.min(100, Math.round(Number(settings.compression) || 0)));
-  return { highpassHz, lowpassHz, compression };
-}
-
-function serializeSoundFx(settings = {}, sampleRate = LOOP_SAMPLE_RATE) {
-  const fx = normalizeSoundFx(settings, sampleRate);
-  return `hp${fx.highpassHz}-lp${fx.lowpassHz}-cp${fx.compression}`;
-}
-
-function applyOnePoleLowpass(channel, sampleRate, cutoffHz) {
-  if (!cutoffHz || cutoffHz <= 0 || !channel.length) return;
-  const rc = 1 / (2 * Math.PI * cutoffHz);
-  const dt = 1 / sampleRate;
-  const alpha = dt / (rc + dt);
-  let y = channel[0] || 0;
-  for (let i = 1; i < channel.length; i++) {
-    y += alpha * (channel[i] - y);
-    channel[i] = y;
-  }
-}
-
-function applyOnePoleHighpass(channel, sampleRate, cutoffHz) {
-  if (!cutoffHz || cutoffHz <= 0 || !channel.length) return;
-  const rc = 1 / (2 * Math.PI * cutoffHz);
-  const dt = 1 / sampleRate;
-  const alpha = rc / (rc + dt);
-  let prevY = 0;
-  let prevX = channel[0] || 0;
-  channel[0] = 0;
-  for (let i = 1; i < channel.length; i++) {
-    const x = channel[i];
-    const y = alpha * (prevY + x - prevX);
-    channel[i] = y;
-    prevY = y;
-    prevX = x;
-  }
-}
-
-function applyStereoCompression(left, right, sampleRate, amount) {
-  if (!amount || amount <= 0) return;
-  const normalized = Math.max(0, Math.min(1, amount / 100));
-  const threshold = 0.88 - (normalized * 0.5);
-  const ratio = 1 + normalized * 9;
-  const attackSeconds = 0.002 + (1 - normalized) * 0.01;
-  const releaseSeconds = 0.06 + (1 - normalized) * 0.18;
-  const attack = Math.exp(-1 / (sampleRate * attackSeconds));
-  const release = Math.exp(-1 / (sampleRate * releaseSeconds));
-  const makeup = 1 + normalized * 0.35;
-  let gain = 1;
-
-  for (let i = 0; i < left.length; i++) {
-    const peak = Math.max(Math.abs(left[i]), Math.abs(right[i]));
-    let targetGain = 1;
-    if (peak > threshold) {
-      const compressed = threshold + ((peak - threshold) / ratio);
-      targetGain = compressed / peak;
-    }
-    const smoothing = targetGain < gain ? attack : release;
-    gain = (gain * smoothing) + (targetGain * (1 - smoothing));
-    left[i] *= gain * makeup;
-    right[i] *= gain * makeup;
-  }
-}
-
-function normalizeStereoPeak(left, right, ceiling = 0.96) {
-  let peak = 0;
-  for (let i = 0; i < left.length; i++) {
-    peak = Math.max(peak, Math.abs(left[i]), Math.abs(right[i]));
-  }
-  if (peak <= ceiling || peak === 0) return;
-  const scale = ceiling / peak;
-  for (let i = 0; i < left.length; i++) {
-    left[i] *= scale;
-    right[i] *= scale;
-  }
-}
-
-function processStereoLoopBuffer(buffer, settings = SOUND_FX_DEFAULTS) {
-  const fx = normalizeSoundFx(settings, buffer.sampleRate);
-  if (!fx.highpassHz && !fx.lowpassHz && !fx.compression) return buffer;
-
-  const left = buffer.left.slice();
-  const right = buffer.right.slice();
-
-  if (fx.highpassHz > 0) {
-    applyOnePoleHighpass(left, buffer.sampleRate, fx.highpassHz);
-    applyOnePoleHighpass(right, buffer.sampleRate, fx.highpassHz);
-  }
-  if (fx.lowpassHz > 0) {
-    applyOnePoleLowpass(left, buffer.sampleRate, fx.lowpassHz);
-    applyOnePoleLowpass(right, buffer.sampleRate, fx.lowpassHz);
-  }
-  if (fx.compression > 0) {
-    applyStereoCompression(left, right, buffer.sampleRate, fx.compression);
-  }
-
-  normalizeStereoPeak(left, right);
-  return { left, right, sampleRate: buffer.sampleRate };
-}
-
 function getAmbientLoopBuffer(type) {
   if (LOOP_BUFFER_CACHE.ambient.has(type)) return LOOP_BUFFER_CACHE.ambient.get(type);
   const frames = LOOP_SAMPLE_RATE * AMBIENT_LOOP_SECONDS;
@@ -954,20 +842,16 @@ function getAmbientLoopBuffer(type) {
   return buffer;
 }
 
-function getAmbientLoopUrl(type, gain = 1, soundFx = SOUND_FX_DEFAULTS) {
+function getAmbientLoopUrl(type, gain = 1) {
   const quantizedGain = clamp01(gain);
-  const baseBuffer = getAmbientLoopBuffer(type);
-  const fxKey = serializeSoundFx(soundFx, baseBuffer.sampleRate);
-  const cacheKey = `${type}:${fxKey}`;
-  const processed = processStereoLoopBuffer(baseBuffer, soundFx);
   if (Math.abs(quantizedGain - 1) < LOOP_SCALED_GAIN_EPSILON) {
-    if (LOOP_URL_CACHE.ambient.has(cacheKey)) return LOOP_URL_CACHE.ambient.get(cacheKey);
-    const { left, right, sampleRate } = processed;
+    if (LOOP_URL_CACHE.ambient.has(type)) return LOOP_URL_CACHE.ambient.get(type);
+    const { left, right, sampleRate } = getAmbientLoopBuffer(type);
     const url = buildStereoWavUrl(left, right, sampleRate);
-    LOOP_URL_CACHE.ambient.set(cacheKey, url);
+    LOOP_URL_CACHE.ambient.set(type, url);
     return url;
   }
-  const { left, right, sampleRate } = processed;
+  const { left, right, sampleRate } = getAmbientLoopBuffer(type);
   return buildStereoWavUrl(left, right, sampleRate, quantizedGain);
 }
 
@@ -989,20 +873,16 @@ function getBinauralLoopBuffer(presetKey) {
   return buffer;
 }
 
-function getBinauralLoopUrl(presetKey, gain = 1, soundFx = SOUND_FX_DEFAULTS) {
+function getBinauralLoopUrl(presetKey, gain = 1) {
   const quantizedGain = clamp01(gain);
-  const baseBuffer = getBinauralLoopBuffer(presetKey);
-  const fxKey = serializeSoundFx(soundFx, baseBuffer.sampleRate);
-  const cacheKey = `${presetKey}:${fxKey}`;
-  const processed = processStereoLoopBuffer(baseBuffer, soundFx);
   if (Math.abs(quantizedGain - 1) < LOOP_SCALED_GAIN_EPSILON) {
-    if (LOOP_URL_CACHE.binaural.has(cacheKey)) return LOOP_URL_CACHE.binaural.get(cacheKey);
-    const { left, right, sampleRate } = processed;
+    if (LOOP_URL_CACHE.binaural.has(presetKey)) return LOOP_URL_CACHE.binaural.get(presetKey);
+    const { left, right, sampleRate } = getBinauralLoopBuffer(presetKey);
     const url = buildStereoWavUrl(left, right, sampleRate);
-    LOOP_URL_CACHE.binaural.set(cacheKey, url);
+    LOOP_URL_CACHE.binaural.set(presetKey, url);
     return url;
   }
-  const { left, right, sampleRate } = processed;
+  const { left, right, sampleRate } = getBinauralLoopBuffer(presetKey);
   return buildStereoWavUrl(left, right, sampleRate, quantizedGain);
 }
 
@@ -1037,9 +917,6 @@ function App() {
   const [ambientVol, setAmbientVol] = useState(()=>+localStorage.getItem('brownVolume')||.5);
   const [noiseType,  setNoiseType]  = useState(()=>localStorage.getItem('noiseType')||'brown');
   const [ambientBypass, setAmbientBypass] = useState(()=>localStorage.getItem('ambientBypass')==='true');
-  const [fxHighpassHz, setFxHighpassHz] = useState(()=>parseInt(localStorage.getItem('soundFxHighpassHz') || '0', 10) || 0);
-  const [fxLowpassHz, setFxLowpassHz] = useState(()=>parseInt(localStorage.getItem('soundFxLowpassHz') || '0', 10) || 0);
-  const [fxCompression, setFxCompression] = useState(()=>parseInt(localStorage.getItem('soundFxCompression') || '0', 10) || 0);
 
   // Binaural
   const [binOn,  setBinOn]  = useState(false);
@@ -1084,12 +961,6 @@ function App() {
   });
   const [feedDebug,     setFeedDebug]     = useState(null);
   const [showFeedDebug, setShowFeedDebug] = useState(()=>APP_CONFIG.feedDebug === true || localStorage.getItem('showFeedDebug') === 'true');
-  const [showAdvancedAudio, setShowAdvancedAudio] = useState(()=>{
-    const stored = localStorage.getItem('showAdvancedAudio');
-    if (stored === 'true') return true;
-    if (stored === 'false') return false;
-    return APP_CONFIG.showAdvancedAudio === true;
-  });
   const [subs,          setSubs]          = useState(()=>JSON.parse(localStorage.getItem('feedSubs')||'[]'));
   const [showSubs,      setShowSubs]      = useState(false);
   const [subName,       setSubName]       = useState('');
@@ -1163,17 +1034,15 @@ function App() {
     const gain = clamp01(ambientVol * masterVol * scale);
     const preservePosition = options.preservePosition !== false;
     const allowSourceRebuild = options.allowSourceRebuild !== false;
-    const currentSoundFx = { highpassHz: fxHighpassHz, lowpassHz: fxLowpassHz, compression: fxCompression };
-    const fxKey = serializeSoundFx(currentSoundFx, LOOP_SAMPLE_RATE);
-    const baseSourceKey = `ambient:${noiseType}:${fxKey}:base`;
+    const baseSourceKey = `ambient:${noiseType}:base`;
 
     if (NATIVE_MEDIA_VOLUME_LOCK) {
       if (allowSourceRebuild && gain > LOOP_MUTED_GAIN_EPSILON) {
         const managed = Math.abs(gain - 1) >= LOOP_SCALED_GAIN_EPSILON;
-        const sourceKey = managed ? `ambient:${noiseType}:${fxKey}:${gain.toFixed(2)}` : baseSourceKey;
+        const sourceKey = managed ? `ambient:${noiseType}:${gain.toFixed(2)}` : baseSourceKey;
         const nextUrl = managed && ambientSourceKey.current === sourceKey && ambientManagedUrl.current
           ? ambientManagedUrl.current
-          : getAmbientLoopUrl(noiseType, gain, currentSoundFx);
+          : getAmbientLoopUrl(noiseType, gain);
         swapManagedLoopSource(audio, nextUrl, ambientManagedUrl, AMBIENT_LOOP_SECONDS, preservePosition, managed);
         ambientSourceKey.current = sourceKey;
       }
@@ -1184,30 +1053,28 @@ function App() {
       return;
     }
 
-    swapManagedLoopSource(audio, getAmbientLoopUrl(noiseType, 1, currentSoundFx), ambientManagedUrl, AMBIENT_LOOP_SECONDS, preservePosition, false);
+    swapManagedLoopSource(audio, getAmbientLoopUrl(noiseType), ambientManagedUrl, AMBIENT_LOOP_SECONDS, preservePosition, false);
     ambientSourceKey.current = baseSourceKey;
     setNativeAudioLevel(audio, gain, muteState);
     if (ambientOn && !audio.muted && audio.paused && gain > LOOP_MUTED_GAIN_EPSILON) {
       audio.play().catch(()=>{});
     }
-  }, [ambientVol, masterVol, muted, noiseType, ambientOn, fxHighpassHz, fxLowpassHz, fxCompression, setNativeAudioLevel, swapManagedLoopSource]);
+  }, [ambientVol, masterVol, muted, noiseType, ambientOn, setNativeAudioLevel, swapManagedLoopSource]);
   const syncBinVolume = useCallback((scale = 1, muteState = muted, options = {}) => {
     const audio = binAudio.current;
     if (!audio) return;
     const gain = clamp01(binVol * masterVol * scale);
     const preservePosition = options.preservePosition !== false;
     const allowSourceRebuild = options.allowSourceRebuild !== false;
-    const currentSoundFx = { highpassHz: fxHighpassHz, lowpassHz: fxLowpassHz, compression: fxCompression };
-    const fxKey = serializeSoundFx(currentSoundFx, BINAURAL_LOOP_SAMPLE_RATE);
-    const baseSourceKey = `binaural:${binPreset}:${fxKey}:base`;
+    const baseSourceKey = `binaural:${binPreset}:base`;
 
     if (NATIVE_MEDIA_VOLUME_LOCK) {
       if (allowSourceRebuild && gain > LOOP_MUTED_GAIN_EPSILON) {
         const managed = Math.abs(gain - 1) >= LOOP_SCALED_GAIN_EPSILON;
-        const sourceKey = managed ? `binaural:${binPreset}:${fxKey}:${gain.toFixed(2)}` : baseSourceKey;
+        const sourceKey = managed ? `binaural:${binPreset}:${gain.toFixed(2)}` : baseSourceKey;
         const nextUrl = managed && binSourceKey.current === sourceKey && binManagedUrl.current
           ? binManagedUrl.current
-          : getBinauralLoopUrl(binPreset, gain, currentSoundFx);
+          : getBinauralLoopUrl(binPreset, gain);
         swapManagedLoopSource(audio, nextUrl, binManagedUrl, BINAURAL_LOOP_SECONDS, preservePosition, managed);
         binSourceKey.current = sourceKey;
       }
@@ -1218,13 +1085,13 @@ function App() {
       return;
     }
 
-    swapManagedLoopSource(audio, getBinauralLoopUrl(binPreset, 1, currentSoundFx), binManagedUrl, BINAURAL_LOOP_SECONDS, preservePosition, false);
+    swapManagedLoopSource(audio, getBinauralLoopUrl(binPreset), binManagedUrl, BINAURAL_LOOP_SECONDS, preservePosition, false);
     binSourceKey.current = baseSourceKey;
     setNativeAudioLevel(audio, gain, muteState);
     if (binOn && !audio.muted && audio.paused && gain > LOOP_MUTED_GAIN_EPSILON) {
       audio.play().catch(()=>{});
     }
-  }, [binVol, masterVol, muted, binPreset, binOn, fxHighpassHz, fxLowpassHz, fxCompression, setNativeAudioLevel, swapManagedLoopSource]);
+  }, [binVol, masterVol, muted, binPreset, binOn, setNativeAudioLevel, swapManagedLoopSource]);
   const setPlaybackAudioSession = useCallback(() => {
     try {
       if (navigator.audioSession && navigator.audioSession.type !== 'playback') {
@@ -1270,9 +1137,6 @@ function App() {
       localStorage.setItem('brownVolume',             ambientVol);
       localStorage.setItem('noiseType',               noiseType);
       localStorage.setItem('ambientBypass',           ambientBypass);
-      localStorage.setItem('soundFxHighpassHz',       fxHighpassHz);
-      localStorage.setItem('soundFxLowpassHz',        fxLowpassHz);
-      localStorage.setItem('soundFxCompression',      fxCompression);
       localStorage.setItem('binauralVolume',          binVol);
       localStorage.setItem('binauralPreset',          binPreset);
       localStorage.setItem('binauralBypass',          binBypass);
@@ -1284,13 +1148,12 @@ function App() {
       localStorage.setItem('rssUrl',                  rssUrl);
       localStorage.setItem('feedProxyUrl',            feedProxyUrl);
       localStorage.setItem('showFeedDebug',           showFeedDebug);
-      localStorage.setItem('showAdvancedAudio',       showAdvancedAudio);
       localStorage.setItem('sleepulatorPlaylist',     JSON.stringify(playlist));
       localStorage.setItem('feedSubs',                JSON.stringify(subs));
     } catch(e){}
-  },[masterVol,ambientVol,noiseType,ambientBypass,fxHighpassHz,fxLowpassHz,fxCompression,binVol,binPreset,binBypass,
+  },[masterVol,ambientVol,noiseType,ambientBypass,binVol,binPreset,binBypass,
      podVol,podSpeed,autoPlay,shuffle,
-     timerMins,rssUrl,feedProxyUrl,showFeedDebug,showAdvancedAudio,playlist,subs]);
+     timerMins,rssUrl,feedProxyUrl,showFeedDebug,playlist,subs]);
 
   // ── Service Worker ────────────────────────────────────────────────────────
   useEffect(()=>{
@@ -1793,17 +1656,6 @@ function App() {
   },[podPlaying,curEp]);
 
   const skipPod = s => { if(podAudio.current) podAudio.current.currentTime+=s; };
-  const refreshAdvancedAudio = () => {
-    syncPodVolume();
-    if (ambientAudio.current) syncAmbientVolume(1, muted, { preservePosition: false });
-    if (binAudio.current) syncBinVolume(1, muted, { preservePosition: false });
-  };
-  const resetAdvancedAudio = () => {
-    setFxHighpassHz(0);
-    setFxLowpassHz(0);
-    setFxCompression(0);
-  };
-
   // ── 4. Sleep Timer (setInterval — works in background, unlike rAF) ────────
   const tickTimer = useCallback(()=>{
     const rem = Math.max(0, Math.round((timerEndRef.current-Date.now())/1000));
@@ -2112,109 +1964,6 @@ function App() {
                 All night (bypass timer)
               </label>
             </div>
-          </div>
-
-          {/* Advanced Audio */}
-          <div style={{...cardStyle}}>
-            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:showAdvancedAudio?'.875rem':0}}>
-              <div style={{display:'flex',alignItems:'center',gap:'.5rem',color:bm?'#6b7280':'#818cf8'}}>
-                <LucideIcon name="SlidersHorizontal" size={18}/>
-                <span style={{fontWeight:700,fontSize:'.9rem'}}>Advanced Audio</span>
-              </div>
-              <button
-                onClick={()=>setShowAdvancedAudio(v=>!v)}
-                style={{padding:'.4rem .65rem',borderRadius:'.625rem',border:`1px solid ${c_bord}`,background:'transparent',color:c_sub,fontSize:'.65rem',fontWeight:700,cursor:'pointer',whiteSpace:'nowrap'}}
-              >
-                {showAdvancedAudio ? 'Hide' : 'Show'}
-              </button>
-            </div>
-
-            {showAdvancedAudio && (
-              <div style={{display:'flex',flexDirection:'column',gap:'.75rem'}}>
-                <div style={{...innerStyle,display:'flex',flexDirection:'column',gap:'.5rem'}}>
-                  <div className="section-label" style={{marginBottom:0}}>Soundscape FX</div>
-                  <div style={{fontSize:'.65rem',color:c_sub,lineHeight:1.5}}>
-                    Compressor and pass filters shape the generated ambient and binaural loops. Feed episodes stay on the native audio path for background-safe playback.
-                  </div>
-
-                  <div style={{display:'flex',flexDirection:'column',gap:'.75rem',marginTop:'.25rem'}}>
-                    <div>
-                      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',fontSize:'.7rem',fontWeight:700,color:c_head,marginBottom:'.375rem'}}>
-                        <span>High-pass</span>
-                        <span style={{color:c_sub,fontWeight:600}}>{fxHighpassHz ? `${fxHighpassHz} Hz` : 'Off'}</span>
-                      </div>
-                      <input
-                        type="range"
-                        min="0"
-                        max="600"
-                        step="10"
-                        value={fxHighpassHz}
-                        className="muted"
-                        onChange={e=>setFxHighpassHz(+e.target.value)}
-                      />
-                    </div>
-
-                    <div>
-                      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',fontSize:'.7rem',fontWeight:700,color:c_head,marginBottom:'.375rem'}}>
-                        <span>Low-pass</span>
-                        <span style={{color:c_sub,fontWeight:600}}>{fxLowpassHz ? `${fxLowpassHz} Hz` : 'Off'}</span>
-                      </div>
-                      <input
-                        type="range"
-                        min="0"
-                        max="1800"
-                        step="25"
-                        value={fxLowpassHz}
-                        className="muted"
-                        onChange={e=>setFxLowpassHz(+e.target.value)}
-                      />
-                    </div>
-
-                    <div>
-                      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',fontSize:'.7rem',fontWeight:700,color:c_head,marginBottom:'.375rem'}}>
-                        <span>Compressor</span>
-                        <span style={{color:c_sub,fontWeight:600}}>{fxCompression ? `${fxCompression}%` : 'Off'}</span>
-                      </div>
-                      <input
-                        type="range"
-                        min="0"
-                        max="100"
-                        step="1"
-                        value={fxCompression}
-                        className="muted"
-                        onChange={e=>setFxCompression(+e.target.value)}
-                      />
-                    </div>
-                  </div>
-
-                  {NATIVE_MEDIA_VOLUME_LOCK && (
-                    <div style={{fontSize:'.62rem',color:c_dim,lineHeight:1.5}}>
-                      On iPhone, `Pod Mix` still follows the device volume buttons. These FX are baked into the soundscape loop files directly.
-                    </div>
-                  )}
-                </div>
-
-                <div style={{display:'flex',gap:'.5rem',alignItems:'center',justifyContent:'space-between'}}>
-                  <div style={{fontSize:'.65rem',color:c_sub,lineHeight:1.5}}>
-                    Refresh rebinds the active loop sources. Reset returns compressor and filters to a neutral mix.
-                  </div>
-                  <div style={{display:'flex',gap:'.5rem',flexShrink:0}}>
-                    <button
-                      onClick={resetAdvancedAudio}
-                      style={{padding:'.5rem .75rem',borderRadius:'.625rem',border:`1px solid ${c_bord}`,background:'transparent',color:c_head,fontSize:'.68rem',fontWeight:700,cursor:'pointer',whiteSpace:'nowrap'}}
-                    >
-                      Reset
-                    </button>
-                    <button
-                      onClick={refreshAdvancedAudio}
-                      style={{padding:'.5rem .75rem',borderRadius:'.625rem',border:`1px solid ${c_bord}`,background:'transparent',color:c_head,fontSize:'.68rem',fontWeight:700,cursor:'pointer',whiteSpace:'nowrap'}}
-                    >
-                      Refresh Audio
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
           </div>
 
           {/* Podcast */}
