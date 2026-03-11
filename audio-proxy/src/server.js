@@ -17,6 +17,7 @@ const DEFAULT_ALLOWED_ORIGINS = [
 
 const DEFAULT_ALLOWED_AUDIO_HOSTS = [
   'cbbworld.memberfulcontent.com',
+  'www.patreon.com',
 ].join(',');
 
 const PROFILE_FILTERS = {

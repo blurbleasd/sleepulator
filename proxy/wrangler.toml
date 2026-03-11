@@ -5,4 +5,4 @@ workers_dev = true
 
 [vars]
 ALLOWED_ORIGINS = "https://blurbleasd.github.io,http://127.0.0.1:4173,http://localhost:4173"
-ALLOWED_FEED_HOSTS = "cbbworld.memberfulcontent.com"
+ALLOWED_FEED_HOSTS = "cbbworld.memberfulcontent.com,www.patreon.com"
