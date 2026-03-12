@@ -1,3 +1,13 @@
+---
+title: Sleepulator Audio Proxy
+emoji: 🌙
+colorFrom: blue
+colorTo: indigo
+sdk: docker
+app_port: 7860
+pinned: false
+---
+
 # Sleepulator Audio Proxy
 
 This service adds an optional `Sleep Safe Audio` playback path for podcast episodes.
@@ -30,18 +40,29 @@ cd audio-proxy
 npm start
 ```
 
-## Deploy
+## Deploy to Hugging Face Spaces
 
-The easiest path is a Docker-based web service.
+This folder is set up to be the root of a Docker Space.
 
-For Render:
-1. Create a Blueprint from this repo so Render picks up `/render.yaml`.
-2. Confirm the `sleepulator-audio-proxy` service points at the `audio-proxy` root directory.
-3. Render will use the included `Dockerfile`.
-4. Set or adjust:
+1. Create a new Space on Hugging Face.
+2. Choose `Docker` as the SDK.
+3. Upload the contents of this `audio-proxy/` folder as the Space repo.
+4. In the Space settings, add variables for:
    - `ALLOWED_ORIGINS`
    - `ALLOWED_AUDIO_HOSTS`
-5. Paste the deployed service URL into the app's `Sleep Safe proxy URL` field.
+   - `TARGET_BITRATE`
+5. Wait for the Space build to finish.
+6. Paste the deployed Space URL into the app's `Sleep Safe proxy URL` field.
+
+Recommended variables for the current app:
+
+```text
+ALLOWED_ORIGINS=https://blurbleasd.github.io
+ALLOWED_AUDIO_HOSTS=cbbworld.memberfulcontent.com,www.patreon.com
+TARGET_BITRATE=96k
+```
+
+The Docker image listens on port `7860`, which matches the Space metadata above.
 
 ## Notes
 

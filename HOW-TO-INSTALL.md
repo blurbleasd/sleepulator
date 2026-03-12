@@ -116,13 +116,15 @@ Before deploy, edit `proxy/wrangler.toml` and set:
 
 If you want server-side loudness normalization and peak limiting for podcast audio:
 
-1. Create a Render Blueprint from this repo so it picks up [render.yaml](/Users/melpools/Documents/_SITES/SLEEPULATOR/render.yaml)
-2. Deploy the `sleepulator-audio-proxy` service from `audio-proxy/`
-3. Set or adjust:
-   - `ALLOWED_ORIGINS`
-   - `ALLOWED_AUDIO_HOSTS`
-4. Paste the deployed service URL into the app's `Sleep Safe proxy URL` field
-5. Turn on `Sleep Safe Audio`
+1. Create a new Hugging Face Space with the `Docker` SDK
+2. Upload the contents of [audio-proxy](/Users/melpools/Documents/_SITES/SLEEPULATOR/audio-proxy) as the Space repo
+3. In the Space settings, add:
+   - `ALLOWED_ORIGINS=https://blurbleasd.github.io`
+   - `ALLOWED_AUDIO_HOSTS=cbbworld.memberfulcontent.com,www.patreon.com`
+   - `TARGET_BITRATE=96k`
+4. Wait for the Space build to finish
+5. Paste the deployed service URL into the app's `Sleep Safe proxy URL` field
+6. Turn on `Sleep Safe Audio`
 
 This mode keeps iPhone playback on a native media element, which is the background-safe path. The tradeoff is that seek/scrub can be less precise because the audio is transcoded as a live stream.
 

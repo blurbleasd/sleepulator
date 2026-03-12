@@ -1,7 +1,7 @@
 const http = require('node:http');
 const { spawn } = require('node:child_process');
 
-const PORT = Number.parseInt(process.env.PORT || '8788', 10);
+const PORT = Number.parseInt(process.env.PORT || '7860', 10);
 const HOST = process.env.HOST || '0.0.0.0';
 const FFMPEG_BIN = process.env.FFMPEG_BIN || 'ffmpeg';
 

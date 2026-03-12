@@ -4,14 +4,19 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends ffmpeg ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app
+RUN useradd --create-home --uid 1000 appuser
 
-COPY package.json ./
-COPY src ./src
+WORKDIR /home/appuser/app
+
+COPY --chown=appuser:appuser package.json ./
+COPY --chown=appuser:appuser src ./src
 
 ENV NODE_ENV=production
-ENV PORT=8788
+ENV HOST=0.0.0.0
+ENV PORT=7860
 
-EXPOSE 8788
+USER appuser
 
-CMD ["npm", "start"]
+EXPOSE 7860
+
+CMD ["node", "src/server.js"]
