@@ -838,6 +838,8 @@ const BINAURAL_LOOP_SAMPLE_RATE = 4000;
 const AMBIENT_LOOP_SECONDS = 60;
 // iOS media-element looping is not reliably gapless, so keep this much longer.
 const BINAURAL_LOOP_SECONDS = 300;
+const LOOP_TRANSITION_SECONDS = 1.25;
+const LOOP_MATCH_SECONDS = 1.5;
 const LOOP_SCALED_GAIN_EPSILON = 0.01;
 const LOOP_MUTED_GAIN_EPSILON = 0.001;
 const LOOP_SOURCE_TIME_FUZZ = 0.05;
@@ -886,15 +888,83 @@ function buildStereoWavUrl(left, right, sampleRate, gain = 1) {
   return URL.createObjectURL(new Blob([buffer], { type: 'audio/wav' }));
 }
 
+function buildLoopMeta(sampleRate, loopStartFrames, loopWrapStartFrames, totalFrames) {
+  return {
+    sampleRate,
+    loopStartFrames,
+    loopWrapStartFrames,
+    totalFrames,
+    loopStartTime: loopStartFrames / sampleRate,
+    loopWrapStartTime: loopWrapStartFrames / sampleRate,
+    loopWindowSeconds: Math.max(0, (totalFrames - loopWrapStartFrames) / sampleRate),
+  };
+}
+
+function maybeWrapManualLoop(audio, loopMeta, wrapLockRef) {
+  if (!audio || !loopMeta || !Number.isFinite(audio.currentTime)) return;
+  const currentTime = audio.currentTime;
+  const wrapStart = loopMeta.loopWrapStartTime;
+  if (currentTime < wrapStart - LOOP_SOURCE_TIME_FUZZ) {
+    wrapLockRef.current = false;
+    return;
+  }
+  const offset = currentTime - wrapStart;
+  if (offset < -LOOP_SOURCE_TIME_FUZZ || offset > loopMeta.loopWindowSeconds + LOOP_SOURCE_TIME_FUZZ) return;
+  if (wrapLockRef.current) return;
+  wrapLockRef.current = true;
+  try {
+    audio.currentTime = Math.max(0, loopMeta.loopStartTime + Math.max(0, offset));
+  } catch (error) {}
+}
+
 function getAmbientLoopBuffer(type) {
   if (LOOP_BUFFER_CACHE.ambient.has(type)) return LOOP_BUFFER_CACHE.ambient.get(type);
   const frames = LOOP_SAMPLE_RATE * AMBIENT_LOOP_SECONDS;
-  const left = new Float32Array(frames);
-  const right = new Float32Array(frames);
-  NOISE_TYPES[type].fn(left, right, frames, LOOP_SAMPLE_RATE);
-  const buffer = { left, right, sampleRate: LOOP_SAMPLE_RATE };
+  const rawLeft = new Float32Array(frames);
+  const rawRight = new Float32Array(frames);
+  NOISE_TYPES[type].fn(rawLeft, rawRight, frames, LOOP_SAMPLE_RATE);
+
+  const left = rawLeft.slice();
+  const right = rawRight.slice();
+  const transitionFrames = Math.min(
+    Math.max(64, Math.round(LOOP_SAMPLE_RATE * LOOP_TRANSITION_SECONDS)),
+    Math.max(64, Math.floor(frames / 4))
+  );
+  const matchFrames = Math.min(
+    Math.max(64, Math.round(LOOP_SAMPLE_RATE * LOOP_MATCH_SECONDS)),
+    Math.max(64, Math.floor(frames / 4))
+  );
+  const loopStartFrames = transitionFrames;
+  const loopWrapStartFrames = Math.max(loopStartFrames + 1, frames - matchFrames);
+  const transitionStart = Math.max(0, loopWrapStartFrames - transitionFrames);
+
+  for (let i = 0; i < transitionFrames; i++) {
+    const tailIndex = transitionStart + i;
+    if (tailIndex >= loopWrapStartFrames) break;
+    const blend = transitionFrames <= 1 ? 1 : i / (transitionFrames - 1);
+    left[tailIndex] = rawLeft[tailIndex] * (1 - blend) + rawLeft[i] * blend;
+    right[tailIndex] = rawRight[tailIndex] * (1 - blend) + rawRight[i] * blend;
+  }
+  for (let i = 0; i < matchFrames; i++) {
+    const targetIndex = loopWrapStartFrames + i;
+    const sourceIndex = loopStartFrames + i;
+    if (targetIndex >= frames || sourceIndex >= frames) break;
+    left[targetIndex] = rawLeft[sourceIndex];
+    right[targetIndex] = rawRight[sourceIndex];
+  }
+
+  const buffer = {
+    left,
+    right,
+    sampleRate: LOOP_SAMPLE_RATE,
+    loopMeta: buildLoopMeta(LOOP_SAMPLE_RATE, loopStartFrames, loopWrapStartFrames, frames),
+  };
   LOOP_BUFFER_CACHE.ambient.set(type, buffer);
   return buffer;
+}
+
+function getAmbientLoopMeta(type) {
+  return getAmbientLoopBuffer(type).loopMeta;
 }
 
 function getAmbientLoopUrl(type, gain = 1) {
@@ -912,20 +982,38 @@ function getAmbientLoopUrl(type, gain = 1) {
 
 function getBinauralLoopBuffer(presetKey) {
   if (LOOP_BUFFER_CACHE.binaural.has(presetKey)) return LOOP_BUFFER_CACHE.binaural.get(presetKey);
-  const frames = BINAURAL_LOOP_SAMPLE_RATE * BINAURAL_LOOP_SECONDS;
+  const coreFrames = BINAURAL_LOOP_SAMPLE_RATE * BINAURAL_LOOP_SECONDS;
+  const matchFrames = Math.min(
+    Math.max(64, Math.round(BINAURAL_LOOP_SAMPLE_RATE * LOOP_MATCH_SECONDS)),
+    Math.max(64, Math.floor(coreFrames / 6))
+  );
+  const frames = coreFrames + matchFrames;
   const left = new Float32Array(frames);
   const right = new Float32Array(frames);
   const { beat, carrier } = BINAURAL[presetKey];
   const leftFreq = carrier - beat / 2;
   const rightFreq = carrier + beat / 2;
-  for (let i = 0; i < frames; i++) {
+  for (let i = 0; i < coreFrames; i++) {
     const t = i / BINAURAL_LOOP_SAMPLE_RATE;
     left[i] = Math.sin(2 * Math.PI * leftFreq * t) * 0.32;
     right[i] = Math.sin(2 * Math.PI * rightFreq * t) * 0.32;
   }
-  const buffer = { left, right, sampleRate: BINAURAL_LOOP_SAMPLE_RATE };
+  for (let i = 0; i < matchFrames; i++) {
+    left[coreFrames + i] = left[i];
+    right[coreFrames + i] = right[i];
+  }
+  const buffer = {
+    left,
+    right,
+    sampleRate: BINAURAL_LOOP_SAMPLE_RATE,
+    loopMeta: buildLoopMeta(BINAURAL_LOOP_SAMPLE_RATE, 0, coreFrames, frames),
+  };
   LOOP_BUFFER_CACHE.binaural.set(presetKey, buffer);
   return buffer;
+}
+
+function getBinauralLoopMeta(presetKey) {
+  return getBinauralLoopBuffer(presetKey).loopMeta;
 }
 
 function getBinauralLoopUrl(presetKey, gain = 1) {
@@ -1054,6 +1142,10 @@ function App() {
   const binManagedUrl = useRef('');
   const ambientSourceKey = useRef('');
   const binSourceKey = useRef('');
+  const ambientLoopMeta = useRef(null);
+  const binLoopMeta = useRef(null);
+  const ambientWrapLock = useRef(false);
+  const binWrapLock = useRef(false);
   const setNativeAudioLevel = useCallback((audio, volume, muteState) => {
     if (!audio) return;
     audio.muted = !!muteState || volume <= LOOP_MUTED_GAIN_EPSILON;
@@ -1106,6 +1198,7 @@ function App() {
     const preservePosition = options.preservePosition !== false;
     const allowSourceRebuild = options.allowSourceRebuild !== false;
     const baseSourceKey = `ambient:${noiseType}:base`;
+    ambientLoopMeta.current = getAmbientLoopMeta(noiseType);
 
     if (NATIVE_MEDIA_VOLUME_LOCK) {
       if (allowSourceRebuild && gain > LOOP_MUTED_GAIN_EPSILON) {
@@ -1138,6 +1231,7 @@ function App() {
     const preservePosition = options.preservePosition !== false;
     const allowSourceRebuild = options.allowSourceRebuild !== false;
     const baseSourceKey = `binaural:${binPreset}:base`;
+    binLoopMeta.current = getBinauralLoopMeta(binPreset);
 
     if (NATIVE_MEDIA_VOLUME_LOCK) {
       if (allowSourceRebuild && gain > LOOP_MUTED_GAIN_EPSILON) {
@@ -1384,6 +1478,9 @@ function App() {
     if (ambientAudio.current) return ambientAudio.current;
     const audio = document.createElement('audio');
     configureHiddenAudioElement(audio);
+    audio.addEventListener('timeupdate', () => {
+      if (NATIVE_MEDIA_VOLUME_LOCK) maybeWrapManualLoop(audio, ambientLoopMeta.current, ambientWrapLock);
+    });
     document.body.appendChild(audio);
     ambientAudio.current = audio;
     syncAmbientVolume(1, muted, { preservePosition: false });
@@ -1394,6 +1491,9 @@ function App() {
     if (binAudio.current) return binAudio.current;
     const audio = document.createElement('audio');
     configureHiddenAudioElement(audio);
+    audio.addEventListener('timeupdate', () => {
+      if (NATIVE_MEDIA_VOLUME_LOCK) maybeWrapManualLoop(audio, binLoopMeta.current, binWrapLock);
+    });
     document.body.appendChild(audio);
     binAudio.current = audio;
     syncBinVolume(1, muted, { preservePosition: false });
@@ -1414,6 +1514,7 @@ function App() {
       ambientAudio.current.pause();
       ambientAudio.current.currentTime = 0;
     }
+    ambientWrapLock.current = false;
     setAmbientOn(false);
   };
   const toggleAmbient = () => {
@@ -1441,6 +1542,7 @@ function App() {
       binAudio.current.pause();
       binAudio.current.currentTime = 0;
     }
+    binWrapLock.current = false;
     setBinOn(false);
   };
   const toggleBin = () => {
@@ -1908,6 +2010,10 @@ function App() {
     }
     ambientSourceKey.current = '';
     binSourceKey.current = '';
+    ambientLoopMeta.current = null;
+    binLoopMeta.current = null;
+    ambientWrapLock.current = false;
+    binWrapLock.current = false;
   },[]);
 
   // ── Breathing config ──────────────────────────────────────────────────────
