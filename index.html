@@ -226,6 +226,7 @@
 const { useState, useEffect, useRef, useCallback } = React;
 const APP_CONFIG = window.SLEEPULATOR_CONFIG || {};
 const LEGACY_DEFAULT_FEED_URL = 'https://feeds.simplecast.com/tOaZvgCO';
+const DEFAULT_FEED_PROXY_URL = 'https://sleepulator-feed-proxy.chesteraarfer.workers.dev';
 const NATIVE_MEDIA_VOLUME_LOCK = !!APP_CONFIG.forceNativeMediaVolumeLock || isIOSDevice();
 const LUCIDE_FALLBACK_GLYPHS = {
   BookMarked: '⌑',
@@ -346,6 +347,10 @@ function normalizeConfigUrl(input) {
   if (!trimmed) return '';
   try { return new URL(trimmed, window.location.href).href; }
   catch { return trimmed; }
+}
+
+function getDefaultFeedProxyUrl() {
+  return normalizeConfigUrl(APP_CONFIG.feedProxyUrl || DEFAULT_FEED_PROXY_URL);
 }
 
 function buildSleepSafeAudioUrl(sourceUrl, proxyUrl, profile = 'sleep-safe') {
@@ -971,7 +976,7 @@ function App() {
   const [feedErr,       setFeedErr]       = useState('');
   const [feedProxyUrl,  setFeedProxyUrl]  = useState(()=>{
     const stored = (localStorage.getItem('feedProxyUrl') || '').trim();
-    return stored || normalizeConfigUrl(APP_CONFIG.feedProxyUrl || '');
+    return stored || getDefaultFeedProxyUrl();
   });
   const [audioProxyUrl, setAudioProxyUrl] = useState(()=>{
     const stored = (localStorage.getItem('audioProxyUrl') || '').trim();
@@ -1408,7 +1413,7 @@ function App() {
   // ── 3. Podcast ────────────────────────────────────────────────────────────
   const loadFeed = async (urlOverride) => {
     const requestedUrl = (urlOverride||rssUrl).trim();
-    const configuredProxyUrl = normalizeConfigUrl(feedProxyUrl);
+    const configuredProxyUrl = normalizeConfigUrl(feedProxyUrl || getDefaultFeedProxyUrl());
     if(!requestedUrl) {
       setFeedErr('Please enter a valid RSS URL.');
       setFeedDebug({
@@ -2037,7 +2042,7 @@ function App() {
                 <div>
                   <div className="section-label" style={{marginBottom:'.25rem'}}>Private Feed Proxy</div>
                   <div style={{fontSize:'.65rem',color:c_sub,lineHeight:1.5}}>
-                    Member-only feeds often need a private proxy because Safari and public proxies cannot always fetch them directly.
+                    Member-only feeds use the built-in private proxy by default. Replace it only if you run your own worker.
                   </div>
                 </div>
                 <button
@@ -2053,15 +2058,15 @@ function App() {
                   type="url"
                   value={feedProxyUrl}
                   onChange={e=>setFeedProxyUrl(e.target.value)}
-                  placeholder="Optional proxy URL…"
+                  placeholder="Built-in proxy URL…"
                   style={{flex:1,background:c_inner,border:`1px solid ${c_bord}`,borderRadius:'.625rem',padding:'.5rem .75rem',color:c_text,fontSize:'13px'}}
                 />
                 <button
-                  onClick={()=>setFeedProxyUrl('')}
-                  disabled={!feedProxyUrl}
-                  style={{padding:'.5rem .8rem',borderRadius:'.625rem',background:'transparent',color:feedProxyUrl?c_sub:c_dim,border:`1px solid ${c_bord}`,fontWeight:700,cursor:feedProxyUrl?'pointer':'default',whiteSpace:'nowrap',opacity:feedProxyUrl?1:.6}}
+                  onClick={()=>setFeedProxyUrl(getDefaultFeedProxyUrl())}
+                  disabled={normalizeConfigUrl(feedProxyUrl) === getDefaultFeedProxyUrl()}
+                  style={{padding:'.5rem .8rem',borderRadius:'.625rem',background:'transparent',color:normalizeConfigUrl(feedProxyUrl) === getDefaultFeedProxyUrl()?c_dim:c_sub,border:`1px solid ${c_bord}`,fontWeight:700,cursor:normalizeConfigUrl(feedProxyUrl) === getDefaultFeedProxyUrl()?'default':'pointer',whiteSpace:'nowrap',opacity:normalizeConfigUrl(feedProxyUrl) === getDefaultFeedProxyUrl()?.6:1}}
                 >
-                  Clear
+                  Reset
                 </button>
               </div>
 
