@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "description": "Server-side podcast loudness normalization and peak limiting for Sleepulator.",
+  "dependencies": {
+    "@ffmpeg-installer/ffmpeg": "^1.1.0"
+  },
   "scripts": {
     "start": "node src/server.js",
     "check": "node --check src/server.js"

@@ -3,7 +3,17 @@ const { spawn } = require('node:child_process');
 
 const PORT = Number.parseInt(process.env.PORT || '7860', 10);
 const HOST = process.env.HOST || '0.0.0.0';
-const FFMPEG_BIN = process.env.FFMPEG_BIN || 'ffmpeg';
+
+function resolveFfmpegBin() {
+  if (process.env.FFMPEG_BIN) return process.env.FFMPEG_BIN;
+  try {
+    return require('@ffmpeg-installer/ffmpeg').path;
+  } catch {
+    return 'ffmpeg';
+  }
+}
+
+const FFMPEG_BIN = resolveFfmpegBin();
 
 const DEFAULT_ALLOWED_ORIGINS = [
   'https://blurbleasd.github.io',

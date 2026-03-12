@@ -31,12 +31,15 @@ That keeps the iPhone app on a single native `<audio>` stream, which is the back
 - `ALLOWED_AUDIO_HOSTS`
 - `TARGET_BITRATE`
 
+The Docker Space build uses the bundled `@ffmpeg-installer/ffmpeg` package, so it does not depend on `apt-get` installing system packages during the image build.
+
 ## Local run
 
-Requires `ffmpeg` installed on the machine:
+Requires `npm install` first. If you do not set `FFMPEG_BIN`, the app will try the bundled npm binary and then fall back to a system `ffmpeg` if one is installed:
 
 ```bash
 cd audio-proxy
+npm install
 npm start
 ```
 
