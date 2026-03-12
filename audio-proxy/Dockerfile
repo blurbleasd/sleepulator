@@ -1,22 +1,23 @@
-FROM node:24-bookworm-slim
+FROM node:22-bookworm-slim
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends ffmpeg ca-certificates \
-  && rm -rf /var/lib/apt/lists/*
+  && rm -rf /var/lib/apt/lists/* \
+  && useradd -m -u 1000 user
 
-RUN useradd --create-home --uid 1000 appuser
+USER user
 
-WORKDIR /home/appuser/app
+ENV HOME=/home/user \
+    PATH=/home/user/.local/bin:$PATH \
+    NODE_ENV=production \
+    HOST=0.0.0.0 \
+    PORT=7860
 
-COPY --chown=appuser:appuser package.json ./
-COPY --chown=appuser:appuser src ./src
+WORKDIR $HOME/app
 
-ENV NODE_ENV=production
-ENV HOST=0.0.0.0
-ENV PORT=7860
-
-USER appuser
+COPY --chown=user package.json ./package.json
+COPY --chown=user src ./src
 
 EXPOSE 7860
 
-CMD ["node", "src/server.js"]
+CMD ["npm", "start"]
