@@ -1009,6 +1009,7 @@ function App() {
   });
   const [loading,       setLoading]       = useState(false);
   const [feedErr,       setFeedErr]       = useState('');
+  const [feedNote,      setFeedNote]      = useState('');
   const [feedProxyUrl,  setFeedProxyUrl]  = useState(()=>{
     const stored = (localStorage.getItem('feedProxyUrl') || '').trim();
     return stored || getDefaultFeedProxyUrl();
@@ -1035,6 +1036,8 @@ function App() {
   const [epFilter,      setEpFilter]      = useState('');
   const [podProgress,   setPodProgress]   = useState({cur:0,dur:0});
   const dragSrcRef = useRef(null);
+  const normalizedAudioProxyUrl = normalizeConfigUrl(audioProxyUrl);
+  const sleepSafeConfigured = !!normalizedAudioProxyUrl;
 
   // Audio refs
   const ambientAudio = useRef(null);
@@ -1528,6 +1531,7 @@ function App() {
     const configuredProxyUrl = normalizeConfigUrl(feedProxyUrl || getDefaultFeedProxyUrl());
     if(!requestedUrl) {
       setFeedErr('Please enter a valid RSS URL.');
+      setFeedNote('');
       setFeedDebug({
         requestedUrl: '',
         normalizedUrl: '',
@@ -1541,7 +1545,7 @@ function App() {
       });
       return;
     }
-    setLoading(true); setFeedErr('');
+    setLoading(true); setFeedErr(''); setFeedNote('');
     const normalized = normalizeFeedUrl(requestedUrl);
     let currentUrl = normalized.fetchUrl;
     let resolvedFeedUrl = requestedUrl;
@@ -1682,6 +1686,7 @@ function App() {
         },
       });
       setFeedErr(message);
+      setFeedNote('');
     } finally {
       setLoading(false);
     }
@@ -1754,18 +1759,16 @@ function App() {
   const playEp = (ep, source='feed', opts={}) => {
     const audio = ensurePodAudio();
     const iosHandoff = !!opts.iosHandoff;
-    const normalizedAudioProxyUrl = normalizeConfigUrl(audioProxyUrl);
-    const useSleepSafeAudio = sleepSafeAudio && !!normalizedAudioProxyUrl;
-    if (sleepSafeAudio && !normalizedAudioProxyUrl) {
-      setFeedErr('Sleep Safe Audio is enabled, but no audio proxy URL is configured.');
-      return;
-    }
+    const useSleepSafeAudio = sleepSafeAudio && sleepSafeConfigured;
     const playbackUrl = useSleepSafeAudio
       ? buildSleepSafeAudioUrl(ep.url, normalizedAudioProxyUrl)
       : ep.url;
     const activeAudioUrl = audio.currentSrc || audio.src || '';
     const sourceChangedForEpisode = curEp?.id === ep.id && activeAudioUrl !== playbackUrl;
     setFeedErr('');
+    setFeedNote(sleepSafeAudio && !sleepSafeConfigured
+      ? 'Sleep Safe is enabled, but no proxy URL is configured yet. Playing this episode directly.'
+      : '');
     setPlayingSrc(source);
     if(curEp?.id===ep.id && !sourceChangedForEpisode){
       if(podPlaying){ audio.pause(); }
@@ -2298,6 +2301,11 @@ function App() {
                 <div style={{fontSize:'.62rem',color:c_dim,lineHeight:1.5}}>
                   Sleep Safe uses a server proxy, so scrubbing may be less precise than direct playback.
                 </div>
+                <div style={{fontSize:'.62rem',color:sleepSafeAudio && !sleepSafeConfigured ? '#fbbf24' : c_dim,lineHeight:1.5}}>
+                  {sleepSafeConfigured
+                    ? 'Status: proxy configured.'
+                    : 'Status: no Sleep Safe proxy URL yet. Playback will fall back to direct audio.'}
+                </div>
               </div>
 
               {showFeedDebug && (
@@ -2435,6 +2443,7 @@ function App() {
             </div>
 
             {feedErr && <p style={{color:'#f87171',fontSize:'.8rem',marginBottom:'.75rem'}}>{feedErr}</p>}
+            {!feedErr && feedNote && <p style={{color:'#fbbf24',fontSize:'.78rem',marginBottom:'.75rem'}}>{feedNote}</p>}
 
             {activeTab==='feed' && episodes.length>0 && (
               <div style={{display:'flex',gap:'.5rem',marginBottom:'.75rem',flexWrap:'wrap'}}>
