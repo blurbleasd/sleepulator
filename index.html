@@ -39,6 +39,7 @@
       --c-red:      #f87171;
       --safe-top:   env(safe-area-inset-top, 0px);
       --safe-bot:   env(safe-area-inset-bottom, 0px);
+      --top-clearance: max(2.5rem, calc(var(--safe-top) + 1rem));
     }
 
     * { -webkit-tap-highlight-color: transparent; box-sizing: border-box; }
@@ -47,7 +48,7 @@
 
     /* ── Layout helpers ── */
     #root { min-height: 100dvh; }
-    .pad-top    { padding-top:    max(1.5rem, var(--safe-top)); }
+    .pad-top    { padding-top:    var(--top-clearance); }
     .pad-bottom { padding-bottom: max(5rem,   var(--safe-bot)); }
 
     /* ── Cards ── */
@@ -2043,7 +2044,7 @@ function App() {
       {breathMode && bc && (
         <div className="overlay" style={{background:bm?'#000':'rgba(3,7,18,.97)',alignItems:'center',justifyContent:'center'}}>
           <button onClick={()=>setBreathMode(null)}
-            style={{position:'absolute',top:'max(2rem,var(--safe-top))',right:'1.25rem',background:'#1e293b',border:'none',borderRadius:'50%',width:44,height:44,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',color:'#94a3b8'}}>
+            style={{position:'absolute',top:'var(--top-clearance)',right:'1.25rem',background:'#1e293b',border:'none',borderRadius:'50%',width:44,height:44,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',color:'#94a3b8'}}>
             <LucideIcon name="X" size={20}/>
           </button>
           <div style={{display:'flex',gap:'.75rem',marginBottom:'2rem'}}>
@@ -2067,7 +2068,7 @@ function App() {
 
       {/* ── Saved feeds overlay ── */}
       {showSubs && (
-        <div className="overlay" style={{background:bm?'#000':'#030712',paddingTop:'var(--safe-top)'}}>
+        <div className="overlay" style={{background:bm?'#000':'#030712',paddingTop:'var(--top-clearance)'}}>
           <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'1.25rem'}}>
             <h2 style={{fontSize:'1.1rem',fontWeight:800,color:c_head,margin:0}}>Saved Feeds</h2>
             <button onClick={()=>setShowSubs(false)}
@@ -2120,7 +2121,7 @@ function App() {
       )}
 
       {showPlaylistLibrary && (
-        <div className="overlay" style={{background:bm?'#000':'#030712',paddingTop:'var(--safe-top)'}}>
+        <div className="overlay" style={{background:bm?'#000':'#030712',paddingTop:'var(--top-clearance)'}}>
           <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'1.25rem'}}>
             <h2 style={{fontSize:'1.1rem',fontWeight:800,color:c_head,margin:0}}>Saved Playlists</h2>
             <button onClick={()=>setShowPlaylistLibrary(false)}
