@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: sleepulator-audio-proxy
+    runtime: docker
+    rootDir: audio-proxy
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    autoDeploy: true
+    buildFilter:
+      paths:
+        - audio-proxy/**
+        - render.yaml
+    envVars:
+      - key: ALLOWED_ORIGINS
+        value: https://blurbleasd.github.io
+      - key: ALLOWED_AUDIO_HOSTS
+        value: cbbworld.memberfulcontent.com,www.patreon.com
+      - key: TARGET_BITRATE
+        value: 96k

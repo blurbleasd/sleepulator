@@ -401,6 +401,40 @@ function previewText(text, maxLength = 140) {
   return normalized.length > maxLength ? `${normalized.slice(0, maxLength - 3)}...` : normalized;
 }
 
+function readStoredArray(key) {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(key) || '[]');
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function deriveFeedName(rawUrl) {
+  const trimmed = (rawUrl || '').trim();
+  if (!trimmed) return 'Saved Feed';
+  try {
+    return new URL(trimmed, window.location.href).hostname.replace(/^www\./, '') || 'Saved Feed';
+  } catch {
+    return trimmed.replace(/^https?:\/\//, '').split('/')[0] || 'Saved Feed';
+  }
+}
+
+function inferPodcastTitle(episodeTitle) {
+  const match = (episodeTitle || '').match(/^\[([^\]]+)\]\s*/);
+  return match?.[1]?.trim() || '';
+}
+
+function dedupeEpisodes(episodes) {
+  const seen = new Set();
+  return episodes.filter(episode => {
+    const key = episode?.id || episode?.url;
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 function describeError(error) {
   if (!error) return '';
   if (typeof error === 'string') return error;
@@ -670,14 +704,12 @@ function parseFeedEpisodes(raw, feedUrl) {
 
   const root = xml.documentElement;
   const container = directMatches(root, ['channel', 'feed'])[0] || root;
-  let fallbackTitle = 'Podcast';
-  try { fallbackTitle = new URL(feedUrl, window.location.href).hostname.replace(/^www\./, ''); }
-  catch {}
+  const fallbackTitle = deriveFeedName(feedUrl) || 'Podcast';
   const podcastTitle = firstDirectText(container, ['title']) || firstDescendantText(container, ['title']) || fallbackTitle;
 
   const items = directMatches(container, ['item', 'entry']);
-  const itemNodes = (items.length ? items : descendantMatches(container, ['item', 'entry'])).slice(0, 40);
-  const episodes = itemNodes.map(item => {
+  const itemNodes = items.length ? items : descendantMatches(container, ['item', 'entry']);
+  const episodes = dedupeEpisodes(itemNodes.map(item => {
     const title = firstDirectText(item, ['title']) || firstDescendantText(item, ['title']) || 'Untitled';
     const directAudio = firstAttrFromElements(directMatches(item, ['enclosure']), ['url']);
     const mediaAudio = firstAttrFromElements(descendantMatches(item, ['content']), ['url', 'href', 'src'], el => {
@@ -704,9 +736,12 @@ function parseFeedEpisodes(raw, feedUrl) {
       duration,
       description,
     };
-  }).filter(Boolean);
+  }).filter(Boolean));
   if (!episodes.length) throw makeFeedError('empty-feed');
-  return episodes;
+  return {
+    feedTitle: podcastTitle,
+    episodes,
+  };
 }
 
 function isIOSDevice() {
@@ -955,9 +990,9 @@ function App() {
   const [playlist,      setPlaylist]      = useState(()=>{
     // migrate legacy key
     const v=localStorage.getItem('sleepulatorPlaylist');
-    if(v) return JSON.parse(v);
+    if(v) return readStoredArray('sleepulatorPlaylist');
     const leg=localStorage.getItem('comedyPlaylist');
-    if(leg){ localStorage.setItem('sleepulatorPlaylist',leg); localStorage.removeItem('comedyPlaylist'); return JSON.parse(leg); }
+    if(leg){ localStorage.setItem('sleepulatorPlaylist',leg); localStorage.removeItem('comedyPlaylist'); return readStoredArray('sleepulatorPlaylist'); }
     return [];
   });
   const [activeTab,     setActiveTab]     = useState('feed');
@@ -990,9 +1025,12 @@ function App() {
   });
   const [feedDebug,     setFeedDebug]     = useState(null);
   const [showFeedDebug, setShowFeedDebug] = useState(()=>APP_CONFIG.feedDebug === true || localStorage.getItem('showFeedDebug') === 'true');
-  const [subs,          setSubs]          = useState(()=>JSON.parse(localStorage.getItem('feedSubs')||'[]'));
+  const [subs,          setSubs]          = useState(()=>readStoredArray('feedSubs'));
   const [showSubs,      setShowSubs]      = useState(false);
   const [subName,       setSubName]       = useState('');
+  const [savedPlaylists, setSavedPlaylists] = useState(()=>readStoredArray('savedPlaylists'));
+  const [showPlaylistLibrary, setShowPlaylistLibrary] = useState(false);
+  const [playlistName,  setPlaylistName]  = useState('');
   const [expandedEp,    setExpandedEp]    = useState(null);
   const [epFilter,      setEpFilter]      = useState('');
   const [podProgress,   setPodProgress]   = useState({cur:0,dur:0});
@@ -1181,10 +1219,11 @@ function App() {
       localStorage.setItem('showFeedDebug',           showFeedDebug);
       localStorage.setItem('sleepulatorPlaylist',     JSON.stringify(playlist));
       localStorage.setItem('feedSubs',                JSON.stringify(subs));
+      localStorage.setItem('savedPlaylists',          JSON.stringify(savedPlaylists));
     } catch(e){}
   },[masterVol,ambientVol,noiseType,ambientBypass,binVol,binPreset,binBypass,
      podVol,podSpeed,autoPlay,shuffle,
-     timerMins,rssUrl,feedProxyUrl,audioProxyUrl,sleepSafeAudio,showFeedDebug,playlist,subs]);
+     timerMins,rssUrl,feedProxyUrl,audioProxyUrl,sleepSafeAudio,showFeedDebug,playlist,subs,savedPlaylists]);
 
   // ── Service Worker ────────────────────────────────────────────────────────
   useEffect(()=>{
@@ -1411,7 +1450,80 @@ function App() {
   useEffect(()=>{ syncBinVolume(); },[binVol, masterVol, muted, syncBinVolume]);
 
   // ── 3. Podcast ────────────────────────────────────────────────────────────
-  const loadFeed = async (urlOverride) => {
+  const upsertFeedSub = nextSub => {
+    const normalizedUrl = (nextSub?.url || '').trim();
+    if (!normalizedUrl) return;
+    setSubs(prev => {
+      const index = prev.findIndex(entry => entry.url === normalizedUrl);
+      const existing = index >= 0 ? prev[index] : null;
+      const entry = {
+        ...existing,
+        ...nextSub,
+        url: normalizedUrl,
+        name: (nextSub?.name || '').trim() || existing?.name || deriveFeedName(normalizedUrl),
+        updatedAt: new Date().toISOString(),
+      };
+      if (index >= 0) {
+        const next = [...prev];
+        next[index] = entry;
+        return next;
+      }
+      return [entry, ...prev];
+    });
+  };
+
+  const addEpisodesToPlaylist = nextEpisodes => {
+    const additions = Array.isArray(nextEpisodes) ? nextEpisodes.filter(Boolean) : [];
+    if (!additions.length) return;
+    setPlaylist(prev => {
+      const existingIds = new Set(prev.map(ep => ep.id));
+      const uniqueAdditions = additions.filter(ep => ep?.id && !existingIds.has(ep.id));
+      return uniqueAdditions.length ? [...prev, ...uniqueAdditions] : prev;
+    });
+  };
+
+  const getDefaultPlaylistName = () => {
+    const fromLibrary = subs.find(entry => entry.url === rssUrl.trim())?.name || '';
+    const fromFeed = subName.trim() || inferPodcastTitle(playlist[0]?.title) || inferPodcastTitle(episodes[0]?.title);
+    const base = fromLibrary || fromFeed;
+    if (base) return `${base} Playlist`;
+    return `Playlist ${new Date().toLocaleDateString(undefined, { month:'short', day:'numeric' })}`;
+  };
+
+  const saveCurrentPlaylist = () => {
+    if (!playlist.length) return;
+    const name = (playlistName.trim() || getDefaultPlaylistName()).trim();
+    if (!name) return;
+    setSavedPlaylists(prev => {
+      const existingIndex = prev.findIndex(entry => entry.name.toLowerCase() === name.toLowerCase());
+      const nextEntry = {
+        id: existingIndex >= 0 ? prev[existingIndex].id : `playlist-${Date.now()}`,
+        name,
+        episodes: playlist,
+        count: playlist.length,
+        updatedAt: new Date().toISOString(),
+      };
+      if (existingIndex >= 0) {
+        const next = [...prev];
+        next[existingIndex] = nextEntry;
+        return next;
+      }
+      return [nextEntry, ...prev];
+    });
+    setPlaylistName(name);
+  };
+
+  const loadSavedPlaylist = (savedPlaylist, opts = {}) => {
+    const savedEpisodes = Array.isArray(savedPlaylist?.episodes) ? savedPlaylist.episodes.filter(Boolean) : [];
+    if (!savedEpisodes.length) return;
+    setPlaylist(savedEpisodes);
+    setPlaylistName(savedPlaylist?.name || '');
+    setActiveTab('playlist');
+    setShowPlaylistLibrary(false);
+    if (opts.autoplay) playEp(savedEpisodes[0], 'playlist');
+  };
+
+  const loadFeed = async (urlOverride, options = {}) => {
     const requestedUrl = (urlOverride||rssUrl).trim();
     const configuredProxyUrl = normalizeConfigUrl(feedProxyUrl || getDefaultFeedProxyUrl());
     if(!requestedUrl) {
@@ -1507,10 +1619,22 @@ function App() {
         }
 
         try {
-          const parsed = parseFeedEpisodes(raw, currentUrl);
-          setEpisodes(parsed);
+          const parsedFeed = parseFeedEpisodes(raw, currentUrl);
+          const nextEpisodes = parsedFeed.episodes;
+          const existingSub = subs.find(entry => entry.url === currentUrl);
+          const nextFeedName = existingSub?.name || parsedFeed.feedTitle || deriveFeedName(currentUrl);
+          setEpisodes(nextEpisodes);
           setActiveTab('feed');
           setRssUrl(currentUrl);
+          setSubName(nextFeedName);
+          upsertFeedSub({
+            url: currentUrl,
+            name: nextFeedName,
+            episodeCount: nextEpisodes.length,
+            latestEpisodeTitle: nextEpisodes[0]?.title || '',
+          });
+          if (options.closeLibrary) setShowSubs(false);
+          if (options.autoplay && nextEpisodes[0]) playEp(nextEpisodes[0], 'feed');
           setFeedDebug({
             ...debugState,
             attempts: [...debugState.attempts],
@@ -1518,7 +1642,7 @@ function App() {
               status: 'success',
               via: sourceLabel,
               feedUrl: currentUrl,
-              episodeCount: parsed.length,
+              episodeCount: nextEpisodes.length,
             },
           });
           return;
@@ -1563,13 +1687,19 @@ function App() {
     }
   };
 
-  const addToPlaylist    = ep => { if(!playlist.find(p=>p.id===ep.id)) setPlaylist(prev=>[...prev,ep]); };
+  const addToPlaylist = ep => addEpisodesToPlaylist([ep]);
   const removeFromPlaylist=id => setPlaylist(prev=>prev.filter(ep=>ep.id!==id));
   const saveSub = () => {
-    const name = subName.trim() || rssUrl.replace(/^https?:\/\//,'').split('/')[0];
-    if(!rssUrl.trim()||subs.find(s=>s.url===rssUrl.trim())) return;
-    setSubs(prev=>[...prev,{name,url:rssUrl.trim()}]);
-    setSubName('');
+    const url = rssUrl.trim();
+    if(!url) return;
+    const existing = subs.find(entry => entry.url === url);
+    const name = subName.trim() || existing?.name || deriveFeedName(url);
+    upsertFeedSub({
+      ...existing,
+      url,
+      name,
+    });
+    setSubName(name);
   };
 
   const ensurePodAudio = () => {
@@ -1837,13 +1967,13 @@ function App() {
           </div>
 
           <div style={{...cardStyle,margin:'0 1rem 1rem',padding:'1rem'}}>
-            <p style={{fontSize:'.7rem',color:c_sub,margin:'0 0 .5rem'}}>Save current URL as a named feed</p>
+            <p style={{fontSize:'.7rem',color:c_sub,margin:'0 0 .5rem'}}>Loaded feeds are saved automatically. Use this to rename the current feed if you want.</p>
             <div style={{display:'flex',gap:'.5rem'}}>
-              <input type="text" value={subName} onChange={e=>setSubName(e.target.value)} placeholder="Feed name (optional)…"
+              <input type="text" value={subName} onChange={e=>setSubName(e.target.value)} placeholder={rssUrl.trim() ? "Current feed name…" : "Load a feed to rename it…"}
                 style={{flex:1,background:c_inner,border:`1px solid ${c_bord}`,borderRadius:'.5rem',padding:'.5rem .75rem',color:c_text,fontSize:'14px'}}/>
-              <button onClick={saveSub}
-                style={{padding:'.5rem 1rem',borderRadius:'.5rem',background:'#6d28d9',color:'#fff',border:'none',fontWeight:700,cursor:'pointer',whiteSpace:'nowrap'}}>
-                Save
+              <button onClick={saveSub} disabled={!rssUrl.trim()}
+                style={{padding:'.5rem 1rem',borderRadius:'.5rem',background:rssUrl.trim()?'#6d28d9':'#312e81',color:'#fff',border:'none',fontWeight:700,cursor:rssUrl.trim()?'pointer':'default',whiteSpace:'nowrap',opacity:rssUrl.trim()?1:.55}}>
+                Update
               </button>
             </div>
           </div>
@@ -1855,12 +1985,72 @@ function App() {
                 <div style={{flex:1,minWidth:0}}>
                   <p style={{margin:0,fontSize:'.85rem',fontWeight:600,color:c_head,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{s.name}</p>
                   <p style={{margin:0,fontSize:'.7rem',color:c_sub,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{s.url}</p>
+                  {!!s.episodeCount && (
+                    <p style={{margin:'.25rem 0 0',fontSize:'.65rem',color:c_dim}}>{s.episodeCount} episode{s.episodeCount===1?'':'s'} cached from last load</p>
+                  )}
                 </div>
-                <button onClick={()=>{loadFeed(s.url);setShowSubs(false);}}
+                <button onClick={()=>{ setSubName(s.name || ''); loadFeed(s.url, { closeLibrary: true }); }}
                   style={{padding:'.4rem .875rem',borderRadius:'.5rem',background:'rgba(139,92,246,.2)',color:'#c084fc',border:'none',fontSize:'.75rem',fontWeight:700,cursor:'pointer',whiteSpace:'nowrap'}}>
                   Load
                 </button>
+                <button onClick={()=>{ setSubName(s.name || ''); loadFeed(s.url, { autoplay: true, closeLibrary: true }); }}
+                  style={{padding:'.4rem .875rem',borderRadius:'.5rem',background:'#6d28d9',color:'#fff',border:'none',fontSize:'.75rem',fontWeight:700,cursor:'pointer',whiteSpace:'nowrap'}}>
+                  Play
+                </button>
                 <button onClick={()=>setSubs(prev=>prev.filter(x=>x.url!==s.url))}
+                  style={{background:'none',border:'none',cursor:'pointer',color:'#4b5563',padding:'.25rem',display:'flex',alignItems:'center'}}
+                  onMouseOver={e=>e.currentTarget.style.color='#f87171'}
+                  onMouseOut={e=>e.currentTarget.style.color='#4b5563'}>
+                  <LucideIcon name="Trash2" size={16}/>
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {showPlaylistLibrary && (
+        <div className="overlay" style={{background:bm?'#000':'#030712',paddingTop:'var(--safe-top)'}}>
+          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'1.25rem'}}>
+            <h2 style={{fontSize:'1.1rem',fontWeight:800,color:c_head,margin:0}}>Saved Playlists</h2>
+            <button onClick={()=>setShowPlaylistLibrary(false)}
+              style={{background:'#1e293b',border:'none',borderRadius:'50%',width:44,height:44,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',color:'#94a3b8'}}>
+              <LucideIcon name="X" size={18}/>
+            </button>
+          </div>
+
+          <div style={{...cardStyle,margin:'0 1rem 1rem',padding:'1rem'}}>
+            <p style={{fontSize:'.7rem',color:c_sub,margin:'0 0 .5rem'}}>Save the current queue under a reusable name.</p>
+            <div style={{display:'flex',gap:'.5rem'}}>
+              <input type="text" value={playlistName} onChange={e=>setPlaylistName(e.target.value)} placeholder="Playlist name…"
+                style={{flex:1,background:c_inner,border:`1px solid ${c_bord}`,borderRadius:'.5rem',padding:'.5rem .75rem',color:c_text,fontSize:'14px'}}/>
+              <button onClick={saveCurrentPlaylist} disabled={!playlist.length}
+                style={{padding:'.5rem 1rem',borderRadius:'.5rem',background:playlist.length?'#6d28d9':'#312e81',color:'#fff',border:'none',fontWeight:700,cursor:playlist.length?'pointer':'default',whiteSpace:'nowrap',opacity:playlist.length?1:.55}}>
+                Save
+              </button>
+            </div>
+          </div>
+
+          <div className="scroll-y" style={{flex:1,padding:'0 1rem',display:'flex',flexDirection:'column',gap:'.5rem'}}>
+            {savedPlaylists.length===0 && <p style={{textAlign:'center',padding:'2rem',color:c_sub,fontSize:'.85rem'}}>No saved playlists yet.</p>}
+            {savedPlaylists.map(saved => (
+              <div key={saved.id || saved.name} style={{...cardStyle,padding:'1rem',display:'flex',alignItems:'center',gap:'.75rem'}}>
+                <div style={{flex:1,minWidth:0}}>
+                  <p style={{margin:0,fontSize:'.85rem',fontWeight:600,color:c_head,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{saved.name}</p>
+                  <p style={{margin:'.2rem 0 0',fontSize:'.68rem',color:c_sub}}>
+                    {(saved.count || saved.episodes?.length || 0)} episode{(saved.count || saved.episodes?.length || 0)===1?'':'s'}
+                    {saved.updatedAt ? ` · Updated ${new Date(saved.updatedAt).toLocaleDateString()}` : ''}
+                  </p>
+                </div>
+                <button onClick={()=>loadSavedPlaylist(saved)}
+                  style={{padding:'.4rem .875rem',borderRadius:'.5rem',background:'rgba(139,92,246,.2)',color:'#c084fc',border:'none',fontSize:'.75rem',fontWeight:700,cursor:'pointer',whiteSpace:'nowrap'}}>
+                  Load
+                </button>
+                <button onClick={()=>loadSavedPlaylist(saved, { autoplay: true })}
+                  style={{padding:'.4rem .875rem',borderRadius:'.5rem',background:'#6d28d9',color:'#fff',border:'none',fontSize:'.75rem',fontWeight:700,cursor:'pointer',whiteSpace:'nowrap'}}>
+                  Play
+                </button>
+                <button onClick={()=>setSavedPlaylists(prev=>prev.filter(entry=>(entry.id || entry.name)!==(saved.id || saved.name)))}
                   style={{background:'none',border:'none',cursor:'pointer',color:'#4b5563',padding:'.25rem',display:'flex',alignItems:'center'}}
                   onMouseOver={e=>e.currentTarget.style.color='#f87171'}
                   onMouseOut={e=>e.currentTarget.style.color='#4b5563'}>
@@ -2117,7 +2307,7 @@ function App() {
                     Requested: {feedDebug?.requestedUrl ? redactUrlForDisplay(feedDebug.requestedUrl) : 'No feed loaded yet.'}
                   </div>
                   <div style={{fontSize:'.65rem',color:c_sub,lineHeight:1.5}}>
-                    Proxy: {feedProxyUrl ? redactUrlForDisplay(feedProxyUrl) : 'Not configured'}
+                    Proxy: {redactUrlForDisplay(normalizeConfigUrl(feedProxyUrl || getDefaultFeedProxyUrl()))}
                   </div>
                   {feedDebug?.final && (
                     <div style={{fontSize:'.65rem',color:feedDebug.final.status==='success'?'#86efac':'#fca5a5',lineHeight:1.5}}>
@@ -2188,7 +2378,9 @@ function App() {
 
             {/* Tabs */}
             <div className="tab-bar" style={{marginBottom:'.875rem'}}>
-              <button className={`tab-btn${activeTab==='feed'?' active':''}`} onClick={()=>setActiveTab('feed')}>Browse Feed</button>
+              <button className={`tab-btn${activeTab==='feed'?' active':''}`} onClick={()=>setActiveTab('feed')}>
+                Browse Feed {episodes.length>0&&`(${episodes.length})`}
+              </button>
               <button className={`tab-btn${activeTab==='playlist'?' active-purple':''}`} onClick={()=>setActiveTab('playlist')}>
                 Playlist {playlist.length>0&&`(${playlist.length})`}
               </button>
@@ -2244,6 +2436,36 @@ function App() {
 
             {feedErr && <p style={{color:'#f87171',fontSize:'.8rem',marginBottom:'.75rem'}}>{feedErr}</p>}
 
+            {activeTab==='feed' && episodes.length>0 && (
+              <div style={{display:'flex',gap:'.5rem',marginBottom:'.75rem',flexWrap:'wrap'}}>
+                <button onClick={()=>playEp(episodes[0], 'feed')}
+                  style={{padding:'.45rem .8rem',borderRadius:'.625rem',background:'#6d28d9',color:'#fff',border:'none',fontSize:'.72rem',fontWeight:700,cursor:'pointer'}}>
+                  Play Latest
+                </button>
+                <button onClick={()=>addEpisodesToPlaylist(episodes)}
+                  style={{padding:'.45rem .8rem',borderRadius:'.625rem',background:'rgba(139,92,246,.18)',color:'#c084fc',border:`1px solid ${c_bord}`,fontSize:'.72rem',fontWeight:700,cursor:'pointer'}}>
+                  Add All to Playlist
+                </button>
+              </div>
+            )}
+
+            {activeTab==='playlist' && (
+              <div style={{display:'flex',gap:'.5rem',marginBottom:'.75rem',flexWrap:'wrap'}}>
+                <button onClick={()=>playlist.length && playEp(playlist[0], 'playlist')} disabled={!playlist.length}
+                  style={{padding:'.45rem .8rem',borderRadius:'.625rem',background:playlist.length?'#6d28d9':'#312e81',color:'#fff',border:'none',fontSize:'.72rem',fontWeight:700,cursor:playlist.length?'pointer':'default',opacity:playlist.length?1:.55}}>
+                  Play Playlist
+                </button>
+                <button onClick={saveCurrentPlaylist} disabled={!playlist.length}
+                  style={{padding:'.45rem .8rem',borderRadius:'.625rem',background:'rgba(139,92,246,.18)',color:playlist.length?'#c084fc':'#64748b',border:`1px solid ${c_bord}`,fontSize:'.72rem',fontWeight:700,cursor:playlist.length?'pointer':'default',opacity:playlist.length?1:.55}}>
+                  Save Playlist
+                </button>
+                <button onClick={()=>setShowPlaylistLibrary(true)}
+                  style={{padding:'.45rem .8rem',borderRadius:'.625rem',background:'transparent',color:c_sub,border:`1px solid ${c_bord}`,fontSize:'.72rem',fontWeight:700,cursor:'pointer'}}>
+                  Saved Playlists
+                </button>
+              </div>
+            )}
+
             {/* Episode search filter — only show when there's a list to filter */}
             {((activeTab==='feed'&&episodes.length>0)||(activeTab==='playlist'&&playlist.length>0)) && (
               <div style={{position:'relative',marginBottom:'.625rem'}}>
@@ -2266,7 +2488,7 @@ function App() {
             {activeTab==='feed'&&!episodes.length&&!loading&&!feedErr ? (
               <EmptyState text="Paste a podcast feed URL and tap Load" color={c_sub}/>
             ) : activeTab==='playlist'&&!playlist.length ? (
-              <EmptyState text={"Playlist is empty.\nBrowse a feed and tap + to add episodes."} color={c_sub}/>
+              <EmptyState text={"Playlist is empty.\nBrowse a feed, add episodes, or save a queue for later."} color={c_sub}/>
             ) : (
               <div className="scroll-y" style={{maxHeight:'min(420px,45dvh)',display:'flex',flexDirection:'column',gap:'.375rem'}}>
                 {(activeTab==='feed'?episodes:playlist)

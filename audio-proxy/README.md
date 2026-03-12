@@ -35,10 +35,10 @@ npm start
 The easiest path is a Docker-based web service.
 
 For Render:
-1. Create a new Web Service from this repo.
-2. Set the root directory to `audio-proxy`.
+1. Create a Blueprint from this repo so Render picks up `/render.yaml`.
+2. Confirm the `sleepulator-audio-proxy` service points at the `audio-proxy` root directory.
 3. Render will use the included `Dockerfile`.
-4. Set:
+4. Set or adjust:
    - `ALLOWED_ORIGINS`
    - `ALLOWED_AUDIO_HOSTS`
 5. Paste the deployed service URL into the app's `Sleep Safe proxy URL` field.
