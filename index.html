@@ -359,6 +359,7 @@ function buildSleepSafeAudioUrl(sourceUrl, proxyUrl, profile = 'sleep-safe') {
   if (!trimmedSource || !trimmedProxy) return trimmedSource;
   try {
     const next = new URL(trimmedProxy, window.location.href);
+    if (!next.pathname || next.pathname === '/') next.pathname = '/audio';
     next.searchParams.set('url', trimmedSource);
     next.searchParams.set('profile', profile);
     return next.toString();

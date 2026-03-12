@@ -63,6 +63,7 @@ TARGET_BITRATE=96k
 ```
 
 The Docker image listens on port `7860`, which matches the Space metadata above.
+The app can use the plain Space URL and will target `/audio` automatically.
 
 ## Notes
 

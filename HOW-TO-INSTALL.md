@@ -123,7 +123,7 @@ If you want server-side loudness normalization and peak limiting for podcast aud
    - `ALLOWED_AUDIO_HOSTS=cbbworld.memberfulcontent.com,www.patreon.com`
    - `TARGET_BITRATE=96k`
 4. Wait for the Space build to finish
-5. Paste the deployed service URL into the app's `Sleep Safe proxy URL` field
+5. Paste the deployed Space URL into the app's `Sleep Safe proxy URL` field
 6. Turn on `Sleep Safe Audio`
 
 This mode keeps iPhone playback on a native media element, which is the background-safe path. The tradeoff is that seek/scrub can be less precise because the audio is transcoded as a live stream.
