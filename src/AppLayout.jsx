@@ -3,6 +3,10 @@ import { useAppContext } from './context/AppContext.jsx';
 import {
   BookMarked, Clock, GripVertical, Moon, MoonStar, Pause, Play, Plus, RotateCcw, RotateCw, Rss, Search, Settings2, Shuffle, SlidersHorizontal, Square, Sun, Trash2, Volume2, VolumeX, Wind, X, HelpCircle, Download, Check, Waves
 } from 'lucide-react';
+import {
+  NOISE_TYPES, BINAURAL, NATIVE_MEDIA_VOLUME_LOCK, fmtTime,
+  redactUrlForDisplay, normalizeConfigUrl, getDefaultFeedProxyUrl
+} from './utils/core.js';
 
 const icons = {
   BookMarked, Clock, GripVertical, Moon, MoonStar, Pause, Play, Plus, RotateCcw, RotateCw, Rss, Search, Settings2, Shuffle, SlidersHorizontal, Square, Sun, Trash2, Volume2, VolumeX, Wind, X, Download, Check, Waves
@@ -544,7 +548,7 @@ export default function AppLayout() {
         <div style={{display:'flex',flexDirection:'column',gap:'1rem'}}>
 
           {/* Sleep Timer */}
-          <div style={cardStyle}>
+          <div className="card">
             <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'1rem'}}>
               <div style={{display:'flex',alignItems:'center',gap:'.5rem',color:bm?'#6b7280':'#a5b4fc'}}>
                 <LucideIcon name="Clock" size={18}/>
