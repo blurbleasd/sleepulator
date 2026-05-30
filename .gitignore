@@ -2,3 +2,14 @@
 .playwright-cli/
 icon.svg.png
 proxy/.wrangler/
+
+# dependencies & build output (reproducible via `npm install` + `npm run build`)
+node_modules/
+dist/
+
+# local editor / agent settings
+.claude/
+
+# one-off migration & refactor scripts (kept on disk, out of version control)
+*.cjs
+ios-spike.html
