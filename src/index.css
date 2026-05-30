@@ -32,6 +32,14 @@ body {
   transition: background 0.5s ease;
 }
 
+/* Minimal reset — replaces Tailwind 2.x Preflight (CDN removed). Preserves the
+   defaults the UI relied on: zeroed block margins, list reset, controls that
+   inherit fonts, and block/middle-aligned media so lucide icons stay aligned. */
+h1, h2, h3, h4, h5, h6, p, figure, blockquote, dl, dd { margin: 0; }
+ul, ol { margin: 0; padding: 0; }
+img, svg, video, canvas, audio, iframe, embed, object { display: block; vertical-align: middle; }
+button, input, optgroup, select, textarea { font: inherit; }
+
 /* ── Dynamic Animated Background ── */
 .mesh-bg {
   position: fixed;
