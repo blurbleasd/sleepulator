@@ -276,7 +276,8 @@ export default function AppLayout() {
     c_inner,
   } = useAppContext() || {}; // fallback for safety
 
-  
+  const [showPodcasts, setShowPodcasts] = React.useState(false);
+
   return (
     <div className="app-container" style={{minHeight:'100dvh', color:c_text}}>
       <div className="mesh-bg" />
@@ -429,6 +430,33 @@ export default function AppLayout() {
 
           {/* Ambient + Binaural */}
           <AmbientBinaural />
+
+          {/* Podcasts entry — opens the podcast screen */}
+          <button onClick={()=>setShowPodcasts(true)} className="card" style={{display:'flex',alignItems:'center',justifyContent:'space-between',cursor:'pointer',width:'100%',textAlign:'left',border:'1px solid var(--c-border)'}}>
+            <span style={{display:'flex',alignItems:'center',gap:'.6rem',fontWeight:700,fontSize:'1rem',color:c_head}}>
+              <LucideIcon name="Rss" size={20} color={bm?'#a9762f':'#e6b277'}/> Podcasts
+            </span>
+            <span style={{display:'flex',alignItems:'center',gap:'.5rem',color:c_sub,fontSize:'.85rem'}}>
+              {curEp ? <span style={{color:'#e6b277',maxWidth:130,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{podPlaying?'▶':'⏸'} {curEp.title}</span> : 'Browse & play'}
+              <span style={{fontSize:'1.3rem',lineHeight:1,color:c_dim}}>›</span>
+            </span>
+          </button>
+
+          {/* Install hint */}
+          <div style={{textAlign:'center',fontSize:'.7rem',color:c_sub,padding:'.5rem 0 .25rem',lineHeight:1.7}}>
+            <p style={{margin:0}}><strong style={{color:c_sub}}>iPhone:</strong> Safari → Share → "Add to Home Screen"</p>
+            <p style={{margin:0}}><strong style={{color:c_sub}}>Android:</strong> Chrome → ⋮ → "Add to Home Screen"</p>
+          </div>
+        </div>
+
+        {/* Podcast screen */}
+        {showPodcasts && (
+        <div className="overlay" style={{zIndex:150,paddingTop:'var(--top-clearance)',overflowY:'auto'}}>
+          <div style={{maxWidth:500,margin:'0 auto',paddingLeft:'1rem',paddingRight:'1rem'}} className="pad-bottom">
+            <div style={{display:'flex',alignItems:'center',gap:'.5rem',padding:'0 0 1rem'}}>
+              <button onClick={()=>setShowPodcasts(false)} className="btn-icon" title="Back"><LucideIcon name="X" size={20}/></button>
+              <span style={{fontSize:'1.1rem',fontWeight:800,color:c_head}}>Podcasts</span>
+            </div>
 
           {/* Podcast */}
           <div className="card" style={{position:'relative',overflow:'hidden'}}>
@@ -700,14 +728,9 @@ export default function AppLayout() {
               </div>
             )}
           </div>
-
-          {/* Install hint */}
-          <div style={{textAlign:'center',fontSize:'.7rem',color:c_sub,padding:'.5rem 0 .25rem',lineHeight:1.7}}>
-            <p style={{margin:0}}><strong style={{color:c_sub}}>iPhone:</strong> Safari → Share → "Add to Home Screen"</p>
-            <p style={{margin:0}}><strong style={{color:c_sub}}>Android:</strong> Chrome → ⋮ → "Add to Home Screen"</p>
           </div>
-
         </div>
+        )}
       </div>
     </div>
   );

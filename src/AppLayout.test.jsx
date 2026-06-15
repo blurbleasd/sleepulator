@@ -28,7 +28,9 @@ describe('Audio Engine dev panel (Feed Debug)', () => {
     render(<App />);
     await screen.findByRole('heading', { name: 'SLEEPULATOR' });
 
-    // Collapsed by default.
+    // Podcast controls (incl. Feed Debug) now live on a separate screen.
+    expect(screen.queryByText('Audio Engine (dev)')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /podcasts/i }));
     expect(screen.queryByText('Audio Engine (dev)')).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Feed Debug' }));
@@ -42,6 +44,7 @@ describe('Audio Engine dev panel (Feed Debug)', () => {
     const user = userEvent.setup();
     render(<App />);
     await screen.findByRole('heading', { name: 'SLEEPULATOR' });
+    await user.click(screen.getByRole('button', { name: /podcasts/i }));
     await user.click(screen.getByRole('button', { name: 'Feed Debug' }));
 
     expect(screen.queryByText(/^state:/)).not.toBeInTheDocument();
