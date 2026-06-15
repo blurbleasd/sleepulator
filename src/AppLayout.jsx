@@ -13,6 +13,7 @@ import Header from './components/Header.jsx';
 import AmbientBinaural from './components/AmbientBinaural.jsx';
 import PodcastSettings from './components/PodcastSettings.jsx';
 import NowPlayingBar from './components/NowPlayingBar.jsx';
+import ImportOpmlButton from './components/ImportOpmlButton.jsx';
 
 const icons = {
   BookMarked, Clock, GripVertical, Moon, MoonStar, Pause, Play, Plus, RotateCcw, RotateCw, Rss, Search, Settings2, Shuffle, SlidersHorizontal, Square, Sun, Trash2, Volume2, VolumeX, Wind, X, Download, Check, Waves
@@ -329,6 +330,10 @@ export default function AppLayout() {
                 style={{padding:'.5rem 1rem',borderRadius:'.5rem',background:rssUrl.trim()?'#b8813a':'#4a3a1e',color:'#fff',border:'none',fontWeight:700,cursor:rssUrl.trim()?'pointer':'default',whiteSpace:'nowrap',opacity:rssUrl.trim()?1:.55}}>
                 Update
               </button>
+            </div>
+            <div style={{borderTop:`1px solid ${c_bord}`,margin:'.875rem 0 0',paddingTop:'.875rem'}}>
+              <p style={{fontSize:'.7rem',color:c_sub,margin:'0 0 .5rem'}}>Bring in your subscriptions from Overcast or another app.</p>
+              <ImportOpmlButton />
             </div>
           </div>
 

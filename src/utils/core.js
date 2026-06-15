@@ -447,6 +447,37 @@ export function parseFeedEpisodes(raw, feedUrl) {
   };
 }
 
+// Parse an OPML subscription export (Overcast, Apple Podcasts, Pocket Casts,
+// etc.) into a de-duplicated list of { url, name }. Recurses through folder
+// outlines and ignores outlines without a feed URL. Returns [] on bad input.
+export function parseOpmlFeeds(raw) {
+  if (!raw || typeof raw !== 'string') return [];
+  let doc;
+  try {
+    doc = new DOMParser().parseFromString(raw, 'text/xml');
+  } catch (e) {
+    return [];
+  }
+  if (!doc || doc.querySelector('parsererror')) return [];
+
+  const outlines = Array.from(doc.getElementsByTagName('outline'));
+  const seen = new Set();
+  const feeds = [];
+  for (const node of outlines) {
+    const xmlUrl = (
+      node.getAttribute('xmlUrl') ||
+      node.getAttribute('xmlurl') ||
+      node.getAttribute('xmlURL') ||
+      ''
+    ).trim();
+    if (!xmlUrl || seen.has(xmlUrl)) continue;
+    seen.add(xmlUrl);
+    const name = (node.getAttribute('text') || node.getAttribute('title') || '').trim();
+    feeds.push({ url: xmlUrl, name });
+  }
+  return feeds;
+}
+
 export function isIOSDevice() {
   const ua = navigator.userAgent || '';
   return /iP(hone|ad|od)/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);

@@ -10,6 +10,7 @@ import {
   deriveFeedName,
   inferPodcastTitle,
   dedupeEpisodes,
+  parseOpmlFeeds,
   NOISE_TYPES,
 } from './core.js';
 
@@ -172,4 +173,35 @@ describe('NOISE_TYPES generators', () => {
       expect(maxAbs).toBeLessThan(16);
     });
   }
+});
+
+describe('parseOpmlFeeds', () => {
+  const opml = `<?xml version="1.0" encoding="UTF-8"?>
+    <opml version="1.0"><body>
+      <outline text="Tech News" type="rss" xmlUrl="https://feeds.example.com/tech" htmlUrl="https://example.com/tech"/>
+      <outline text="Folder">
+        <outline title="Sleepy Stories" type="rss" xmlUrl="https://feeds.example.com/stories"/>
+        <outline text="Tech News" type="rss" xmlUrl="https://feeds.example.com/tech"/>
+      </outline>
+      <outline text="A folder with no feed"/>
+    </body></opml>`;
+
+  it('extracts feed url + name, recurses folders, and de-dupes', () => {
+    const feeds = parseOpmlFeeds(opml);
+    expect(feeds).toEqual([
+      { url: 'https://feeds.example.com/tech', name: 'Tech News' },
+      { url: 'https://feeds.example.com/stories', name: 'Sleepy Stories' },
+    ]);
+  });
+
+  it('ignores outlines without a feed URL', () => {
+    const feeds = parseOpmlFeeds('<opml><body><outline text="Just a folder"/></body></opml>');
+    expect(feeds).toEqual([]);
+  });
+
+  it('returns [] for empty or malformed input', () => {
+    expect(parseOpmlFeeds('')).toEqual([]);
+    expect(parseOpmlFeeds(null)).toEqual([]);
+    expect(parseOpmlFeeds('not xml at all <<<')).toEqual([]);
+  });
 });
