@@ -7,6 +7,9 @@ import {
   NOISE_TYPES, BINAURAL, NATIVE_MEDIA_VOLUME_LOCK, fmtTime,
   redactUrlForDisplay, normalizeConfigUrl, getDefaultFeedProxyUrl
 } from './utils/core.js';
+import FeedDebugPanel from './components/FeedDebugPanel.jsx';
+import SleepTimer from './components/SleepTimer.jsx';
+import MixerPanel from './components/MixerPanel.jsx';
 
 const icons = {
   BookMarked, Clock, GripVertical, Moon, MoonStar, Pause, Play, Plus, RotateCcw, RotateCw, Rss, Search, Settings2, Shuffle, SlidersHorizontal, Square, Sun, Trash2, Volume2, VolumeX, Wind, X, Download, Check, Waves
@@ -302,9 +305,6 @@ export default function AppLayout() {
     c_inner,
   } = useAppContext() || {}; // fallback for safety
 
-  const [mixName, setMixName] = React.useState('');
-  const [showMixes, setShowMixes] = React.useState(false);
-  const [audioDiag, setAudioDiag] = React.useState(null);
   
   return (
     <div className="app-container" style={{minHeight:'100dvh', color:c_text}}>
@@ -473,124 +473,12 @@ export default function AppLayout() {
           </div>
         </header>
 
-        {/* Master Volume */}
-        <div className="card" style={{display:'flex',alignItems:'center',gap:'.875rem',marginBottom:'1rem'}}>
-          <LucideIcon name="Settings2" size={18} color={bm?'#4b5563':'#818cf8'}/>
-          <span style={{fontSize:'.8rem',fontWeight:700,color:c_head,whiteSpace:'nowrap'}}>Master</span>
-          <input type="range" min="0" max="1" step=".01" value={masterVol} className="indigo"
-            onChange={e=>setMasterVol(+e.target.value)} style={{flex:1}}/>
-          <span style={{fontSize:'.7rem',fontFamily:'monospace',color:c_sub,width:32,textAlign:'right'}}>{Math.round(masterVol*100)}%</span>
-        </div>
-
-        {/* Pro Audio Controls */}
-        <div style={{display:'flex',gap:'.5rem',marginBottom:'1rem'}}>
-          <button onClick={() => setCompOn(!compOn)} className="card"
-            style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',gap:'.5rem',padding:'.875rem',cursor:'pointer',
-            border:compOn?'1px solid rgba(192,132,252,0.4)':'1px solid var(--c-border)',
-            background:compOn?'rgba(192,132,252,0.1)':'var(--c-surface)'}}>
-            <LucideIcon name="Settings2" size={16} color={compOn?'#c084fc':'var(--c-dim)'} />
-            <span style={{fontSize:'.65rem',fontWeight:700,color:compOn?'#c084fc':'var(--c-dim)'}}>NIGHT COMP</span>
-          </button>
-          
-          <button onClick={() => setEqOn(!eqOn)} className="card"
-            style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',gap:'.5rem',padding:'.875rem',cursor:'pointer',
-            border:eqOn?'1px solid rgba(96,165,250,0.4)':'1px solid var(--c-border)',
-            background:eqOn?'rgba(96,165,250,0.1)':'var(--c-surface)'}}>
-            <LucideIcon name="SlidersHorizontal" size={16} color={eqOn?'#60a5fa':'var(--c-dim)'} />
-            <span style={{fontSize:'.65rem',fontWeight:700,color:eqOn?'#60a5fa':'var(--c-dim)'}}>VOICE EQ</span>
-          </button>
-
-          <button onClick={() => setPanOn(!panOn)} className="card"
-            style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',gap:'.5rem',padding:'.875rem',cursor:'pointer',
-            border:panOn?'1px solid rgba(236,72,153,0.4)':'1px solid var(--c-border)',
-            background:panOn?'rgba(236,72,153,0.1)':'var(--c-surface)'}}>
-            <LucideIcon name="Waves" size={16} color={panOn?'#ec4899':'var(--c-dim)'} />
-            <span style={{fontSize:'.65rem',fontWeight:700,color:panOn?'#ec4899':'var(--c-dim)'}}>AUTO PAN</span>
-          </button>
-
-        </div>
-
-
-        
-        {/* Mix Presets */}
-        <div style={{marginBottom:'1rem'}}>
-          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'.5rem',padding:'0 .5rem'}}>
-            <span className="section-label" style={{margin:0}}>Mix Presets</span>
-            <button onClick={() => setShowMixes(!showMixes)} className="btn-icon" style={{width:28,height:28,minWidth:28,minHeight:28}}>
-              <LucideIcon name={showMixes ? 'X' : 'BookMarked'} size={14} />
-            </button>
-          </div>
-          
-          {showMixes && (
-            <div className="card" style={{marginBottom:'1rem', padding:'1rem'}}>
-              <div style={{display:'flex',gap:'.5rem',marginBottom:mixPresets.length ? '1rem' : 0}}>
-                <input type="text" value={mixName} onChange={e=>setMixName(e.target.value)} placeholder="Name this mix..." 
-                  style={{flex:1, fontSize:'14px'}}/>
-                <button onClick={()=>{ saveCurrentMix(mixName); setMixName(''); }} disabled={!mixName.trim()} 
-                  className="btn-pill" style={{padding:'0 1rem'}}>Save</button>
-              </div>
-              
-              {mixPresets.length > 0 && (
-                <div style={{display:'flex',flexDirection:'column',gap:'.5rem',maxHeight:200}} className="scroll-y">
-                  {mixPresets.map(mix => (
-                    <div key={mix.id} className="card-inner" style={{display:'flex',alignItems:'center',gap:'.5rem',padding:'.5rem'}}>
-                      <button onClick={()=>loadMix(mix)} style={{flex:1,textAlign:'left',background:'transparent',border:'none',color:c_head,fontWeight:600,cursor:'pointer',padding:'.25rem'}}>
-                        {mix.name}
-                      </button>
-                      <button onClick={()=>deleteMix(mix.id)} className="btn-icon" style={{width:32,height:32,minWidth:32,minHeight:32}}>
-                        <LucideIcon name="Trash2" size={14} color="#f87171" />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
+        <MixerPanel />
 
         <div style={{display:'flex',flexDirection:'column',gap:'1rem'}}>
 
           {/* Sleep Timer */}
-          <div className="card">
-            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'1rem'}}>
-              <div style={{display:'flex',alignItems:'center',gap:'.5rem',color:bm?'#6b7280':'#a5b4fc'}}>
-                <LucideIcon name="Clock" size={18}/>
-                <span style={{fontWeight:700,fontSize:'.9rem'}}>Sleep Timer</span>
-              </div>
-              {timerActive && <span style={{fontFamily:'monospace',fontSize:'1.3rem',fontWeight:700,color:bm?'#9ca3af':'#818cf8',letterSpacing:'.04em'}}>{fmt(timeLeft)}</span>}
-            </div>
-            <div style={{display:'flex',gap:'.375rem',marginBottom:'.625rem'}}>
-              {[15,30,45,60].map(m=>(
-                <button key={m} onClick={()=>setTimerMins(m)} disabled={timerActive}
-                  className={`speed-chip${timerMins===m?' on':''}`}
-                  style={{opacity:timerActive?.4:1}}>
-                  {m}m
-                </button>
-              ))}
-            </div>
-            <div style={{display:'flex',alignItems:'center',gap:'.75rem',marginBottom:'1rem'}}>
-              <span style={{fontSize:'.7rem',color:c_sub}}>5m</span>
-              <input type="range" min="5" max="120" step="5" value={timerMins} className="indigo"
-                disabled={timerActive} onChange={e=>setTimerMins(+e.target.value)} style={{flex:1,opacity:timerActive?.4:1}}/>
-              <span style={{fontSize:'.75rem',color:c_sub,width:36,textAlign:'right'}}>{timerMins}m</span>
-            </div>
-            {timerActive&&timeLeft!==null&&timeLeft<=60&&timeLeft>0 ? (
-              <button onClick={bumpTimer} className="btn-primary"
-                style={{background:bm?'#1f2937':'#4f46e5',color:bm?'#d1d5db':'#fff',animation:'pulse 1.5s ease-in-out infinite',
-                  boxShadow:bm?'none':'0 0 20px rgba(79,70,229,.4)'}}>
-                Still Awake? (+15 min)
-              </button>
-            ):(
-              <button onClick={toggleTimer} className="btn-primary"
-                style={{background:timerActive?(bm?'rgba(255,255,255,.04)':'rgba(248,113,113,.1)'):(bm?'#1f2937':'#4f46e5'),
-                  color:timerActive?(bm?'#6b7280':'#f87171'):(bm?'#d1d5db':'#fff'),
-                  border:timerActive?`1px solid ${bm?'#1f2937':'rgba(248,113,113,.3)'}`:'none',
-                  boxShadow:timerActive?'none':(bm?'none':'0 4px 20px rgba(79,70,229,.3)')}}>
-                {timerActive?'Cancel Timer':`Start ${timerMins} Min Timer`}
-              </button>
-            )}
-            <p style={{fontSize:'.7rem',color:c_sub,textAlign:'center',margin:'.75rem 0 0'}}>Audio fades out over the last 60 seconds</p>
-          </div>
+          <SleepTimer />
 
           {/* Ambient + Binaural */}
           <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'1rem'}}>
@@ -774,87 +662,7 @@ export default function AppLayout() {
                 </div>
               </div>
 
-              {showFeedDebug && (
-                <div style={{background:c_inner,border:`1px solid ${c_bord}`,borderRadius:'.75rem',padding:'.75rem',display:'flex',flexDirection:'column',gap:'.5rem'}}>
-                  <div style={{fontSize:'.68rem',fontWeight:700,color:c_head}}>Audio Engine (dev)</div>
-                  <div style={{fontSize:'.62rem',color:c_sub,lineHeight:1.5}}>
-                    Simulates an iOS interruption that closes the AudioContext, then rebuilds it
-                    (TESTING.md §3B). After tapping, audio should recover on the next Play / lock-screen control.
-                  </div>
-                  <div style={{display:'flex',gap:'.5rem',flexWrap:'wrap'}}>
-                    <button
-                      type="button"
-                      onClick={async ()=>{ await forceAudioTeardown?.(); setAudioDiag(getAudioDiagnostics?.()); }}
-                      style={{fontSize:'.65rem',fontWeight:700,color:'#fca5a5',background:'transparent',border:`1px solid ${c_bord}`,borderRadius:'.5rem',padding:'.4rem .6rem',cursor:'pointer'}}
-                    >
-                      Force teardown + rebuild
-                    </button>
-                    <button
-                      type="button"
-                      onClick={()=>setAudioDiag(getAudioDiagnostics?.())}
-                      style={{fontSize:'.65rem',fontWeight:700,color:c_head,background:'transparent',border:`1px solid ${c_bord}`,borderRadius:'.5rem',padding:'.4rem .6rem',cursor:'pointer'}}
-                    >
-                      Refresh status
-                    </button>
-                  </div>
-                  {audioDiag && (
-                    <div style={{fontSize:'.62rem',color:audioDiag.dead?'#fca5a5':'#86efac',lineHeight:1.5,wordBreak:'break-all'}}>
-                      state: {audioDiag.state} · dead: {String(audioDiag.dead)} · rebuilding: {String(audioDiag.rebuilding)} · sources: [{audioDiag.sources.join(', ')||'none'}]
-                    </div>
-                  )}
-                  <div style={{fontSize:'.68rem',fontWeight:700,color:c_head,marginTop:'.25rem'}}>Feed Debug</div>
-                  <div style={{fontSize:'.65rem',color:c_sub,lineHeight:1.5}}>
-                    Requested: {feedDebug?.requestedUrl ? redactUrlForDisplay(feedDebug.requestedUrl) : 'No feed loaded yet.'}
-                  </div>
-                  <div style={{fontSize:'.65rem',color:c_sub,lineHeight:1.5}}>
-                    Proxy: {redactUrlForDisplay(normalizeConfigUrl(feedProxyUrl || getDefaultFeedProxyUrl()))}
-                  </div>
-                  {feedDebug?.final && (
-                    <div style={{fontSize:'.65rem',color:feedDebug.final.status==='success'?'#86efac':'#fca5a5',lineHeight:1.5}}>
-                      Result: {feedDebug.final.status==='success'
-                        ? `Loaded ${feedDebug.final.episodeCount} episode${feedDebug.final.episodeCount===1?'':'s'} via ${feedDebug.final.via || 'feed loader'}.`
-                        : feedDebug.final.message}
-                    </div>
-                  )}
-                  {feedDebug?.attempts?.length ? (
-                    <div style={{display:'flex',flexDirection:'column',gap:'.5rem'}}>
-                      {feedDebug.attempts.map((attempt, idx)=>(
-                        <div key={`${attempt.hop}-${attempt.via}-${idx}`} style={{border:`1px solid ${c_bord}`,borderRadius:'.625rem',padding:'.625rem',display:'flex',flexDirection:'column',gap:'.2rem'}}>
-                          <div style={{display:'flex',justifyContent:'space-between',gap:'.5rem',fontSize:'.65rem'}}>
-                            <span style={{fontWeight:700,color:c_head}}>{attempt.via}</span>
-                            <span style={{color:c_sub}}>
-                              Hop {attempt.hop}
-                              {attempt.status ? ` · HTTP ${attempt.status}` : ''}
-                            </span>
-                          </div>
-                          <div style={{fontSize:'.62rem',color:c_sub,lineHeight:1.4,wordBreak:'break-all'}}>
-                            {redactUrlForDisplay(attempt.requestUrl || attempt.targetUrl || '')}
-                          </div>
-                          {attempt.contentType && (
-                            <div style={{fontSize:'.62rem',color:c_sub}}>Content-Type: {attempt.contentType}</div>
-                          )}
-                          {(attempt.markupType || attempt.embeddedFeed) && (
-                            <div style={{fontSize:'.62rem',color:c_sub}}>
-                              Detected: {attempt.markupType || 'unknown'}{attempt.embeddedFeed ? ` -> ${attempt.embeddedMarkupType || 'embedded feed'}` : ''}
-                            </div>
-                          )}
-                          {attempt.message && (
-                            <div style={{fontSize:'.62rem',color:'#86efac'}}>{attempt.message}</div>
-                          )}
-                          {attempt.error && (
-                            <div style={{fontSize:'.62rem',color:'#fca5a5'}}>{attempt.error}</div>
-                          )}
-                          {attempt.preview && (
-                            <div style={{fontSize:'.62rem',color:c_dim,lineHeight:1.4}}>{attempt.preview}</div>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div style={{fontSize:'.62rem',color:c_dim}}>No request attempts recorded yet.</div>
-                  )}
-                </div>
-              )}
+              <FeedDebugPanel />
             </div>
 
             {/* Now Playing strip */}
