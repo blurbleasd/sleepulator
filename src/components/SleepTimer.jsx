@@ -21,11 +21,11 @@ export default function SleepTimer() {
   return (
     <div className="card">
       <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'1rem'}}>
-        <div style={{display:'flex',alignItems:'center',gap:'.5rem',color:bm?'#6b7280':'#a5b4fc'}}>
+        <div style={{display:'flex',alignItems:'center',gap:'.5rem',color:bm?'#8a7860':'#f0c79a'}}>
           <Clock size={18}/>
           <span style={{fontWeight:700,fontSize:'.9rem'}}>Sleep Timer</span>
         </div>
-        {timerActive && <span style={{fontFamily:'monospace',fontSize:'1.3rem',fontWeight:700,color:bm?'#9ca3af':'#818cf8',letterSpacing:'.04em'}}>{fmt(timeLeft)}</span>}
+        {timerActive && <span style={{fontFamily:'monospace',fontSize:'1.3rem',fontWeight:700,color:bm?'#b39b80':'#e6b277',letterSpacing:'.04em'}}>{fmt(timeLeft)}</span>}
       </div>
       <div style={{display:'flex',gap:'.375rem',marginBottom:'.625rem'}}>
         {[15,30,45,60].map(m=>(
@@ -44,15 +44,15 @@ export default function SleepTimer() {
       </div>
       {timerActive&&timeLeft!==null&&timeLeft<=60&&timeLeft>0 ? (
         <button onClick={bumpTimer} className="btn-primary"
-          style={{background:bm?'#1f2937':'#4f46e5',color:bm?'#d1d5db':'#fff',animation:'pulse 1.5s ease-in-out infinite',
+          style={{background:bm?'#2a2114':'#b8813a',color:bm?'#e6dcce':'#fff',animation:'pulse 1.5s ease-in-out infinite',
             boxShadow:bm?'none':'0 0 20px rgba(79,70,229,.4)'}}>
           Still Awake? (+15 min)
         </button>
       ):(
         <button onClick={toggleTimer} className="btn-primary"
-          style={{background:timerActive?(bm?'rgba(255,255,255,.04)':'rgba(248,113,113,.1)'):(bm?'#1f2937':'#4f46e5'),
-            color:timerActive?(bm?'#6b7280':'#f87171'):(bm?'#d1d5db':'#fff'),
-            border:timerActive?`1px solid ${bm?'#1f2937':'rgba(248,113,113,.3)'}`:'none',
+          style={{background:timerActive?(bm?'rgba(255,255,255,.04)':'rgba(248,113,113,.1)'):(bm?'#2a2114':'#b8813a'),
+            color:timerActive?(bm?'#8a7860':'#f87171'):(bm?'#e6dcce':'#fff'),
+            border:timerActive?`1px solid ${bm?'#2a2114':'rgba(248,113,113,.3)'}`:'none',
             boxShadow:timerActive?'none':(bm?'none':'0 4px 20px rgba(79,70,229,.3)')}}>
           {timerActive?'Cancel Timer':`Start ${timerMins} Min Timer`}
         </button>

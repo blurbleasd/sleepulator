@@ -47,7 +47,7 @@ export default function AmbientBinaural() {
 
       {/* Binaural */}
       <div className="card" style={{position:'relative',overflow:'hidden'}}>
-        {binOn && !bm && <div className="glow-blue" style={{position:'absolute',top:0,left:0,width:3,height:'100%',background:'#60a5fa',borderRadius:2}}/>}
+        {binOn && !bm && <div className="glow-blue" style={{position:'absolute',top:0,left:0,width:3,height:'100%',background:'#e6b277',borderRadius:2}}/>}
         <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:'.875rem'}}>
           <div style={{flex:1,minWidth:0}}>
             <div style={{fontSize:'.8rem',fontWeight:700,color:c_head,marginBottom:'.5rem'}}>Binaural</div>

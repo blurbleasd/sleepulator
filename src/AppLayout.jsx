@@ -285,20 +285,20 @@ export default function AppLayout() {
       {breathMode && bc && (
         <div className="overlay" style={{background:bm?'#000':'rgba(3,7,18,.97)',alignItems:'center',justifyContent:'center'}}>
           <button onClick={()=>setBreathMode(null)}
-            style={{position:'absolute',top:'var(--top-clearance)',right:'1.25rem',background:'#1e293b',border:'none',borderRadius:'50%',width:44,height:44,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',color:'#94a3b8'}}>
+            style={{position:'absolute',top:'var(--top-clearance)',right:'1.25rem',background:'#1e293b',border:'none',borderRadius:'50%',width:44,height:44,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',color:'#b39b80'}}>
             <LucideIcon name="X" size={20}/>
           </button>
           <div style={{display:'flex',gap:'.75rem',marginBottom:'2rem'}}>
             {['478','box'].map(m=>(
               <button key={m} onClick={()=>setBreathMode(m)}
                 style={{padding:'.5rem 1.25rem',borderRadius:'9999px',border:'none',fontWeight:700,fontSize:'.8rem',cursor:'pointer',
-                  background:breathMode===m?(bm?'#1f2937':'#4f46e5'):(bm?'#111':'#1e293b'),
-                  color:breathMode===m?'#fff':(bm?'#6b7280':'#94a3b8')}}>
+                  background:breathMode===m?(bm?'#2a2114':'#b8813a'):(bm?'#111':'#1e293b'),
+                  color:breathMode===m?'#fff':(bm?'#8a7860':'#b39b80')}}>
                 {m==='478'?'4-7-8':'Box 4-4-4-4'}
               </button>
             ))}
           </div>
-          <h2 style={{fontSize:'1.2rem',fontWeight:800,letterSpacing:'.08em',color:bm?'#9ca3af':bc.col,marginBottom:'.25rem'}}>{bc.label}</h2>
+          <h2 style={{fontSize:'1.2rem',fontWeight:800,letterSpacing:'.08em',color:bm?'#b39b80':bc.col,marginBottom:'.25rem'}}>{bc.label}</h2>
           <p style={{fontSize:'.85rem',color:c_sub,marginBottom:'5rem',textAlign:'center',padding:'0 2rem'}}>{bc.sub}</p>
           <div style={{position:'relative',width:220,height:220,display:'flex',alignItems:'center',justifyContent:'center'}}>
             <div style={{position:'absolute',inset:0,borderRadius:'50%',background:bc.col,opacity:.1}}/>
@@ -309,11 +309,11 @@ export default function AppLayout() {
 
       {/* ── Saved feeds overlay ── */}
       {showSubs && (
-        <div className="overlay" style={{background:bm?'#000':'#030712',paddingTop:'var(--top-clearance)'}}>
+        <div className="overlay" style={{background:bm?'#000':'#15110b',paddingTop:'var(--top-clearance)'}}>
           <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'1.25rem'}}>
             <h2 style={{fontSize:'1.1rem',fontWeight:800,color:c_head,margin:0}}>Saved Feeds</h2>
             <button onClick={()=>setShowSubs(false)}
-              style={{background:'#1e293b',border:'none',borderRadius:'50%',width:44,height:44,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',color:'#94a3b8'}}>
+              style={{background:'#1e293b',border:'none',borderRadius:'50%',width:44,height:44,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',color:'#b39b80'}}>
               <LucideIcon name="X" size={18}/>
             </button>
           </div>
@@ -324,7 +324,7 @@ export default function AppLayout() {
               <input type="text" value={subName} onChange={e=>setSubName(e.target.value)} placeholder={rssUrl.trim() ? "Current feed name…" : "Load a feed to rename it…"}
                 style={{flex:1,background:c_inner,border:`1px solid ${c_bord}`,borderRadius:'.5rem',padding:'.5rem .75rem',color:c_text,fontSize:'14px'}}/>
               <button onClick={saveSub} disabled={!rssUrl.trim()}
-                style={{padding:'.5rem 1rem',borderRadius:'.5rem',background:rssUrl.trim()?'#6d28d9':'#312e81',color:'#fff',border:'none',fontWeight:700,cursor:rssUrl.trim()?'pointer':'default',whiteSpace:'nowrap',opacity:rssUrl.trim()?1:.55}}>
+                style={{padding:'.5rem 1rem',borderRadius:'.5rem',background:rssUrl.trim()?'#b8813a':'#4a3a1e',color:'#fff',border:'none',fontWeight:700,cursor:rssUrl.trim()?'pointer':'default',whiteSpace:'nowrap',opacity:rssUrl.trim()?1:.55}}>
                 Update
               </button>
             </div>
@@ -342,17 +342,17 @@ export default function AppLayout() {
                   )}
                 </div>
                 <button onClick={()=>{ setSubName(s.name || ''); loadFeed(s.url, { closeLibrary: true }); }}
-                  style={{padding:'.4rem .875rem',borderRadius:'.5rem',background:'rgba(139,92,246,.2)',color:'#c084fc',border:'none',fontSize:'.75rem',fontWeight:700,cursor:'pointer',whiteSpace:'nowrap'}}>
+                  style={{padding:'.4rem .875rem',borderRadius:'.5rem',background:'rgba(230,178,119,.2)',color:'#e6b277',border:'none',fontSize:'.75rem',fontWeight:700,cursor:'pointer',whiteSpace:'nowrap'}}>
                   Load
                 </button>
                 <button onClick={()=>{ setSubName(s.name || ''); loadFeed(s.url, { autoplay: true, closeLibrary: true }); }}
-                  style={{padding:'.4rem .875rem',borderRadius:'.5rem',background:'#6d28d9',color:'#fff',border:'none',fontSize:'.75rem',fontWeight:700,cursor:'pointer',whiteSpace:'nowrap'}}>
+                  style={{padding:'.4rem .875rem',borderRadius:'.5rem',background:'#b8813a',color:'#fff',border:'none',fontSize:'.75rem',fontWeight:700,cursor:'pointer',whiteSpace:'nowrap'}}>
                   Play
                 </button>
                 <button onClick={()=>setSubs(prev=>prev.filter(x=>x.url!==s.url))}
-                  style={{background:'none',border:'none',cursor:'pointer',color:'#4b5563',padding:'.25rem',display:'flex',alignItems:'center'}}
+                  style={{background:'none',border:'none',cursor:'pointer',color:'#6b5d48',padding:'.25rem',display:'flex',alignItems:'center'}}
                   onMouseOver={e=>e.currentTarget.style.color='#f87171'}
-                  onMouseOut={e=>e.currentTarget.style.color='#4b5563'}>
+                  onMouseOut={e=>e.currentTarget.style.color='#6b5d48'}>
                   <LucideIcon name="Trash2" size={16}/>
                 </button>
               </div>
@@ -362,11 +362,11 @@ export default function AppLayout() {
       )}
 
       {showPlaylistLibrary && (
-        <div className="overlay" style={{background:bm?'#000':'#030712',paddingTop:'var(--top-clearance)'}}>
+        <div className="overlay" style={{background:bm?'#000':'#15110b',paddingTop:'var(--top-clearance)'}}>
           <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'1.25rem'}}>
             <h2 style={{fontSize:'1.1rem',fontWeight:800,color:c_head,margin:0}}>Saved Playlists</h2>
             <button onClick={()=>setShowPlaylistLibrary(false)}
-              style={{background:'#1e293b',border:'none',borderRadius:'50%',width:44,height:44,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',color:'#94a3b8'}}>
+              style={{background:'#1e293b',border:'none',borderRadius:'50%',width:44,height:44,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',color:'#b39b80'}}>
               <LucideIcon name="X" size={18}/>
             </button>
           </div>
@@ -377,7 +377,7 @@ export default function AppLayout() {
               <input type="text" value={playlistName} onChange={e=>setPlaylistName(e.target.value)} placeholder="Playlist name…"
                 style={{flex:1,background:c_inner,border:`1px solid ${c_bord}`,borderRadius:'.5rem',padding:'.5rem .75rem',color:c_text,fontSize:'14px'}}/>
               <button onClick={saveCurrentPlaylist} disabled={!playlist.length}
-                style={{padding:'.5rem 1rem',borderRadius:'.5rem',background:playlist.length?'#6d28d9':'#312e81',color:'#fff',border:'none',fontWeight:700,cursor:playlist.length?'pointer':'default',whiteSpace:'nowrap',opacity:playlist.length?1:.55}}>
+                style={{padding:'.5rem 1rem',borderRadius:'.5rem',background:playlist.length?'#b8813a':'#4a3a1e',color:'#fff',border:'none',fontWeight:700,cursor:playlist.length?'pointer':'default',whiteSpace:'nowrap',opacity:playlist.length?1:.55}}>
                 Save
               </button>
             </div>
@@ -395,17 +395,17 @@ export default function AppLayout() {
                   </p>
                 </div>
                 <button onClick={()=>loadSavedPlaylist(saved)}
-                  style={{padding:'.4rem .875rem',borderRadius:'.5rem',background:'rgba(139,92,246,.2)',color:'#c084fc',border:'none',fontSize:'.75rem',fontWeight:700,cursor:'pointer',whiteSpace:'nowrap'}}>
+                  style={{padding:'.4rem .875rem',borderRadius:'.5rem',background:'rgba(230,178,119,.2)',color:'#e6b277',border:'none',fontSize:'.75rem',fontWeight:700,cursor:'pointer',whiteSpace:'nowrap'}}>
                   Load
                 </button>
                 <button onClick={()=>loadSavedPlaylist(saved, { autoplay: true })}
-                  style={{padding:'.4rem .875rem',borderRadius:'.5rem',background:'#6d28d9',color:'#fff',border:'none',fontSize:'.75rem',fontWeight:700,cursor:'pointer',whiteSpace:'nowrap'}}>
+                  style={{padding:'.4rem .875rem',borderRadius:'.5rem',background:'#b8813a',color:'#fff',border:'none',fontSize:'.75rem',fontWeight:700,cursor:'pointer',whiteSpace:'nowrap'}}>
                   Play
                 </button>
                 <button onClick={()=>setSavedPlaylists(prev=>prev.filter(entry=>(entry.id || entry.name)!==(saved.id || saved.name)))}
-                  style={{background:'none',border:'none',cursor:'pointer',color:'#4b5563',padding:'.25rem',display:'flex',alignItems:'center'}}
+                  style={{background:'none',border:'none',cursor:'pointer',color:'#6b5d48',padding:'.25rem',display:'flex',alignItems:'center'}}
                   onMouseOver={e=>e.currentTarget.style.color='#f87171'}
-                  onMouseOut={e=>e.currentTarget.style.color='#4b5563'}>
+                  onMouseOut={e=>e.currentTarget.style.color='#6b5d48'}>
                   <LucideIcon name="Trash2" size={16}/>
                 </button>
               </div>
@@ -415,7 +415,7 @@ export default function AppLayout() {
       )}
 
       {/* ── Main ── */}
-      <div style={{maxWidth:500,margin:'0 auto',padding:'0 1rem'}} className="pad-top pad-bottom">
+      <div style={{maxWidth:500,margin:'0 auto',paddingLeft:'1rem',paddingRight:'1rem'}} className="pad-top pad-bottom">
 
         {/* Header */}
         <Header />
@@ -432,10 +432,10 @@ export default function AppLayout() {
 
           {/* Podcast */}
           <div className="card" style={{position:'relative',overflow:'hidden'}}>
-            {podPlaying && !bm && <div className="glow-purple" style={{position:'absolute',top:0,left:0,width:3,height:'100%',background:'#c084fc',borderRadius:2}}/>}
+            {podPlaying && !bm && <div className="glow-purple" style={{position:'absolute',top:0,left:0,width:3,height:'100%',background:'#e6b277',borderRadius:2}}/>}
 
             <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'1rem'}}>
-              <div style={{display:'flex',alignItems:'center',gap:'.5rem',color:bm?'#7c3aed':'#c084fc'}}>
+              <div style={{display:'flex',alignItems:'center',gap:'.5rem',color:bm?'#a9762f':'#e6b277'}}>
                 <LucideIcon name="Rss" size={18}/>
                 <span style={{fontWeight:700,fontSize:'.9rem'}}>Podcast Stream</span>
               </div>
@@ -451,7 +451,7 @@ export default function AppLayout() {
                 placeholder="Paste podcast feed URL…"
                 style={{flex:1,background:c_inner,border:`1px solid ${c_bord}`,borderRadius:'.625rem',padding:'.5rem .75rem',color:c_text,fontSize:'14px'}}/>
               <button onClick={()=>{ document.activeElement?.blur(); loadFeed(); }} disabled={loading}
-                style={{padding:'.5rem 1rem',borderRadius:'.625rem',background:bm?'#1f2937':'#7e22ce',color:bm?'#9ca3af':'#fff',border:'none',fontWeight:700,cursor:'pointer',whiteSpace:'nowrap',minWidth:60,opacity:loading?.6:1}}>
+                style={{padding:'.5rem 1rem',borderRadius:'.625rem',background:bm?'#2a2114':'#b8813a',color:bm?'#b39b80':'#fff',border:'none',fontWeight:700,cursor:'pointer',whiteSpace:'nowrap',minWidth:60,opacity:loading?.6:1}}>
                 {loading?'…':'Load'}
               </button>
             </div>
@@ -460,8 +460,8 @@ export default function AppLayout() {
 
             {/* Now Playing strip */}
             {curEp && (
-              <div className="card-inner" style={{marginBottom:'.875rem',background:bm?'rgba(139,92,246,.05)':'rgba(192,132,252,.07)',borderColor:bm?'rgba(139,92,246,.25)':'rgba(192,132,252,.25)'}}>
-                <div style={{fontSize:'.62rem',fontWeight:700,letterSpacing:'.07em',textTransform:'uppercase',color:bm?'#7c3aed':'#a78bfa',marginBottom:'.2rem'}}>
+              <div className="card-inner" style={{marginBottom:'.875rem',background:bm?'rgba(230,178,119,.05)':'rgba(230,178,119,.07)',borderColor:bm?'rgba(230,178,119,.25)':'rgba(230,178,119,.25)'}}>
+                <div style={{fontSize:'.62rem',fontWeight:700,letterSpacing:'.07em',textTransform:'uppercase',color:bm?'#a9762f':'#e6b277',marginBottom:'.2rem'}}>
                   {podPlaying ? '▶ Now Playing' : '⏸ Paused'}
                 </div>
                 <div style={{fontSize:'.73rem',color:c_head,lineHeight:1.4,marginBottom:'.5rem',display:'-webkit-box',WebkitLineClamp:2,WebkitBoxOrient:'vertical',overflow:'hidden'}}>
@@ -491,7 +491,7 @@ export default function AppLayout() {
             <div className="card-inner" style={{marginBottom:'.875rem',display:'flex',flexDirection:'column',gap:'.875rem'}}>
               <div style={{display:'flex',flexDirection:'column',gap:'.5rem'}}>
                 <div style={{display:'flex',alignItems:'center',gap:'.75rem'}}>
-                  <LucideIcon name="Volume2" size={16} color={bm?'#7c3aed':'#c084fc'}/>
+                  <LucideIcon name="Volume2" size={16} color={bm?'#a9762f':'#e6b277'}/>
                   <span style={{fontSize:'.7rem',fontWeight:700,color:c_sub,whiteSpace:'nowrap'}}>Pod Mix</span>
                   <input type="range" min="0" max="1" step=".01" value={podVol} className="purple"
                     disabled={NATIVE_MEDIA_VOLUME_LOCK}
@@ -541,11 +541,11 @@ export default function AppLayout() {
             {activeTab==='feed' && episodes.length>0 && (
               <div style={{display:'flex',gap:'.5rem',marginBottom:'.75rem',flexWrap:'wrap'}}>
                 <button onClick={()=>playEp(episodes[0], 'feed')}
-                  style={{padding:'.45rem .8rem',borderRadius:'.625rem',background:'#6d28d9',color:'#fff',border:'none',fontSize:'.72rem',fontWeight:700,cursor:'pointer'}}>
+                  style={{padding:'.45rem .8rem',borderRadius:'.625rem',background:'#b8813a',color:'#fff',border:'none',fontSize:'.72rem',fontWeight:700,cursor:'pointer'}}>
                   Play Latest
                 </button>
                 <button onClick={()=>addEpisodesToPlaylist(episodes)}
-                  style={{padding:'.45rem .8rem',borderRadius:'.625rem',background:'rgba(139,92,246,.18)',color:'#c084fc',border:`1px solid ${c_bord}`,fontSize:'.72rem',fontWeight:700,cursor:'pointer'}}>
+                  style={{padding:'.45rem .8rem',borderRadius:'.625rem',background:'rgba(230,178,119,.18)',color:'#e6b277',border:`1px solid ${c_bord}`,fontSize:'.72rem',fontWeight:700,cursor:'pointer'}}>
                   Add All to Playlist
                 </button>
               </div>
@@ -554,11 +554,11 @@ export default function AppLayout() {
             {activeTab==='playlist' && (
               <div style={{display:'flex',gap:'.5rem',marginBottom:'.75rem',flexWrap:'wrap'}}>
                 <button onClick={()=>playlist.length && playEp(playlist[0], 'playlist')} disabled={!playlist.length}
-                  style={{padding:'.45rem .8rem',borderRadius:'.625rem',background:playlist.length?'#6d28d9':'#312e81',color:'#fff',border:'none',fontSize:'.72rem',fontWeight:700,cursor:playlist.length?'pointer':'default',opacity:playlist.length?1:.55}}>
+                  style={{padding:'.45rem .8rem',borderRadius:'.625rem',background:playlist.length?'#b8813a':'#4a3a1e',color:'#fff',border:'none',fontSize:'.72rem',fontWeight:700,cursor:playlist.length?'pointer':'default',opacity:playlist.length?1:.55}}>
                   Play Playlist
                 </button>
                 <button onClick={saveCurrentPlaylist} disabled={!playlist.length}
-                  style={{padding:'.45rem .8rem',borderRadius:'.625rem',background:'rgba(139,92,246,.18)',color:playlist.length?'#c084fc':'#64748b',border:`1px solid ${c_bord}`,fontSize:'.72rem',fontWeight:700,cursor:playlist.length?'pointer':'default',opacity:playlist.length?1:.55}}>
+                  style={{padding:'.45rem .8rem',borderRadius:'.625rem',background:'rgba(230,178,119,.18)',color:playlist.length?'#e6b277':'#8a7860',border:`1px solid ${c_bord}`,fontSize:'.72rem',fontWeight:700,cursor:playlist.length?'pointer':'default',opacity:playlist.length?1:.55}}>
                   Save Playlist
                 </button>
                 <button onClick={()=>setShowPlaylistLibrary(true)}
@@ -619,8 +619,8 @@ export default function AppLayout() {
                         dragSrcRef.current=null;
                       }}>
                       <div className="ep-row"
-                        style={{background:playing?(bm?'rgba(139,92,246,.12)':'rgba(192,132,252,.08)'):(bm?'rgba(255,255,255,.02)':'rgba(255,255,255,.02)'),
-                          border:playing?`1px solid ${bm?'rgba(139,92,246,.2)':'rgba(192,132,252,.2)'}`:undefined,
+                        style={{background:playing?(bm?'rgba(230,178,119,.12)':'rgba(230,178,119,.08)'):(bm?'rgba(255,255,255,.02)':'rgba(255,255,255,.02)'),
+                          border:playing?`1px solid ${bm?'rgba(230,178,119,.2)':'rgba(230,178,119,.2)'}`:undefined,
                           cursor:activeTab==='playlist'?'grab':'default'}}>
                         {/* Drag handle on playlist */}
                         {activeTab==='playlist' && (
@@ -653,7 +653,7 @@ export default function AppLayout() {
                             else downloadEpisode(ep.url);
                           }} className="btn-icon"
                             style={{width:36,height:36,minWidth:36,minHeight:36,
-                              background:'transparent', color: cachedEpisodes[ep.url] ? '#38bdf8' : c_dim}}>
+                              background:'transparent', color: cachedEpisodes[ep.url] ? '#e6b277' : c_dim}}>
                             {downloadProgress[ep.url] ? (
                               <span style={{fontSize:'10px',fontWeight:'bold'}}>...</span>
                             ) : (
@@ -677,7 +677,7 @@ export default function AppLayout() {
                           <button onClick={()=>playEp(ep,activeTab)}
                             className={`btn-icon${playing?' active-purple':''}`}
                             style={{width:36,height:36,minWidth:36,minHeight:36,
-                              ...(playing?{background:'rgba(192,132,252,.2)',color:'#c084fc'}:{})}}>
+                              ...(playing?{background:'rgba(230,178,119,.2)',color:'#e6b277'}:{})}}>
                             <LucideIcon name={playing?'Pause':'Play'} size={15}/>
                           </button>
                         </div>
@@ -687,8 +687,8 @@ export default function AppLayout() {
                           {[{s:-15,icon:'RotateCcw'},{s:15,icon:'RotateCw'}].map(({s,icon})=>(
                             <button key={s} onClick={()=>skipPod(s)}
                               style={{display:'flex',alignItems:'center',gap:'.25rem',padding:'.375rem .625rem',borderRadius:'.5rem',
-                                background:bm?'rgba(255,255,255,.04)':'rgba(192,132,252,.08)',
-                                color:bm?'#6b7280':'#c084fc',border:'none',cursor:'pointer',fontSize:'.7rem'}}>
+                                background:bm?'rgba(255,255,255,.04)':'rgba(230,178,119,.08)',
+                                color:bm?'#8a7860':'#e6b277',border:'none',cursor:'pointer',fontSize:'.7rem'}}>
                               <LucideIcon name={icon} size={13}/>{Math.abs(s)}s
                             </button>
                           ))}

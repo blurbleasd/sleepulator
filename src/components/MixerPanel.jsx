@@ -26,7 +26,7 @@ export default function MixerPanel() {
     <>
       {/* Master Volume */}
       <div className="card" style={{display:'flex',alignItems:'center',gap:'.875rem',marginBottom:'1rem'}}>
-        <Settings2 size={18} color={bm?'#4b5563':'#818cf8'}/>
+        <Settings2 size={18} color={bm?'#6b5d48':'#e6b277'}/>
         <span style={{fontSize:'.8rem',fontWeight:700,color:c_head,whiteSpace:'nowrap'}}>Master</span>
         <input type="range" min="0" max="1" step=".01" value={masterVol} className="indigo"
           onChange={e=>setMasterVol(+e.target.value)} style={{flex:1}}/>
@@ -37,26 +37,26 @@ export default function MixerPanel() {
       <div style={{display:'flex',gap:'.5rem',marginBottom:'1rem'}}>
         <button onClick={() => setCompOn(!compOn)} className="card"
           style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',gap:'.5rem',padding:'.875rem',cursor:'pointer',
-          border:compOn?'1px solid rgba(192,132,252,0.4)':'1px solid var(--c-border)',
-          background:compOn?'rgba(192,132,252,0.1)':'var(--c-surface)'}}>
-          <Settings2 size={16} color={compOn?'#c084fc':'var(--c-dim)'} />
-          <span style={{fontSize:'.65rem',fontWeight:700,color:compOn?'#c084fc':'var(--c-dim)'}}>NIGHT COMP</span>
+          border:compOn?'1px solid rgba(230,178,119,0.4)':'1px solid var(--c-border)',
+          background:compOn?'rgba(230,178,119,0.1)':'var(--c-surface)'}}>
+          <Settings2 size={16} color={compOn?'#e6b277':'var(--c-dim)'} />
+          <span style={{fontSize:'.65rem',fontWeight:700,color:compOn?'#e6b277':'var(--c-dim)'}}>NIGHT COMP</span>
         </button>
 
         <button onClick={() => setEqOn(!eqOn)} className="card"
           style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',gap:'.5rem',padding:'.875rem',cursor:'pointer',
-          border:eqOn?'1px solid rgba(96,165,250,0.4)':'1px solid var(--c-border)',
-          background:eqOn?'rgba(96,165,250,0.1)':'var(--c-surface)'}}>
-          <SlidersHorizontal size={16} color={eqOn?'#60a5fa':'var(--c-dim)'} />
-          <span style={{fontSize:'.65rem',fontWeight:700,color:eqOn?'#60a5fa':'var(--c-dim)'}}>VOICE EQ</span>
+          border:eqOn?'1px solid rgba(230,178,119,0.4)':'1px solid var(--c-border)',
+          background:eqOn?'rgba(230,178,119,0.1)':'var(--c-surface)'}}>
+          <SlidersHorizontal size={16} color={eqOn?'#e6b277':'var(--c-dim)'} />
+          <span style={{fontSize:'.65rem',fontWeight:700,color:eqOn?'#e6b277':'var(--c-dim)'}}>VOICE EQ</span>
         </button>
 
         <button onClick={() => setPanOn(!panOn)} className="card"
           style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',gap:'.5rem',padding:'.875rem',cursor:'pointer',
-          border:panOn?'1px solid rgba(236,72,153,0.4)':'1px solid var(--c-border)',
-          background:panOn?'rgba(236,72,153,0.1)':'var(--c-surface)'}}>
-          <Waves size={16} color={panOn?'#ec4899':'var(--c-dim)'} />
-          <span style={{fontSize:'.65rem',fontWeight:700,color:panOn?'#ec4899':'var(--c-dim)'}}>AUTO PAN</span>
+          border:panOn?'1px solid rgba(217,138,94,0.4)':'1px solid var(--c-border)',
+          background:panOn?'rgba(217,138,94,0.1)':'var(--c-surface)'}}>
+          <Waves size={16} color={panOn?'#d98a5e':'var(--c-dim)'} />
+          <span style={{fontSize:'.65rem',fontWeight:700,color:panOn?'#d98a5e':'var(--c-dim)'}}>AUTO PAN</span>
         </button>
       </div>
 
