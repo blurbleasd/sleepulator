@@ -12,6 +12,7 @@ import MixerPanel from './components/MixerPanel.jsx';
 import Header from './components/Header.jsx';
 import AmbientBinaural from './components/AmbientBinaural.jsx';
 import PodcastSettings from './components/PodcastSettings.jsx';
+import NowPlayingBar from './components/NowPlayingBar.jsx';
 
 const icons = {
   BookMarked, Clock, GripVertical, Moon, MoonStar, Pause, Play, Plus, RotateCcw, RotateCw, Rss, Search, Settings2, Shuffle, SlidersHorizontal, Square, Sun, Trash2, Volume2, VolumeX, Wind, X, Download, Check, Waves
@@ -421,6 +422,8 @@ export default function AppLayout() {
         {/* Header */}
         <Header />
 
+        <NowPlayingBar onOpen={()=>setShowPodcasts(true)} />
+
         <MixerPanel />
 
         <div style={{display:'flex',flexDirection:'column',gap:'1rem'}}>
@@ -437,7 +440,7 @@ export default function AppLayout() {
               <LucideIcon name="Rss" size={20} color={bm?'#a9762f':'#e6b277'}/> Podcasts
             </span>
             <span style={{display:'flex',alignItems:'center',gap:'.5rem',color:c_sub,fontSize:'.85rem'}}>
-              {curEp ? <span style={{color:'#e6b277',maxWidth:130,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{podPlaying?'▶':'⏸'} {curEp.title}</span> : 'Browse & play'}
+              Browse &amp; play
               <span style={{fontSize:'1.3rem',lineHeight:1,color:c_dim}}>›</span>
             </span>
           </button>

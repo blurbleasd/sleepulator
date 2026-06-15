@@ -19,6 +19,8 @@ describe('App shell', () => {
     expect(screen.getByText('Sleep Timer')).toBeInTheDocument();
     expect(screen.getByText('Ambient')).toBeInTheDocument();
     expect(screen.getByText('Binaural')).toBeInTheDocument();
+    // With no episode loaded, the now-playing bar stays hidden.
+    expect(screen.queryByText(/now playing|paused/i)).not.toBeInTheDocument();
   });
 });
 
