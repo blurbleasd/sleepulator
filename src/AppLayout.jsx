@@ -7,9 +7,11 @@ import {
   NOISE_TYPES, BINAURAL, NATIVE_MEDIA_VOLUME_LOCK, fmtTime,
   redactUrlForDisplay, normalizeConfigUrl, getDefaultFeedProxyUrl
 } from './utils/core.js';
-import FeedDebugPanel from './components/FeedDebugPanel.jsx';
 import SleepTimer from './components/SleepTimer.jsx';
 import MixerPanel from './components/MixerPanel.jsx';
+import Header from './components/Header.jsx';
+import AmbientBinaural from './components/AmbientBinaural.jsx';
+import PodcastSettings from './components/PodcastSettings.jsx';
 
 const icons = {
   BookMarked, Clock, GripVertical, Moon, MoonStar, Pause, Play, Plus, RotateCcw, RotateCw, Rss, Search, Settings2, Shuffle, SlidersHorizontal, Square, Sun, Trash2, Volume2, VolumeX, Wind, X, Download, Check, Waves
@@ -19,37 +21,6 @@ function LucideIcon({ name, size = 20, color = 'currentColor', strokeWidth = 2, 
   const Icon = icons[name] || HelpCircle;
   return <Icon size={size} color={color} strokeWidth={strokeWidth} className={className} style={style} />;
 }
-
-
-  const handleExportData = () => {
-    const data = JSON.stringify(localStorage);
-    const blob = new Blob([data], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `sleepulator-backup-${new Date().toISOString().split('T')[0]}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  const handleImportData = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      try {
-        const data = JSON.parse(event.target.result);
-        for (const [key, value] of Object.entries(data)) {
-          localStorage.setItem(key, value);
-        }
-        alert('Data imported successfully! The app will now reload.');
-        window.location.reload();
-      } catch (err) {
-        alert('Failed to parse backup file.');
-      }
-    };
-    reader.readAsText(file);
-  };
 
 export default function AppLayout() {
   const {
@@ -447,31 +418,7 @@ export default function AppLayout() {
       <div style={{maxWidth:500,margin:'0 auto',padding:'0 1rem'}} className="pad-top pad-bottom">
 
         {/* Header */}
-        <header style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'1.25rem'}}>
-          <div style={{display:'flex',alignItems:'center',gap:'.625rem'}}>
-            <LucideIcon name="Moon" size={26} color={bm?'#374151':'#818cf8'}/>
-            <h1 style={{margin:0,fontSize:'1.4rem',fontWeight:900,letterSpacing:'.12em',
-              background:bm?'none':'linear-gradient(135deg,#818cf8,#c084fc)',
-              WebkitBackgroundClip:bm?'unset':'text',WebkitTextFillColor:bm?'#6b7280':'transparent',
-              color:bm?'#6b7280':'transparent'}}>
-              SLEEPULATOR
-            </h1>
-          </div>
-          <div style={{display:'flex',gap:'.5rem',alignItems:'center'}}>
-            <button onClick={()=>setBreathMode(v=>v?null:'478')} title="Breathing Guide"
-              className={`btn-icon${breathMode?' active-indigo':''}`}>
-              <LucideIcon name="Wind" size={18}/>
-            </button>
-            <button onClick={()=>setBm(v=>!v)}
-              style={{display:'flex',alignItems:'center',gap:'.375rem',padding:'.5rem .875rem',borderRadius:'9999px',
-                border:`1px solid ${bm?'#1f2937':'rgba(129,140,248,.3)'}`,
-                background:bm?'#0a0a0a':'rgba(129,140,248,.08)',
-                color:bm?'#6b7280':'#818cf8',cursor:'pointer',fontSize:'.75rem',fontWeight:700}}>
-              <LucideIcon name={bm?'Sun':'MoonStar'} size={14}/>
-              {bm?'Wake':'Bedtime'}
-            </button>
-          </div>
-        </header>
+        <Header />
 
         <MixerPanel />
 
@@ -481,60 +428,7 @@ export default function AppLayout() {
           <SleepTimer />
 
           {/* Ambient + Binaural */}
-          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'1rem'}}>
-
-            {/* Ambient */}
-            <div className="card" style={{position:'relative',overflow:'hidden'}}>
-              {ambientOn && !bm && <div className="glow-orange" style={{position:'absolute',top:0,left:0,width:3,height:'100%',background:'#fb923c',borderRadius:2}}/>}
-              <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:'.875rem'}}>
-                <div style={{flex:1,minWidth:0}}>
-                  <div style={{fontSize:'.8rem',fontWeight:700,color:c_head,marginBottom:'.5rem'}}>Ambient</div>
-                  <select value={noiseType} onChange={e=>setNoiseType(e.target.value)}
-                    style={{fontSize:'12px',background:c_inner,border:`1px solid ${c_bord}`,borderRadius:'.5rem',color:c_sub,padding:'.25rem .375rem',width:'100%'}}>
-                    {Object.entries(NOISE_TYPES).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
-                  </select>
-                </div>
-                <button onClick={toggleAmbient} className={`btn-icon${ambientOn?' active-orange':''}`} style={{marginLeft:'.5rem',flexShrink:0}}>
-                  <LucideIcon name={ambientOn?'Square':'Play'} size={18}/>
-                </button>
-              </div>
-              <div style={{display:'flex',alignItems:'center',gap:'.5rem'}}>
-                <LucideIcon name="Volume2" size={14} color={c_sub}/>
-                <input type="range" min="0" max="1" step=".01" value={ambientVol} className="orange"
-                  onChange={e=>setAmbientVol(+e.target.value)} style={{flex:1}}/>
-              </div>
-              <label style={{display:'flex',alignItems:'center',gap:'.5rem',fontSize:'.7rem',color:c_sub,marginTop:'.75rem',cursor:'pointer'}}>
-                <input type="checkbox" checked={ambientBypass} onChange={e=>setAmbientBypass(e.target.checked)}/>
-                All night (bypass timer)
-              </label>
-            </div>
-
-            {/* Binaural */}
-            <div className="card" style={{position:'relative',overflow:'hidden'}}>
-              {binOn && !bm && <div className="glow-blue" style={{position:'absolute',top:0,left:0,width:3,height:'100%',background:'#60a5fa',borderRadius:2}}/>}
-              <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:'.875rem'}}>
-                <div style={{flex:1,minWidth:0}}>
-                  <div style={{fontSize:'.8rem',fontWeight:700,color:c_head,marginBottom:'.5rem'}}>Binaural</div>
-                  <select value={binPreset} onChange={e=>setBinPreset(e.target.value)}
-                    style={{fontSize:'12px',background:c_inner,border:`1px solid ${c_bord}`,borderRadius:'.5rem',color:c_sub,padding:'.25rem .375rem',width:'100%'}}>
-                    {Object.entries(BINAURAL).map(([k,v])=><option key={k} value={k}>{v.name}</option>)}
-                  </select>
-                </div>
-                <button onClick={toggleBin} className={`btn-icon${binOn?' active-blue':''}`} style={{marginLeft:'.5rem',flexShrink:0}}>
-                  <LucideIcon name={binOn?'Square':'Play'} size={18}/>
-                </button>
-              </div>
-              <div style={{display:'flex',alignItems:'center',gap:'.5rem'}}>
-                <LucideIcon name="Volume2" size={14} color={c_sub}/>
-                <input type="range" min="0" max="1" step=".01" value={binVol} className="blue"
-                  onChange={e=>setBinVol(+e.target.value)} style={{flex:1}}/>
-              </div>
-              <label style={{display:'flex',alignItems:'center',gap:'.5rem',fontSize:'.7rem',color:c_sub,marginTop:'.75rem',cursor:'pointer'}}>
-                <input type="checkbox" checked={binBypass} onChange={e=>setBinBypass(e.target.checked)}/>
-                All night (bypass timer)
-              </label>
-            </div>
-          </div>
+          <AmbientBinaural />
 
           {/* Podcast */}
           <div className="card" style={{position:'relative',overflow:'hidden'}}>
@@ -562,108 +456,7 @@ export default function AppLayout() {
               </button>
             </div>
 
-            <div className="card-inner" style={{marginBottom:'.875rem',display:'flex',flexDirection:'column',gap:'.625rem'}}>
-              <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',gap:'.75rem'}}>
-                <div>
-                  <div className="section-label" style={{marginBottom:'.25rem'}}>Private Feed Proxy</div>
-                  <div style={{fontSize:'.65rem',color:c_sub,lineHeight:1.5}}>
-                    Member-only feeds use the built-in private proxy by default. Replace it only if you run your own worker.
-                  </div>
-                </div>
-                <button
-                  onClick={()=>setShowFeedDebug(v=>!v)}
-                  style={{padding:'.4rem .65rem',borderRadius:'.625rem',border:`1px solid ${c_bord}`,background:'transparent',color:c_sub,fontSize:'.65rem',fontWeight:700,cursor:'pointer',whiteSpace:'nowrap'}}
-                >
-                  {showFeedDebug ? 'Hide Debug' : 'Feed Debug'}
-                </button>
-              </div>
-
-              <div style={{display:'flex',gap:'.5rem'}}>
-                <input
-                  type="url"
-                  value={feedProxyUrl}
-                  onChange={e=>setFeedProxyUrl(e.target.value)}
-                  placeholder="Built-in proxy URL…"
-                  style={{flex:1,background:c_inner,border:`1px solid ${c_bord}`,borderRadius:'.625rem',padding:'.5rem .75rem',color:c_text,fontSize:'13px'}}
-                />
-                <button
-                  onClick={()=>setFeedProxyUrl(getDefaultFeedProxyUrl())}
-                  disabled={normalizeConfigUrl(feedProxyUrl) === getDefaultFeedProxyUrl()}
-                  style={{padding:'.5rem .8rem',borderRadius:'.625rem',background:'transparent',color:normalizeConfigUrl(feedProxyUrl) === getDefaultFeedProxyUrl()?c_dim:c_sub,border:`1px solid ${c_bord}`,fontWeight:700,cursor:normalizeConfigUrl(feedProxyUrl) === getDefaultFeedProxyUrl()?'default':'pointer',whiteSpace:'nowrap',opacity:normalizeConfigUrl(feedProxyUrl) === getDefaultFeedProxyUrl()?.6:1}}
-                >
-                  Reset
-                </button>
-              </div>
-
-              <div style={{borderTop:`1px solid ${c_bord}`,marginTop:'.125rem',paddingTop:'.625rem',display:'flex',flexDirection:'column',gap:'.625rem'}}>
-                <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',gap:'.75rem'}}>
-                  <div>
-                    <div className="section-label" style={{marginBottom:'.25rem'}}>Sleep Safe Audio</div>
-                    <div style={{fontSize:'.65rem',color:c_sub,lineHeight:1.5}}>
-                      Optional server-side limiter and loudness normalization for podcast playback. Best for reducing abrupt spikes before sleep.
-                    </div>
-                  </div>
-                  <label style={{display:'flex',alignItems:'center',gap:'.5rem',fontSize:'.68rem',color:c_sub,cursor:'pointer',whiteSpace:'nowrap'}}>
-                    <input
-                      type="checkbox"
-                      checked={sleepSafeAudio}
-                      onChange={e=>setSleepSafeAudio(e.target.checked)}
-                    />
-                    Enabled
-                  </label>
-                </div>
-
-                <div style={{display:'flex',gap:'.5rem'}}>
-                  <input
-                    type="url"
-                    value={audioProxyUrl}
-                    onChange={e=>setAudioProxyUrl(e.target.value)}
-                    placeholder="Sleep Safe proxy URL…"
-                    style={{flex:1,background:c_inner,border:`1px solid ${c_bord}`,borderRadius:'.625rem',padding:'.5rem .75rem',color:c_text,fontSize:'13px'}}
-                  />
-                  <button
-                    onClick={()=>setAudioProxyUrl('')}
-                    disabled={!audioProxyUrl}
-                    style={{padding:'.5rem .8rem',borderRadius:'.625rem',background:'transparent',color:audioProxyUrl?c_sub:c_dim,border:`1px solid ${c_bord}`,fontWeight:700,cursor:audioProxyUrl?'pointer':'default',whiteSpace:'nowrap',opacity:audioProxyUrl?1:.6}}
-                  >
-                    Clear
-                  </button>
-                </div>
-
-                <div style={{fontSize:'.62rem',color:c_dim,lineHeight:1.5}}>
-                  Sleep Safe uses a server proxy, so scrubbing may be less precise than direct playback.
-                </div>
-                <div style={{fontSize:'.62rem',color:sleepSafeAudio && !sleepSafeConfigured ? '#fbbf24' : c_dim,lineHeight:1.5}}>
-                  {sleepSafeConfigured
-                    ? 'Status: proxy configured.'
-                    : 'Status: no Sleep Safe proxy URL yet. Playback will fall back to direct audio.'}
-                </div>
-              </div>
-
-              
-              {/* Backup & Restore */}
-              <div className="card" style={{marginBottom:'1rem'}}>
-                <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:'.5rem'}}>
-                  <div>
-                    <div style={{fontSize:'.8rem',fontWeight:700,color:c_head,marginBottom:'.25rem'}}>Backup & Restore</div>
-                    <div style={{fontSize:'.65rem',color:c_sub,lineHeight:1.4}}>
-                      Export your custom mixes, playlists, and settings to a file, or restore them.
-                    </div>
-                  </div>
-                </div>
-                <div style={{display:'flex',gap:'.5rem',marginTop:'.75rem'}}>
-                  <button onClick={handleExportData} className="btn-pill" style={{flex:1,padding:'.5rem'}}>
-                    Export Data
-                  </button>
-                  <label className="btn-pill" style={{flex:1,padding:'.5rem',textAlign:'center',cursor:'pointer'}}>
-                    Import Data
-                    <input type="file" accept=".json" onChange={handleImportData} style={{display:'none'}} />
-                  </label>
-                </div>
-              </div>
-
-              <FeedDebugPanel />
-            </div>
+            <PodcastSettings />
 
             {/* Now Playing strip */}
             {curEp && (
