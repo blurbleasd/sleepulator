@@ -131,6 +131,10 @@ export function AppProvider({ children }) {
   const binLoopMeta = useRef(null);
   const ambientWrapLock = useRef(false);
   const binWrapLock = useRef(false);
+  // Last podcast playback URL + a snapshot of live state, used to recreate
+  // elements after MixBus rebuilds a dead (iOS-closed) AudioContext.
+  const lastPodUrl = useRef('');
+  const liveRef = useRef({});
   const setNativeAudioLevel = useCallback((audio, volume, muteState) => {
     if (!audio) return;
     audio.muted = !!muteState || volume <= LOOP_MUTED_GAIN_EPSILON;
@@ -493,8 +497,19 @@ export function AppProvider({ children }) {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [podPlaying]);
 
-  const ensureAmbientAudio = () => {
-    if (ambientAudio.current) return ambientAudio.current;
+  // Discard an orphaned element (its MediaElementSourceNode dies with the old
+  // context and can't be reused) so a fresh one can take its place on rebuild.
+  const discardAudioElement = (ref) => {
+    const el = ref.current;
+    if (!el) return;
+    try { el.pause(); el.src = ''; el.load?.(); } catch (e) {}
+    try { el.remove(); } catch (e) {}
+    ref.current = null;
+  };
+
+  const ensureAmbientAudio = (force = false) => {
+    if (ambientAudio.current && !force) return ambientAudio.current;
+    if (force) discardAudioElement(ambientAudio);
     const audio = document.createElement('audio');
     configureHiddenAudioElement(audio);
     mixBus.addSource('ambient', audio);
@@ -503,12 +518,14 @@ export function AppProvider({ children }) {
     });
     document.body.appendChild(audio);
     ambientAudio.current = audio;
+    ambientSourceKey.current = '';
     syncAmbientVolume(1, muted, { preservePosition: false });
     return audio;
   };
 
-  const ensureBinAudio = () => {
-    if (binAudio.current) return binAudio.current;
+  const ensureBinAudio = (force = false) => {
+    if (binAudio.current && !force) return binAudio.current;
+    if (force) discardAudioElement(binAudio);
     const audio = document.createElement('audio');
     configureHiddenAudioElement(audio);
     mixBus.addSource('bin', audio);
@@ -517,6 +534,7 @@ export function AppProvider({ children }) {
     });
     document.body.appendChild(audio);
     binAudio.current = audio;
+    binSourceKey.current = '';
     syncBinVolume(1, muted, { preservePosition: false });
     return audio;
   };
@@ -913,8 +931,9 @@ export function AppProvider({ children }) {
     setSubName(name);
   };
 
-  const ensurePodAudio = () => {
-    if (podAudio.current) return podAudio.current;
+  const ensurePodAudio = (force = false) => {
+    if (podAudio.current && !force) return podAudio.current;
+    if (force) discardAudioElement(podAudio);
     const audio = document.createElement('audio');
     configureHiddenAudioElement(audio);
     mixBus.addSource('pod', audio);
@@ -958,10 +977,47 @@ export function AppProvider({ children }) {
     document.body.appendChild(audio);
     podAudio.current = audio;
     syncPodVolume();
+    // On a forced recreate (context rebuild) the fresh element has no src and
+    // is at 0:00 — restore the last episode and resume position once metadata
+    // loads (seeking before that races to 0).
+    if (force && lastPodUrl.current) {
+      const resumeAt = liveRef.current.podPosition || 0;
+      audio.src = lastPodUrl.current;
+      audio.addEventListener('loadedmetadata', () => {
+        try { if (resumeAt > 0) audio.currentTime = resumeAt; } catch (e) {}
+      }, { once: true });
+      audio.load();
+    }
     return audio;
   };
 
   useEffect(()=>{ syncPodVolume(); },[syncPodVolume]);
+
+  // Keep a snapshot of live state for the rebuild callback, which is registered
+  // once but must read current values (not stale first-render closures).
+  useEffect(() => {
+    liveRef.current = {
+      ambientOn, binOn, podPlaying,
+      eqOn, compOn, panOn,
+      podPosition: podProgress.cur || 0,
+    };
+  });
+
+  // When MixBus rebuilds a dead (iOS-closed) AudioContext, recreate the
+  // <audio> elements for whichever layers were active and re-apply pod effects.
+  // Re-registered every render so it closes over the latest builders/state.
+  // Resume is intentionally left to the next user gesture (iOS requires one).
+  useEffect(() => {
+    mixBus.onRebuild(async () => {
+      const live = liveRef.current;
+      if (live.ambientOn) ensureAmbientAudio(true);
+      if (live.binOn) ensureBinAudio(true);
+      if (live.podPlaying || lastPodUrl.current) ensurePodAudio(true);
+      mixBus.setEffects('pod', {
+        eqOn: live.eqOn, compOn: live.compOn, panOn: live.panOn,
+      });
+    });
+  });
 
   const playEp = async (ep, source='feed', opts={}) => {
     mixBus.resumeContext();
@@ -1013,6 +1069,7 @@ export function AppProvider({ children }) {
         : (prog[ep.id] ? Math.max(0, prog[ep.id]-90) : 0);
       if (!iosHandoff) audio.pause();
       audio.src=playbackUrl;
+      lastPodUrl.current = playbackUrl;
       audio.playbackRate=podSpeed;
       audio.load();
       if (resumeAt > 0) {
@@ -1228,6 +1285,8 @@ export function AppProvider({ children }) {
     setFeedDebug,
     showFeedDebug,
     setShowFeedDebug,
+    forceAudioTeardown: () => mixBus.forceTeardown(),
+    getAudioDiagnostics: () => mixBus.getDiagnostics(),
     subs,
     setSubs,
     showSubs,

@@ -1,5 +1,17 @@
 export class MixBus {
   constructor() {
+    // Cross-party hooks/flags must survive a rebuild, so they live on the
+    // instance rather than inside _initContext().
+    this._onRebuild = null;        // AppContext registers this (see onRebuild)
+    this._rebuilding = false;      // guards against rebuild storms
+    this._lastMasterVolume = 1;    // re-applied to a freshly built context
+    this._initContext();
+  }
+
+  // Stand up a fresh AudioContext, master gain, shared pan LFO, and an empty
+  // source map. Called once from the constructor and again from rebuild() after
+  // iOS has torn the previous context down to 'closed'.
+  _initContext() {
     const AudioContextClass = window.AudioContext || window.webkitAudioContext;
     if (!AudioContextClass) {
       this.supported = false;
@@ -12,9 +24,19 @@ export class MixBus {
     this.masterGain = this.context.createGain();
     this.masterGain.connect(this.context.destination);
 
-    // A single shared LFO drives the pan param of every source's panner.
-    // One oscillator can modulate many AudioParams, so this stays shared
-    // even though the panner nodes themselves are per-source.
+    this._startPanLFO();
+
+    // Map of id -> { element, sourceNode, gainNode, eqNode, compNode,
+    //               pannerNode, isConnected, volume, eqOn, compOn, panOn }
+    this.sources = new Map();
+
+    this.context.onstatechange = () => this._handleStateChange();
+  }
+
+  // A single shared LFO drives the pan param of every source's panner.
+  // One oscillator can modulate many AudioParams, so this stays shared
+  // even though the panner nodes themselves are per-source.
+  _startPanLFO() {
     if (this.context.createStereoPanner) {
       this.panLFO = this.context.createOscillator();
       this.panLFO.type = 'sine';
@@ -23,36 +45,119 @@ export class MixBus {
     } else {
       this.panLFO = null;
     }
+  }
 
-    // Map of id -> { element, sourceNode, gainNode, eqNode, compNode,
-    //               pannerNode, isConnected, volume, eqOn, compOn, panOn }
-    this.sources = new Map();
+  // 'running'  -> the context survived a suspend/interrupt; re-route in place.
+  // 'closed'   -> iOS tore the context down; the node graph is dead and the
+  //               existing MediaElementSourceNodes can't be reused, so rebuild.
+  _handleStateChange() {
+    if (!this.context) return;
+    const state = this.context.state;
+    console.log(`MixBus: AudioContext state changed to ${state}`);
+    if (state === 'running') {
+      this.reconnectAllSources();
+    } else if (state === 'closed') {
+      this.rebuild();
+    }
+  }
 
-    // Handle iOS AudioContext suspension
-    this.context.onstatechange = () => {
-      console.log(`MixBus: AudioContext state changed to ${this.context.state}`);
-      if (this.context.state === 'running') {
-        this.reconnectAllSources();
-      }
-    };
+  // True when there is no usable context to play through.
+  isDead() {
+    return !this.supported || !this.context || this.context.state === 'closed';
   }
 
   async resumeContext() {
     if (!this.supported) return;
+    if (this.isDead()) {
+      await this.rebuild();
+      return;
+    }
     if (this.context.state === 'suspended' || this.context.state === 'interrupted') {
       try {
         await this.context.resume();
         console.log("MixBus: AudioContext resumed successfully.");
       } catch (err) {
-        console.warn("MixBus: Failed to resume AudioContext", err);
+        // Some iOS builds reach 'closed' without firing onstatechange; a
+        // resume() against a closed context rejects with InvalidStateError.
+        if (err?.name === 'InvalidStateError') {
+          await this.rebuild();
+        } else {
+          console.warn("MixBus: Failed to resume AudioContext", err);
+        }
       }
+    }
+  }
+
+  // Register a callback invoked after rebuild() stands up a new context. It
+  // receives the captured per-layer settings and is responsible for recreating
+  // the <audio> elements and re-adding them via addSource (AppContext owns the
+  // elements, MixBus owns the context/nodes). May be async.
+  onRebuild(cb) {
+    this._onRebuild = cb;
+  }
+
+  // Discard a dead context and build a new one from scratch. The existing
+  // source nodes can't migrate, so we snapshot each layer's logical settings,
+  // tear down, re-init, and hand off to AppContext to recreate the elements.
+  async rebuild() {
+    if (!this.supported || this._rebuilding) return;
+    this._rebuilding = true;
+    try {
+      // 1. Snapshot logical layer settings before discarding the dead nodes.
+      const layers = [...this.sources.entries()].map(([id, s]) => ({
+        id, volume: s.volume, eqOn: s.eqOn, compOn: s.compOn, panOn: s.panOn,
+      }));
+
+      // 2. Tear down the old context (it may already be 'closed' — ignore).
+      try { this.panLFO?.stop(); } catch (e) {}
+      if (this.context && this.context.state !== 'closed') {
+        try { await this.context.close(); } catch (e) {}
+      }
+
+      // 3. Stand up a fresh context + master + LFO; this clears this.sources.
+      this._initContext();
+      if (!this.supported) return;
+      this.setMasterVolume(this._lastMasterVolume);
+
+      // 4. Ask AppContext to recreate elements and re-addSource each layer.
+      if (this._onRebuild) {
+        try { await this._onRebuild(layers); }
+        catch (e) { console.warn('MixBus: onRebuild callback failed', e); }
+      }
+    } finally {
+      this._rebuilding = false;
     }
   }
 
   setMasterVolume(value) {
     if (!this.supported) return;
     const clamped = Math.max(0, Math.min(1, value));
+    this._lastMasterVolume = clamped;
     this.masterGain.gain.setTargetAtTime(clamped, this.context.currentTime, 0.05);
+  }
+
+  // DEV/TEST ONLY: simulate the iOS "context torn down to closed" interruption
+  // so the rebuild path can be exercised on demand (see TESTING.md §3B). Closing
+  // the context should fire onstatechange -> rebuild; we also trigger explicitly
+  // in case a browser doesn't, guarded against a double run by _rebuilding / the
+  // post-rebuild context already being 'running'.
+  async forceTeardown() {
+    if (!this.supported || !this.context) return;
+    try { await this.context.close(); } catch (e) {}
+    if (this.context.state === 'closed' && !this._rebuilding) {
+      await this.rebuild();
+    }
+  }
+
+  // Snapshot of engine health for a dev diagnostics readout.
+  getDiagnostics() {
+    return {
+      supported: this.supported,
+      state: this.context?.state ?? 'none',
+      dead: this.isDead(),
+      sources: [...this.sources.keys()],
+      rebuilding: this._rebuilding,
+    };
   }
 
   // Build a dedicated effect chain for one source so that re-routing or

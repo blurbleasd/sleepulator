@@ -54,8 +54,25 @@ launch from the home-screen icon (must run standalone, not in the Safari tab).
 1. Start audio, lock the screen.
 2. Call the phone from another device (or trigger Siri), then end the call.
 3. ✅ Audio resumes on its own within a couple of seconds.
-   - This exercises `MixBus.onstatechange → reconnectAllSources`. If audio stays dead,
-     that handler isn't recovering the iOS AudioContext — the top reliability risk.
+   - This exercises `MixBus.onstatechange → reconnectAllSources`, which only
+     recovers a *suspend → resume*. Watch the console for the state transition.
+   - If audio stays dead, distinguish the two failure modes (see TODOS.md):
+     - Context went `suspended`/`interrupted` → `running` but stayed silent →
+       the elements weren't `.play()`d / `resume()`d (auto-resume gap).
+     - Context went to `closed` → the engine rebuilds (new context + fresh
+       elements); audio recovers on the **next Play / lock-screen control**, not
+       on its own (iOS requires a user gesture to resume). That tap-to-recover
+       is a *pass*, not a fail.
+4. Repeat with a *long* interruption (let it ring a while, or play audio in
+   another app for ~30s before returning) — this is what tends to push iOS to
+   `closed` rather than `suspended`.
+
+**Repeatable simulation (no phone call needed).** Tap **Feed Debug** to open the
+debug panel, then **Force teardown + rebuild** under "Audio Engine (dev)". This
+closes the AudioContext exactly like an iOS interruption and triggers the
+rebuild. The status line shows `state / dead / rebuilding / sources`; after the
+rebuild it should read `state: running, dead: false` with the active layers
+listed. Then tap Play (or the lock-screen control) and confirm audio returns.
 
 ### C. Sleep timer
 1. Set a short timer, start audio. ✅ Volume fades over the final minutes, then stops.

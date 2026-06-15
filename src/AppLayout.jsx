@@ -118,6 +118,8 @@ export default function AppLayout() {
     setFeedDebug,
     showFeedDebug,
     setShowFeedDebug,
+    forceAudioTeardown,
+    getAudioDiagnostics,
     subs,
     setSubs,
     showSubs,
@@ -302,6 +304,7 @@ export default function AppLayout() {
 
   const [mixName, setMixName] = React.useState('');
   const [showMixes, setShowMixes] = React.useState(false);
+  const [audioDiag, setAudioDiag] = React.useState(null);
   
   return (
     <div className="app-container" style={{minHeight:'100dvh', color:c_text}}>
@@ -773,7 +776,33 @@ export default function AppLayout() {
 
               {showFeedDebug && (
                 <div style={{background:c_inner,border:`1px solid ${c_bord}`,borderRadius:'.75rem',padding:'.75rem',display:'flex',flexDirection:'column',gap:'.5rem'}}>
-                  <div style={{fontSize:'.68rem',fontWeight:700,color:c_head}}>Feed Debug</div>
+                  <div style={{fontSize:'.68rem',fontWeight:700,color:c_head}}>Audio Engine (dev)</div>
+                  <div style={{fontSize:'.62rem',color:c_sub,lineHeight:1.5}}>
+                    Simulates an iOS interruption that closes the AudioContext, then rebuilds it
+                    (TESTING.md §3B). After tapping, audio should recover on the next Play / lock-screen control.
+                  </div>
+                  <div style={{display:'flex',gap:'.5rem',flexWrap:'wrap'}}>
+                    <button
+                      type="button"
+                      onClick={async ()=>{ await forceAudioTeardown?.(); setAudioDiag(getAudioDiagnostics?.()); }}
+                      style={{fontSize:'.65rem',fontWeight:700,color:'#fca5a5',background:'transparent',border:`1px solid ${c_bord}`,borderRadius:'.5rem',padding:'.4rem .6rem',cursor:'pointer'}}
+                    >
+                      Force teardown + rebuild
+                    </button>
+                    <button
+                      type="button"
+                      onClick={()=>setAudioDiag(getAudioDiagnostics?.())}
+                      style={{fontSize:'.65rem',fontWeight:700,color:c_head,background:'transparent',border:`1px solid ${c_bord}`,borderRadius:'.5rem',padding:'.4rem .6rem',cursor:'pointer'}}
+                    >
+                      Refresh status
+                    </button>
+                  </div>
+                  {audioDiag && (
+                    <div style={{fontSize:'.62rem',color:audioDiag.dead?'#fca5a5':'#86efac',lineHeight:1.5,wordBreak:'break-all'}}>
+                      state: {audioDiag.state} · dead: {String(audioDiag.dead)} · rebuilding: {String(audioDiag.rebuilding)} · sources: [{audioDiag.sources.join(', ')||'none'}]
+                    </div>
+                  )}
+                  <div style={{fontSize:'.68rem',fontWeight:700,color:c_head,marginTop:'.25rem'}}>Feed Debug</div>
                   <div style={{fontSize:'.65rem',color:c_sub,lineHeight:1.5}}>
                     Requested: {feedDebug?.requestedUrl ? redactUrlForDisplay(feedDebug.requestedUrl) : 'No feed loaded yet.'}
                   </div>
