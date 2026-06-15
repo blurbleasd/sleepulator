@@ -26,3 +26,31 @@ for (const name of ['localStorage', 'sessionStorage']) {
     });
   }
 }
+
+// React Testing Library matchers + automatic DOM cleanup between tests.
+import '@testing-library/jest-dom/vitest';
+import { afterEach } from 'vitest';
+import { cleanup } from '@testing-library/react';
+afterEach(() => cleanup());
+
+// Browser APIs the full app touches on mount/play that happy-dom doesn't
+// provide. Stub them so <App/> can mount under RTL. These are no-ops for the
+// pure-logic and server-render tests, which never reach them.
+const define = (target, key, value) => {
+  if (target[key] === undefined) {
+    try { Object.defineProperty(target, key, { value, configurable: true, writable: true }); } catch { /* ignore */ }
+  }
+};
+
+// CacheStorage — AppContext loads downloaded episodes from `caches` on mount.
+const emptyCache = { match: async () => undefined, put: async () => {}, keys: async () => [], delete: async () => false };
+define(globalThis, 'caches', { open: async () => emptyCache, keys: async () => [], match: async () => undefined, delete: async () => false });
+
+// Media Session (lock-screen controls) — present but inert under test.
+define(globalThis.navigator, 'mediaSession', {
+  metadata: null,
+  playbackState: 'none',
+  setActionHandler: () => {},
+  setPositionState: () => {},
+});
+define(globalThis, 'MediaMetadata', class { constructor(init = {}) { Object.assign(this, init); } });

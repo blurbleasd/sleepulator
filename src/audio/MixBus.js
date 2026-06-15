@@ -155,7 +155,7 @@ export class MixBus {
       supported: this.supported,
       state: this.context?.state ?? 'none',
       dead: this.isDead(),
-      sources: [...this.sources.keys()],
+      sources: this.sources ? [...this.sources.keys()] : [],
       rebuilding: this._rebuilding,
     };
   }
