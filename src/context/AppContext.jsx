@@ -1124,7 +1124,11 @@ export function AppProvider({ children }) {
     const rem = Math.max(0, Math.round((timerEndRef.current-Date.now())/1000));
     setTimeLeft(rem);
     if(rem<=600&&rem>0){
-      const r=Math.pow(rem/600,2);
+      // Perceptually-even fade: amplitude decays exponentially so loudness drops
+      // by a roughly constant number of dB each second (hearing is logarithmic),
+      // down to ~-48 dB over the final 10 minutes. Smoother than a linear or
+      // quadratic amplitude taper, which lingers audibly then drops abruptly.
+      const r=Math.pow(0.004, 1 - rem/600);
       if(podAudio.current) syncPodVolume(r, muted);
       if(!ambientBypass&&ambientAudio.current) syncAmbientVolume(r, muted, { allowSourceRebuild: false });
       if(!binBypass&&binAudio.current) syncBinVolume(r, muted, { allowSourceRebuild: false });

@@ -57,7 +57,7 @@ export default function SleepTimer() {
           {timerActive?'Cancel Timer':`Start ${timerMins} Min Timer`}
         </button>
       )}
-      <p style={{fontSize:'.7rem',color:c_sub,textAlign:'center',margin:'.75rem 0 0'}}>Audio fades out over the last 60 seconds</p>
+      <p style={{fontSize:'.7rem',color:c_sub,textAlign:'center',margin:'.75rem 0 0'}}>Audio fades out gently over the final 10 minutes</p>
     </div>
   );
 }

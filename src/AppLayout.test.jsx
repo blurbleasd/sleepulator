@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import App from './App.jsx';
@@ -56,5 +56,30 @@ describe('Audio Engine dev panel (Feed Debug)', () => {
     // we only assert the readout rendered, not a specific state.
     const readout = await screen.findByText(/state:.*dead:/i);
     expect(readout).toBeInTheDocument();
+  });
+});
+
+describe('Episode browser', () => {
+  afterEach(() => { try { localStorage.clear(); } catch { /* ignore */ } });
+
+  it('renders playlist episodes on the Playlist tab and filters them', async () => {
+    localStorage.setItem('sleepulatorPlaylist', JSON.stringify([
+      { id: 'e1', title: 'Sleepy Episode One', url: 'https://example.com/1.mp3' },
+      { id: 'e2', title: 'Calm Episode Two', url: 'https://example.com/2.mp3' },
+    ]));
+    const user = userEvent.setup();
+    render(<App />);
+    await screen.findByRole('heading', { name: 'SLEEPULATOR' });
+
+    await user.click(screen.getByRole('button', { name: /podcasts/i }));
+    await user.click(screen.getByRole('button', { name: /^playlist/i }));
+
+    expect(screen.getByText('Sleepy Episode One')).toBeInTheDocument();
+    expect(screen.getByText('Calm Episode Two')).toBeInTheDocument();
+
+    // The filter input narrows the list by title.
+    await user.type(screen.getByPlaceholderText(/filter episodes/i), 'calm');
+    expect(screen.queryByText('Sleepy Episode One')).not.toBeInTheDocument();
+    expect(screen.getByText('Calm Episode Two')).toBeInTheDocument();
   });
 });
