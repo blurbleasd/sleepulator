@@ -513,9 +513,9 @@ export function AppProvider({ children }) {
     const audio = document.createElement('audio');
     configureHiddenAudioElement(audio);
     mixBus.addSource('ambient', audio);
-    audio.addEventListener('timeupdate', () => {
-      if (NATIVE_MEDIA_VOLUME_LOCK) maybeWrapManualLoop(audio, ambientLoopMeta.current, ambientWrapLock);
-    });
+    // Ambient loops are now natively seamless (makeSeamlessLoop), so native
+    // <audio loop> handles the wrap with zero JS — which keeps it gapless even
+    // when the screen is locked and timeupdate is throttled. No manual wrap.
     document.body.appendChild(audio);
     ambientAudio.current = audio;
     ambientSourceKey.current = '';

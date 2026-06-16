@@ -660,47 +660,49 @@ export function maybeWrapManualLoop(audio, loopMeta, wrapLockRef) {
   } catch (error) {}
 }
 
+// Turn `frames + xfade` raw samples into a `frames`-length buffer that loops
+// seamlessly end -> start under native `<audio loop>`. Overlap-add crossfade:
+// the head region blends the continuation (raw[frames..]) fading out with the
+// original head (raw[0..]) fading in. The loop boundary sample[frames-1] ->
+// sample[0] is then just raw[frames-1] -> raw[frames] (consecutive generated
+// samples = continuous), so the browser loops it gaplessly with no JS — which
+// is what keeps it working when the iPhone screen is locked.
+export function makeSeamlessLoop(rawLeft, rawRight, frames, xfade) {
+  const left = new Float32Array(frames);
+  const right = new Float32Array(frames);
+  for (let i = 0; i < frames; i++) {
+    if (i < xfade) {
+      const t = i / xfade; // 0 -> 1
+      left[i]  = rawLeft[frames + i]  * (1 - t) + rawLeft[i]  * t;
+      right[i] = rawRight[frames + i] * (1 - t) + rawRight[i] * t;
+    } else {
+      left[i] = rawLeft[i];
+      right[i] = rawRight[i];
+    }
+  }
+  return { left, right };
+}
+
 export function getAmbientLoopBuffer(type) {
   if (LOOP_BUFFER_CACHE.ambient.has(type)) return LOOP_BUFFER_CACHE.ambient.get(type);
   const frames = LOOP_SAMPLE_RATE * AMBIENT_LOOP_SECONDS;
-  const rawLeft = new Float32Array(frames);
-  const rawRight = new Float32Array(frames);
-  NOISE_TYPES[type].fn(rawLeft, rawRight, frames, LOOP_SAMPLE_RATE);
-
-  const left = rawLeft.slice();
-  const right = rawRight.slice();
-  const transitionFrames = Math.min(
+  const xfade = Math.min(
     Math.max(64, Math.round(LOOP_SAMPLE_RATE * LOOP_TRANSITION_SECONDS)),
     Math.max(64, Math.floor(frames / 4))
   );
-  const matchFrames = Math.min(
-    Math.max(64, Math.round(LOOP_SAMPLE_RATE * LOOP_MATCH_SECONDS)),
-    Math.max(64, Math.floor(frames / 4))
-  );
-  const loopStartFrames = transitionFrames;
-  const loopWrapStartFrames = Math.max(loopStartFrames + 1, frames - matchFrames);
-  const transitionStart = Math.max(0, loopWrapStartFrames - transitionFrames);
+  // Generate frames + xfade so the crossfade has real continuation samples.
+  const rawLeft = new Float32Array(frames + xfade);
+  const rawRight = new Float32Array(frames + xfade);
+  NOISE_TYPES[type].fn(rawLeft, rawRight, frames + xfade, LOOP_SAMPLE_RATE);
 
-  for (let i = 0; i < transitionFrames; i++) {
-    const tailIndex = transitionStart + i;
-    if (tailIndex >= loopWrapStartFrames) break;
-    const blend = transitionFrames <= 1 ? 1 : i / (transitionFrames - 1);
-    left[tailIndex] = rawLeft[tailIndex] * (1 - blend) + rawLeft[i] * blend;
-    right[tailIndex] = rawRight[tailIndex] * (1 - blend) + rawRight[i] * blend;
-  }
-  for (let i = 0; i < matchFrames; i++) {
-    const targetIndex = loopWrapStartFrames + i;
-    const sourceIndex = loopStartFrames + i;
-    if (targetIndex >= frames || sourceIndex >= frames) break;
-    left[targetIndex] = rawLeft[sourceIndex];
-    right[targetIndex] = rawRight[sourceIndex];
-  }
+  const { left, right } = makeSeamlessLoop(rawLeft, rawRight, frames, xfade);
 
   const buffer = {
     left,
     right,
     sampleRate: LOOP_SAMPLE_RATE,
-    loopMeta: buildLoopMeta(LOOP_SAMPLE_RATE, loopStartFrames, loopWrapStartFrames, frames),
+    // loopStart 0 + native looping: the whole buffer is the loop, no manual wrap.
+    loopMeta: buildLoopMeta(LOOP_SAMPLE_RATE, 0, frames, frames),
   };
   LOOP_BUFFER_CACHE.ambient.set(type, buffer);
   return buffer;

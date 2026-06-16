@@ -12,6 +12,7 @@ import {
   dedupeEpisodes,
   parseOpmlFeeds,
   nextEpisode,
+  makeSeamlessLoop,
   NOISE_TYPES,
 } from './core.js';
 
@@ -226,5 +227,30 @@ describe('nextEpisode', () => {
   it('returns null for an empty or invalid list', () => {
     expect(nextEpisode([], 'a')).toBe(null);
     expect(nextEpisode(null, 'a')).toBe(null);
+  });
+});
+
+describe('makeSeamlessLoop', () => {
+  // A ramp 0,1,2,... makes the seam easy to reason about: a perfect loop means
+  // out[frames-1] then out[0] are consecutive values (no discontinuity).
+  const frames = 100, xfade = 10;
+  const raw = Float32Array.from({ length: frames + xfade }, (_, i) => i);
+  const { left, right } = makeSeamlessLoop(raw, raw, frames, xfade);
+
+  it('returns buffers of the loop length', () => {
+    expect(left).toHaveLength(frames);
+    expect(right).toHaveLength(frames);
+  });
+
+  it('leaves the body past the crossfade untouched', () => {
+    for (let i = xfade; i < frames; i++) expect(left[i]).toBe(i);
+  });
+
+  it('makes the loop boundary continuous (end flows into start)', () => {
+    // Looping plays ...out[frames-1], out[0], out[1]...
+    // For the ramp: out[frames-1] = frames-1, out[0] = raw[frames] = frames.
+    expect(left[frames - 1]).toBe(frames - 1);
+    expect(left[0]).toBe(frames);            // continuation, not a jump back to 0
+    expect(left[0] - left[frames - 1]).toBe(1); // one clean step across the seam
   });
 });
