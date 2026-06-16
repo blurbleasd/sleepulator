@@ -5,7 +5,7 @@ import {
 import { mixBus } from '../audio/MixBus.js';
 
 import {
-  APP_CONFIG, LEGACY_DEFAULT_FEED_URL, DEFAULT_FEED_PROXY_URL, NATIVE_MEDIA_VOLUME_LOCK, hashUrl, FEED_TIMEOUT_MS, FEED_ACCEPT_HEADER, clamp01, shortenSecret, redactUrlForDisplay, normalizeConfigUrl, getDefaultFeedProxyUrl, buildSleepSafeAudioUrl, parseDuration, fmtTime, previewText, readStoredArray, deriveFeedName, inferPodcastTitle, dedupeEpisodes, describeError, mergeHeaders, withFeedHeaders, fetchWithTimeout, safeJsonParse, localNameOf, directElements, directMatches, descendantMatches, firstDirectText, firstDescendantText, firstAttrFromElements, firstText, firstAttr, resolveMaybeUrl, sniffMarkupType, looksLikeXmlFeed, extractEmbeddedFeedMarkup, discoverAlternateFeedUrl, normalizeFeedUrl, buildFeedSources, makeFeedError, formatFeedError, parseFeedEpisodes, isIOSDevice, isStandaloneWebApp, generateBrown, generatePink, generateGreen, generateWhite, generateFan, generateRain, generateOcean, generateForest, NOISE_TYPES, BINAURAL, ARTWORK, LOOP_SAMPLE_RATE, BINAURAL_LOOP_SAMPLE_RATE, AMBIENT_LOOP_SECONDS, BINAURAL_LOOP_SECONDS, LOOP_TRANSITION_SECONDS, LOOP_MATCH_SECONDS, LOOP_SCALED_GAIN_EPSILON, LOOP_MUTED_GAIN_EPSILON, LOOP_SOURCE_TIME_FUZZ, LOOP_BUFFER_CACHE, LOOP_URL_CACHE, writeAscii, buildStereoWavUrl, buildLoopMeta, maybeWrapManualLoop, getAmbientLoopBuffer, getAmbientLoopMeta, getAmbientLoopUrl, getBinauralLoopBuffer, getBinauralLoopMeta, getBinauralLoopUrl, configureHiddenAudioElement
+  APP_CONFIG, LEGACY_DEFAULT_FEED_URL, DEFAULT_FEED_PROXY_URL, NATIVE_MEDIA_VOLUME_LOCK, hashUrl, FEED_TIMEOUT_MS, FEED_ACCEPT_HEADER, clamp01, shortenSecret, redactUrlForDisplay, normalizeConfigUrl, getDefaultFeedProxyUrl, buildSleepSafeAudioUrl, parseDuration, fmtTime, previewText, readStoredArray, deriveFeedName, inferPodcastTitle, dedupeEpisodes, describeError, mergeHeaders, withFeedHeaders, fetchWithTimeout, safeJsonParse, localNameOf, directElements, directMatches, descendantMatches, firstDirectText, firstDescendantText, firstAttrFromElements, firstText, firstAttr, resolveMaybeUrl, sniffMarkupType, looksLikeXmlFeed, extractEmbeddedFeedMarkup, discoverAlternateFeedUrl, normalizeFeedUrl, buildFeedSources, makeFeedError, formatFeedError, parseFeedEpisodes, nextEpisode, isIOSDevice, isStandaloneWebApp, generateBrown, generatePink, generateGreen, generateWhite, generateFan, generateRain, generateOcean, generateForest, NOISE_TYPES, BINAURAL, ARTWORK, LOOP_SAMPLE_RATE, BINAURAL_LOOP_SAMPLE_RATE, AMBIENT_LOOP_SECONDS, BINAURAL_LOOP_SECONDS, LOOP_TRANSITION_SECONDS, LOOP_MATCH_SECONDS, LOOP_SCALED_GAIN_EPSILON, LOOP_MUTED_GAIN_EPSILON, LOOP_SOURCE_TIME_FUZZ, LOOP_BUFFER_CACHE, LOOP_URL_CACHE, writeAscii, buildStereoWavUrl, buildLoopMeta, maybeWrapManualLoop, getAmbientLoopBuffer, getAmbientLoopMeta, getAmbientLoopUrl, getBinauralLoopBuffer, getBinauralLoopMeta, getBinauralLoopUrl, configureHiddenAudioElement
 } from '../utils/core.js';
 
 // Fallback glyphs for the imperative floating mute button. The app uses
@@ -61,6 +61,7 @@ export function AppProvider({ children }) {
   const [podSpeed,      setPodSpeed]      = useState(()=>+localStorage.getItem('playbackSpeed')||1);
   const [autoPlay,      setAutoPlay]      = useState(()=>localStorage.getItem('autoPlayEnabled')!=='false');
   const [shuffle,       setShuffle]       = useState(()=>localStorage.getItem('shuffleEnabled')==='true');
+  const [preloadNext,   setPreloadNext]   = useState(()=>localStorage.getItem('preloadNext')!=='false');
   const [rssUrl,        setRssUrl]        = useState(()=>{
     const stored = (localStorage.getItem('rssUrl') || '').trim();
     return stored && stored !== LEGACY_DEFAULT_FEED_URL ? stored : '';
@@ -135,6 +136,7 @@ export function AppProvider({ children }) {
   // elements after MixBus rebuilds a dead (iOS-closed) AudioContext.
   const lastPodUrl = useRef('');
   const liveRef = useRef({});
+  const prefetchingRef = useRef(new Set()); // episode URLs currently being preloaded
   const setNativeAudioLevel = useCallback((audio, volume, muteState) => {
     if (!audio) return;
     audio.muted = !!muteState || volume <= LOOP_MUTED_GAIN_EPSILON;
@@ -308,6 +310,7 @@ export function AppProvider({ children }) {
       localStorage.setItem('podcastVolume',           podVol);
       localStorage.setItem('playbackSpeed',           podSpeed);
       localStorage.setItem('autoPlayEnabled',         autoPlay);
+      localStorage.setItem('preloadNext',             preloadNext);
       localStorage.setItem('shuffleEnabled',          shuffle);
       localStorage.setItem('timerMinutes',            timerMins);
       localStorage.setItem('rssUrl',                  rssUrl);
@@ -321,7 +324,7 @@ export function AppProvider({ children }) {
       localStorage.setItem('mixPresets',              JSON.stringify(mixPresets));
     } catch(e){}
   },[masterVol,ambientVol,noiseType,ambientBypass,binVol,binPreset,binBypass,
-     podVol,podSpeed,autoPlay,shuffle,
+     podVol,podSpeed,autoPlay,shuffle,preloadNext,
      timerMins,rssUrl,feedProxyUrl,audioProxyUrl,sleepSafeAudio,showFeedDebug,playlist,subs,savedPlaylists,mixPresets]);
 
   // ── Service Worker ────────────────────────────────────────────────────────
@@ -667,6 +670,30 @@ export function AppProvider({ children }) {
       });
     }
   };
+
+  // Silently warm the cache for an episode (the autoplay "next up") so it starts
+  // instantly with no buffering. Mirrors downloadEpisode but shows no UI and
+  // skips when already cached, in flight, or on a metered (Data Saver) connection.
+  const prefetchEpisode = useCallback(async (epUrl) => {
+    if (!epUrl || cachedEpisodes[epUrl] || prefetchingRef.current.has(epUrl)) return;
+    if (navigator.connection?.saveData) return;
+    prefetchingRef.current.add(epUrl);
+    try {
+      const cache = await caches.open('sleepulator-episodes');
+      if (await cache.match(epUrl)) {
+        setCachedEpisodes(prev => ({ ...prev, [epUrl]: true }));
+        return;
+      }
+      const response = await fetch(epUrl);
+      if (!response.ok) return; // opaque/cross-origin can't be replayed from cache
+      await cache.put(epUrl, response.clone());
+      setCachedEpisodes(prev => ({ ...prev, [epUrl]: true }));
+    } catch (err) {
+      // Network/CORS failures are non-fatal — playback just streams normally.
+    } finally {
+      prefetchingRef.current.delete(epUrl);
+    }
+  }, [cachedEpisodes]);
 
   const deleteEpisode = async (epUrl) => {
     if (!epUrl) return;
@@ -1107,6 +1134,15 @@ export function AppProvider({ children }) {
     };
   },[autoPlay,shuffle,episodes,playlist,curEp,playingSrc]);
 
+  // Preload the autoplay "next up" episode while the current one plays, so it
+  // starts instantly. Deterministic next only (skip shuffle — unpredictable).
+  useEffect(()=>{
+    if(!preloadNext||!autoPlay||shuffle||!curEp) return;
+    const list = playingSrc==='playlist' ? playlist : episodes;
+    const next = nextEpisode(list, curEp.id);
+    if(next?.url && next.id!==curEp.id) prefetchEpisode(next.url);
+  },[preloadNext,autoPlay,shuffle,curEp,playingSrc,episodes,playlist,prefetchEpisode]);
+
   // Progress save
   useEffect(()=>{
     if(podPlaying&&curEp){
@@ -1271,6 +1307,8 @@ export function AppProvider({ children }) {
     setAutoPlay,
     shuffle,
     setShuffle,
+    preloadNext,
+    setPreloadNext,
     rssUrl,
     setRssUrl,
     loading,

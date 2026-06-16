@@ -478,6 +478,16 @@ export function parseOpmlFeeds(raw) {
   return feeds;
 }
 
+// The episode that autoplay would advance to next (deterministic, non-shuffle):
+// the one after currentId, wrapping to the start. Returns null if the list is
+// empty. Used by the background preloader to warm the cache ahead of time.
+export function nextEpisode(list, currentId) {
+  if (!Array.isArray(list) || list.length === 0) return null;
+  const i = list.findIndex(e => e?.id === currentId);
+  if (i < 0) return list[0] || null;
+  return list[(i + 1) % list.length] || null;
+}
+
 export function isIOSDevice() {
   const ua = navigator.userAgent || '';
   return /iP(hone|ad|od)/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);

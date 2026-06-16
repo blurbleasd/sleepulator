@@ -11,6 +11,7 @@ import {
   inferPodcastTitle,
   dedupeEpisodes,
   parseOpmlFeeds,
+  nextEpisode,
   NOISE_TYPES,
 } from './core.js';
 
@@ -203,5 +204,27 @@ describe('parseOpmlFeeds', () => {
     expect(parseOpmlFeeds('')).toEqual([]);
     expect(parseOpmlFeeds(null)).toEqual([]);
     expect(parseOpmlFeeds('not xml at all <<<')).toEqual([]);
+  });
+});
+
+describe('nextEpisode', () => {
+  const list = [{ id: 'a' }, { id: 'b' }, { id: 'c' }];
+
+  it('returns the episode after the current one', () => {
+    expect(nextEpisode(list, 'a')).toEqual({ id: 'b' });
+    expect(nextEpisode(list, 'b')).toEqual({ id: 'c' });
+  });
+
+  it('wraps from the last episode back to the first', () => {
+    expect(nextEpisode(list, 'c')).toEqual({ id: 'a' });
+  });
+
+  it('falls back to the first episode when current is unknown', () => {
+    expect(nextEpisode(list, 'zzz')).toEqual({ id: 'a' });
+  });
+
+  it('returns null for an empty or invalid list', () => {
+    expect(nextEpisode([], 'a')).toBe(null);
+    expect(nextEpisode(null, 'a')).toBe(null);
   });
 });

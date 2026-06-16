@@ -22,6 +22,7 @@ export default function EpisodeBrowser() {
     activeTab, setActiveTab, episodes, playlist,
     bm, c_head, c_sub, c_dim, c_bord, c_inner, c_text,
     podVol, setPodVol, autoPlay, setAutoPlay, shuffle, setShuffle, podSpeed, setPodSpeed,
+    preloadNext, setPreloadNext,
     feedErr, feedNote, loading,
     playEp, addEpisodesToPlaylist, saveCurrentPlaylist, setShowPlaylistLibrary,
     epFilter, setEpFilter,
@@ -80,6 +81,9 @@ export default function EpisodeBrowser() {
                 </label>
                 <label style={{display:'flex',alignItems:'center',gap:'.375rem',fontSize:'.7rem',color:c_sub,cursor:'pointer'}}>
                   <input type="checkbox" checked={shuffle} onChange={e=>setShuffle(e.target.checked)}/><LucideIcon name="Shuffle" size={12}/> Shuffle
+                </label>
+                <label style={{display:'flex',alignItems:'center',gap:'.375rem',fontSize:'.7rem',color:c_sub,cursor:'pointer'}} title="Download the next episode ahead of time so it starts instantly (uses data)">
+                  <input type="checkbox" checked={preloadNext} onChange={e=>setPreloadNext(e.target.checked)}/> Preload next
                 </label>
               </div>
 
