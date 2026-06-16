@@ -122,12 +122,20 @@ button, input, optgroup, select, textarea { font: inherit; }
   font-size: 1.1rem; font-weight: 700; cursor: pointer;
   border: none; 
   background: linear-gradient(135deg, var(--c-indigo), var(--c-purple));
-  color: white;
+  color: #15110b;
   transition: all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
   box-shadow: 0 4px 20px rgba(230, 178, 119, 0.4);
 }
 .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(230, 178, 119, 0.6); }
 .btn-primary:active { transform: translateY(1px) scale(0.98); opacity: 0.9; box-shadow: 0 2px 10px rgba(230, 178, 119, 0.4); }
+
+/* Visible keyboard focus (WCAG 2.4.7). Only shows for keyboard nav, not taps. */
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible,
+[role="button"]:focus-visible, [tabindex]:focus-visible {
+  outline: 2px solid var(--c-accent);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
 
 /* ── Toggle switch ── */
 .toggle {
@@ -225,7 +233,7 @@ html.bm {
   --c-border:   #111111;
   --c-border2:  #1a1a1a;
   --c-text:     #9ca3af;
-  --c-sub:      #4b5563;
+  --c-sub:      #747a86;
   --c-dim:      #27272a;
 }
 html.bm .card { box-shadow: none; backdrop-filter: none; }

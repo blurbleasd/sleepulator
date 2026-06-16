@@ -65,12 +65,14 @@ export default function EpisodeList({ list, mode = 'feed', emptyText = 'Nothing 
                 </div>
               )}
               <div style={{flex:1,minWidth:0}}>
-                <span onClick={()=>setExpandedEp(isExpanded?null:ep.id)}
+                <button onClick={()=>setExpandedEp(isExpanded?null:ep.id)}
+                  aria-expanded={ep.description?isExpanded:undefined}
                   style={{display:isExpanded?'block':'-webkit-box',fontSize:'.78rem',color:playing?c_head:c_sub,
                     WebkitLineClamp:isExpanded?undefined:2,WebkitBoxOrient:'vertical',overflow:'hidden',
-                    cursor:ep.description?'pointer':'default'}}>
+                    cursor:ep.description?'pointer':'default',
+                    background:'none',border:'none',padding:0,margin:0,textAlign:'left',width:'100%',font:'inherit'}}>
                   {ep.title}
-                </span>
+                </button>
                 {ep.duration && (
                   <span style={{fontSize:'.62rem',color:c_dim,display:'block',marginTop:'.15rem'}}>{ep.duration}</span>
                 )}

@@ -68,7 +68,7 @@ export default function AppLayout() {
               <input type="text" value={playlistName} onChange={e=>setPlaylistName(e.target.value)} placeholder="Playlist name…"
                 style={{flex:1,background:c_inner,border:`1px solid ${c_bord}`,borderRadius:'.5rem',padding:'.5rem .75rem',color:c_text,fontSize:'14px'}}/>
               <button onClick={saveCurrentPlaylist} disabled={!playlist.length}
-                style={{padding:'.5rem 1rem',borderRadius:'.5rem',background:playlist.length?'#b8813a':'#4a3a1e',color:'#fff',border:'none',fontWeight:700,cursor:playlist.length?'pointer':'default',whiteSpace:'nowrap',opacity:playlist.length?1:.55}}>
+                style={{padding:'.5rem 1rem',borderRadius:'.5rem',background:playlist.length?'#b8813a':'#4a3a1e',color:playlist.length?'#15110b':'#fff',border:'none',fontWeight:700,cursor:playlist.length?'pointer':'default',whiteSpace:'nowrap',opacity:playlist.length?1:.55}}>
                 Save
               </button>
             </div>
@@ -90,7 +90,7 @@ export default function AppLayout() {
                   Load
                 </button>
                 <button onClick={()=>loadSavedPlaylist(saved, { autoplay: true })}
-                  style={{padding:'.4rem .875rem',borderRadius:'.5rem',background:'#b8813a',color:'#fff',border:'none',fontSize:'.75rem',fontWeight:700,cursor:'pointer',whiteSpace:'nowrap'}}>
+                  style={{padding:'.4rem .875rem',borderRadius:'.5rem',background:'#b8813a',color:'#15110b',border:'none',fontSize:'.75rem',fontWeight:700,cursor:'pointer',whiteSpace:'nowrap'}}>
                   Play
                 </button>
                 <button onClick={()=>setSavedPlaylists(prev=>prev.filter(entry=>(entry.id || entry.name)!==(saved.id || saved.name)))}

@@ -44,14 +44,14 @@ export default function SleepTimer() {
       </div>
       {timerActive&&timeLeft!==null&&timeLeft<=60&&timeLeft>0 ? (
         <button onClick={bumpTimer} className="btn-primary"
-          style={{background:bm?'#2a2114':'#b8813a',color:bm?'#e6dcce':'#fff',animation:'pulse 1.5s ease-in-out infinite',
+          style={{background:bm?'#2a2114':'#b8813a',color:bm?'#e6dcce':'#15110b',animation:'pulse 1.5s ease-in-out infinite',
             boxShadow:bm?'none':'0 0 20px rgba(79,70,229,.4)'}}>
           Still Awake? (+15 min)
         </button>
       ):(
         <button onClick={toggleTimer} className="btn-primary"
           style={{background:timerActive?(bm?'rgba(255,255,255,.04)':'rgba(248,113,113,.1)'):(bm?'#2a2114':'#b8813a'),
-            color:timerActive?(bm?'#8a7860':'#f87171'):(bm?'#e6dcce':'#fff'),
+            color:timerActive?(bm?'#8a7860':'#f87171'):(bm?'#e6dcce':'#15110b'),
             border:timerActive?`1px solid ${bm?'#2a2114':'rgba(248,113,113,.3)'}`:'none',
             boxShadow:timerActive?'none':(bm?'none':'0 4px 20px rgba(79,70,229,.3)')}}>
           {timerActive?'Cancel Timer':`Start ${timerMins} Min Timer`}
