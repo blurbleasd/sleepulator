@@ -53,7 +53,6 @@ export function AppProvider({ children }) {
   const [eqOn, setEqOn] = useState(()=>localStorage.getItem('eqOn')==='true');
   const [compOn, setCompOn] = useState(()=>localStorage.getItem('compOn')==='true');
   const [panOn, setPanOn] = useState(()=>localStorage.getItem('panOn')==='true');
-  const [activeTab,     setActiveTab]     = useState('feed');
   const [playingSrc,    setPlayingSrc]    = useState('feed');
   const [curEp,         setCurEp]         = useState(null);
   const [podPlaying,    setPodPlaying]    = useState(false);
@@ -106,8 +105,6 @@ export function AppProvider({ children }) {
 
   const [showPlaylistLibrary, setShowPlaylistLibrary] = useState(false);
   const [playlistName,  setPlaylistName]  = useState('');
-  const [expandedEp,    setExpandedEp]    = useState(null);
-  const [epFilter,      setEpFilter]      = useState('');
   const [podProgress,   setPodProgress]   = useState({cur:0,dur:0});
   const dragSrcRef = useRef(null);
   const normalizedAudioProxyUrl = normalizeConfigUrl(audioProxyUrl);
@@ -1291,8 +1288,6 @@ export function AppProvider({ children }) {
     setEpisodes,
     playlist,
     setPlaylist,
-    activeTab,
-    setActiveTab,
     playingSrc,
     setPlayingSrc,
     curEp,
@@ -1350,10 +1345,6 @@ export function AppProvider({ children }) {
     setShowPlaylistLibrary,
     playlistName,
     setPlaylistName,
-    expandedEp,
-    setExpandedEp,
-    epFilter,
-    setEpFilter,
     podProgress,
     setPodProgress,
     timerEndRef,

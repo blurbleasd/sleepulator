@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useAppContext } from '../context/AppContext.jsx';
 import { NATIVE_MEDIA_VOLUME_LOCK } from '../utils/core.js';
 import LucideIcon from './LucideIcon.jsx';
@@ -19,18 +19,23 @@ function EmptyState({text,color}) {
 // Extracted from AppLayout; reads everything from context.
 export default function EpisodeBrowser() {
   const {
-    activeTab, setActiveTab, episodes, playlist,
+    episodes, playlist,
     bm, c_head, c_sub, c_dim, c_bord, c_inner, c_text,
     podVol, setPodVol, autoPlay, setAutoPlay, shuffle, setShuffle, podSpeed, setPodSpeed,
     preloadNext, setPreloadNext,
     feedErr, feedNote, loading,
     playEp, addEpisodesToPlaylist, saveCurrentPlaylist, setShowPlaylistLibrary,
-    epFilter, setEpFilter,
-    curEp, podPlaying, expandedEp, setExpandedEp,
+    curEp, podPlaying,
     dragSrcRef, setPlaylist,
     cachedEpisodes, deleteEpisode, downloadEpisode, downloadProgress,
     addToPlaylist, removeFromPlaylist, skipPod,
   } = useAppContext() || {};
+
+  // Browser-local view state — used only here, so it lives here rather than in
+  // the global context (first step of de-monolithing AppContext).
+  const [activeTab, setActiveTab] = useState('feed');
+  const [expandedEp, setExpandedEp] = useState(null);
+  const [epFilter, setEpFilter] = useState('');
 
   // Swap a playlist item with its neighbour. Drives the up/down reorder buttons,
   // which work on touch (unlike native HTML5 drag-and-drop, which iOS ignores).
