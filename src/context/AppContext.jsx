@@ -963,6 +963,12 @@ export function AppProvider({ children }) {
     mixBus.addSource('pod', audio);
     audio.loop = false;
     audio.preload = 'metadata';
+    // Disable pitch-preserving time-stretch at slow speeds: it's CPU-heavy and
+    // choppy on mobile through a MediaElementSource. Resampling instead drops the
+    // pitch naturally (a deeper, lethargic voice — fitting for a sleep app).
+    audio.preservesPitch = false;
+    audio.mozPreservesPitch = false;
+    audio.webkitPreservesPitch = false;
     audio.addEventListener('play', () => {
       setPodPlaying(true);
       if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
