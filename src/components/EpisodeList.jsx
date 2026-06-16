@@ -1,6 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAppContext } from '../context/AppContext.jsx';
 import LucideIcon from './LucideIcon.jsx';
+
+const PAGE = 40; // render episodes a chunk at a time — long feeds were janky
 
 // A clean, reusable list of episode rows. `mode` is 'feed' (a podcast's
 // episodes: tap + to queue) or 'queue' (the Up-Next list: reorder + remove).
@@ -14,6 +16,9 @@ export default function EpisodeList({ list, mode = 'feed', emptyText = 'Nothing 
     cachedEpisodes, deleteEpisode, downloadEpisode, downloadProgress,
   } = useAppContext() || {};
   const [expandedEp, setExpandedEp] = useState(null);
+  const [visible, setVisible] = useState(PAGE);
+  // Reset the window whenever the list changes (e.g. opening a different feed).
+  useEffect(() => { setVisible(PAGE); }, [list]);
 
   const moveEp = (id, dir) => setPlaylist(prev => {
     const i = prev.findIndex(e => e.id === id);
@@ -37,7 +42,7 @@ export default function EpisodeList({ list, mode = 'feed', emptyText = 'Nothing 
 
   return (
     <div className="scroll-y" style={{display:'flex',flexDirection:'column',gap:'.375rem'}}>
-      {list.map(ep => {
+      {list.slice(0, visible).map(ep => {
         const playing = curEp?.id === ep.id && podPlaying;
         const isExpanded = expandedEp === ep.id;
         const inQueue = playlist.find(p => p.id === ep.id);
@@ -113,6 +118,13 @@ export default function EpisodeList({ list, mode = 'feed', emptyText = 'Nothing 
           </div>
         );
       })}
+      {visible < list.length && (
+        <button onClick={()=>setVisible(v => v + PAGE)} className="btn-pill"
+          style={{margin:'.5rem auto 0',padding:'.6rem 1.2rem'}}>
+          Load more ({list.length - visible} left)
+        </button>
+      )}
     </div>
   );
 }
+

@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import App from './App.jsx';
@@ -101,5 +101,40 @@ describe('Queue (Up next)', () => {
     first = screen.getByText('First Episode');
     second = screen.getByText('Second Episode');
     expect(second.compareDocumentPosition(first) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('renders episodes in chunks with a Load more button', async () => {
+    const many = Array.from({ length: 45 }, (_, i) => ({ id: `e${i}`, title: `Episode ${i}`, url: `https://example.com/${i}.mp3` }));
+    localStorage.setItem('sleepulatorPlaylist', JSON.stringify(many));
+    const user = userEvent.setup();
+    render(<App />);
+    await screen.findByRole('heading', { name: 'SLEEPULATOR' });
+    await user.click(screen.getByRole('button', { name: /podcasts/i }));
+    await user.click(screen.getByRole('button', { name: /up next/i }));
+
+    // First chunk only (40) — episode 44 is not rendered yet.
+    expect(screen.getByText('Episode 0')).toBeInTheDocument();
+    expect(screen.queryByText('Episode 44')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /load more/i }));
+    expect(screen.getByText('Episode 44')).toBeInTheDocument();
+  });
+});
+
+describe('Podcast library', () => {
+  afterEach(() => { try { localStorage.clear(); } catch { /* ignore */ } });
+
+  it('removes a saved podcast from the library', async () => {
+    localStorage.setItem('feedSubs', JSON.stringify([
+      { url: 'https://example.com/feed', name: 'Test Feed', episodeCount: 5 },
+    ]));
+    window.confirm = () => true;
+    const user = userEvent.setup();
+    render(<App />);
+    await screen.findByRole('heading', { name: 'SLEEPULATOR' });
+    await user.click(screen.getByRole('button', { name: /podcasts/i }));
+
+    expect(screen.getByText('Test Feed')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Remove Test Feed' }));
+    expect(screen.queryByText('Test Feed')).not.toBeInTheDocument();
   });
 });

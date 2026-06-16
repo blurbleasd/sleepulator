@@ -17,7 +17,7 @@ import ImportOpmlButton from './ImportOpmlButton.jsx';
 export default function PodcastScreen({ show, onClose }) {
   const {
     c_head, c_sub, c_dim, c_bord, c_inner, c_text,
-    subs, playlist, episodes, loading, feedErr,
+    subs, setSubs, playlist, episodes, loading, feedErr,
     loadFeed, rssUrl, setRssUrl, subName,
     playEp, addEpisodesToPlaylist, saveCurrentPlaylist, setShowPlaylistLibrary,
     podVol, setPodVol, autoPlay, setAutoPlay, shuffle, setShuffle,
@@ -32,6 +32,10 @@ export default function PodcastScreen({ show, onClose }) {
 
   const goBack = () => (view === 'library' ? onClose() : setView('library'));
   const openPodcast = (sub) => { setFeed(sub); if (sub?.url) loadFeed(sub.url); setView('podcast'); };
+  const removeFeed = (sub) => {
+    if (typeof window !== 'undefined' && !window.confirm(`Remove "${sub.name}" from your podcasts?`)) return;
+    setSubs(prev => prev.filter(x => x.url !== sub.url));
+  };
 
   const titles = { library: 'Podcasts', podcast: feed?.name || subName || 'Podcast', queue: 'Up next', settings: 'Podcast settings' };
 
@@ -78,17 +82,23 @@ export default function PodcastScreen({ show, onClose }) {
             ) : (
               <div style={{display:'flex',flexDirection:'column',gap:'.6rem',marginBottom:'1rem'}}>
                 {subs.map((s,i)=>(
-                  <button key={i} onClick={()=>openPodcast(s)} className="card"
-                    style={{display:'flex',alignItems:'center',gap:'.75rem',width:'100%',textAlign:'left',cursor:'pointer',padding:'.85rem'}}>
-                    <span style={{width:42,height:42,borderRadius:'.6rem',background:'#2f2417',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,color:'#e6b277'}}>
-                      <LucideIcon name="Rss" size={20}/>
-                    </span>
-                    <span style={{flex:1,minWidth:0}}>
-                      <span style={{display:'block',fontSize:'.9rem',color:c_head,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{s.name}</span>
-                      <span style={{display:'block',fontSize:'.7rem',color:c_sub}}>{s.episodeCount ? `${s.episodeCount} episodes` : 'Tap to load'}</span>
-                    </span>
-                    <span style={{fontSize:'1.2rem',lineHeight:1,color:c_dim}}>›</span>
-                  </button>
+                  <div key={i} className="card" style={{display:'flex',alignItems:'center',gap:'.5rem',padding:'.85rem'}}>
+                    <button onClick={()=>openPodcast(s)}
+                      style={{flex:1,minWidth:0,display:'flex',alignItems:'center',gap:'.75rem',background:'transparent',border:'none',padding:0,textAlign:'left',cursor:'pointer',color:'inherit'}}>
+                      <span style={{width:42,height:42,borderRadius:'.6rem',background:'#2f2417',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,color:'#e6b277'}}>
+                        <LucideIcon name="Rss" size={20}/>
+                      </span>
+                      <span style={{flex:1,minWidth:0}}>
+                        <span style={{display:'block',fontSize:'.9rem',color:c_head,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{s.name}</span>
+                        <span style={{display:'block',fontSize:'.7rem',color:c_sub}}>{s.episodeCount ? `${s.episodeCount} episodes` : 'Tap to load'}</span>
+                      </span>
+                      <span style={{fontSize:'1.2rem',lineHeight:1,color:c_dim}}>›</span>
+                    </button>
+                    <button onClick={()=>removeFeed(s)} aria-label={`Remove ${s.name}`} className="btn-icon"
+                      style={{width:40,height:40,minWidth:40,minHeight:40,background:'transparent',color:c_dim,flexShrink:0}}>
+                      <LucideIcon name="Trash2" size={16}/>
+                    </button>
+                  </div>
                 ))}
               </div>
             )}
