@@ -134,6 +134,7 @@ export function AppProvider({ children }) {
   const lastPodUrl = useRef('');
   const liveRef = useRef({});
   const prefetchingRef = useRef(new Set()); // episode URLs currently being preloaded
+  const prefetchedRef  = useRef(new Set()); // auto-cached URLs (evictable; not user downloads)
   const setNativeAudioLevel = useCallback((audio, volume, muteState) => {
     if (!audio) return;
     audio.muted = !!muteState || volume <= LOOP_MUTED_GAIN_EPSILON;
@@ -651,7 +652,8 @@ export function AppProvider({ children }) {
       
       // Store in cache
       await cache.put(epUrl, response.clone());
-      
+
+      prefetchedRef.current.delete(epUrl); // user download -> permanent, exempt from eviction
       setCachedEpisodes(prev => ({...prev, [epUrl]: true}));
       setDownloadProgress(prev => {
         const next = {...prev};
@@ -671,31 +673,58 @@ export function AppProvider({ children }) {
   // Silently warm the cache for an episode (the autoplay "next up") so it starts
   // instantly with no buffering. Mirrors downloadEpisode but shows no UI and
   // skips when already cached, in flight, or on a metered (Data Saver) connection.
-  const prefetchEpisode = useCallback(async (epUrl) => {
-    if (!epUrl || cachedEpisodes[epUrl] || prefetchingRef.current.has(epUrl)) return;
+  // Evict auto-prefetched episodes we no longer need so the cache can't grow
+  // unbounded (episodes are 50–100 MB). Only touches URLs we prefetched —
+  // never user-initiated downloads — and always keeps `keep` (the playing one).
+  const evictStalePrefetch = useCallback(async (keep) => {
+    const stale = [...prefetchedRef.current].filter(u => !keep.includes(u));
+    if (!stale.length) return;
+    try {
+      const cache = await caches.open('sleepulator-episodes');
+      for (const u of stale) {
+        await cache.delete(u);
+        prefetchedRef.current.delete(u);
+      }
+      setCachedEpisodes(prev => {
+        const next = { ...prev };
+        stale.forEach(u => { delete next[u]; });
+        return next;
+      });
+    } catch (err) { /* non-fatal */ }
+  }, []);
+
+  const prefetchEpisode = useCallback(async (epUrl, keepUrl) => {
+    if (!epUrl || prefetchingRef.current.has(epUrl)) return;
     if (navigator.connection?.saveData) return;
+    // Drop previously-prefetched episodes except the new next-up and the
+    // currently-playing one, capping the auto-cache at ~2 files.
+    evictStalePrefetch([epUrl, keepUrl].filter(Boolean));
+    if (cachedEpisodes[epUrl]) return;
     prefetchingRef.current.add(epUrl);
     try {
       const cache = await caches.open('sleepulator-episodes');
       if (await cache.match(epUrl)) {
+        prefetchedRef.current.add(epUrl);
         setCachedEpisodes(prev => ({ ...prev, [epUrl]: true }));
         return;
       }
       const response = await fetch(epUrl);
       if (!response.ok) return; // opaque/cross-origin can't be replayed from cache
       await cache.put(epUrl, response.clone());
+      prefetchedRef.current.add(epUrl);
       setCachedEpisodes(prev => ({ ...prev, [epUrl]: true }));
     } catch (err) {
       // Network/CORS failures are non-fatal — playback just streams normally.
     } finally {
       prefetchingRef.current.delete(epUrl);
     }
-  }, [cachedEpisodes]);
+  }, [cachedEpisodes, evictStalePrefetch]);
 
   const deleteEpisode = async (epUrl) => {
     if (!epUrl) return;
     const cache = await caches.open('sleepulator-episodes');
     await cache.delete(epUrl);
+    prefetchedRef.current.delete(epUrl);
     setCachedEpisodes(prev => {
       const next = {...prev};
       delete next[epUrl];
@@ -1143,7 +1172,7 @@ export function AppProvider({ children }) {
     if(!preloadNext||!autoPlay||shuffle||!curEp) return;
     const list = playingSrc==='playlist' ? playlist : episodes;
     const next = nextEpisode(list, curEp.id);
-    if(next?.url && next.id!==curEp.id) prefetchEpisode(next.url);
+    if(next?.url && next.id!==curEp.id) prefetchEpisode(next.url, curEp.url);
   },[preloadNext,autoPlay,shuffle,curEp,playingSrc,episodes,playlist,prefetchEpisode]);
 
   // Progress save
