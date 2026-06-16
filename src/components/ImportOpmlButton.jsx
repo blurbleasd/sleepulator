@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { useAppContext } from '../context/AppContext.jsx';
 import { parseOpmlFeeds, deriveFeedName } from '../utils/core.js';
 
@@ -11,6 +11,7 @@ export default function ImportOpmlButton() {
   const [feeds, setFeeds] = useState(null);   // parsed [{url,name}] awaiting selection, or null
   const [picked, setPicked] = useState(() => new Set());
   const [msg, setMsg] = useState(null);
+  const inputRef = useRef(null);
 
   const onFile = (e) => {
     const file = e.target.files?.[0];
@@ -46,10 +47,15 @@ export default function ImportOpmlButton() {
   if (!feeds) {
     return (
       <div style={{display:'flex',flexDirection:'column',gap:'.4rem'}}>
-        <label className="btn-pill" style={{textAlign:'center',cursor:'pointer',padding:'.6rem'}}>
+        <button type="button" className="btn-pill" style={{textAlign:'center',cursor:'pointer',padding:'.6rem'}}
+          onClick={()=>inputRef.current?.click()}>
           Import from OPML (Overcast, etc.)
-          <input type="file" accept=".opml,.xml,text/xml,application/xml,text/x-opml" onChange={onFile} style={{display:'none'}} />
-        </label>
+        </button>
+        {/* No accept filter: iOS has no registered type for .opml, so any
+            restriction greys the file out. We validate by parsing instead.
+            Off-screen (not display:none) so the picker reliably opens on iOS. */}
+        <input ref={inputRef} type="file" onChange={onFile}
+          style={{position:'absolute',width:1,height:1,opacity:0,overflow:'hidden',pointerEvents:'none'}} />
         {msg && <div style={{fontSize:'.7rem',color:c_sub,textAlign:'center',lineHeight:1.5}}>{msg}</div>}
       </div>
     );
