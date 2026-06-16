@@ -2,15 +2,13 @@ import React from 'react';
 import { useAppContext } from './context/AppContext.jsx';
 import { fmtTime } from './utils/core.js';
 import LucideIcon from './components/LucideIcon.jsx';
-import EpisodeBrowser from './components/EpisodeBrowser.jsx';
 import SleepTimer from './components/SleepTimer.jsx';
 import MixerPanel from './components/MixerPanel.jsx';
 import Header from './components/Header.jsx';
 import AmbientBinaural from './components/AmbientBinaural.jsx';
-import PodcastSettings from './components/PodcastSettings.jsx';
 import NowPlayingBar from './components/NowPlayingBar.jsx';
 import ImportOpmlButton from './components/ImportOpmlButton.jsx';
-import PodcastEffects from './components/PodcastEffects.jsx';
+import PodcastScreen from './components/PodcastScreen.jsx';
 
 export default function AppLayout() {
   const {
@@ -207,69 +205,7 @@ export default function AppLayout() {
           </div>
         </div>
 
-        {/* Podcast screen */}
-        {showPodcasts && (
-        <div className="overlay" style={{zIndex:150,paddingTop:'var(--top-clearance)',overflowY:'auto'}}>
-          <div style={{maxWidth:500,margin:'0 auto',paddingLeft:'1rem',paddingRight:'1rem'}} className="pad-bottom">
-            <div style={{display:'flex',alignItems:'center',gap:'.5rem',padding:'0 0 1rem'}}>
-              <button onClick={()=>setShowPodcasts(false)} className="btn-icon" title="Back"><LucideIcon name="X" size={20}/></button>
-              <span style={{fontSize:'1.1rem',fontWeight:800,color:c_head}}>Podcasts</span>
-            </div>
-
-          {/* Podcast */}
-          <div className="card" style={{position:'relative',overflow:'hidden'}}>
-            {podPlaying && !bm && <div className="glow-purple" style={{position:'absolute',top:0,left:0,width:3,height:'100%',background:'#e6b277',borderRadius:2}}/>}
-
-            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'1rem'}}>
-              <div style={{display:'flex',alignItems:'center',gap:'.5rem',color:bm?'#a9762f':'#e6b277'}}>
-                <LucideIcon name="Rss" size={18}/>
-                <span style={{fontWeight:700,fontSize:'.9rem'}}>Podcast Stream</span>
-              </div>
-              <button onClick={()=>setShowSubs(true)} className="btn-icon" title="Saved Feeds">
-                <LucideIcon name="BookMarked" size={16}/>
-              </button>
-            </div>
-
-            {/* URL input */}
-            <div style={{display:'flex',gap:'.5rem',marginBottom:'.875rem'}}>
-              <input type="url" value={rssUrl} onChange={e=>setRssUrl(e.target.value)}
-                onKeyDown={e=>{ if(e.key==='Enter'){ e.target.blur(); loadFeed(); } }}
-                placeholder="Paste podcast feed URL…"
-                style={{flex:1,background:c_inner,border:`1px solid ${c_bord}`,borderRadius:'.625rem',padding:'.5rem .75rem',color:c_text,fontSize:'14px'}}/>
-              <button onClick={()=>{ document.activeElement?.blur(); loadFeed(); }} disabled={loading}
-                style={{padding:'.5rem 1rem',borderRadius:'.625rem',background:bm?'#2a2114':'#b8813a',color:bm?'#b39b80':'#fff',border:'none',fontWeight:700,cursor:'pointer',whiteSpace:'nowrap',minWidth:60,opacity:loading?.6:1}}>
-                {loading?'…':'Load'}
-              </button>
-            </div>
-
-            <PodcastSettings />
-
-            <PodcastEffects />
-
-            {/* Now Playing strip */}
-            {curEp && (
-              <div className="card-inner" style={{marginBottom:'.875rem',background:bm?'rgba(230,178,119,.05)':'rgba(230,178,119,.07)',borderColor:bm?'rgba(230,178,119,.25)':'rgba(230,178,119,.25)'}}>
-                <div style={{fontSize:'.62rem',fontWeight:700,letterSpacing:'.07em',textTransform:'uppercase',color:bm?'#a9762f':'#e6b277',marginBottom:'.2rem'}}>
-                  {podPlaying ? '▶ Now Playing' : '⏸ Paused'}
-                </div>
-                <div style={{fontSize:'.73rem',color:c_head,lineHeight:1.4,marginBottom:'.5rem',display:'-webkit-box',WebkitLineClamp:2,WebkitBoxOrient:'vertical',overflow:'hidden'}}>
-                  {curEp.title}
-                </div>
-                <input type="range" min={0} max={podProgress.dur||1} step={1} value={podProgress.cur}
-                  onChange={e=>{ if(podAudio.current) podAudio.current.currentTime=+e.target.value; }}
-                  className="purple" style={{width:'100%',marginBottom:'.2rem'}}/>
-                <div style={{display:'flex',justifyContent:'space-between',fontSize:'.65rem',color:c_sub}}>
-                  <span>{fmtTime(podProgress.cur)}</span>
-                  <span>{podProgress.dur>0 ? fmtTime(podProgress.dur) : '--:--'}</span>
-                </div>
-              </div>
-            )}
-
-            <EpisodeBrowser />
-          </div>
-          </div>
-        </div>
-        )}
+        <PodcastScreen show={showPodcasts} onClose={()=>setShowPodcasts(false)} />
       </div>
     </div>
   );

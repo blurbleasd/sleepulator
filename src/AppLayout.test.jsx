@@ -30,9 +30,10 @@ describe('Audio Engine dev panel (Feed Debug)', () => {
     render(<App />);
     await screen.findByRole('heading', { name: 'SLEEPULATOR' });
 
-    // Podcast controls (incl. Feed Debug) now live on a separate screen.
+    // Podcast controls (incl. Feed Debug) now live on the Podcasts > Settings screen.
     expect(screen.queryByText('Audio Engine (dev)')).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: /podcasts/i }));
+    await user.click(screen.getByRole('button', { name: 'Settings' }));
     expect(screen.queryByText('Audio Engine (dev)')).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Feed Debug' }));
@@ -47,6 +48,7 @@ describe('Audio Engine dev panel (Feed Debug)', () => {
     render(<App />);
     await screen.findByRole('heading', { name: 'SLEEPULATOR' });
     await user.click(screen.getByRole('button', { name: /podcasts/i }));
+    await user.click(screen.getByRole('button', { name: 'Settings' }));
     await user.click(screen.getByRole('button', { name: 'Feed Debug' }));
 
     expect(screen.queryByText(/^state:/)).not.toBeInTheDocument();
@@ -59,10 +61,10 @@ describe('Audio Engine dev panel (Feed Debug)', () => {
   });
 });
 
-describe('Episode browser', () => {
+describe('Queue (Up next)', () => {
   afterEach(() => { try { localStorage.clear(); } catch { /* ignore */ } });
 
-  it('renders playlist episodes on the Playlist tab and filters them', async () => {
+  it('renders queued episodes on the Up next screen', async () => {
     localStorage.setItem('sleepulatorPlaylist', JSON.stringify([
       { id: 'e1', title: 'Sleepy Episode One', url: 'https://example.com/1.mp3' },
       { id: 'e2', title: 'Calm Episode Two', url: 'https://example.com/2.mp3' },
@@ -72,18 +74,13 @@ describe('Episode browser', () => {
     await screen.findByRole('heading', { name: 'SLEEPULATOR' });
 
     await user.click(screen.getByRole('button', { name: /podcasts/i }));
-    await user.click(screen.getByRole('button', { name: /^playlist/i }));
+    await user.click(screen.getByRole('button', { name: /up next/i }));
 
     expect(screen.getByText('Sleepy Episode One')).toBeInTheDocument();
     expect(screen.getByText('Calm Episode Two')).toBeInTheDocument();
-
-    // The filter input narrows the list by title.
-    await user.type(screen.getByPlaceholderText(/filter episodes/i), 'calm');
-    expect(screen.queryByText('Sleepy Episode One')).not.toBeInTheDocument();
-    expect(screen.getByText('Calm Episode Two')).toBeInTheDocument();
   });
 
-  it('reorders the playlist with the up/down buttons', async () => {
+  it('reorders the queue with the up/down buttons', async () => {
     localStorage.setItem('sleepulatorPlaylist', JSON.stringify([
       { id: 'e1', title: 'First Episode', url: 'https://example.com/1.mp3' },
       { id: 'e2', title: 'Second Episode', url: 'https://example.com/2.mp3' },
@@ -92,7 +89,7 @@ describe('Episode browser', () => {
     render(<App />);
     await screen.findByRole('heading', { name: 'SLEEPULATOR' });
     await user.click(screen.getByRole('button', { name: /podcasts/i }));
-    await user.click(screen.getByRole('button', { name: /^playlist/i }));
+    await user.click(screen.getByRole('button', { name: /up next/i }));
 
     // Initially First precedes Second.
     let first = screen.getByText('First Episode');
