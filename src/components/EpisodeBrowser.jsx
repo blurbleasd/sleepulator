@@ -95,7 +95,7 @@ export default function EpisodeBrowser() {
               </div>
 
               <div>
-                <div className="section-label">Lethargic Speed</div>
+                <div className="section-label">Playback speed</div>
                 <div style={{display:'flex',gap:'.375rem'}}>
                   {[1,.85,.75].map(s=>(
                     <button key={s} onClick={()=>setPodSpeed(s)} className={`speed-chip${podSpeed===s?' on':''}`}>

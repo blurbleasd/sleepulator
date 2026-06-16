@@ -41,7 +41,7 @@ export default function AmbientBinaural() {
         </div>
         <label style={{display:'flex',alignItems:'center',gap:'.5rem',fontSize:'.7rem',color:c_sub,marginTop:'.75rem',cursor:'pointer'}}>
           <input type="checkbox" checked={ambientBypass} onChange={e=>setAmbientBypass(e.target.checked)}/>
-          All night (bypass timer)
+          Play all night (ignore timer)
         </label>
       </div>
 
@@ -65,9 +65,10 @@ export default function AmbientBinaural() {
           <input type="range" min="0" max="1" step=".01" value={binVol} className="blue"
             onChange={e=>setBinVol(+e.target.value)} style={{flex:1}}/>
         </div>
+        <div style={{fontSize:'.6rem',color:c_sub,opacity:.7,marginTop:'.4rem'}}>Best with headphones</div>
         <label style={{display:'flex',alignItems:'center',gap:'.5rem',fontSize:'.7rem',color:c_sub,marginTop:'.75rem',cursor:'pointer'}}>
           <input type="checkbox" checked={binBypass} onChange={e=>setBinBypass(e.target.checked)}/>
-          All night (bypass timer)
+          Play all night (ignore timer)
         </label>
       </div>
     </div>
