@@ -7,23 +7,18 @@ import MixerPanel from './components/MixerPanel.jsx';
 import Header from './components/Header.jsx';
 import AmbientBinaural from './components/AmbientBinaural.jsx';
 import NowPlayingBar from './components/NowPlayingBar.jsx';
-import ImportOpmlButton from './components/ImportOpmlButton.jsx';
 import PodcastScreen from './components/PodcastScreen.jsx';
 
 export default function AppLayout() {
   const {
     bm, breathMode, setBreathMode, episodes,
-    playlist, curEp, podPlaying, rssUrl,
-    setRssUrl, loading, subs, setSubs,
-    showSubs, setShowSubs, subName, setSubName,
-    savedPlaylists, setSavedPlaylists, showPlaylistLibrary, setShowPlaylistLibrary,
-    playlistName, setPlaylistName, podProgress, podAudio,
-    btn, icon, label, sub,
-    m, entry, saveCurrentPlaylist, name,
-    loadSavedPlaylist, loadFeed, saveSub, url,
-    p, bc, c_text, c_sub,
-    c_dim, c_head, c_bord, c_inner,
-  } = useAppContext() || {}; // only what AppLayout itself renders
+    playlist, savedPlaylists, setSavedPlaylists, showPlaylistLibrary,
+    setShowPlaylistLibrary, playlistName, setPlaylistName, label,
+    sub, m, entry, saveCurrentPlaylist,
+    name, loadSavedPlaylist, p, bc,
+    c_text, c_sub, c_dim, c_head,
+    c_bord, c_inner,
+  } = useAppContext() || {};
 
   const [showPodcasts, setShowPodcasts] = React.useState(false);
 
@@ -53,64 +48,6 @@ export default function AppLayout() {
           <div style={{position:'relative',width:220,height:220,display:'flex',alignItems:'center',justifyContent:'center'}}>
             <div style={{position:'absolute',inset:0,borderRadius:'50%',background:bc.col,opacity:.1}}/>
             <div className={bc.cls} style={{width:'100%',height:'100%',borderRadius:'50%',background:bc.col,opacity:.85,boxShadow:bm?'none':`0 0 60px ${bc.col}40`}}/>
-          </div>
-        </div>
-      )}
-
-      {/* ── Saved feeds overlay ── */}
-      {showSubs && (
-        <div className="overlay" style={{background:bm?'#000':'#15110b',paddingTop:'var(--top-clearance)'}}>
-          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'1.25rem'}}>
-            <h2 style={{fontSize:'1.1rem',fontWeight:800,color:c_head,margin:0}}>Saved Feeds</h2>
-            <button onClick={()=>setShowSubs(false)}
-              style={{background:'#1e293b',border:'none',borderRadius:'50%',width:44,height:44,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',color:'#b39b80'}}>
-              <LucideIcon name="X" size={18}/>
-            </button>
-          </div>
-
-          <div className="card" style={{margin:'0 1rem 1rem',padding:'1rem'}}>
-            <p style={{fontSize:'.7rem',color:c_sub,margin:'0 0 .5rem'}}>Loaded feeds are saved automatically. Use this to rename the current feed if you want.</p>
-            <div style={{display:'flex',gap:'.5rem'}}>
-              <input type="text" value={subName} onChange={e=>setSubName(e.target.value)} placeholder={rssUrl.trim() ? "Current feed name…" : "Load a feed to rename it…"}
-                style={{flex:1,background:c_inner,border:`1px solid ${c_bord}`,borderRadius:'.5rem',padding:'.5rem .75rem',color:c_text,fontSize:'14px'}}/>
-              <button onClick={saveSub} disabled={!rssUrl.trim()}
-                style={{padding:'.5rem 1rem',borderRadius:'.5rem',background:rssUrl.trim()?'#b8813a':'#4a3a1e',color:'#fff',border:'none',fontWeight:700,cursor:rssUrl.trim()?'pointer':'default',whiteSpace:'nowrap',opacity:rssUrl.trim()?1:.55}}>
-                Update
-              </button>
-            </div>
-            <div style={{borderTop:`1px solid ${c_bord}`,margin:'.875rem 0 0',paddingTop:'.875rem'}}>
-              <p style={{fontSize:'.7rem',color:c_sub,margin:'0 0 .5rem'}}>Bring in your subscriptions from Overcast or another app.</p>
-              <ImportOpmlButton />
-            </div>
-          </div>
-
-          <div className="scroll-y" style={{flex:1,padding:'0 1rem',display:'flex',flexDirection:'column',gap:'.5rem'}}>
-            {subs.length===0 && <p style={{textAlign:'center',padding:'2rem',color:c_sub,fontSize:'.85rem'}}>No saved feeds yet.</p>}
-            {subs.map((s,i)=>(
-              <div key={i} className="card" style={{padding:'1rem',display:'flex',alignItems:'center',gap:'.75rem'}}>
-                <div style={{flex:1,minWidth:0}}>
-                  <p style={{margin:0,fontSize:'.85rem',fontWeight:600,color:c_head,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{s.name}</p>
-                  <p style={{margin:0,fontSize:'.7rem',color:c_sub,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{s.url}</p>
-                  {!!s.episodeCount && (
-                    <p style={{margin:'.25rem 0 0',fontSize:'.65rem',color:c_dim}}>{s.episodeCount} episode{s.episodeCount===1?'':'s'} cached from last load</p>
-                  )}
-                </div>
-                <button onClick={()=>{ setSubName(s.name || ''); loadFeed(s.url, { closeLibrary: true }); }}
-                  style={{padding:'.4rem .875rem',borderRadius:'.5rem',background:'rgba(230,178,119,.2)',color:'#e6b277',border:'none',fontSize:'.75rem',fontWeight:700,cursor:'pointer',whiteSpace:'nowrap'}}>
-                  Load
-                </button>
-                <button onClick={()=>{ setSubName(s.name || ''); loadFeed(s.url, { autoplay: true, closeLibrary: true }); }}
-                  style={{padding:'.4rem .875rem',borderRadius:'.5rem',background:'#b8813a',color:'#fff',border:'none',fontSize:'.75rem',fontWeight:700,cursor:'pointer',whiteSpace:'nowrap'}}>
-                  Play
-                </button>
-                <button onClick={()=>setSubs(prev=>prev.filter(x=>x.url!==s.url))}
-                  style={{background:'none',border:'none',cursor:'pointer',color:'#6b5d48',padding:'.25rem',display:'flex',alignItems:'center'}}
-                  onMouseOver={e=>e.currentTarget.style.color='#f87171'}
-                  onMouseOut={e=>e.currentTarget.style.color='#6b5d48'}>
-                  <LucideIcon name="Trash2" size={16}/>
-                </button>
-              </div>
-            ))}
           </div>
         </div>
       )}
