@@ -7,6 +7,9 @@ proxy/.wrangler/
 node_modules/
 dist/
 
+# transient Vite config temp files
+vite.config.js.timestamp-*
+
 # local editor / agent settings
 .claude/
 
