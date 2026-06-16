@@ -1,18 +1,14 @@
 import React, { useState } from 'react';
-import { Settings2, SlidersHorizontal, Waves, X, BookMarked, Trash2 } from 'lucide-react';
+import { Settings2, X, BookMarked, Trash2 } from 'lucide-react';
 import { useAppContext } from '../context/AppContext.jsx';
 
-// Master volume, the three pro-audio toggles (Night Comp / Voice EQ / Auto Pan),
-// and the saveable Mix Presets. Extracted from AppLayout; the preset-naming and
-// preset-list-open UI state is local to this component.
+// Master volume + the saveable Mix Presets. The podcast EQ/compressor/pan
+// toggles moved to PodcastEffects (they only affect podcast audio).
 export default function MixerPanel() {
   const {
     bm,
     c_head, c_sub,
     masterVol, setMasterVol,
-    compOn, setCompOn,
-    eqOn, setEqOn,
-    panOn, setPanOn,
     mixPresets,
     saveCurrentMix,
     loadMix,
@@ -31,33 +27,6 @@ export default function MixerPanel() {
         <input type="range" min="0" max="1" step=".01" value={masterVol} className="indigo"
           onChange={e=>setMasterVol(+e.target.value)} style={{flex:1}}/>
         <span style={{fontSize:'.7rem',fontFamily:'monospace',color:c_sub,width:32,textAlign:'right'}}>{Math.round(masterVol*100)}%</span>
-      </div>
-
-      {/* Pro Audio Controls */}
-      <div style={{display:'flex',gap:'.5rem',marginBottom:'1rem'}}>
-        <button onClick={() => setCompOn(!compOn)} className="card"
-          style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',gap:'.5rem',padding:'.875rem',cursor:'pointer',
-          border:compOn?'1px solid rgba(230,178,119,0.4)':'1px solid var(--c-border)',
-          background:compOn?'rgba(230,178,119,0.1)':'var(--c-surface)'}}>
-          <Settings2 size={16} color={compOn?'#e6b277':'var(--c-dim)'} />
-          <span style={{fontSize:'.65rem',fontWeight:700,color:compOn?'#e6b277':'var(--c-dim)'}}>NIGHT COMP</span>
-        </button>
-
-        <button onClick={() => setEqOn(!eqOn)} className="card"
-          style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',gap:'.5rem',padding:'.875rem',cursor:'pointer',
-          border:eqOn?'1px solid rgba(230,178,119,0.4)':'1px solid var(--c-border)',
-          background:eqOn?'rgba(230,178,119,0.1)':'var(--c-surface)'}}>
-          <SlidersHorizontal size={16} color={eqOn?'#e6b277':'var(--c-dim)'} />
-          <span style={{fontSize:'.65rem',fontWeight:700,color:eqOn?'#e6b277':'var(--c-dim)'}}>VOICE EQ</span>
-        </button>
-
-        <button onClick={() => setPanOn(!panOn)} className="card"
-          style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',gap:'.5rem',padding:'.875rem',cursor:'pointer',
-          border:panOn?'1px solid rgba(217,138,94,0.4)':'1px solid var(--c-border)',
-          background:panOn?'rgba(217,138,94,0.1)':'var(--c-surface)'}}>
-          <Waves size={16} color={panOn?'#d98a5e':'var(--c-dim)'} />
-          <span style={{fontSize:'.65rem',fontWeight:700,color:panOn?'#d98a5e':'var(--c-dim)'}}>AUTO PAN</span>
-        </button>
       </div>
 
       {/* Mix Presets */}

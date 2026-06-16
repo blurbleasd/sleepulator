@@ -10,6 +10,7 @@ import AmbientBinaural from './components/AmbientBinaural.jsx';
 import PodcastSettings from './components/PodcastSettings.jsx';
 import NowPlayingBar from './components/NowPlayingBar.jsx';
 import ImportOpmlButton from './components/ImportOpmlButton.jsx';
+import PodcastEffects from './components/PodcastEffects.jsx';
 
 export default function AppLayout() {
   const {
@@ -416,15 +417,16 @@ export default function AppLayout() {
 
         <NowPlayingBar onOpen={()=>setShowPodcasts(true)} />
 
-        <MixerPanel />
-
         <div style={{display:'flex',flexDirection:'column',gap:'1rem'}}>
+
+          {/* Sounds — the primary choice, first */}
+          <AmbientBinaural />
 
           {/* Sleep Timer */}
           <SleepTimer />
 
-          {/* Ambient + Binaural */}
-          <AmbientBinaural />
+          {/* Master volume + saved mixes */}
+          <MixerPanel />
 
           {/* Podcasts entry — opens the podcast screen */}
           <button onClick={()=>setShowPodcasts(true)} className="card" style={{display:'flex',alignItems:'center',justifyContent:'space-between',cursor:'pointer',width:'100%',textAlign:'left',border:'1px solid var(--c-border)'}}>
@@ -480,6 +482,8 @@ export default function AppLayout() {
             </div>
 
             <PodcastSettings />
+
+            <PodcastEffects />
 
             {/* Now Playing strip */}
             {curEp && (
