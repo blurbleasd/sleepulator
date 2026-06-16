@@ -13,7 +13,7 @@ export default function EpisodeList({ list, mode = 'feed', emptyText = 'Nothing 
     bm, c_head, c_sub, c_dim,
     curEp, podPlaying, playEp, skipPod,
     playlist, setPlaylist, addToPlaylist, removeFromPlaylist,
-    cachedEpisodes, deleteEpisode, downloadEpisode, downloadProgress,
+    cachedEpisodes, deleteEpisode, downloadEpisode, downloadProgress, online,
   } = useAppContext() || {};
   const [expandedEp, setExpandedEp] = useState(null);
   const [visible, setVisible] = useState(PAGE);
@@ -44,6 +44,9 @@ export default function EpisodeList({ list, mode = 'feed', emptyText = 'Nothing 
     <div className="scroll-y" style={{display:'flex',flexDirection:'column',gap:'.375rem'}}>
       {list.slice(0, visible).map(ep => {
         const playing = curEp?.id === ep.id && podPlaying;
+        // Offline + not downloaded = can't stream it. Don't block the episode
+        // that's already playing (it's buffered/cached), only fresh starts.
+        const offlineLocked = online === false && !cachedEpisodes[ep.url] && curEp?.id !== ep.id;
         const isExpanded = expandedEp === ep.id;
         const inQueue = playlist.find(p => p.id === ep.id);
         const pi = mode === 'queue' ? list.findIndex(e => e.id === ep.id) : -1;
@@ -99,10 +102,15 @@ export default function EpisodeList({ list, mode = 'feed', emptyText = 'Nothing 
                     <LucideIcon name="X" size={16}/>
                   </button>
                 )}
-                <button onClick={()=>playEp(ep, mode === 'queue' ? 'playlist' : 'feed')}
-                  className={`btn-icon${playing?' active-purple':''}`} aria-label={playing ? 'Pause' : 'Play'}
-                  style={{width:38,height:38,minWidth:38,minHeight:38,...(playing?{background:'rgba(230,178,119,.2)',color:'#e6b277'}:{})}}>
-                  <LucideIcon name={playing ? 'Pause' : 'Play'} size={16}/>
+                <button onClick={()=>{ if(!offlineLocked) playEp(ep, mode === 'queue' ? 'playlist' : 'feed'); }}
+                  disabled={offlineLocked}
+                  className={`btn-icon${playing?' active-purple':''}`}
+                  aria-label={offlineLocked ? 'Unavailable offline — download to play' : (playing ? 'Pause' : 'Play')}
+                  title={offlineLocked ? 'Unavailable offline — download to play' : undefined}
+                  style={{width:38,height:38,minWidth:38,minHeight:38,
+                    ...(offlineLocked?{opacity:.35,cursor:'default'}:{}),
+                    ...(playing?{background:'rgba(230,178,119,.2)',color:'#e6b277'}:{})}}>
+                  <LucideIcon name={offlineLocked ? 'CloudOff' : (playing ? 'Pause' : 'Play')} size={16}/>
                 </button>
               </div>
             </div>

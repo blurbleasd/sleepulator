@@ -5,6 +5,17 @@ export class MixBus {
     this._onRebuild = null;        // AppContext registers this (see onRebuild)
     this._rebuilding = false;      // guards against rebuild storms
     this._lastMasterVolume = 1;    // re-applied to a freshly built context
+
+    // Ducking ("sidechain") config lives on the instance so it survives a
+    // rebuild; the graph nodes (duckBus / analyser) are rebuilt in _initContext.
+    this.duckEnabled = false;
+    this.duckDepth = 0.45;     // ambient floor multiplier while voice present (~-7dB)
+    this.duckThreshold = 0.04; // RMS gate above which the podcast counts as "talking"
+    this.duckAttack = 0.12;    // s — time constant pulling ambient down (fast)
+    this.duckRelease = 0.55;   // s — time constant letting it swell back (gentle)
+    this._duckSuspended = false; // transient override (e.g. during the sleep-timer fade)
+    this._duckRAF = null;
+
     this._initContext();
   }
 
@@ -23,6 +34,16 @@ export class MixBus {
     // Master gain controls overall volume
     this.masterGain = this.context.createGain();
     this.masterGain.connect(this.context.destination);
+
+    // Ducking sub-bus: ambient + binaural pass through here so the podcast voice
+    // can pull them down and let them swell back in the gaps. Pod routes straight
+    // to master (it's the trigger, not a duck target).
+    this.duckBus = this.context.createGain();
+    this.duckBus.gain.value = 1;
+    this.duckBus.connect(this.masterGain);
+    this._duckCurrent = 1;     // last applied duck multiplier (1 = fully open)
+    this._duckAnalyser = null; // tap on the pod trigger signal (set in addSource)
+    this._duckData = null;     // reusable time-domain analysis buffer
 
     this._startPanLFO();
 
@@ -109,6 +130,7 @@ export class MixBus {
       }));
 
       // 2. Tear down the old context (it may already be 'closed' — ignore).
+      this._stopDuckLoop();
       try { this.panLFO?.stop(); } catch (e) {}
       if (this.context && this.context.state !== 'closed') {
         try { await this.context.close(); } catch (e) {}
@@ -124,6 +146,10 @@ export class MixBus {
         try { await this._onRebuild(layers); }
         catch (e) { console.warn('MixBus: onRebuild callback failed', e); }
       }
+
+      // 5. Resume ducking if it was on (addSource('pod') also restarts it once
+      //    the trigger comes back, but cover the case where pod re-adds first).
+      if (this.duckEnabled) this._startDuckLoop();
     } finally {
       this._rebuilding = false;
     }
@@ -157,6 +183,7 @@ export class MixBus {
       dead: this.isDead(),
       sources: this.sources ? [...this.sources.keys()] : [],
       rebuilding: this._rebuilding,
+      ducking: { enabled: this.duckEnabled, gain: this._duckCurrent },
     };
   }
 
@@ -192,7 +219,10 @@ export class MixBus {
     }
 
     const gainNode = this.context.createGain();
-    gainNode.connect(this.masterGain);
+    // Ambient + binaural route through the duck sub-bus; the podcast (the duck
+    // trigger) and anything else go straight to master.
+    const duckable = id === 'ambient' || id === 'bin';
+    gainNode.connect(duckable ? this.duckBus : this.masterGain);
 
     let sourceNode = null;
     let isConnected = false;
@@ -216,20 +246,26 @@ export class MixBus {
       compNode,
       pannerNode,
       isConnected,
+      isDuckTrigger: false,
       volume: 1.0,
       eqOn: false,
       compOn: false,
       panOn: false
     });
 
-    if (isConnected) {
-      this._routeSource(this.sources.get(id));
-    }
+    const src = this.sources.get(id);
+    // The podcast is the duck trigger: give it an analyser tap so the duck loop
+    // can read its loudness. _routeSource (re)establishes the actual tap so it
+    // survives iOS re-routes, which disconnect the source node.
+    if (id === 'pod' && isConnected) this._attachDuckTrigger(src);
+    if (isConnected) this._routeSource(src);
+    if (id === 'pod' && isConnected && this.duckEnabled) this._startDuckLoop();
 
     return isConnected;
   }
 
   setSourceVolume(id, value) {
+    if (!this.sources) return; // no context (e.g. unsupported env)
     const src = this.sources.get(id);
     if (!src) return;
 
@@ -245,6 +281,7 @@ export class MixBus {
   }
 
   setEffects(id, { eqOn, compOn, panOn }) {
+    if (!this.supported || !this.sources) return; // no context (e.g. unsupported env)
     const src = this.sources.get(id);
     if (!src || !src.isConnected || !src.sourceNode) return;
 
@@ -284,6 +321,13 @@ export class MixBus {
     }
 
     currentNode.connect(src.gainNode);
+
+    // Re-establish the duck analyser tap (the leading disconnect cleared it).
+    // Tapping the raw source node keeps detection independent of the podcast
+    // volume slider and its effect chain.
+    if (src.isDuckTrigger && this._duckAnalyser) {
+      try { src.sourceNode.connect(this._duckAnalyser); } catch (e) {}
+    }
   }
 
   reconnectAllSources() {
@@ -299,6 +343,91 @@ export class MixBus {
           console.warn(`MixBus: Failed to reconnect source ${id}`, e);
         }
       }
+    }
+  }
+
+  // ── Ducking ("sidechain"): pull ambient/binaural down under the podcast voice ─
+  // Web Audio has no true sidechain, so we tap the podcast with an AnalyserNode,
+  // measure its RMS each frame, and ride the duck sub-bus gain: fast down when the
+  // host is talking, slow back up in the gaps. The tap itself is (re)connected in
+  // _routeSource so it survives re-routes and rebuilds.
+  _attachDuckTrigger(src) {
+    src.isDuckTrigger = true;
+    if (!this.context.createAnalyser) return; // older WebViews — ducking just no-ops
+    this._duckAnalyser = this.context.createAnalyser();
+    this._duckAnalyser.fftSize = 1024;
+    this._duckData = new Float32Array(this._duckAnalyser.fftSize);
+  }
+
+  _duckTick() {
+    if (!this.duckEnabled || this._duckSuspended || !this._duckAnalyser || !this._duckData || this.isDead()) {
+      this._duckRAF = null;
+      return;
+    }
+    this._duckAnalyser.getFloatTimeDomainData(this._duckData);
+    let sum = 0;
+    for (let i = 0; i < this._duckData.length; i++) {
+      const v = this._duckData[i];
+      sum += v * v;
+    }
+    const rms = Math.sqrt(sum / (this._duckData.length || 1));
+    const target = rms > this.duckThreshold ? this.duckDepth : 1;
+    // Asymmetric smoothing: duck quickly when speech starts, swell back gently.
+    const tc = target < this._duckCurrent ? this.duckAttack : this.duckRelease;
+    this._duckCurrent = target;
+    try { this.duckBus.gain.setTargetAtTime(target, this.context.currentTime, tc); } catch (e) {}
+    if (typeof requestAnimationFrame === 'function') {
+      this._duckRAF = requestAnimationFrame(() => this._duckTick());
+    } else {
+      this._duckRAF = null;
+    }
+  }
+
+  _startDuckLoop() {
+    if (this._duckRAF != null || this._duckSuspended || typeof requestAnimationFrame !== 'function') return;
+    this._duckRAF = requestAnimationFrame(() => this._duckTick());
+  }
+
+  // Temporarily pause ducking without forgetting the user's preference — used by
+  // the sleep-timer fade so the duck loop and the fade taper don't both ride the
+  // ambient level at once. Suspending opens the bus back to 1; lifting it resumes.
+  setDuckSuspended(suspended) {
+    const next = !!suspended;
+    if (next === this._duckSuspended) return;
+    this._duckSuspended = next;
+    if (!this.supported) return;
+    if (next) {
+      this._stopDuckLoop();
+      this._duckCurrent = 1;
+      try { this.duckBus?.gain.setTargetAtTime(1, this.context.currentTime, 0.2); } catch (e) {}
+    } else if (this.duckEnabled) {
+      this._startDuckLoop();
+    }
+  }
+
+  _stopDuckLoop() {
+    if (this._duckRAF != null && typeof cancelAnimationFrame === 'function') {
+      cancelAnimationFrame(this._duckRAF);
+    }
+    this._duckRAF = null;
+  }
+
+  // Toggle ducking and optionally tune depth/threshold/attack/release. Safe to
+  // call before the podcast source exists — addSource starts the loop once the
+  // trigger is present.
+  setDucking(enabled, opts = {}) {
+    this.duckEnabled = !!enabled;
+    if (Number.isFinite(opts.depth))     this.duckDepth = Math.max(0, Math.min(1, opts.depth));
+    if (Number.isFinite(opts.threshold)) this.duckThreshold = Math.max(0, opts.threshold);
+    if (Number.isFinite(opts.attack))    this.duckAttack = Math.max(0.001, opts.attack);
+    if (Number.isFinite(opts.release))   this.duckRelease = Math.max(0.001, opts.release);
+    if (!this.supported) return;
+    if (this.duckEnabled) {
+      this._startDuckLoop();
+    } else {
+      this._stopDuckLoop();
+      this._duckCurrent = 1;
+      try { this.duckBus?.gain.setTargetAtTime(1, this.context.currentTime, 0.1); } catch (e) {}
     }
   }
 }

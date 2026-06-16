@@ -53,6 +53,7 @@ export function AppProvider({ children }) {
   const [eqOn, setEqOn] = useState(()=>localStorage.getItem('eqOn')==='true');
   const [compOn, setCompOn] = useState(()=>localStorage.getItem('compOn')==='true');
   const [panOn, setPanOn] = useState(()=>localStorage.getItem('panOn')==='true');
+  const [duckOn, setDuckOn] = useState(()=>localStorage.getItem('duckAmbient')==='true');
   const [playingSrc,    setPlayingSrc]    = useState('feed');
   const [curEp,         setCurEp]         = useState(null);
   const [podPlaying,    setPodPlaying]    = useState(false);
@@ -91,6 +92,9 @@ export function AppProvider({ children }) {
   const [mixPresets, setMixPresets] = useState(()=>readStoredArray('mixPresets'));
   const [cachedEpisodes, setCachedEpisodes] = useState({});
   const [downloadProgress, setDownloadProgress] = useState({});
+  // navigator.onLine is a soft hint (it lies on captive portals), so we use it
+  // only to gray out un-downloaded episodes — never to block cached playback.
+  const [online, setOnline] = useState(()=> typeof navigator === 'undefined' ? true : navigator.onLine !== false);
 
   // Initialize cachedEpisodes on mount
   useEffect(() => {
@@ -141,6 +145,19 @@ export function AppProvider({ children }) {
     if (!NATIVE_MEDIA_VOLUME_LOCK) {
       audio.volume = clamp01(volume);
     }
+  }, []);
+
+  // ── Multi-instance conflict resolution ────────────────────────────────────
+  // A second open instance (e.g. the PWA plus a stray Safari tab) playing the
+  // same brown noise causes phase-cancellation that ruins a night's sleep. Each
+  // instance claims playback over a BroadcastChannel when it starts; any other
+  // instance hearing that claim silences itself. stopAllForRemote is held in a
+  // ref so the once-registered listener always calls the latest closures.
+  const bcRef = useRef(null);
+  const instanceId = useRef(Math.random().toString(36).slice(2));
+  const stopAllForRemoteRef = useRef(() => {});
+  const claimPlayback = useCallback(() => {
+    try { bcRef.current?.postMessage({ type: 'PLAYING', id: instanceId.current, t: Date.now() }); } catch (e) {}
   }, []);
   const swapManagedLoopSource = useCallback((audio, nextUrl, managedRef, loopDuration, preservePosition = true, managed = false) => {
     if (!audio || !nextUrl) return;
@@ -292,13 +309,21 @@ export function AppProvider({ children }) {
   },[autoPlay, shuffle, playingSrc, episodes, playlist, curEp]);
 
   // ── Persist settings ──────────────────────────────────────────────────────
+  // Apply podcast effects + ducking to the audio graph. Kept separate from the
+  // persistence effect so toggling an effect only touches the audio graph (and
+  // a graph command never rides on an unrelated setting change).
+  useEffect(()=>{
+    mixBus.setEffects('pod', { eqOn, compOn, panOn });
+    mixBus.setDucking(duckOn);
+  },[eqOn, compOn, panOn, duckOn]);
+
   useEffect(()=>{
     try {
       localStorage.setItem('masterVolume',            masterVol);
       localStorage.setItem('eqOn',                    eqOn);
       localStorage.setItem('compOn',                  compOn);
       localStorage.setItem('panOn',                   panOn);
-      mixBus.setEffects('pod', { eqOn, compOn, panOn });
+      localStorage.setItem('duckAmbient',             duckOn);
       localStorage.setItem('brownVolume',             ambientVol);
       localStorage.setItem('noiseType',               noiseType);
       localStorage.setItem('ambientBypass',           ambientBypass);
@@ -321,17 +346,32 @@ export function AppProvider({ children }) {
       localStorage.setItem('savedPlaylists',          JSON.stringify(savedPlaylists));
       localStorage.setItem('mixPresets',              JSON.stringify(mixPresets));
     } catch(e){}
-  },[masterVol,ambientVol,noiseType,ambientBypass,binVol,binPreset,binBypass,
+  },[masterVol,eqOn,compOn,panOn,duckOn,ambientVol,noiseType,ambientBypass,binVol,binPreset,binBypass,
      podVol,podSpeed,autoPlay,shuffle,preloadNext,
      timerMins,rssUrl,feedProxyUrl,audioProxyUrl,sleepSafeAudio,showFeedDebug,playlist,subs,savedPlaylists,mixPresets]);
 
   // ── Service Worker ────────────────────────────────────────────────────────
   useEffect(()=>{
     if('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(()=>{});
-    const show=()=>document.getElementById('offline-banner').style.display='block';
-    const hide=()=>document.getElementById('offline-banner').style.display='none';
+    const banner=(d)=>{ const el=document.getElementById('offline-banner'); if(el) el.style.display=d; };
+    const show=()=>{ setOnline(false); banner('block'); };
+    const hide=()=>{ setOnline(true);  banner('none'); };
     window.addEventListener('offline',show); window.addEventListener('online',hide);
     return ()=>{ window.removeEventListener('offline',show); window.removeEventListener('online',hide); };
+  },[]);
+
+  // ── Multi-instance playback channel ───────────────────────────────────────
+  // Registered once. When another instance claims playback, silence this one.
+  useEffect(()=>{
+    if (typeof BroadcastChannel === 'undefined') return;
+    const ch = new BroadcastChannel('sleepulator-playback');
+    bcRef.current = ch;
+    ch.onmessage = (e) => {
+      if (e?.data?.type === 'PLAYING' && e.data.id !== instanceId.current) {
+        stopAllForRemoteRef.current();
+      }
+    };
+    return ()=>{ try { ch.close(); } catch(err){} bcRef.current = null; };
   },[]);
 
   // ── Bedtime mode class on root ────────────────────────────────────────────
@@ -549,6 +589,7 @@ export function AppProvider({ children }) {
     try { audio.currentTime = 0; } catch(e){}
     audio.play().catch(()=>{});
     setAmbientOn(true);
+    claimPlayback();
   };
   const stopAmbient = () => {
     if (ambientAudio.current) {
@@ -578,6 +619,7 @@ export function AppProvider({ children }) {
     try { audio.currentTime = 0; } catch(e){}
     audio.play().catch(()=>{});
     setBinOn(true);
+    claimPlayback();
   };
   const stopBin = () => {
     if (binAudio.current) {
@@ -596,6 +638,18 @@ export function AppProvider({ children }) {
   };
   useEffect(()=>{ if(binOn) startBin(); },[binPreset]);
   useEffect(()=>{ syncBinVolume(); },[binVol, masterVol, muted, syncBinVolume]);
+
+  // Keep the remote-claim handler pointing at the latest stop closures. Another
+  // instance starting playback silences every layer here — stopping doesn't
+  // re-broadcast, so there's no claim/stop feedback loop between instances.
+  useEffect(()=>{
+    stopAllForRemoteRef.current = () => {
+      try { podAudio.current?.pause(); } catch(e){}
+      setPodPlaying(false);
+      stopAmbient();
+      stopBin();
+    };
+  });
 
   // ── 3. Podcast ────────────────────────────────────────────────────────────
   const upsertFeedSub = nextSub => {
@@ -1000,6 +1054,7 @@ export function AppProvider({ children }) {
     audio.webkitPreservesPitch = false;
     audio.addEventListener('play', () => {
       setPodPlaying(true);
+      claimPlayback(); // tell other instances to stand down (covers every play path)
       if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
       syncMediaPositionState();
     });
@@ -1191,6 +1246,9 @@ export function AppProvider({ children }) {
   const tickTimer = useCallback(()=>{
     const rem = Math.max(0, Math.round((timerEndRef.current-Date.now())/1000));
     setTimeLeft(rem);
+    // Hand the ambient level entirely to the fade taper once it starts — pause
+    // ducking so the two don't both ride the ambient gain at once (idempotent).
+    mixBus.setDuckSuspended(rem<=600 && rem>0);
     if(rem<=600&&rem>0){
       // Perceptually-even fade: amplitude decays exponentially so loudness drops
       // by a roughly constant number of dB each second (hearing is logarithmic),
@@ -1204,6 +1262,7 @@ export function AppProvider({ children }) {
     if(rem<=0){
       clearInterval(timerTickRef.current);
       setTimerActive(false); setTimeLeft(null);
+      mixBus.setDuckSuspended(false);
       podAudio.current?.pause(); setPodPlaying(false);
       if(!ambientBypass) stopAmbient();
       if(!binBypass&&binOn) stopBin();
@@ -1218,6 +1277,7 @@ export function AppProvider({ children }) {
   const toggleTimer = ()=>{
     if(timerActive){
       clearInterval(timerTickRef.current); setTimerActive(false); setTimeLeft(null);
+      mixBus.setDuckSuspended(false);
       syncPodVolume();
       syncAmbientVolume();
       syncBinVolume();
@@ -1357,6 +1417,8 @@ export function AppProvider({ children }) {
     setFeedDebug,
     showFeedDebug,
     setShowFeedDebug,
+    duckOn,
+    setDuckOn,
     forceAudioTeardown: () => mixBus.forceTeardown(),
     getAudioDiagnostics: () => mixBus.getDiagnostics(),
     subs,
@@ -1374,6 +1436,7 @@ export function AppProvider({ children }) {
     deleteMix,
     cachedEpisodes,
     downloadProgress,
+    online,
     downloadEpisode,
     deleteEpisode,
     showPlaylistLibrary,

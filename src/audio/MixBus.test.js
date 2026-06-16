@@ -27,6 +27,9 @@ class FakeAudioContext {
   }
   createStereoPanner() { return node({ pan: new FakeParam() }); }
   createOscillator() { return node({ type: '', frequency: new FakeParam(), start() {}, stop() {} }); }
+  createAnalyser() {
+    return node({ fftSize: 2048, getFloatTimeDomainData(arr) { arr.fill(0); } });
+  }
   createMediaElementSource() { return node(); }
   async resume() {
     if (this.state === 'closed') {
@@ -166,6 +169,66 @@ describe('state change handling', () => {
     mb.context.state = 'running';
     mb._handleStateChange();
     expect(spy).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('ducking', () => {
+  it('marks the pod source as the duck trigger and gives it an analyser', () => {
+    const mb = new MixBus();
+    mb.addSource('ambient', fakeEl());
+    mb.addSource('pod', fakeEl());
+    expect(mb.sources.get('pod').isDuckTrigger).toBe(true);
+    expect(mb.sources.get('ambient').isDuckTrigger).toBe(false);
+    expect(mb._duckAnalyser).not.toBeNull();
+  });
+
+  it('pulls the duck bus down to the depth floor when the podcast is loud', () => {
+    const mb = new MixBus();
+    mb.setDucking(true, { depth: 0.4, threshold: 0.04 });
+    mb.addSource('pod', fakeEl());
+    mb._duckAnalyser.getFloatTimeDomainData = (arr) => arr.fill(0.5); // loud "speech"
+    mb._duckTick();
+    expect(mb.duckBus.gain.value).toBeCloseTo(0.4);
+  });
+
+  it('lets the duck bus swell back to 1 in silence', () => {
+    const mb = new MixBus();
+    mb.setDucking(true);
+    mb.addSource('pod', fakeEl());
+    mb._duckAnalyser.getFloatTimeDomainData = (arr) => arr.fill(0); // silence
+    mb._duckCurrent = 0.45; // pretend we were ducked
+    mb._duckTick();
+    expect(mb.duckBus.gain.value).toBeCloseTo(1);
+  });
+
+  it('opens the bus back up and stops detecting when disabled', () => {
+    const mb = new MixBus();
+    mb.setDucking(true);
+    mb.addSource('pod', fakeEl());
+    mb.setDucking(false);
+    expect(mb.duckEnabled).toBe(false);
+    expect(mb.duckBus.gain.value).toBeCloseTo(1);
+  });
+
+  it('suspends detection and opens the bus during a fade, then resumes', () => {
+    const mb = new MixBus();
+    mb.setDucking(true);
+    mb.addSource('pod', fakeEl());
+    mb._duckAnalyser.getFloatTimeDomainData = (arr) => arr.fill(0.5); // loud
+    mb.setDuckSuspended(true);
+    mb._duckTick(); // should bail out while suspended
+    expect(mb.duckBus.gain.value).toBeCloseTo(1);
+    mb.setDuckSuspended(false);
+    expect(mb._duckSuspended).toBe(false);
+    expect(mb.duckEnabled).toBe(true); // preference preserved across suspend
+  });
+
+  it('clamps the depth into 0..1', () => {
+    const mb = new MixBus();
+    mb.setDucking(true, { depth: 5 });
+    expect(mb.duckDepth).toBe(1);
+    mb.setDucking(true, { depth: -2 });
+    expect(mb.duckDepth).toBe(0);
   });
 });
 

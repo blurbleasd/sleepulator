@@ -25,6 +25,11 @@ describe('App shell', () => {
 });
 
 describe('Audio Engine dev panel (Feed Debug)', () => {
+  // Opening Feed Debug persists showFeedDebug=true; clear it so the next test
+  // starts from the closed state. (Persistence now works correctly — it used to
+  // be silently aborted by an unsupported-env throw in the settings effect.)
+  afterEach(() => { try { localStorage.clear(); } catch { /* ignore */ } });
+
   it('is hidden until Feed Debug is opened, then exposes the teardown tools', async () => {
     const user = userEvent.setup();
     render(<App />);
@@ -117,6 +122,29 @@ describe('Queue (Up next)', () => {
     expect(screen.queryByText('Episode 44')).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: /load more/i }));
     expect(screen.getByText('Episode 44')).toBeInTheDocument();
+  });
+});
+
+describe('Offline UX', () => {
+  afterEach(() => {
+    try { localStorage.clear(); } catch { /* ignore */ }
+    try { Object.defineProperty(navigator, 'onLine', { value: true, configurable: true }); } catch { /* ignore */ }
+  });
+
+  it('disables Play for un-downloaded episodes when offline', async () => {
+    Object.defineProperty(navigator, 'onLine', { value: false, configurable: true });
+    localStorage.setItem('sleepulatorPlaylist', JSON.stringify([
+      { id: 'e1', title: 'Uncached Episode', url: 'https://example.com/1.mp3' },
+    ]));
+    const user = userEvent.setup();
+    render(<App />);
+    await screen.findByRole('heading', { name: 'SLEEPULATOR' });
+    await user.click(screen.getByRole('button', { name: /podcasts/i }));
+    await user.click(screen.getByRole('button', { name: /up next/i }));
+
+    // The caches stub reports nothing cached, so an offline Play is locked.
+    const lockedPlay = screen.getByRole('button', { name: /unavailable offline/i });
+    expect(lockedPlay).toBeDisabled();
   });
 });
 

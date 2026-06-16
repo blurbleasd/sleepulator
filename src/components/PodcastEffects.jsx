@@ -1,5 +1,5 @@
 import React from 'react';
-import { Settings2, SlidersHorizontal, Waves } from 'lucide-react';
+import { Settings2, SlidersHorizontal, Waves, Mic } from 'lucide-react';
 import { useAppContext } from '../context/AppContext.jsx';
 import { NATIVE_MEDIA_VOLUME_LOCK } from '../utils/core.js';
 
@@ -10,18 +10,19 @@ import { NATIVE_MEDIA_VOLUME_LOCK } from '../utils/core.js';
 // server-side "Sleep Safe Audio" option instead. Lives on the Podcast screen,
 // next to the audio it affects (previously a dead control on the home screen).
 const EFFECTS = [
-  { key: 'comp', label: 'Even out volume', Icon: Settings2 },
-  { key: 'eq',   label: 'Clearer speech',  Icon: SlidersHorizontal },
-  { key: 'pan',  label: 'Gentle drift',    Icon: Waves },
+  { key: 'comp', label: 'Even out volume',  Icon: Settings2 },
+  { key: 'eq',   label: 'Clearer speech',   Icon: SlidersHorizontal },
+  { key: 'pan',  label: 'Gentle drift',     Icon: Waves },
+  { key: 'duck', label: 'Duck under voice', Icon: Mic },
 ];
 
 export default function PodcastEffects() {
   const {
     c_sub, c_dim,
-    eqOn, setEqOn, compOn, setCompOn, panOn, setPanOn,
+    eqOn, setEqOn, compOn, setCompOn, panOn, setPanOn, duckOn, setDuckOn,
   } = useAppContext() || {};
 
-  const wiring = { comp: [compOn, setCompOn], eq: [eqOn, setEqOn], pan: [panOn, setPanOn] };
+  const wiring = { comp: [compOn, setCompOn], eq: [eqOn, setEqOn], pan: [panOn, setPanOn], duck: [duckOn, setDuckOn] };
   const disabled = NATIVE_MEDIA_VOLUME_LOCK;
 
   return (
