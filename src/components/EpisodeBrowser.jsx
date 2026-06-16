@@ -31,6 +31,17 @@ export default function EpisodeBrowser() {
     addToPlaylist, removeFromPlaylist, skipPod,
   } = useAppContext() || {};
 
+  // Swap a playlist item with its neighbour. Drives the up/down reorder buttons,
+  // which work on touch (unlike native HTML5 drag-and-drop, which iOS ignores).
+  const moveEp = (id, dir) => setPlaylist(prev => {
+    const i = prev.findIndex(e => e.id === id);
+    const j = i + dir;
+    if (i < 0 || j < 0 || j >= prev.length) return prev;
+    const next = [...prev];
+    [next[i], next[j]] = [next[j], next[i]];
+    return next;
+  });
+
   return (
     <>
             {/* Tabs */}
@@ -178,12 +189,24 @@ export default function EpisodeBrowser() {
                         style={{background:playing?(bm?'rgba(230,178,119,.12)':'rgba(230,178,119,.08)'):(bm?'rgba(255,255,255,.02)':'rgba(255,255,255,.02)'),
                           border:playing?`1px solid ${bm?'rgba(230,178,119,.2)':'rgba(230,178,119,.2)'}`:undefined,
                           cursor:activeTab==='playlist'?'grab':'default'}}>
-                        {/* Drag handle on playlist */}
-                        {activeTab==='playlist' && (
-                          <span style={{color:c_dim,marginRight:'.25rem',flexShrink:0}}>
-                            <LucideIcon name="GripVertical" size={14}/>
-                          </span>
-                        )}
+                        {/* Reorder controls on playlist (touch-friendly; native
+                            drag is kept above for desktop). Hidden while filtering,
+                            since order is ambiguous against a filtered subset. */}
+                        {activeTab==='playlist' && !epFilter && (() => {
+                          const pi = playlist.findIndex(e=>e.id===ep.id);
+                          return (
+                            <div style={{display:'flex',flexDirection:'column',marginRight:'.25rem',flexShrink:0}}>
+                              <button aria-label="Move up" disabled={pi<=0} onClick={()=>moveEp(ep.id,-1)}
+                                style={{background:'transparent',border:'none',cursor:pi<=0?'default':'pointer',color:c_dim,padding:0,opacity:pi<=0?.3:1,lineHeight:0}}>
+                                <LucideIcon name="ChevronUp" size={16}/>
+                              </button>
+                              <button aria-label="Move down" disabled={pi>=playlist.length-1} onClick={()=>moveEp(ep.id,1)}
+                                style={{background:'transparent',border:'none',cursor:pi>=playlist.length-1?'default':'pointer',color:c_dim,padding:0,opacity:pi>=playlist.length-1?.3:1,lineHeight:0}}>
+                                <LucideIcon name="ChevronDown" size={16}/>
+                              </button>
+                            </div>
+                          );
+                        })()}
                         <div style={{flex:1,minWidth:0}}>
                           <span
                             onClick={()=>setExpandedEp(isExpanded?null:ep.id)}

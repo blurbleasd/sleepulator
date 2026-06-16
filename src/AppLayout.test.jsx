@@ -82,4 +82,27 @@ describe('Episode browser', () => {
     expect(screen.queryByText('Sleepy Episode One')).not.toBeInTheDocument();
     expect(screen.getByText('Calm Episode Two')).toBeInTheDocument();
   });
+
+  it('reorders the playlist with the up/down buttons', async () => {
+    localStorage.setItem('sleepulatorPlaylist', JSON.stringify([
+      { id: 'e1', title: 'First Episode', url: 'https://example.com/1.mp3' },
+      { id: 'e2', title: 'Second Episode', url: 'https://example.com/2.mp3' },
+    ]));
+    const user = userEvent.setup();
+    render(<App />);
+    await screen.findByRole('heading', { name: 'SLEEPULATOR' });
+    await user.click(screen.getByRole('button', { name: /podcasts/i }));
+    await user.click(screen.getByRole('button', { name: /^playlist/i }));
+
+    // Initially First precedes Second.
+    let first = screen.getByText('First Episode');
+    let second = screen.getByText('Second Episode');
+    expect(first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    // Move the first item down; now Second should precede First.
+    await user.click(screen.getAllByRole('button', { name: 'Move down' })[0]);
+    first = screen.getByText('First Episode');
+    second = screen.getByText('Second Episode');
+    expect(second.compareDocumentPosition(first) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
 });
