@@ -325,34 +325,50 @@ export function AppProvider({ children }) {
   },[eqOn, compOn, panOn, duckOn]);
 
   useEffect(()=>{
-    try {
-      localStorage.setItem('masterVolume',            masterVol);
-      localStorage.setItem('eqOn',                    eqOn);
-      localStorage.setItem('compOn',                  compOn);
-      localStorage.setItem('panOn',                   panOn);
-      localStorage.setItem('duckAmbient',             duckOn);
-      localStorage.setItem('brownVolume',             ambientVol);
-      localStorage.setItem('noiseType',               noiseType);
-      localStorage.setItem('ambientBypass',           ambientBypass);
-      localStorage.setItem('binauralVolume',          binVol);
-      localStorage.setItem('binauralPreset',          binPreset);
-      localStorage.setItem('binauralBypass',          binBypass);
-      localStorage.setItem('podcastVolume',           podVol);
-      localStorage.setItem('playbackSpeed',           podSpeed);
-      localStorage.setItem('autoPlayEnabled',         autoPlay);
-      localStorage.setItem('preloadNext',             preloadNext);
-      localStorage.setItem('shuffleEnabled',          shuffle);
-      localStorage.setItem('timerMinutes',            timerMins);
-      localStorage.setItem('rssUrl',                  rssUrl);
-      localStorage.setItem('feedProxyUrl',            feedProxyUrl);
-      localStorage.setItem('audioProxyUrl',           audioProxyUrl);
-      localStorage.setItem('sleepSafeAudioEnabled',   sleepSafeAudio);
-      localStorage.setItem('showFeedDebug',           showFeedDebug);
-      localStorage.setItem('sleepulatorPlaylist',     JSON.stringify(playlist));
-      localStorage.setItem('feedSubs',                JSON.stringify(subs));
-      localStorage.setItem('savedPlaylists',          JSON.stringify(savedPlaylists));
-      localStorage.setItem('mixPresets',              JSON.stringify(mixPresets));
-    } catch(e){}
+    // Each key saved independently: iOS gives localStorage a tight budget, and a
+    // single oversized write (usually savedPlaylists) throwing QuotaExceededError
+    // used to abort the whole block — silently dropping the queue/subs that came
+    // after it, so a refresh reverted to the last fully-saved (older) state.
+    const save = (k, v) => { try { localStorage.setItem(k, v); } catch(e){} };
+    // Drop the heavy `description` blob from persisted episodes — it's the bulk of
+    // the footprint and isn't needed to play or re-show a queued item. Live feed
+    // episodes keep descriptions; only the stored copies are slimmed.
+    const slim = ep => { if (!ep || typeof ep !== 'object') return ep; const { description, ...rest } = ep; return rest; };
+    const slimList = list => Array.isArray(list) ? list.map(slim) : list;
+
+    // Active queue + subs first, so they persist even if a bigger key later fails.
+    save('sleepulatorPlaylist', JSON.stringify(slimList(playlist)));
+    save('feedSubs',            JSON.stringify(subs));
+    save('mixPresets',          JSON.stringify(mixPresets));
+    save('masterVolume',        masterVol);
+    save('eqOn',                eqOn);
+    save('compOn',              compOn);
+    save('panOn',               panOn);
+    save('duckAmbient',         duckOn);
+    save('brownVolume',         ambientVol);
+    save('noiseType',           noiseType);
+    save('ambientBypass',       ambientBypass);
+    save('binauralVolume',      binVol);
+    save('binauralPreset',      binPreset);
+    save('binauralBypass',      binBypass);
+    save('podcastVolume',       podVol);
+    save('playbackSpeed',       podSpeed);
+    save('autoPlayEnabled',     autoPlay);
+    save('preloadNext',         preloadNext);
+    save('shuffleEnabled',      shuffle);
+    save('timerMinutes',        timerMins);
+    save('rssUrl',              rssUrl);
+    save('feedProxyUrl',        feedProxyUrl);
+    save('audioProxyUrl',       audioProxyUrl);
+    save('sleepSafeAudioEnabled', sleepSafeAudio);
+    save('showFeedDebug',       showFeedDebug);
+    // Biggest key last — if anything is going to hit quota, it's this one, and by
+    // now everything important is already saved.
+    save('savedPlaylists', JSON.stringify(
+      Array.isArray(savedPlaylists)
+        ? savedPlaylists.map(p => ({ ...p, episodes: slimList(p.episodes) }))
+        : savedPlaylists
+    ));
   },[masterVol,eqOn,compOn,panOn,duckOn,ambientVol,noiseType,ambientBypass,binVol,binPreset,binBypass,
      podVol,podSpeed,autoPlay,shuffle,preloadNext,
      timerMins,rssUrl,feedProxyUrl,audioProxyUrl,sleepSafeAudio,showFeedDebug,playlist,subs,savedPlaylists,mixPresets]);

@@ -30,12 +30,21 @@
 /* overflow-x:hidden + max-width:100% stop the horizontal "wobble"/side-scroll on
    phones if any descendant (a transform, a wide row) pokes past the viewport. */
 html, body { height: 100%; overscroll-behavior: none; margin: 0; max-width: 100%; overflow-x: hidden; }
-body { 
-  background: var(--c-bg); 
-  color: var(--c-text); 
-  font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; 
+body {
+  background: var(--c-bg);
+  color: var(--c-text);
+  font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   transition: background 0.5s ease;
+  /* Break long unbreakable strings (feed URLs, long titles) so they wrap instead
+     of forcing a column wider than the screen. */
+  overflow-wrap: anywhere;
 }
+
+/* Flex/grid children default to min-width:auto, so a long string can grow the
+   column past the viewport and push header controls (e.g. the Settings gear)
+   off-screen. min-width:0 lets columns shrink and keeps content in-bounds. */
+#root > *, .overlay > * { min-width: 0; max-width: 100%; }
+.app-container { min-width: 0; max-width: 100%; overflow-x: hidden; }
 
 /* Minimal reset — replaces Tailwind 2.x Preflight (CDN removed). Preserves the
    defaults the UI relied on: zeroed block margins, list reset, controls that
