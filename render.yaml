@@ -11,8 +11,14 @@ services:
         - audio-proxy/**
         - render.yaml
     envVars:
+      # CORS allowlist (comma-separated). Managed in the Render dashboard rather
+      # than pinned to a GH-Pages URL here, so a custom domain doesn't silently
+      # break CORS — add your domain(s) in the dashboard. If left unset, the proxy
+      # falls back to DEFAULT_ALLOWED_ORIGINS in audio-proxy/src/server.js
+      # (the GH-Pages origin + localhost), so the default deploy still works.
       - key: ALLOWED_ORIGINS
-        value: https://blurbleasd.github.io
+        sync: false
+      # Podcast hosts the proxy is allowed to fetch from (comma-separated).
       - key: ALLOWED_AUDIO_HOSTS
         value: cbbworld.memberfulcontent.com,www.patreon.com
       - key: TARGET_BITRATE

@@ -1,4 +1,5 @@
-@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700;900&display=swap');
+/* Outfit is now self-hosted via @fontsource (imported in main.jsx) — no remote
+   Google Fonts @import, so the app paints and works fully offline. */
 
 :root {
   /* Warm Dusk Theme — low-blue-light palette for nighttime use */
