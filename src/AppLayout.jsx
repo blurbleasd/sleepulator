@@ -40,14 +40,14 @@ export default function AppLayout() {
       {breathMode && bc && (
         <div className="overlay" style={{background:bm?'#000':'rgba(3,7,18,.97)',alignItems:'center',justifyContent:'center'}}>
           <button onClick={()=>setBreathMode(null)}
-            style={{position:'absolute',top:'var(--top-clearance)',right:'1.25rem',background:'#1e293b',border:'none',borderRadius:'50%',width:44,height:44,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',color:'#b39b80'}}>
+            style={{position:'absolute',top:'var(--top-clearance)',right:'1.25rem',background:'var(--c-btn)',border:'none',borderRadius:'50%',width:44,height:44,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',color:'#b39b80'}}>
             <LucideIcon name="X" size={20}/>
           </button>
           <div style={{display:'flex',gap:'.75rem',marginBottom:'2rem'}}>
             {['478','box'].map(m=>(
               <button key={m} onClick={()=>setBreathMode(m)}
                 style={{padding:'.5rem 1.25rem',borderRadius:'9999px',border:'none',fontWeight:700,fontSize:'.8rem',cursor:'pointer',
-                  background:breathMode===m?(bm?'#2a2114':'#b8813a'):(bm?'#111':'#1e293b'),
+                  background:breathMode===m?(bm?'#2a2114':'var(--c-accent-strong)'):(bm?'#111':'var(--c-btn)'),
                   color:breathMode===m?'#fff':(bm?'#8a7860':'#b39b80')}}>
                 {m==='478'?'4-7-8':'Box 4-4-4-4'}
               </button>
@@ -63,11 +63,11 @@ export default function AppLayout() {
       )}
 
       {showPlaylistLibrary && (
-        <div className="overlay" style={{background:bm?'#000':'#15110b',paddingTop:'var(--top-clearance)'}}>
+        <div className="overlay" style={{background:bm?'#000':'var(--c-bg)',paddingTop:'var(--top-clearance)'}}>
           <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'1.25rem'}}>
             <h2 style={{fontSize:'1.1rem',fontWeight:800,color:c_head,margin:0}}>Saved Playlists</h2>
             <button onClick={()=>setShowPlaylistLibrary(false)}
-              style={{background:'#1e293b',border:'none',borderRadius:'50%',width:44,height:44,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',color:'#b39b80'}}>
+              style={{background:'var(--c-btn)',border:'none',borderRadius:'50%',width:44,height:44,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',color:'#b39b80'}}>
               <LucideIcon name="X" size={18}/>
             </button>
           </div>
@@ -78,7 +78,7 @@ export default function AppLayout() {
               <input type="text" value={playlistName} onChange={e=>setPlaylistName(e.target.value)} placeholder="Playlist name…"
                 style={{flex:1,background:c_inner,border:`1px solid ${c_bord}`,borderRadius:'.5rem',padding:'.5rem .75rem',color:c_text,fontSize:'14px'}}/>
               <button onClick={saveCurrentPlaylist} disabled={!playlist.length}
-                style={{padding:'.5rem 1rem',borderRadius:'.5rem',background:playlist.length?'#b8813a':'#4a3a1e',color:playlist.length?'#15110b':'#fff',border:'none',fontWeight:700,cursor:playlist.length?'pointer':'default',whiteSpace:'nowrap',opacity:playlist.length?1:.55}}>
+                style={{padding:'.5rem 1rem',borderRadius:'.5rem',background:playlist.length?'var(--c-accent-strong)':'#4a3a1e',color:playlist.length?'var(--c-bg)':'#fff',border:'none',fontWeight:700,cursor:playlist.length?'pointer':'default',whiteSpace:'nowrap',opacity:playlist.length?1:.55}}>
                 Save
               </button>
             </div>
@@ -100,7 +100,7 @@ export default function AppLayout() {
                   Load
                 </button>
                 <button onClick={()=>loadSavedPlaylist(saved, { autoplay: true })}
-                  style={{padding:'.4rem .875rem',borderRadius:'.5rem',background:'#b8813a',color:'#15110b',border:'none',fontSize:'.75rem',fontWeight:700,cursor:'pointer',whiteSpace:'nowrap'}}>
+                  style={{padding:'.4rem .875rem',borderRadius:'.5rem',background:'var(--c-accent-strong)',color:'var(--c-bg)',border:'none',fontSize:'.75rem',fontWeight:700,cursor:'pointer',whiteSpace:'nowrap'}}>
                   Play
                 </button>
                 <button onClick={()=>setSavedPlaylists(prev=>prev.filter(entry=>(entry.id || entry.name)!==(saved.id || saved.name)))}

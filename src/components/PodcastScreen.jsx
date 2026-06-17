@@ -40,7 +40,7 @@ export default function PodcastScreen({ show, onClose }) {
   const titles = { library: 'Podcasts', podcast: feed?.name || subName || 'Podcast', queue: 'Up next', settings: 'Podcast settings' };
 
   const headerBtn = { background:'#241d12',border:'none',borderRadius:'50%',width:42,height:42,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',color:'#b39b80',flexShrink:0 };
-  const pill = (active=false) => ({ padding:'.55rem .9rem',borderRadius:'.7rem',border:`1px solid ${c_bord}`,fontSize:'.78rem',fontWeight:700,cursor:'pointer',background:active?'#b8813a':'rgba(230,178,119,.14)',color:active?'#15110b':'#e6b277' });
+  const pill = (active=false) => ({ padding:'.55rem .9rem',borderRadius:'.7rem',border:`1px solid ${c_bord}`,fontSize:'.78rem',fontWeight:700,cursor:'pointer',background:active?'var(--c-accent-strong)':'rgba(230,178,119,.14)',color:active?'var(--c-bg)':'#e6b277' });
 
   return (
     <div className="overlay" style={{zIndex:150,paddingTop:'var(--top-clearance)',overflowY:'auto'}}>
@@ -109,7 +109,7 @@ export default function PodcastScreen({ show, onClose }) {
                   <input type="url" value={rssUrl} onChange={e=>setRssUrl(e.target.value)} placeholder="Paste podcast feed URL…"
                     style={{flex:1,background:c_inner,border:`1px solid ${c_bord}`,borderRadius:'.625rem',padding:'.5rem .75rem',color:c_text,fontSize:'14px'}}/>
                   <button onClick={()=>{ if(rssUrl.trim()){ loadFeed(); setAdding(false); setFeed(null); setView('podcast'); } }} disabled={!rssUrl.trim()||loading}
-                    style={{padding:'.5rem 1rem',borderRadius:'.625rem',background:rssUrl.trim()?'#b8813a':'#4a3a1e',color:rssUrl.trim()?'#15110b':'#fff',border:'none',fontWeight:700,cursor:rssUrl.trim()?'pointer':'default',whiteSpace:'nowrap'}}>
+                    style={{padding:'.5rem 1rem',borderRadius:'.625rem',background:rssUrl.trim()?'var(--c-accent-strong)':'#4a3a1e',color:rssUrl.trim()?'var(--c-bg)':'#fff',border:'none',fontWeight:700,cursor:rssUrl.trim()?'pointer':'default',whiteSpace:'nowrap'}}>
                     {loading?'…':'Load'}
                   </button>
                 </div>

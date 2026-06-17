@@ -14,7 +14,9 @@
 
   /* Single warm accent; legacy accent names repointed to the warm family so
      existing var()-based styling stays coherent until inline colors are swept. */
-  --c-accent:   #e6b277;
+  --c-accent:        #e6b277;
+  --c-accent-strong: #b8813a; /* deeper gold for primary-action buttons */
+  --c-btn:           #241d12; /* solid warm button surface (replaces cold #1e293b) */
   --c-indigo:   #e6b277;
   --c-orange:   #e6a96a;
   --c-blue:     #d8a978;
@@ -134,7 +136,7 @@ button, input, optgroup, select, textarea { font: inherit; }
   font-size: 1.1rem; font-weight: 700; cursor: pointer;
   border: none; 
   background: linear-gradient(135deg, var(--c-indigo), var(--c-purple));
-  color: #15110b;
+  color: var(--c-bg);
   transition: all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
   box-shadow: 0 4px 20px rgba(230, 178, 119, 0.4);
 }
@@ -244,8 +246,8 @@ html.bm {
   --c-surface:  #050505;
   --c-border:   #111111;
   --c-border2:  #1a1a1a;
-  --c-text:     #9ca3af;
-  --c-sub:      #747a86;
+  --c-text:     #a8a094; /* warm gray (was cool #9ca3af) — same brightness, matches dusk identity */
+  --c-sub:      #7d776b; /* warm gray (was cool #747a86) */
   --c-dim:      #27272a;
 }
 html.bm .card { box-shadow: none; backdrop-filter: none; }
