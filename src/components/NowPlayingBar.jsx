@@ -3,11 +3,11 @@ import { Play, Pause } from 'lucide-react';
 import { useAppContext } from '../context/AppContext.jsx';
 import { fmtTime } from '../utils/core.js';
 
-// Compact home-screen player: shows the current episode with play/pause and a
-// scrubber so playback is controllable without opening the Podcasts screen.
-// Tapping the title opens the full Podcasts screen (onOpen). Renders nothing
-// when no episode is loaded.
-export default function NowPlayingBar({ onOpen }) {
+// Home-screen / podcast player. `compact` (home) shows a thin NON-interactive
+// progress bar — a stray thumb in the dark shouldn't jump playback to a random
+// timestamp. Full scrubbing lives in the Podcast screen (compact=false). Tapping
+// the title opens the Podcasts screen (onOpen). Renders nothing with no episode.
+export default function NowPlayingBar({ onOpen, compact = false }) {
   const { curEp, podPlaying, podProgress, podAudio, c_head, c_sub } = useAppContext() || {};
   if (!curEp) return null;
 
@@ -37,9 +37,15 @@ export default function NowPlayingBar({ onOpen }) {
       </div>
       <div style={{display:'flex',alignItems:'center',gap:'.5rem'}}>
         <span style={{fontSize:'.6rem',color:c_sub,fontFamily:'monospace',width:36,textAlign:'right'}}>{fmtTime(cur)}</span>
-        <input type="range" min={0} max={dur||1} step={1} value={cur} className="purple"
-          onChange={e=>{ if (podAudio?.current) podAudio.current.currentTime = +e.target.value; }}
-          style={{flex:1}}/>
+        {compact ? (
+          <div style={{flex:1,height:4,borderRadius:2,background:'rgba(255,255,255,0.1)',overflow:'hidden'}}>
+            <div style={{height:'100%',width:`${dur>0?Math.min(100,(cur/dur)*100):0}%`,background:'var(--c-accent)',borderRadius:2,transition:'width .3s linear'}}/>
+          </div>
+        ) : (
+          <input type="range" min={0} max={dur||1} step={1} value={cur} className="purple"
+            onChange={e=>{ if (podAudio?.current) podAudio.current.currentTime = +e.target.value; }}
+            style={{flex:1}}/>
+        )}
         <span style={{fontSize:'.6rem',color:c_sub,fontFamily:'monospace',width:36}}>{dur>0 ? fmtTime(dur) : '--:--'}</span>
       </div>
     </div>

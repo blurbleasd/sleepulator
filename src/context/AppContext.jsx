@@ -20,6 +20,8 @@ export function AppProvider({ children }) {
   const [muted, setMuted]         = useState(false);
   const [breathMode, setBreathMode]= useState(null); // null | '478' | 'box'
   const [masterVol, setMasterVol] = useState(()=>+localStorage.getItem('masterVolume')||1);
+  // Snapshot of the last sound mix that was playing, for the home "Resume" button.
+  const [lastMix, setLastMix] = useState(()=>{ try { return JSON.parse(localStorage.getItem('lastMix')||'null'); } catch { return null; } });
 
   // Ambient
   const [ambientOn,  setAmbientOn]  = useState(false);
@@ -314,6 +316,15 @@ export function AppProvider({ children }) {
   useEffect(()=>{
     podStateRef.current = { autoPlay, shuffle, playingSrc, episodes, playlist, curEp };
   },[autoPlay, shuffle, playingSrc, episodes, playlist, curEp]);
+
+  // Remember the last playing sound mix so the home screen can offer a one-tap
+  // "Resume" — the 95% nightly case. Snapshot only while something plays.
+  useEffect(()=>{
+    if (!ambientOn && !binOn) return;
+    const mix = { ambient: ambientOn, bin: binOn, noiseType, binPreset, useTimer: timerActive, timerMins };
+    setLastMix(mix);
+    try { localStorage.setItem('lastMix', JSON.stringify(mix)); } catch(e){}
+  },[ambientOn, binOn, noiseType, binPreset, timerActive, timerMins]);
 
   // ── Persist settings ──────────────────────────────────────────────────────
   // Apply podcast effects + ducking to the audio graph. Kept separate from the
@@ -1336,6 +1347,21 @@ export function AppProvider({ children }) {
     if(!binBypass) syncBinVolume();
   };
 
+  // One-tap nightly resume: re-apply the last mix's sound choices and start it
+  // playing (+ the timer if it was used). noiseType/binPreset are already restored
+  // from persistence on load; setting them here covers the case where the user
+  // changed them since. The noiseType/binPreset effects restart playback with the
+  // correct source if it differs.
+  const resumeLastMix = () => {
+    if (!lastMix) return;
+    setMuted(false);
+    if (lastMix.noiseType) setNoiseType(lastMix.noiseType);
+    if (lastMix.binPreset) setBinPreset(lastMix.binPreset);
+    if (lastMix.ambient) startAmbient();
+    if (lastMix.bin) startBin();
+    if (lastMix.useTimer && !timerActive) toggleTimer();
+  };
+
   const fmt = s=>s===null?'':String(Math.floor(s/60))+':'+String(s%60).padStart(2,'0');
 
   useEffect(()=>()=>{
@@ -1398,6 +1424,8 @@ export function AppProvider({ children }) {
     setBreathMode,
     masterVol,
     setMasterVol,
+    lastMix,
+    resumeLastMix,
     ambientOn,
     setAmbientOn,
     ambientVol,

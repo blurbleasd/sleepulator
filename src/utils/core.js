@@ -569,10 +569,12 @@ export const NOISE_TYPES = {
   forest: { label:'🌲 Forest (Night Crickets)',   fn: generateForest},
 };
 
+// Labelled by outcome (what a tired human wants), with the brainwave band as a
+// parenthetical — reads better than raw "delta/theta" jargon.
 export const BINAURAL = {
-  delta: { name:'Deep Sleep (4 Hz)',  beat:4,  carrier:180 },
-  theta: { name:'Meditation (6 Hz)', beat:6,  carrier:200 },
-  alpha: { name:'Relaxation (10 Hz)',beat:10, carrier:220 },
+  delta: { name:'Deep Sleep (Delta)', beat:4,  carrier:180 },
+  theta: { name:'Drift Off (Theta)',  beat:6,  carrier:200 },
+  alpha: { name:'Relax (Alpha)',      beat:10, carrier:220 },
 };
 
 export const ARTWORK = [{ src:'icon-512.png', sizes:'512x512', type:'image/png' }];

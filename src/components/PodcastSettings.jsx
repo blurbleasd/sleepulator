@@ -3,6 +3,10 @@ import { useAppContext } from '../context/AppContext.jsx';
 import { normalizeConfigUrl, getDefaultFeedProxyUrl } from '../utils/core.js';
 import FeedDebugPanel from './FeedDebugPanel.jsx';
 
+// Injected by Vite at build time (vite.config.js). typeof guard keeps it safe
+// under tests/dev where the define isn't applied.
+const BUILD_ID = typeof __BUILD_ID__ !== 'undefined' ? __BUILD_ID__ : 'dev';
+
 // Dump all of localStorage to a downloadable JSON backup.
 function handleExportData() {
   const data = JSON.stringify(localStorage);
@@ -148,6 +152,13 @@ export default function PodcastSettings() {
       </div>
 
       <FeedDebugPanel />
+
+      {/* Build stamp — compare to the latest commit on GitHub to confirm the
+          service worker served the current version. Lives here, off the nightly
+          home view. */}
+      <div style={{textAlign:'center',fontSize:'.6rem',color:c_dim,paddingTop:'.5rem',letterSpacing:'.04em'}}>
+        build {BUILD_ID}
+      </div>
     </div>
   );
 }

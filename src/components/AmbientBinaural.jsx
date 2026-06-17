@@ -25,10 +25,14 @@ export default function AmbientBinaural() {
         <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:'.875rem'}}>
           <div style={{flex:1,minWidth:0}}>
             <div style={{fontSize:'.8rem',fontWeight:700,color:c_head,marginBottom:'.5rem'}}>Ambient</div>
-            <select value={noiseType} onChange={e=>setNoiseType(e.target.value)}
-              style={{fontSize:'12px',background:c_inner,border:`1px solid ${c_bord}`,borderRadius:'.5rem',color:c_sub,padding:'.25rem .375rem',width:'100%'}}>
-              {Object.entries(NOISE_TYPES).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
-            </select>
+            <div className="chip-row" role="radiogroup" aria-label="Ambient sound">
+              {Object.entries(NOISE_TYPES).map(([k,v])=>(
+                <button key={k} role="radio" aria-checked={noiseType===k}
+                  onClick={()=>setNoiseType(k)} className={`chip${noiseType===k?' on':''}`}>
+                  {v.label.split(' (')[0]}
+                </button>
+              ))}
+            </div>
           </div>
           <button onClick={toggleAmbient} className={`btn-icon${ambientOn?' active-orange':''}`} style={{marginLeft:'.5rem',flexShrink:0}}>
             {ambientOn ? <Square size={18}/> : <Play size={18}/>}
@@ -51,10 +55,14 @@ export default function AmbientBinaural() {
         <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:'.875rem'}}>
           <div style={{flex:1,minWidth:0}}>
             <div style={{fontSize:'.8rem',fontWeight:700,color:c_head,marginBottom:'.5rem'}}>Binaural</div>
-            <select value={binPreset} onChange={e=>setBinPreset(e.target.value)}
-              style={{fontSize:'12px',background:c_inner,border:`1px solid ${c_bord}`,borderRadius:'.5rem',color:c_sub,padding:'.25rem .375rem',width:'100%'}}>
-              {Object.entries(BINAURAL).map(([k,v])=><option key={k} value={k}>{v.name}</option>)}
-            </select>
+            <div className="chip-row" role="radiogroup" aria-label="Binaural preset">
+              {Object.entries(BINAURAL).map(([k,v])=>(
+                <button key={k} role="radio" aria-checked={binPreset===k}
+                  onClick={()=>setBinPreset(k)} className={`chip${binPreset===k?' on':''}`}>
+                  {v.name}
+                </button>
+              ))}
+            </div>
           </div>
           <button onClick={toggleBin} className={`btn-icon${binOn?' active-blue':''}`} style={{marginLeft:'.5rem',flexShrink:0}}>
             {binOn ? <Square size={18}/> : <Play size={18}/>}

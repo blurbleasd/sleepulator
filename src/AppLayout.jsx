@@ -1,6 +1,6 @@
 import React from 'react';
 import { useAppContext } from './context/AppContext.jsx';
-import { fmtTime } from './utils/core.js';
+import { fmtTime, NOISE_TYPES, BINAURAL, isStandaloneWebApp } from './utils/core.js';
 import LucideIcon from './components/LucideIcon.jsx';
 import SleepTimer from './components/SleepTimer.jsx';
 import MixerPanel from './components/MixerPanel.jsx';
@@ -8,10 +8,6 @@ import Header from './components/Header.jsx';
 import AmbientBinaural from './components/AmbientBinaural.jsx';
 import NowPlayingBar from './components/NowPlayingBar.jsx';
 import PodcastScreen from './components/PodcastScreen.jsx';
-
-// Injected by Vite at build time (see vite.config.js). The typeof guard keeps
-// this safe under tests/dev where the define isn't applied.
-const BUILD_ID = typeof __BUILD_ID__ !== 'undefined' ? __BUILD_ID__ : 'dev';
 
 export default function AppLayout() {
   const {
@@ -22,7 +18,17 @@ export default function AppLayout() {
     name, loadSavedPlaylist, p, bc,
     c_text, c_sub, c_dim, c_head,
     c_bord, c_inner,
+    lastMix, resumeLastMix, ambientOn, binOn,
   } = useAppContext() || {};
+
+  // Standalone (installed PWA) is computed once — the install hint is noise then.
+  const standalone = isStandaloneWebApp();
+  // One-tap "Resume" the last mix: only when nothing's already playing.
+  const showResume = lastMix && (lastMix.ambient || lastMix.bin) && !ambientOn && !binOn;
+  const resumeLabel = showResume ? [
+    lastMix.ambient && NOISE_TYPES[lastMix.noiseType]?.label.split(' (')[0],
+    lastMix.bin && BINAURAL[lastMix.binPreset]?.name,
+  ].filter(Boolean).join(' + ') : '';
 
   const [showPodcasts, setShowPodcasts] = React.useState(false);
 
@@ -115,7 +121,28 @@ export default function AppLayout() {
         {/* Header */}
         <Header />
 
-        <NowPlayingBar onOpen={()=>setShowPodcasts(true)} />
+        {/* One-tap nightly resume — the 95% case, at the very top so you can
+            open → tap → let the screen go dark. */}
+        {showResume && (
+          <button onClick={resumeLastMix} aria-label={`Resume ${resumeLabel}`}
+            style={{width:'100%',display:'flex',alignItems:'center',gap:'.75rem',padding:'1.1rem 1.25rem',marginBottom:'1rem',
+              borderRadius:'1.25rem',border:'1px solid rgba(230,178,119,0.35)',cursor:'pointer',textAlign:'left',
+              background:bm?'#0e0a05':'linear-gradient(135deg, rgba(230,178,119,0.18), rgba(230,169,106,0.08))',
+              boxShadow:bm?'none':'0 4px 24px rgba(230,178,119,0.18)'}}>
+            <span style={{width:46,height:46,flexShrink:0,borderRadius:'50%',display:'flex',alignItems:'center',justifyContent:'center',
+              background:bm?'#1a1305':'rgba(230,178,119,0.2)',color:'#e6b277'}}>
+              <LucideIcon name="Play" size={22}/>
+            </span>
+            <span style={{flex:1,minWidth:0}}>
+              <span style={{display:'block',fontSize:'.62rem',fontWeight:700,letterSpacing:'.08em',textTransform:'uppercase',color:'#e6b277',marginBottom:'.15rem'}}>Resume last night</span>
+              <span style={{display:'block',fontSize:'.95rem',fontWeight:700,color:c_head,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                {resumeLabel}{lastMix.useTimer ? ` · ${lastMix.timerMins} min timer` : ''}
+              </span>
+            </span>
+          </button>
+        )}
+
+        <NowPlayingBar onOpen={()=>setShowPodcasts(true)} compact />
 
         <div style={{display:'flex',flexDirection:'column',gap:'1rem'}}>
 
@@ -139,17 +166,14 @@ export default function AppLayout() {
             </span>
           </button>
 
-          {/* Install hint */}
-          <div style={{textAlign:'center',fontSize:'.7rem',color:c_sub,padding:'.5rem 0 .25rem',lineHeight:1.7}}>
-            <p style={{margin:0}}><strong style={{color:c_sub}}>iPhone:</strong> Safari → Share → "Add to Home Screen"</p>
-            <p style={{margin:0}}><strong style={{color:c_sub}}>Android:</strong> Chrome → ⋮ → "Add to Home Screen"</p>
-          </div>
-
-          {/* Build stamp — compare to the latest commit hash on GitHub to confirm
-              the service worker has served the current version. */}
-          <div style={{textAlign:'center',fontSize:'.6rem',color:c_dim,padding:'.25rem 0 .5rem',letterSpacing:'.04em'}}>
-            build {BUILD_ID}
-          </div>
+          {/* Install hint — only before the app is installed (it's noise once
+              you're running standalone). Build stamp moved to Podcast settings. */}
+          {!standalone && (
+            <div style={{textAlign:'center',fontSize:'.7rem',color:c_sub,padding:'.5rem 0 .25rem',lineHeight:1.7}}>
+              <p style={{margin:0}}><strong style={{color:c_sub}}>iPhone:</strong> Safari → Share → "Add to Home Screen"</p>
+              <p style={{margin:0}}><strong style={{color:c_sub}}>Android:</strong> Chrome → ⋮ → "Add to Home Screen"</p>
+            </div>
+          )}
         </div>
 
         <PodcastScreen show={showPodcasts} onClose={()=>setShowPodcasts(false)} />
