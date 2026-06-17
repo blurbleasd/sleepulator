@@ -577,7 +577,12 @@ export const BINAURAL = {
 
 export const ARTWORK = [{ src:'icon-512.png', sizes:'512x512', type:'image/png' }];
 export const LOOP_SAMPLE_RATE = 12000;
-export const BINAURAL_LOOP_SAMPLE_RATE = 4000;
+// 8000 Hz, not 4000: iOS/Safari's audio decoder is unreliable below ~8 kHz and
+// can play a 4 kHz WAV as silence — which is why binaural was inaudible while
+// ambient (12 kHz) worked. 8 kHz is the universally-supported telephone-grade
+// floor and still far above Nyquist for the ~180 Hz carriers. (Carrier tones are
+// low-frequency and barely reproduce on a phone speaker — binaural needs headphones.)
+export const BINAURAL_LOOP_SAMPLE_RATE = 8000;
 export const AMBIENT_LOOP_SECONDS = 60;
 // iOS media-element looping is not reliably gapless, so keep this much longer.
 export const BINAURAL_LOOP_SECONDS = 300;
