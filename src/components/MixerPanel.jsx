@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Settings2, X, BookMarked, Trash2 } from 'lucide-react';
 import { useAppContext } from '../context/AppContext.jsx';
+import Slider from './Slider.jsx';
 
 // Master volume + the saveable Mix Presets. The podcast EQ/compressor/pan
 // toggles moved to PodcastEffects (they only affect podcast audio).
@@ -24,8 +25,7 @@ export default function MixerPanel() {
       <div className="card" style={{display:'flex',alignItems:'center',gap:'.875rem',marginBottom:'1rem'}}>
         <Settings2 size={18} color={bm?'#6b5d48':'#e6b277'}/>
         <span style={{fontSize:'.8rem',fontWeight:700,color:c_head,whiteSpace:'nowrap'}}>Master</span>
-        <input type="range" min="0" max="1" step=".01" value={masterVol} className="indigo"
-          onChange={e=>setMasterVol(+e.target.value)} style={{flex:1}}/>
+        <Slider value={masterVol} onChange={setMasterVol} className="indigo" style={{flex:1}}/>
         <span style={{fontSize:'.7rem',fontFamily:'monospace',color:c_sub,width:32,textAlign:'right'}}>{Math.round(masterVol*100)}%</span>
       </div>
 

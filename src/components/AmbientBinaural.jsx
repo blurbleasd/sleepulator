@@ -2,6 +2,7 @@ import React from 'react';
 import { Volume2, Square, Play } from 'lucide-react';
 import { useAppContext } from '../context/AppContext.jsx';
 import { NOISE_TYPES, BINAURAL } from '../utils/core.js';
+import Slider from './Slider.jsx';
 
 // The side-by-side Ambient (noise) and Binaural (beats) cards: source select,
 // play/stop, volume, and the "All night (bypass timer)" toggle for each.
@@ -40,8 +41,7 @@ export default function AmbientBinaural() {
         </div>
         <div style={{display:'flex',alignItems:'center',gap:'.5rem'}}>
           <Volume2 size={14} color={c_sub}/>
-          <input type="range" min="0" max="1" step=".01" value={ambientVol} className="orange"
-            onChange={e=>setAmbientVol(+e.target.value)} style={{flex:1}}/>
+          <Slider value={ambientVol} onChange={setAmbientVol} className="orange" style={{flex:1}}/>
         </div>
         <label style={{display:'flex',alignItems:'center',gap:'.5rem',fontSize:'.7rem',color:c_sub,marginTop:'.75rem',cursor:'pointer'}}>
           <input type="checkbox" checked={ambientBypass} onChange={e=>setAmbientBypass(e.target.checked)}/>
@@ -70,8 +70,7 @@ export default function AmbientBinaural() {
         </div>
         <div style={{display:'flex',alignItems:'center',gap:'.5rem'}}>
           <Volume2 size={14} color={c_sub}/>
-          <input type="range" min="0" max="1" step=".01" value={binVol} className="blue"
-            onChange={e=>setBinVol(+e.target.value)} style={{flex:1}}/>
+          <Slider value={binVol} onChange={setBinVol} className="blue" style={{flex:1}}/>
         </div>
         <div style={{fontSize:'.6rem',color:c_sub,opacity:.7,marginTop:'.4rem'}}>Best with headphones</div>
         <label style={{display:'flex',alignItems:'center',gap:'.5rem',fontSize:'.7rem',color:c_sub,marginTop:'.75rem',cursor:'pointer'}}>
