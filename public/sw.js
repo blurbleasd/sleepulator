@@ -1,8 +1,9 @@
-// SLEEPULATOR Service Worker — v2.1
+// SLEEPULATOR Service Worker — v3
 // Dynamically caches the Vite app shell for offline use via Network-First.
 // Audio episodes are managed directly by the App via Cache API (not intercepted here).
+// Bump CACHE_NAME on releases that must guarantee a stale shell is purged.
 
-const CACHE_NAME    = 'sleepulator-shell-v2';
+const CACHE_NAME    = 'sleepulator-shell-v3';
 const EPISODE_CACHE = 'sleepulator-episodes'; // downloaded podcasts — never purge
 
 // ── Install ───────────────────────────────────────────────────────────────

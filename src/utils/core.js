@@ -673,8 +673,15 @@ export function makeSeamlessLoop(rawLeft, rawRight, frames, xfade) {
   for (let i = 0; i < frames; i++) {
     if (i < xfade) {
       const t = i / xfade; // 0 -> 1
-      left[i]  = rawLeft[frames + i]  * (1 - t) + rawLeft[i]  * t;
-      right[i] = rawRight[frames + i] * (1 - t) + rawRight[i] * t;
+      // Equal-power crossfade (cos/sin), not linear. The two blended segments are
+      // uncorrelated noise, so a linear fade dips ~3 dB at the midpoint — an
+      // audible loudness "gap" every loop. cos²+sin²=1 keeps power (loudness)
+      // constant across the seam. Boundary continuity is unchanged: at i=0 the
+      // gain is (1,0) so sample[0]=rawLeft[frames], consecutive with sample[frames-1].
+      const fadeOut = Math.cos(t * Math.PI / 2); // continuation: 1 -> 0
+      const fadeIn  = Math.sin(t * Math.PI / 2); // original head: 0 -> 1
+      left[i]  = rawLeft[frames + i]  * fadeOut + rawLeft[i]  * fadeIn;
+      right[i] = rawRight[frames + i] * fadeOut + rawRight[i] * fadeIn;
     } else {
       left[i] = rawLeft[i];
       right[i] = rawRight[i];

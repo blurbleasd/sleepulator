@@ -27,7 +27,9 @@
 }
 
 * { -webkit-tap-highlight-color: transparent; box-sizing: border-box; }
-html, body { height: 100%; overscroll-behavior: none; margin: 0; }
+/* overflow-x:hidden + max-width:100% stop the horizontal "wobble"/side-scroll on
+   phones if any descendant (a transform, a wide row) pokes past the viewport. */
+html, body { height: 100%; overscroll-behavior: none; margin: 0; max-width: 100%; overflow-x: hidden; }
 body { 
   background: var(--c-bg); 
   color: var(--c-text); 
@@ -63,7 +65,7 @@ button, input, optgroup, select, textarea { font: inherit; }
 }
 
 /* ── Layout helpers ── */
-#root { min-height: 100dvh; display: flex; flex-direction: column; }
+#root { min-height: 100dvh; display: flex; flex-direction: column; max-width: 100%; overflow-x: hidden; }
 .pad-top    { padding-top:    var(--top-clearance); }
 .pad-bottom { padding-bottom: max(5rem,   var(--safe-bot)); }
 

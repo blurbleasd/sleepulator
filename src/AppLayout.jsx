@@ -9,6 +9,10 @@ import AmbientBinaural from './components/AmbientBinaural.jsx';
 import NowPlayingBar from './components/NowPlayingBar.jsx';
 import PodcastScreen from './components/PodcastScreen.jsx';
 
+// Injected by Vite at build time (see vite.config.js). The typeof guard keeps
+// this safe under tests/dev where the define isn't applied.
+const BUILD_ID = typeof __BUILD_ID__ !== 'undefined' ? __BUILD_ID__ : 'dev';
+
 export default function AppLayout() {
   const {
     bm, breathMode, setBreathMode, episodes,
@@ -139,6 +143,12 @@ export default function AppLayout() {
           <div style={{textAlign:'center',fontSize:'.7rem',color:c_sub,padding:'.5rem 0 .25rem',lineHeight:1.7}}>
             <p style={{margin:0}}><strong style={{color:c_sub}}>iPhone:</strong> Safari → Share → "Add to Home Screen"</p>
             <p style={{margin:0}}><strong style={{color:c_sub}}>Android:</strong> Chrome → ⋮ → "Add to Home Screen"</p>
+          </div>
+
+          {/* Build stamp — compare to the latest commit hash on GitHub to confirm
+              the service worker has served the current version. */}
+          <div style={{textAlign:'center',fontSize:'.6rem',color:c_dim,padding:'.25rem 0 .5rem',letterSpacing:'.04em'}}>
+            build {BUILD_ID}
           </div>
         </div>
 

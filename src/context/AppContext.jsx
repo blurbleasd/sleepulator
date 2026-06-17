@@ -221,7 +221,14 @@ export function AppProvider({ children }) {
         ambientSourceKey.current = sourceKey;
       }
       setNativeAudioLevel(audio, 1, muteState || gain <= LOOP_MUTED_GAIN_EPSILON);
-      if (ambientOn && !audio.muted && audio.paused && gain > LOOP_MUTED_GAIN_EPSILON) {
+      // True zero (user slid volume to 0 — not a timer fade) → pause outright.
+      // On iOS a muted element routed through a MediaElementSource can keep
+      // leaking sound, so muting alone isn't reliably silent; pausing is. The
+      // fade path passes allowSourceRebuild:false and never hits a hard zero, so
+      // it's unaffected; the master-mute button keeps gain>eps so it won't pause.
+      if (allowSourceRebuild && gain <= LOOP_MUTED_GAIN_EPSILON) {
+        if (!audio.paused) audio.pause();
+      } else if (ambientOn && !audio.muted && audio.paused && gain > LOOP_MUTED_GAIN_EPSILON) {
         audio.play().catch(()=>{});
       }
       return;
@@ -405,12 +412,30 @@ export function AppProvider({ children }) {
   },[anyPlaying, muted]);
 
   // ── Headphone disconnect ──────────────────────────────────────────────────
+  // Pause when headphones are physically UNPLUGGED so audio doesn't blast from
+  // the speaker. The catch: enumerateDevices() returns audiooutput devices with
+  // blank labels unless mic permission is granted — which a sleep app never asks
+  // for. On iOS the labels are always blank, so the old "no headphone label found
+  // => pause everything" logic fired on every spurious devicechange and stopped
+  // all audio. We now (a) only act when labels are actually readable, and (b)
+  // only pause on a real present->absent transition. When we can't tell, we keep
+  // playing — for a sleep app, a stray pause is far worse than a missed one.
+  const hadHeadphonesRef = useRef(false);
   useEffect(()=>{
     if (!navigator.mediaDevices?.addEventListener) return;
-    const handler = async () => {
+    const probeHeadphones = async () => {
       const devs = await navigator.mediaDevices.enumerateDevices().catch(()=>[]);
-      const hasHP = devs.some(d=>d.kind==='audiooutput' && /head|ear|airpod|bluetooth/i.test(d.label));
-      if (!hasHP && (podPlaying||ambientOn||binOn)) {
+      const outs = devs.filter(d=>d.kind==='audiooutput');
+      if (!outs.some(d=>d.label)) return null; // labels unreadable (iOS/no perm) -> unknown
+      return outs.some(d=>/head|ear|airpod|bluetooth/i.test(d.label));
+    };
+    probeHeadphones().then(v=>{ if (v !== null) hadHeadphonesRef.current = v; });
+    const handler = async () => {
+      const now = await probeHeadphones();
+      if (now === null) return;                         // can't tell -> never auto-pause
+      const removed = hadHeadphonesRef.current && !now; // genuine unplug only
+      hadHeadphonesRef.current = now;
+      if (removed && (podPlaying||ambientOn||binOn)) {
         ambientAudio.current?.pause();
         binAudio.current?.pause();
         podAudio.current?.pause();
