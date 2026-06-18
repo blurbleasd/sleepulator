@@ -188,7 +188,7 @@ struct HomeView: View {
                 VStack(spacing: 25) {
                     WarmMixerRow(icon: "waveform.path.ecg", title: audio.noiseType.capitalized, isOn: $audio.noiseOn, volume: $audio.noiseVolume)
                     WarmMixerRow(icon: "headphones", title: "Binaural (\(audio.binauralPreset.capitalized))", isOn: $audio.binauralOn, volume: $audio.binVolume)
-                    WarmMixerRow(icon: "mic.fill", title: "Podcast", isOn: $audio.isPodPlaying, volume: $audio.podVolume, disableToggle: true)
+                    WarmMixerRow(icon: "mic.fill", title: "Podcast", isOn: $audio.isPodPlaying, volume: $audio.podVolume, onToggle: { audio.togglePodcast() })
                 }
                 .glassPanel()
                 .padding(.horizontal, 20)
@@ -214,7 +214,7 @@ struct WarmMixerRow: View {
     let title: String
     @Binding var isOn: Bool
     @Binding var volume: Double
-    var disableToggle: Bool = false
+    var onToggle: (() -> Void)? = nil
     
     var body: some View {
         VStack(spacing: 12) {
@@ -230,11 +230,15 @@ struct WarmMixerRow: View {
                 
                 Spacer()
                 
-                if !disableToggle {
-                    Toggle("", isOn: $isOn)
-                        .labelsHidden()
-                        .toggleStyle(SwitchToggleStyle(tint: Color(red: 0.9, green: 0.7, blue: 0.4)))
-                }
+                Toggle("", isOn: Binding(
+                    get: { isOn },
+                    set: { newValue in
+                        if let action = onToggle { action() }
+                        else { isOn = newValue }
+                    }
+                ))
+                .labelsHidden()
+                .toggleStyle(SwitchToggleStyle(tint: Color(red: 0.9, green: 0.7, blue: 0.4)))
             }
             
             WarmSlider(value: $volume, range: 0...1)

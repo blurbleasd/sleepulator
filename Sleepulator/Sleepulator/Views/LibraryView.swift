@@ -18,13 +18,13 @@ struct LibraryView: View {
     @State private var showOPMLSelector = false
     
     var body: some View {
-        NavigationView {
+        NavigationStack {
             ZStack {
                 // Background
                 Color.black.ignoresSafeArea()
                 
-                ScrollView {
-                    VStack(spacing: 24) {
+                List {
+
                         // Add URL Section
                         HStack {
                             TextField("RSS Feed URL...", text: $feedUrlInput)
@@ -52,12 +52,12 @@ struct LibraryView: View {
                             .disabled(feedUrlInput.isEmpty || isLoading)
                         }
                         .glassPanel()
-                        .padding(.horizontal)
-                        .padding(.top, 20)
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
                         
                         // Up Next Queue Section
                         if !audio.queue.isEmpty {
-                            VStack(alignment: .leading, spacing: 16) {
+                            Section(header: 
                                 HStack {
                                     Image(systemName: "list.dash")
                                         .foregroundColor(Color(red: 0.9, green: 0.7, blue: 0.4))
@@ -77,7 +77,9 @@ struct LibraryView: View {
                                             .cornerRadius(6)
                                     }
                                 }
-                                
+                                .padding(.vertical, 8)
+                                .listRowBackground(Color.clear)
+                            ) {
                                 ForEach(audio.queue) { ep in
                                     HStack {
                                         VStack(alignment: .leading, spacing: 4) {
@@ -99,12 +101,21 @@ struct LibraryView: View {
                                                 .font(.title3)
                                         }
                                     }
-                                    .padding(.vertical, 8)
-                                    Divider().background(Color.white.opacity(0.1))
+                                    .padding(.vertical, 12)
+                                    .padding(.horizontal, 16)
+                                    .background(Color.white.opacity(0.05))
+                                    .cornerRadius(12)
+                                    .listRowBackground(Color.clear)
+                                    .listRowSeparator(.hidden)
+                                    .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
+                                }
+                                .onMove { indices, newOffset in
+                                    audio.queue.move(fromOffsets: indices, toOffset: newOffset)
+                                }
+                                .onDelete { indices in
+                                    audio.queue.remove(atOffsets: indices)
                                 }
                             }
-                            .glassPanel()
-                            .padding(.horizontal)
                         }
                         
                         // Saved Mixes Section
@@ -153,7 +164,8 @@ struct LibraryView: View {
                                 }
                             }
                             .glassPanel()
-                            .padding(.horizontal)
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
                         }
 
                         // Podcast Subscriptions
@@ -219,9 +231,9 @@ struct LibraryView: View {
                             }
                         }
                         
-                        Spacer().frame(height: 100) // Tab bar clearance
-                    }
+                        Spacer().frame(height: 100).listRowBackground(Color.clear).listRowSeparator(.hidden) // Tab bar clearance
                 }
+                .listStyle(.plain)
             }
             .navigationTitle("Podcasts")
             .navigationBarTitleDisplayMode(.large)
@@ -333,78 +345,71 @@ struct LibraryView: View {
 
 struct EpisodeRowView: View {
     let ep: Episode
-    @Binding var expandedEpisodeId: String?
     @ObservedObject var audio: AudioEngine
     let podcast: Podcast
     
+    @State private var isDownloaded = false
+    
     var body: some View {
-        VStack(spacing: 0) {
-            HStack(alignment: .top) {
+        Button(action: {
+            audio.playEpisode(ep)
+        }) {
+            HStack(alignment: .center) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Button(action: {
-                        if expandedEpisodeId == ep.id {
-                            expandedEpisodeId = nil
-                        } else {
-                            expandedEpisodeId = ep.id
-                        }
-                    }) {
-                        Text(ep.title)
-                            .font(.system(.headline, design: .rounded))
-                            .foregroundColor(.white)
-                            .multilineTextAlignment(.leading)
-                            .lineLimit(expandedEpisodeId == ep.id ? nil : 2)
-                    }
+                    Text(ep.title)
+                        .font(.system(.headline, design: .rounded))
+                        .foregroundColor(.white)
+                        .multilineTextAlignment(.leading)
+                        .lineLimit(2)
                     
-                    if expandedEpisodeId == ep.id {
-                        if let description = ep.description {
-                            Text(description)
-                                .font(.system(.caption, design: .rounded))
-                                .foregroundColor(.gray)
-                                .padding(.top, 4)
-                        }
-                        if let pubDate = ep.pubDate {
-                            Text(pubDate, style: .date)
-                                .font(.system(.caption2, design: .rounded))
-                                .foregroundColor(.gray.opacity(0.7))
-                        }
-                    } else {
-                        if let pubDate = ep.pubDate {
-                            Text(pubDate, style: .date)
-                                .font(.system(.caption2, design: .rounded))
-                                .foregroundColor(.gray.opacity(0.7))
-                        }
+                    if let pubDate = ep.pubDate {
+                        Text(pubDate, style: .date)
+                            .font(.system(.caption2, design: .rounded))
+                            .foregroundColor(.gray.opacity(0.7))
                     }
                 }
                 Spacer()
                 
-                HStack(spacing: 12) {
-                    Button(action: {
-                        Task {
-                            if let url = URL(string: ep.audioUrl) {
-                                let _ = try? await AudioDownloader.shared.download(url: url) { _ in }
-                            }
-                        }
-                    }) {
-                        Image(systemName: "icloud.and.arrow.down")
-                            .foregroundColor(.gray)
-                            .font(.title3)
-                    }
-                    
-                    Button(action: {
-                        audio.queue.append(ep)
-                        if audio.queue.count == 1 { audio.loadPodcast(ep.audioUrl) }
-                    }) {
-                        Image(systemName: "plus.circle")
-                            .foregroundColor(Color(red: 0.9, green: 0.7, blue: 0.4))
-                            .font(.title)
-                    }
+                if isDownloaded {
+                    Image(systemName: "checkmark.icloud.fill")
+                        .foregroundColor(Color(red: 0.9, green: 0.7, blue: 0.4))
+                        .font(.caption)
                 }
             }
-            .buttonStyle(PlainButtonStyle())
             .padding(.vertical, 4)
+        }
+        .buttonStyle(PlainButtonStyle())
+        .contextMenu {
+            Button(action: {
+                if !audio.queue.isEmpty {
+                    audio.queue.insert(ep, at: 1)
+                } else {
+                    audio.playEpisode(ep)
+                }
+            }) {
+                Label("Play Next", systemImage: "text.insert")
+            }
             
-            if ep.id != podcast.episodes.last?.id {
-                Divider().background(Color.white.opacity(0.1))
+            Button(action: {
+                audio.addToQueue(ep)
+            }) {
+                Label("Add to Queue", systemImage: "text.append")
+            }
+            
+            Button(action: {
+                Task {
+                    if let url = URL(string: ep.audioUrl) {
+                        let _ = try? await AudioDownloader.shared.download(url: url) { _ in }
+                        DispatchQueue.main.async { self.isDownloaded = true }
+                    }
+                }
+            }) {
+                Label(isDownloaded ? "Redownload" : "Download Offline", systemImage: "icloud.and.arrow.down")
+            }
+        }
+        .onAppear {
+            if let url = URL(string: ep.audioUrl), AudioDownloader.shared.getCachedUrl(for: url) != nil {
+                isDownloaded = true
             }
         }
     }

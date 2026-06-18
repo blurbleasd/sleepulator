@@ -22,7 +22,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		017F902453F66EBD5997209E /* SleepulatorTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SleepulatorTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		017F902453F66EBD5997209E /* SleepulatorTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; name = SleepulatorTests.xctest; path = .xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		18E370CCB927FE199F422346 /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		896815A52FE42DE100C5DF4D /* Sleepulator.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Sleepulator.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		AB899D16B0611E1DE7BE7027 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };

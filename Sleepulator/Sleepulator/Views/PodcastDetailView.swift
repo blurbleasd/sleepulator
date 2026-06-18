@@ -7,7 +7,6 @@ struct PodcastDetailView: View {
     
     @State private var isLoading = false
     @State private var errorMessage: String? = nil
-    @State private var expandedEpisodeId: String? = nil
     
     var body: some View {
         ZStack {
@@ -32,7 +31,6 @@ struct PodcastDetailView: View {
                         HStack(spacing: 12) {
                             if let first = podcast.episodes.first {
                                 Button(action: {
-                                    audio.queue = [first]
                                     audio.playEpisode(first)
                                 }) {
                                     Text("Play Latest")
@@ -66,7 +64,7 @@ struct PodcastDetailView: View {
                         
                         VStack(alignment: .leading, spacing: 0) {
                             ForEach(podcast.episodes) { ep in
-                                EpisodeRowView(ep: ep, expandedEpisodeId: $expandedEpisodeId, audio: audio, podcast: podcast)
+                                EpisodeRowView(ep: ep, audio: audio, podcast: podcast)
                                     .padding(.vertical, 8)
                                 
                                 if ep.id != podcast.episodes.last?.id {
@@ -119,7 +117,7 @@ struct PodcastDetailView: View {
     
     private func savePodcasts() {
         if let data = try? JSONEncoder().encode(libraryPodcasts) {
-            UserDefaults.standard.set(data, forKey: "saved_podcasts")
+            UserDefaults.standard.set(data, forKey: "savedPodcasts")
         }
     }
 }
