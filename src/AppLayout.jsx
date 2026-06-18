@@ -33,17 +33,17 @@ export default function AppLayout() {
   const [showPodcasts, setShowPodcasts] = React.useState(false);
 
   return (
-    <div className="app-container" style={{minHeight:'100dvh', color:c_text}}>
+    <div className="app-container">
       <div className="mesh-bg" />
 
       {/* ── Breathing overlay ── */}
       {breathMode && bc && (
-        <div className="overlay" style={{background:bm?'#000':'rgba(3,7,18,.97)',alignItems:'center',justifyContent:'center'}}>
+        <div className="overlay" className="overlay-content centered">
           <button onClick={()=>setBreathMode(null)}
-            style={{position:'absolute',top:'var(--top-clearance)',right:'1.25rem',background:'var(--c-btn)',border:'none',borderRadius:'50%',width:44,height:44,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',color:'#b39b80'}}>
+            className="btn-icon header-btn">
             <LucideIcon name="X" size={20}/>
           </button>
-          <div style={{display:'flex',gap:'.75rem',marginBottom:'2rem'}}>
+          <div className="flex-row gap-md" style={{marginBottom: "2rem"}}>
             {['478','box'].map(m=>(
               <button key={m} onClick={()=>setBreathMode(m)}
                 style={{padding:'.5rem 1.25rem',borderRadius:'9999px',border:'none',fontWeight:700,fontSize:'.8rem',cursor:'pointer',
@@ -53,11 +53,11 @@ export default function AppLayout() {
               </button>
             ))}
           </div>
-          <h2 style={{fontSize:'1.2rem',fontWeight:800,letterSpacing:'.08em',color:bm?'#b39b80':bc.col,marginBottom:'.25rem'}}>{bc.label}</h2>
-          <p style={{fontSize:'.85rem',color:c_sub,marginBottom:'5rem',textAlign:'center',padding:'0 2rem'}}>{bc.sub}</p>
-          <div style={{position:'relative',width:220,height:220,display:'flex',alignItems:'center',justifyContent:'center'}}>
-            <div style={{position:'absolute',inset:0,borderRadius:'50%',background:bc.col,opacity:.1}}/>
-            <div className={bc.cls} style={{width:'100%',height:'100%',borderRadius:'50%',background:bc.col,opacity:.85,boxShadow:bm?'none':`0 0 60px ${bc.col}40`}}/>
+          <h2 className="breath-title" style={{color:bm?'#b39b80':bc.col}}>{bc.label}</h2>
+          <p className="breath-sub">{bc.sub}</p>
+          <div className="breath-circle-container">
+            <div className="breath-circle-bg" style={{background: bc.col}}/>
+            <div className={`${bc.cls} breath-circle-pulse`} style={{background: bc.col, boxShadow: bm ? "none" : `0 0 60px ${bc.col}40`}}/>
           </div>
         </div>
       )}
@@ -65,15 +65,15 @@ export default function AppLayout() {
       {showPlaylistLibrary && (
         <div className="overlay" style={{background:bm?'#000':'var(--c-bg)',paddingTop:'var(--top-clearance)'}}>
           <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'1.25rem'}}>
-            <h2 style={{fontSize:'1.1rem',fontWeight:800,color:c_head,margin:0}}>Saved Playlists</h2>
+            <h2 className="text-title" style={{color: c_head}}>Saved Playlists</h2>
             <button onClick={()=>setShowPlaylistLibrary(false)}
-              style={{background:'var(--c-btn)',border:'none',borderRadius:'50%',width:44,height:44,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',color:'#b39b80'}}>
+              className="btn-icon header-btn">
               <LucideIcon name="X" size={18}/>
             </button>
           </div>
 
-          <div className="card" style={{margin:'0 1rem 1rem',padding:'1rem'}}>
-            <p style={{fontSize:'.7rem',color:c_sub,margin:'0 0 .5rem'}}>Save the current queue under a reusable name.</p>
+          <div className="card" className="panel anim-fade-in">
+            <p className="text-dim" style={{marginBottom: "0.5rem"}}>Save the current queue under a reusable name.</p>
             <div style={{display:'flex',gap:'.5rem'}}>
               <input type="text" value={playlistName} onChange={e=>setPlaylistName(e.target.value)} placeholder="Playlist name…"
                 style={{flex:1,background:c_inner,border:`1px solid ${c_bord}`,borderRadius:'.5rem',padding:'.5rem .75rem',color:c_text,fontSize:'14px'}}/>
@@ -87,20 +87,20 @@ export default function AppLayout() {
           <div className="scroll-y" style={{flex:1,padding:'0 1rem',display:'flex',flexDirection:'column',gap:'.5rem'}}>
             {savedPlaylists.length===0 && <p style={{textAlign:'center',padding:'2rem',color:c_sub,fontSize:'.85rem'}}>No saved playlists yet.</p>}
             {savedPlaylists.map(saved => (
-              <div key={saved.id || saved.name} className="card" style={{padding:'1rem',display:'flex',alignItems:'center',gap:'.75rem'}}>
+              <div key={saved.id || saved.name} className="card" className="panel-row">
                 <div style={{flex:1,minWidth:0}}>
-                  <p style={{margin:0,fontSize:'.85rem',fontWeight:600,color:c_head,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{saved.name}</p>
-                  <p style={{margin:'.2rem 0 0',fontSize:'.68rem',color:c_sub}}>
+                  <p className="text-sub" style={{fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: c_head}}>{saved.name}</p>
+                  <p className="text-dim">
                     {(saved.count || saved.episodes?.length || 0)} episode{(saved.count || saved.episodes?.length || 0)===1?'':'s'}
                     {saved.updatedAt ? ` · Updated ${new Date(saved.updatedAt).toLocaleDateString()}` : ''}
                   </p>
                 </div>
                 <button onClick={()=>loadSavedPlaylist(saved)}
-                  style={{padding:'.4rem .875rem',borderRadius:'.5rem',background:'rgba(230,178,119,.2)',color:'#e6b277',border:'none',fontSize:'.75rem',fontWeight:700,cursor:'pointer',whiteSpace:'nowrap'}}>
+                  className="btn-pill-sub">
                   Load
                 </button>
                 <button onClick={()=>loadSavedPlaylist(saved, { autoplay: true })}
-                  style={{padding:'.4rem .875rem',borderRadius:'.5rem',background:'var(--c-accent-strong)',color:'var(--c-bg)',border:'none',fontSize:'.75rem',fontWeight:700,cursor:'pointer',whiteSpace:'nowrap'}}>
+                  className="btn-pill-main">
                   Play
                 </button>
                 <button onClick={()=>setSavedPlaylists(prev=>prev.filter(entry=>(entry.id || entry.name)!==(saved.id || saved.name)))}
@@ -116,7 +116,7 @@ export default function AppLayout() {
       )}
 
       {/* ── Main ── */}
-      <div style={{maxWidth:500,margin:'0 auto',paddingLeft:'1rem',paddingRight:'1rem'}} className="pad-top pad-bottom">
+      <div className="pad-top pad-bottom anim-fade-in" style={{maxWidth: 500, margin: "0 auto", paddingLeft: "1rem", paddingRight: "1rem"}}>
 
         {/* Header */}
         <Header />
@@ -125,10 +125,7 @@ export default function AppLayout() {
             open → tap → let the screen go dark. */}
         {showResume && (
           <button onClick={resumeLastMix} aria-label={`Resume ${resumeLabel}`}
-            style={{width:'100%',display:'flex',alignItems:'center',gap:'.75rem',padding:'1.1rem 1.25rem',marginBottom:'1rem',
-              borderRadius:'1.25rem',border:'1px solid rgba(230,178,119,0.35)',cursor:'pointer',textAlign:'left',
-              background:bm?'#0e0a05':'linear-gradient(135deg, rgba(230,178,119,0.18), rgba(230,169,106,0.08))',
-              boxShadow:bm?'none':'0 4px 24px rgba(230,178,119,0.18)'}}>
+            className="btn-resume-mix">
             <span style={{width:46,height:46,flexShrink:0,borderRadius:'50%',display:'flex',alignItems:'center',justifyContent:'center',
               background:bm?'#1a1305':'rgba(230,178,119,0.2)',color:'#e6b277'}}>
               <LucideIcon name="Play" size={22}/>
@@ -156,7 +153,7 @@ export default function AppLayout() {
           <MixerPanel />
 
           {/* Podcasts entry — opens the podcast screen */}
-          <button onClick={()=>setShowPodcasts(true)} className="card" style={{display:'flex',alignItems:'center',justifyContent:'space-between',cursor:'pointer',width:'100%',textAlign:'left',border:'1px solid var(--c-border)'}}>
+          <button onClick={()=>setShowPodcasts(true)} className="panel-row" style={{width: "100%"}}>
             <span style={{display:'flex',alignItems:'center',gap:'.6rem',fontWeight:700,fontSize:'1rem',color:c_head}}>
               <LucideIcon name="Rss" size={20} color={bm?'#a9762f':'#e6b277'}/> Podcasts
             </span>

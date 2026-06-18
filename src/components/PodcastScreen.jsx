@@ -39,7 +39,7 @@ export default function PodcastScreen({ show, onClose }) {
 
   const titles = { library: 'Podcasts', podcast: feed?.name || subName || 'Podcast', queue: 'Up next', settings: 'Podcast settings' };
 
-  const headerBtn = { background:'#241d12',border:'none',borderRadius:'50%',width:42,height:42,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',color:'#b39b80',flexShrink:0 };
+  const headerBtn = {}; // Replaced by class
   const pill = (active=false) => ({ padding:'.55rem .9rem',borderRadius:'.7rem',border:`1px solid ${c_bord}`,fontSize:'.78rem',fontWeight:700,cursor:'pointer',background:active?'var(--c-accent-strong)':'rgba(230,178,119,.14)',color:active?'var(--c-bg)':'#e6b277' });
 
   return (
@@ -47,13 +47,13 @@ export default function PodcastScreen({ show, onClose }) {
       <div style={{maxWidth:500,margin:'0 auto',paddingLeft:'1rem',paddingRight:'1rem'}} className="pad-bottom">
 
         {/* Header */}
-        <div style={{display:'flex',alignItems:'center',gap:'.6rem',padding:'0 0 1rem'}}>
-          <button onClick={goBack} className="" aria-label="Back" style={headerBtn}>
+        <div className="screen-header">
+          <button onClick={goBack} className="" aria-label="Back" className="btn-icon header-btn">
             <LucideIcon name={view==='library' ? 'X' : 'ChevronLeft'} size={20}/>
           </button>
-          <span style={{flex:1,fontSize:'1.15rem',fontWeight:800,color:c_head,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{titles[view]}</span>
+          <span className="screen-title">{titles[view]}</span>
           {view==='library' && (
-            <button onClick={()=>setView('settings')} aria-label="Settings" style={headerBtn}>
+            <button onClick={()=>setView('settings')} aria-label="Settings" className="btn-icon header-btn">
               <LucideIcon name="Settings2" size={18}/>
             </button>
           )}
@@ -82,10 +82,10 @@ export default function PodcastScreen({ show, onClose }) {
             ) : (
               <div style={{display:'flex',flexDirection:'column',gap:'.6rem',marginBottom:'1rem'}}>
                 {subs.map((s,i)=>(
-                  <div key={i} className="card" style={{display:'flex',alignItems:'center',gap:'.5rem',padding:'.85rem'}}>
+                  <div key={i} className="card" className="panel-row">
                     <button onClick={()=>openPodcast(s)}
                       style={{flex:1,minWidth:0,display:'flex',alignItems:'center',gap:'.75rem',background:'transparent',border:'none',padding:0,textAlign:'left',cursor:'pointer',color:'inherit'}}>
-                      <span style={{width:42,height:42,borderRadius:'.6rem',background:'#2f2417',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,color:'#e6b277'}}>
+                      <span className="sub-icon">
                         <LucideIcon name="Rss" size={20}/>
                       </span>
                       <span style={{flex:1,minWidth:0}}>

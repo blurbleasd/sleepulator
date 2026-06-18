@@ -3,10 +3,10 @@ import {
   BookMarked, Clock, GripVertical, Moon, MoonStar, Pause, Play, Plus, RotateCcw, RotateCw, Rss, Search, Settings2, Shuffle, SlidersHorizontal, Square, Sun, Trash2, Volume2, VolumeX, Wind, X, HelpCircle
 } from 'lucide-react';
 import { mixBus } from '../audio/MixBus.js';
-
 import {
   APP_CONFIG, LEGACY_DEFAULT_FEED_URL, DEFAULT_FEED_PROXY_URL, NATIVE_MEDIA_VOLUME_LOCK, hashUrl, FEED_TIMEOUT_MS, FEED_ACCEPT_HEADER, clamp01, shortenSecret, redactUrlForDisplay, normalizeConfigUrl, getDefaultFeedProxyUrl, buildSleepSafeAudioUrl, parseDuration, fmtTime, previewText, readStoredArray, deriveFeedName, inferPodcastTitle, dedupeEpisodes, describeError, mergeHeaders, withFeedHeaders, fetchWithTimeout, safeJsonParse, localNameOf, directElements, directMatches, descendantMatches, firstDirectText, firstDescendantText, firstAttrFromElements, firstText, firstAttr, resolveMaybeUrl, sniffMarkupType, looksLikeXmlFeed, extractEmbeddedFeedMarkup, discoverAlternateFeedUrl, normalizeFeedUrl, buildFeedSources, makeFeedError, formatFeedError, parseFeedEpisodes, nextEpisode, isIOSDevice, isStandaloneWebApp, generateBrown, generatePink, generateGreen, generateWhite, generateFan, generateRain, generateOcean, generateForest, NOISE_TYPES, BINAURAL, ARTWORK, LOOP_SAMPLE_RATE, BINAURAL_LOOP_SAMPLE_RATE, AMBIENT_LOOP_SECONDS, BINAURAL_LOOP_SECONDS, LOOP_TRANSITION_SECONDS, LOOP_MATCH_SECONDS, LOOP_SCALED_GAIN_EPSILON, LOOP_MUTED_GAIN_EPSILON, LOOP_SOURCE_TIME_FUZZ, LOOP_BUFFER_CACHE, LOOP_URL_CACHE, writeAscii, buildStereoWavUrl, buildLoopMeta, maybeWrapManualLoop, getAmbientLoopBuffer, getAmbientLoopMeta, getAmbientLoopUrl, getBinauralLoopBuffer, getBinauralLoopMeta, getBinauralLoopUrl, configureHiddenAudioElement
 } from '../utils/core.js';
+import { usePersistence } from '../hooks/usePersistence.js';
 
 // Fallback glyphs for the imperative floating mute button. The app uses
 // lucide-react components, so the `window.lucide` global isn't present and this
@@ -19,24 +19,24 @@ export function AppProvider({ children }) {
   const [bm, setBm]               = useState(false); // bedtime mode
   const [muted, setMuted]         = useState(false);
   const [breathMode, setBreathMode]= useState(null); // null | '478' | 'box'
-  const [masterVol, setMasterVol] = useState(()=>+localStorage.getItem('masterVolume')||1);
+  const [masterVol, setMasterVol] = usePersistence('masterVolume', 1);
   // Snapshot of the last sound mix that was playing, for the home "Resume" button.
-  const [lastMix, setLastMix] = useState(()=>{ try { return JSON.parse(localStorage.getItem('lastMix')||'null'); } catch { return null; } });
+  const [lastMix, setLastMix] = usePersistence('lastMix', null);
 
   // Ambient
   const [ambientOn,  setAmbientOn]  = useState(false);
-  const [ambientVol, setAmbientVol] = useState(()=>+localStorage.getItem('brownVolume')||.5);
-  const [noiseType,  setNoiseType]  = useState(()=>localStorage.getItem('noiseType')||'brown');
-  const [ambientBypass, setAmbientBypass] = useState(()=>localStorage.getItem('ambientBypass')==='true');
+  const [ambientVol, setAmbientVol] = usePersistence('brownVolume', 0.5);
+  const [noiseType,  setNoiseType]  = usePersistence('noiseType', 'brown');
+  const [ambientBypass, setAmbientBypass] = usePersistence('ambientBypass', false);
 
   // Binaural
   const [binOn,  setBinOn]  = useState(false);
-  const [binVol, setBinVol] = useState(()=>+localStorage.getItem('binauralVolume')||.5);
-  const [binPreset, setBinPreset] = useState(()=>localStorage.getItem('binauralPreset')||'delta');
-  const [binBypass, setBinBypass] = useState(()=>localStorage.getItem('binauralBypass')==='true');
+  const [binVol, setBinVol] = usePersistence('binauralVolume', 0.5);
+  const [binPreset, setBinPreset] = usePersistence('binauralPreset', 'delta');
+  const [binBypass, setBinBypass] = usePersistence('binauralBypass', false);
 
   // Timer
-  const [timerMins,   setTimerMins]  = useState(()=>parseInt(localStorage.getItem('timerMinutes'))||30);
+  const [timerMins,   setTimerMins]  = usePersistence('timerMinutes', 30);
   const [timerActive, setTimerActive]= useState(false);
   const [timeLeft,    setTimeLeft]   = useState(null);
   const timerEndRef  = useRef(null);
@@ -44,54 +44,33 @@ export function AppProvider({ children }) {
 
   // Podcast
   const [episodes,      setEpisodes]      = useState([]);
-  const [playlist,      setPlaylist]      = useState(()=>{
-    // migrate legacy key
-    const v=localStorage.getItem('sleepulatorPlaylist');
-    if(v) return readStoredArray('sleepulatorPlaylist');
-    const leg=localStorage.getItem('comedyPlaylist');
-    if(leg){ localStorage.setItem('sleepulatorPlaylist',leg); localStorage.removeItem('comedyPlaylist'); return readStoredArray('sleepulatorPlaylist'); }
-    return [];
-  });
-  const [eqOn, setEqOn] = useState(()=>localStorage.getItem('eqOn')==='true');
-  const [compOn, setCompOn] = useState(()=>localStorage.getItem('compOn')==='true');
-  const [panOn, setPanOn] = useState(()=>localStorage.getItem('panOn')==='true');
-  const [duckOn, setDuckOn] = useState(()=>localStorage.getItem('duckAmbient')==='true');
+  const [playlist,      setPlaylist]      = usePersistence('sleepulatorPlaylist', []);
+  const [eqOn, setEqOn] = usePersistence('eqOn', false);
+  const [compOn, setCompOn] = usePersistence('compOn', false);
+  const [panOn, setPanOn] = usePersistence('panOn', false);
+  const [duckOn, setDuckOn] = usePersistence('duckAmbient', false);
   const [playingSrc,    setPlayingSrc]    = useState('feed');
   const [curEp,         setCurEp]         = useState(null);
   const [podPlaying,    setPodPlaying]    = useState(false);
-  const [podVol,        setPodVol]        = useState(()=>+localStorage.getItem('podcastVolume')||+localStorage.getItem('comedyVolume')||.8);
-  const [podSpeed,      setPodSpeed]      = useState(()=>+localStorage.getItem('playbackSpeed')||1);
-  const [autoPlay,      setAutoPlay]      = useState(()=>localStorage.getItem('autoPlayEnabled')!=='false');
-  const [shuffle,       setShuffle]       = useState(()=>localStorage.getItem('shuffleEnabled')==='true');
-  const [preloadNext,   setPreloadNext]   = useState(()=>localStorage.getItem('preloadNext')!=='false');
-  const [rssUrl,        setRssUrl]        = useState(()=>{
-    const stored = (localStorage.getItem('rssUrl') || '').trim();
-    return stored && stored !== LEGACY_DEFAULT_FEED_URL ? stored : '';
-  });
+  const [podVol,        setPodVol]        = usePersistence('podcastVolume', 0.8);
+  const [podSpeed,      setPodSpeed]      = usePersistence('playbackSpeed', 1);
+  const [autoPlay,      setAutoPlay]      = usePersistence('autoPlayEnabled', true);
+  const [shuffle,       setShuffle]       = usePersistence('shuffleEnabled', false);
+  const [preloadNext,   setPreloadNext]   = usePersistence('preloadNext', true);
+  const [rssUrl,        setRssUrl]        = usePersistence('rssUrl', '');
   const [loading,       setLoading]       = useState(false);
   const [feedErr,       setFeedErr]       = useState('');
   const [feedNote,      setFeedNote]      = useState('');
-  const [feedProxyUrl,  setFeedProxyUrl]  = useState(()=>{
-    const stored = (localStorage.getItem('feedProxyUrl') || '').trim();
-    return stored || getDefaultFeedProxyUrl();
-  });
-  const [audioProxyUrl, setAudioProxyUrl] = useState(()=>{
-    const stored = (localStorage.getItem('audioProxyUrl') || '').trim();
-    return stored || normalizeConfigUrl(APP_CONFIG.audioProxyUrl || '');
-  });
-  const [sleepSafeAudio, setSleepSafeAudio] = useState(()=>{
-    const stored = localStorage.getItem('sleepSafeAudioEnabled');
-    if (stored === 'true') return true;
-    if (stored === 'false') return false;
-    return APP_CONFIG.sleepSafeAudioEnabled === true;
-  });
+  const [feedProxyUrl,  setFeedProxyUrl]  = usePersistence('feedProxyUrl', getDefaultFeedProxyUrl());
+  const [audioProxyUrl, setAudioProxyUrl] = usePersistence('audioProxyUrl', APP_CONFIG.audioProxyUrl || '');
+  const [sleepSafeAudio, setSleepSafeAudio] = usePersistence('sleepSafeAudioEnabled', APP_CONFIG.sleepSafeAudioEnabled === true);
   const [feedDebug,     setFeedDebug]     = useState(null);
-  const [showFeedDebug, setShowFeedDebug] = useState(()=>APP_CONFIG.feedDebug === true || localStorage.getItem('showFeedDebug') === 'true');
-  const [subs,          setSubs]          = useState(()=>readStoredArray('feedSubs'));
+  const [showFeedDebug, setShowFeedDebug] = usePersistence('showFeedDebug', APP_CONFIG.feedDebug === true);
+  const [subs,          setSubs]          = usePersistence('feedSubs', []);
   const [showSubs,      setShowSubs]      = useState(false);
   const [subName,       setSubName]       = useState('');
-  const [savedPlaylists, setSavedPlaylists] = useState(()=>readStoredArray('savedPlaylists'));
-  const [mixPresets, setMixPresets] = useState(()=>readStoredArray('mixPresets'));
+  const [savedPlaylists, setSavedPlaylists] = usePersistence('savedPlaylists', []);
+  const [mixPresets, setMixPresets] = usePersistence('mixPresets', []);
   const [cachedEpisodes, setCachedEpisodes] = useState({});
   const [downloadProgress, setDownloadProgress] = useState({});
   // navigator.onLine is a soft hint (it lies on captive portals), so we use it
@@ -323,8 +302,7 @@ export function AppProvider({ children }) {
     if (!ambientOn && !binOn) return;
     const mix = { ambient: ambientOn, bin: binOn, noiseType, binPreset, useTimer: timerActive, timerMins };
     setLastMix(mix);
-    try { localStorage.setItem('lastMix', JSON.stringify(mix)); } catch(e){}
-  },[ambientOn, binOn, noiseType, binPreset, timerActive, timerMins]);
+  },[ambientOn, binOn, noiseType, binPreset, timerActive, timerMins, setLastMix]);
 
   // ── Persist settings ──────────────────────────────────────────────────────
   // Apply podcast effects + ducking to the audio graph. Kept separate from the
@@ -334,55 +312,6 @@ export function AppProvider({ children }) {
     mixBus.setEffects('pod', { eqOn, compOn, panOn });
     mixBus.setDucking(duckOn);
   },[eqOn, compOn, panOn, duckOn]);
-
-  useEffect(()=>{
-    // Each key saved independently: iOS gives localStorage a tight budget, and a
-    // single oversized write (usually savedPlaylists) throwing QuotaExceededError
-    // used to abort the whole block — silently dropping the queue/subs that came
-    // after it, so a refresh reverted to the last fully-saved (older) state.
-    const save = (k, v) => { try { localStorage.setItem(k, v); } catch(e){} };
-    // Drop the heavy `description` blob from persisted episodes — it's the bulk of
-    // the footprint and isn't needed to play or re-show a queued item. Live feed
-    // episodes keep descriptions; only the stored copies are slimmed.
-    const slim = ep => { if (!ep || typeof ep !== 'object') return ep; const { description, ...rest } = ep; return rest; };
-    const slimList = list => Array.isArray(list) ? list.map(slim) : list;
-
-    // Active queue + subs first, so they persist even if a bigger key later fails.
-    save('sleepulatorPlaylist', JSON.stringify(slimList(playlist)));
-    save('feedSubs',            JSON.stringify(subs));
-    save('mixPresets',          JSON.stringify(mixPresets));
-    save('masterVolume',        masterVol);
-    save('eqOn',                eqOn);
-    save('compOn',              compOn);
-    save('panOn',               panOn);
-    save('duckAmbient',         duckOn);
-    save('brownVolume',         ambientVol);
-    save('noiseType',           noiseType);
-    save('ambientBypass',       ambientBypass);
-    save('binauralVolume',      binVol);
-    save('binauralPreset',      binPreset);
-    save('binauralBypass',      binBypass);
-    save('podcastVolume',       podVol);
-    save('playbackSpeed',       podSpeed);
-    save('autoPlayEnabled',     autoPlay);
-    save('preloadNext',         preloadNext);
-    save('shuffleEnabled',      shuffle);
-    save('timerMinutes',        timerMins);
-    save('rssUrl',              rssUrl);
-    save('feedProxyUrl',        feedProxyUrl);
-    save('audioProxyUrl',       audioProxyUrl);
-    save('sleepSafeAudioEnabled', sleepSafeAudio);
-    save('showFeedDebug',       showFeedDebug);
-    // Biggest key last — if anything is going to hit quota, it's this one, and by
-    // now everything important is already saved.
-    save('savedPlaylists', JSON.stringify(
-      Array.isArray(savedPlaylists)
-        ? savedPlaylists.map(p => ({ ...p, episodes: slimList(p.episodes) }))
-        : savedPlaylists
-    ));
-  },[masterVol,eqOn,compOn,panOn,duckOn,ambientVol,noiseType,ambientBypass,binVol,binPreset,binBypass,
-     podVol,podSpeed,autoPlay,shuffle,preloadNext,
-     timerMins,rssUrl,feedProxyUrl,audioProxyUrl,sleepSafeAudio,showFeedDebug,playlist,subs,savedPlaylists,mixPresets]);
 
   // ── Service Worker ────────────────────────────────────────────────────────
   useEffect(()=>{
