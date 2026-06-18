@@ -47,13 +47,13 @@ export default function PodcastScreen({ show, onClose }) {
       <div style={{maxWidth:500,margin:'0 auto',paddingLeft:'1rem',paddingRight:'1rem'}} className="pad-bottom">
 
         {/* Header */}
-        <div className="screen-header">
-          <button onClick={goBack} className="" aria-label="Back" className="btn-icon header-btn">
+        <div className="screen-header" style={{ minWidth: 0, width: "100%" }}>
+          <button onClick={goBack} aria-label="Back" className="btn-icon header-btn" style={{ flexShrink: 0 }}>
             <LucideIcon name={view==='library' ? 'X' : 'ChevronLeft'} size={20}/>
           </button>
-          <span className="screen-title">{titles[view]}</span>
+          <span className="screen-title" style={{ minWidth: 0 }}>{titles[view]}</span>
           {view==='library' && (
-            <button onClick={()=>setView('settings')} aria-label="Settings" className="btn-icon header-btn">
+            <button onClick={()=>setView('settings')} aria-label="Settings" className="btn-icon header-btn" style={{ flexShrink: 0 }}>
               <LucideIcon name="Settings2" size={18}/>
             </button>
           )}

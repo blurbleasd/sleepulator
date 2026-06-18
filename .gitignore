@@ -16,3 +16,8 @@ vite.config.js.timestamp-*
 # one-off migration & refactor scripts (kept on disk, out of version control)
 *.cjs
 ios-spike.html
+
+# Xcode ignores
+xcuserdata/
+*.xcuserstate
+test_math
