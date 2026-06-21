@@ -422,10 +422,14 @@ final class PodcastPlayer: NSObject {
                 tapStorageOut.pointee = UnsafeMutableRawPointer(state)
 
                 if let clientInfo = clientInfo {
-                    let player = Unmanaged<PodcastPlayer>.fromOpaque(clientInfo)
-                    state.pointee.player = player
+                    let p = Unmanaged<PodcastPlayer>.fromOpaque(clientInfo).takeUnretainedValue()
+                    // B2: the tap keeps the player alive for its own lifetime (retain here,
+                    // release in finalize). It was stored unretained before, so a finalize
+                    // after the player was gone would be a use-after-free on
+                    // stateLock / activeLimiterStates. clientInfo stays unretained — it's only
+                    // read here in init, which runs synchronously while self is still alive.
+                    state.pointee.player = Unmanaged.passRetained(p)
 
-                    let p = player.takeUnretainedValue()
                     p.stateLock.lock()
                     p.activeLimiterStates.append(state)
                     state.pointee.enabled = p.nightLimiterEnabled ? 1.0 : 0.0
@@ -440,7 +444,9 @@ final class PodcastPlayer: NSObject {
                 let state = tapStorage.assumingMemoryBound(to: LimiterState.self)
                 
                 if let playerUnmanaged = state.pointee.player {
-                    let player = playerUnmanaged.takeUnretainedValue()
+                    // B2: takeRetainedValue() balances the passRetained(p) from init,
+                    // releasing the tap's strong reference to the player.
+                    let player = playerUnmanaged.takeRetainedValue()
                     player.stateLock.lock()
                     player.activeLimiterStates.removeAll(where: { $0 == state })
                     player.stateLock.unlock()
