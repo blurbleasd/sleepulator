@@ -8,6 +8,17 @@ import ActivityKit
 
 final class SleepTimerService: ObservableObject {
     @Published var timerRemaining: TimeInterval = 0
+    /// The timer's original length — denominator for `nightProgress` so the moon knows
+    /// how far through the night it should be. 0 when no timer is running.
+    @Published var timerTotal: TimeInterval = 0
+
+    /// 0 at the start of a sleep timer, →1 as it runs out; 0 when idle. Drives the
+    /// setting-moon position and the sky-darkening overlay.
+    var nightProgress: Double {
+        guard timerTotal > 0 else { return 0 }
+        return min(1, max(0, 1 - timerRemaining / timerTotal))
+    }
+
     private var sleepTimer: DispatchSourceTimer?
     private var sleepTimerEnd: Date?
     // tick() runs from the GCD timer AND from backgroundTick() (RMS tap + AVPlayer observer),
@@ -29,6 +40,7 @@ final class SleepTimerService: ObservableObject {
         sleepTimerEnd = endDate
         didFire = false
         self.timerRemaining = Double(minutes) * 60
+        self.timerTotal = Double(minutes) * 60
         updateFadeMultFn?(1.0)
         
 
@@ -58,7 +70,7 @@ final class SleepTimerService: ObservableObject {
                 guard !self.didFire else { return }
                 self.didFire = true
                 self.stopAllFn?()
-                self.cancelTimer()
+                self.cancelTimer(resetMoon: false)
             } else {
                 self.updateFadeMultFn?(Double(AudioMath.getFadeMultiplier(timerRemaining: remaining)))
                 // Update live activity periodically (e.g., every 15 mins or when a bump occurs)
@@ -72,6 +84,8 @@ final class SleepTimerService: ObservableObject {
             let newEnd = currentEnd.addingTimeInterval(15 * 60)
             sleepTimerEnd = newEnd
             self.timerRemaining += 15 * 60
+            // Grow the total too, so the moon eases back up the arc proportionally.
+            self.timerTotal += 15 * 60
             
             if self.timerRemaining > 600 {
                 self.updateFadeMultFn?(1.0)
@@ -81,11 +95,15 @@ final class SleepTimerService: ObservableObject {
         }
     }
 
-    func cancelTimer() {
+    func cancelTimer(resetMoon: Bool = true) {
         sleepTimer?.cancel()
         sleepTimer = nil
         sleepTimerEnd = nil
         timerRemaining = 0
+        // On a natural finish, keep timerTotal so nightProgress stays 1 and the moon stays
+        // set at the horizon instead of gliding back up the instant the night ends. A fresh
+        // startSleepTimer resets it; an explicit cancel (mode switch / UI) resets it here.
+        if resetMoon { timerTotal = 0 }
         updateFadeMultFn?(1.0)
         
         endLiveActivity()
@@ -147,19 +165,35 @@ final class PomodoroService: ObservableObject {
     @Published var isRunning = false
     @Published var phase: Phase = .work
     @Published var remaining: TimeInterval = 0
+    /// Work intervals finished in the current set — drives the cycle dots.
+    @Published var completedCycles = 0
+    /// True while the active rest is a long break (every `cyclesBeforeLongBreak`th).
+    @Published var restIsLong = false
 
     var workMinutes: Int { didSet { UserDefaults.standard.set(workMinutes, forKey: "pomoWork") } }
     var restMinutes: Int { didSet { UserDefaults.standard.set(restMinutes, forKey: "pomoRest") } }
+    var longRestMinutes: Int { didSet { UserDefaults.standard.set(longRestMinutes, forKey: "pomoLongRest") } }
+    var cyclesBeforeLongBreak: Int { didSet { UserDefaults.standard.set(cyclesBeforeLongBreak, forKey: "pomoCycles") } }
 
     /// Called at every phase boundary so the owner can play a chime.
     var chimeFn: (() -> Void)?
 
     private var timer: DispatchSourceTimer?
     private var phaseEnd: Date?
+    /// Length of the phase currently counting down — denominator for `progress`.
+    private var phaseTotal: TimeInterval = 0
+
+    /// Fraction of the current phase already elapsed (0…1) — drives the ring fill.
+    var progress: Double {
+        guard phaseTotal > 0 else { return 0 }
+        return min(1, max(0, 1 - remaining / phaseTotal))
+    }
 
     init() {
         workMinutes = UserDefaults.standard.object(forKey: "pomoWork") as? Int ?? 25
         restMinutes = UserDefaults.standard.object(forKey: "pomoRest") as? Int ?? 5
+        longRestMinutes = UserDefaults.standard.object(forKey: "pomoLongRest") as? Int ?? 15
+        cyclesBeforeLongBreak = UserDefaults.standard.object(forKey: "pomoCycles") as? Int ?? 4
     }
 
     deinit { timer?.cancel() }
@@ -167,6 +201,8 @@ final class PomodoroService: ObservableObject {
     func start() {
         stop()
         phase = .work
+        completedCycles = 0
+        restIsLong = false
         beginPhase(minutes: workMinutes)
         isRunning = true
 
@@ -186,8 +222,10 @@ final class PomodoroService: ObservableObject {
     }
 
     private func beginPhase(minutes: Int) {
-        phaseEnd = Date().addingTimeInterval(Double(minutes) * 60)
-        remaining = Double(minutes) * 60
+        let secs = Double(minutes) * 60
+        phaseEnd = Date().addingTimeInterval(secs)
+        phaseTotal = secs
+        remaining = secs
     }
 
     private func tick() {
@@ -198,9 +236,14 @@ final class PomodoroService: ObservableObject {
             if r <= 0 {
                 self.chimeFn?()
                 if self.phase == .work {
+                    // Finished a work interval. Every Nth one earns a long break.
+                    self.completedCycles += 1
+                    let longDue = self.completedCycles % max(1, self.cyclesBeforeLongBreak) == 0
+                    self.restIsLong = longDue
                     self.phase = .rest
-                    self.beginPhase(minutes: self.restMinutes)
+                    self.beginPhase(minutes: longDue ? self.longRestMinutes : self.restMinutes)
                 } else {
+                    self.restIsLong = false
                     self.phase = .work
                     self.beginPhase(minutes: self.workMinutes)
                 }
