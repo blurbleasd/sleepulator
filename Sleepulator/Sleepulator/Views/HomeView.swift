@@ -114,24 +114,17 @@ struct HomeView: View {
             )
             .ignoresSafeArea()
 
-            if audio.focusMode {
-                // Focus: cool + energizing — no sleepy stars/moon/breathing glow.
-                FocusBackdrop(accent: pal.accent, reduceMotion: reduceMotion)
-            } else {
-                // Sleep: a realistic night sky. The moon descends its arc as the sleep
-                // timer runs down, sinking into the warm horizon glow; the sky deepens
-                // toward black as the night ends.
-                StarfieldView(paused: audio.ambientScreensaver)
-                    .ignoresSafeArea()
-                MoonArc(sleepTimer: audio.sleepTimer)
-                    .ignoresSafeArea()
-                ShootingStarView()
-                    .ignoresSafeArea()
-                Color.black
-                    .opacity(audio.sleepTimer.nightProgress * 0.35)
-                    .ignoresSafeArea()
-                    .allowsHitTesting(false)
-            }
+            // Backdrop is a registered AmbientScene (Phase 1 of SCREENSAVER-LIBRARY-SPEC):
+            // the night sky and the focus energy sweep now live behind a protocol + registry,
+            // so adding a scene is "conform + register," not editing this branch. One scene
+            // per mood today, so selection is effectively the default until a picker exists.
+            SceneRegistry.selected(for: audio.focusMode ? .focus : .sleep)
+                .makeBackdrop(SceneContext(
+                    palette: pal,
+                    reduceMotion: reduceMotion,
+                    paused: audio.ambientScreensaver,
+                    sleepTimer: audio.sleepTimer
+                ))
             
             // Ambient-minimal foreground: the night sky is the screen. A mode toggle up top,
             // a single central orb (play/pause) with the active sounds as pills, and one
