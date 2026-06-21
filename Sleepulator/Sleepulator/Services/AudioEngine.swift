@@ -93,8 +93,11 @@ final class AudioEngine: ObservableObject {
     
     @Published var isOnline = true
     @Published var playbackNote: String?
-    private let monitor = NWPathMonitor()
-    /// Tokens for the block-based NotificationCenter observers, removed in deinit (A4 cleanup).
+    /// Audio-session plumbing (activation, interruption/route/background observers, network
+    /// monitor) lives in AudioSessionController (Slice A3); AudioEngine keeps the policy.
+    private let sessionController = AudioSessionController()
+    /// Tokens for the block-based observers AudioEngine still owns directly
+    /// (StartSleepulatorMix / SetSleepulatorTimer), removed in deinit.
     private var notificationTokens: [NSObjectProtocol] = []
     
     private var lastActiveSnapshot: (noise: Bool, bin: Bool, pod: Bool) = (false, false, false)
@@ -298,16 +301,15 @@ final class AudioEngine: ObservableObject {
             self?.sleepTimer.backgroundTick()
         }
         
-        monitor.pathUpdateHandler = { [weak self] path in
-            DispatchQueue.main.async { self?.isOnline = path.status == .satisfied }
-        }
-        monitor.start(queue: DispatchQueue(label: "NetworkMonitor"))
-        
-        setupAudioSession()
-        
-        NotificationCenter.default.addObserver(self, selector: #selector(handleInterruption), name: AVAudioSession.interruptionNotification, object: nil)
-        NotificationCenter.default.addObserver(self, selector: #selector(handleRouteChange), name: AVAudioSession.routeChangeNotification, object: nil)
-        NotificationCenter.default.addObserver(self, selector: #selector(handleAppBackground), name: Notification.Name("AppDidEnterBackground"), object: nil)
+        // Audio-session plumbing is owned by AudioSessionController (Slice A3). It forwards
+        // each event here via closures; the handler policy below is unchanged and still runs
+        // on the notification's posting thread (the controller registers selector-based,
+        // queue-less, exactly as before).
+        sessionController.onInterruption = { [weak self] note in self?.handleInterruption(note: note) }
+        sessionController.onRouteChange = { [weak self] note in self?.handleRouteChange(note: note) }
+        sessionController.onAppBackground = { [weak self] in self?.handleAppBackground() }
+        sessionController.onOnlineChanged = { [weak self] online in self?.isOnline = online }
+        sessionController.start()
         
         notificationTokens.append(NotificationCenter.default.addObserver(forName: Notification.Name("StartSleepulatorMix"), object: nil, queue: .main) { [weak self] _ in
             guard let self = self else { return }
@@ -341,20 +343,13 @@ final class AudioEngine: ObservableObject {
     }
 
     deinit {
-        // A4 lifecycle cleanup: stop the network monitor and unregister every observer.
-        // AudioEngine normally lives for the whole app, but it's created/destroyed per test,
-        // so leaving these registered leaks a background queue + observers across instances.
-        monitor.cancel()
-        NotificationCenter.default.removeObserver(self) // selector-based observers (306-308)
+        // The session observers + network monitor are owned and torn down by
+        // AudioSessionController. AudioEngine only removes the block-based observers it still
+        // owns directly (StartSleepulatorMix / SetSleepulatorTimer). Created/destroyed per
+        // test, so leaving them registered would leak observers across instances.
         notificationTokens.forEach { NotificationCenter.default.removeObserver($0) }
     }
 
-    private func setupAudioSession() {
-        let s = AVAudioSession.sharedInstance()
-        try? s.setCategory(.playback, mode: .default, options: [])
-        try? s.setActive(true)
-    }
-    
     private func syncGenEngine() {
         genEngine.setNoise(on: noiseOn, volume: noiseVolume, type: noiseType)
         genEngine.setBinaural(on: binauralOn, volume: binVolume, preset: binauralPreset)
@@ -530,7 +525,7 @@ final class AudioEngine: ObservableObject {
     
     // MARK: - Queue Delegation
     // MARK: Interruption
-    @objc private func handleInterruption(note: Notification) {
+    private func handleInterruption(note: Notification) {
         guard let typeValue = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
               let type = AVAudioSession.InterruptionType(rawValue: typeValue) else { return }
         
@@ -560,7 +555,7 @@ final class AudioEngine: ObservableObject {
         }
     }
     
-    @objc private func handleRouteChange(note: Notification) {
+    private func handleRouteChange(note: Notification) {
         guard let reasonValue = note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt,
               let reason = AVAudioSession.RouteChangeReason(rawValue: reasonValue) else { return }
         
@@ -582,7 +577,7 @@ final class AudioEngine: ObservableObject {
         }
     }
 
-    @objc private func handleAppBackground() {
+    private func handleAppBackground() {
         podPlayer.flushPositionsToDisk()
     }
 }
