@@ -109,6 +109,25 @@ struct LibraryView: View {
                         }
                     }
                 }
+
+                // Empty state — the screen was a black void with no subscriptions.
+                if podcasts.isEmpty {
+                    VStack(spacing: 14) {
+                        Image(systemName: "dot.radiowaves.left.and.right")
+                            .font(.system(size: 46))
+                            .foregroundColor(pal.accent.opacity(0.55))
+                        Text("No podcasts yet")
+                            .font(.system(.title3, design: .rounded).bold())
+                            .foregroundColor(pal.text)
+                        Text("Tap + to add a show, or bring your subscriptions over from another app with Import OPML.")
+                            .font(.subheadline)
+                            .foregroundColor(pal.dim)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 44)
+                    }
+                    .padding(.bottom, 60)
+                    .allowsHitTesting(false)
+                }
             }
             .navigationTitle("Podcasts")
             .navigationBarTitleDisplayMode(.large)

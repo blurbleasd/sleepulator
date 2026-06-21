@@ -93,13 +93,16 @@ struct BreathingOrb: View {
 struct VolumeBar: View {
     @Binding var value: Double
     let accent: Color
+    var range: ClosedRange<Double> = 0...1
     var onEditingChanged: ((Bool) -> Void)? = nil
     @State private var editing = false
 
     var body: some View {
         GeometryReader { geo in
             let w = max(geo.size.width, 1)
-            let fill = max(6, min(w, w * CGFloat(value)))
+            let span = max(range.upperBound - range.lowerBound, 0.0001)
+            let frac = (value - range.lowerBound) / span
+            let fill = max(6, min(w, w * CGFloat(frac)))
             ZStack(alignment: .leading) {
                 Capsule().fill(Color.white.opacity(0.10)).frame(height: 6)
                 Capsule().fill(accent).frame(width: fill, height: 6)
@@ -114,14 +117,15 @@ struct VolumeBar: View {
                 DragGesture(minimumDistance: 0)
                     .onChanged { g in
                         if !editing { editing = true; onEditingChanged?(true) }
-                        value = Double(min(max(g.location.x / w, 0), 1))
+                        let f = Double(min(max(g.location.x / w, 0), 1))
+                        value = range.lowerBound + f * span
                     }
                     .onEnded { _ in editing = false; onEditingChanged?(false) }
             )
         }
         .frame(height: 28)
         // Hand VoiceOver a standard adjustable slider for this custom control.
-        .accessibilityRepresentation { Slider(value: $value, in: 0...1) }
+        .accessibilityRepresentation { Slider(value: $value, in: range) }
     }
 }
 

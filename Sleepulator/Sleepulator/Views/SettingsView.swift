@@ -79,8 +79,7 @@ struct SettingsView: View {
                                     .foregroundColor(pal.dim)
                                     .fixedSize()
                             }
-                            Slider(value: $audio.stereoWidth, in: 0...1.5, step: 0.05)
-                                .tint(pal.accent)
+                            VolumeBar(value: $audio.stereoWidth, accent: pal.accent, range: 0...1.5)
                                 .accessibilityLabel("Stereo width")
                                 .accessibilityValue(audio.stereoWidth < 0.05 ? "Mono" : "\(Int((audio.stereoWidth / 1.5) * 100)) percent")
                             Text("Lower keeps the bass centered on phone and laptop speakers; higher opens the noise up in headphones.")
@@ -126,8 +125,7 @@ struct SettingsView: View {
                                             .foregroundColor(pal.dim)
                                             .fixedSize()
                                     }
-                                    Slider(value: $audio.sleepEQIntensity, in: 0...2, step: 0.1)
-                                        .tint(pal.accent)
+                                    VolumeBar(value: $audio.sleepEQIntensity, accent: pal.accent, range: 0...2)
                                         .accessibilityLabel("Sleep EQ softening amount")
                                         .accessibilityValue(eqAmountLabel)
                                 }
