@@ -94,6 +94,8 @@ final class AudioEngine: ObservableObject {
     @Published var isOnline = true
     @Published var playbackNote: String?
     private let monitor = NWPathMonitor()
+    /// Tokens for the block-based NotificationCenter observers, removed in deinit (A4 cleanup).
+    private var notificationTokens: [NSObjectProtocol] = []
     
     private var lastActiveSnapshot: (noise: Bool, bin: Bool, pod: Bool) = (false, false, false)
     private var isMasterPauseTransition = false
@@ -307,7 +309,7 @@ final class AudioEngine: ObservableObject {
         NotificationCenter.default.addObserver(self, selector: #selector(handleRouteChange), name: AVAudioSession.routeChangeNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(handleAppBackground), name: Notification.Name("AppDidEnterBackground"), object: nil)
         
-        NotificationCenter.default.addObserver(forName: Notification.Name("StartSleepulatorMix"), object: nil, queue: .main) { [weak self] _ in
+        notificationTokens.append(NotificationCenter.default.addObserver(forName: Notification.Name("StartSleepulatorMix"), object: nil, queue: .main) { [weak self] _ in
             guard let self = self else { return }
             if !self.isAnythingPlaying {
                 if let last = self.lastMix {
@@ -317,13 +319,13 @@ final class AudioEngine: ObservableObject {
                     self.binauralOn = true
                 }
             }
-        }
+        })
         
-        NotificationCenter.default.addObserver(forName: Notification.Name("SetSleepulatorTimer"), object: nil, queue: .main) { [weak self] note in
+        notificationTokens.append(NotificationCenter.default.addObserver(forName: Notification.Name("SetSleepulatorTimer"), object: nil, queue: .main) { [weak self] note in
             if let mins = note.userInfo?["minutes"] as? Int {
                 self?.sleepTimer.startSleepTimer(minutes: mins)
             }
-        }
+        })
         
         if let first = queueManager.queue.first { podTitle = first.title }
         
@@ -337,7 +339,16 @@ final class AudioEngine: ObservableObject {
         reconcileSoundsToMode()
         applyLimiterForMode()
     }
-    
+
+    deinit {
+        // A4 lifecycle cleanup: stop the network monitor and unregister every observer.
+        // AudioEngine normally lives for the whole app, but it's created/destroyed per test,
+        // so leaving these registered leaks a background queue + observers across instances.
+        monitor.cancel()
+        NotificationCenter.default.removeObserver(self) // selector-based observers (306-308)
+        notificationTokens.forEach { NotificationCenter.default.removeObserver($0) }
+    }
+
     private func setupAudioSession() {
         let s = AVAudioSession.sharedInstance()
         try? s.setCategory(.playback, mode: .default, options: [])
