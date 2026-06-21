@@ -1,5 +1,7 @@
 # Sleepulator — Architecture Refactor Plan
 
+> **STATUS: SHIPPED 2026-06-21.** All slices executed. Part B (thread-safety): B3 single-writer assert, B1 lock-free atomic param hand-off, B2 tap retain. Part A (decomposition): A1 PersistenceMigrator, A2 MixStore, A3 AudioSessionController, A4 lifecycle cleanup. AudioEngine is now a thin coordinator over owned collaborators; the views never changed. Pushed: B1/B3 (`17755f1`); the rest landed as local commits `ab44ab7`..`d12d05a` (push pending). Device verification (interruptions/route, tap auto-advance, slider/preset audio, persistence on relaunch) still pending. Archived for audit trail.
+
 _Date: 2026-06-21 · Two large items from the audit: (A) decompose the `AudioEngine` god-object, (B) formalize real-time audio thread-safety. Written to be executed **with a compiler in the loop** — each slice below is independently shippable and should be built + smoke-tested before the next._
 
 ## Why incremental, not one big rewrite
