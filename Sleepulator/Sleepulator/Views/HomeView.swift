@@ -6,7 +6,30 @@ struct HomeView: View {
     @State private var isPlayPressed = false
     @State private var showBreathing = false
     @State private var showMix = false
+    // Ambient screensaver: while playing in Sleep mode, the controls fade after a spell of
+    // no interaction, leaving just the sky + moon. A tap brings them back. The flag lives on
+    // `audio` so ContentView's tab bar + mini-player can fade with the home chrome.
+    @State private var idleFade: DispatchWorkItem?
     @Environment(\.accessibilityReduceMotion) var reduceMotion
+
+    private func scheduleIdleFade() {
+        idleFade?.cancel()
+        guard !audio.focusMode, audio.isAnythingPlaying else { return }
+        let work = DispatchWorkItem {
+            guard !self.audio.focusMode, self.audio.isAnythingPlaying else { return }
+            withAnimation(.easeInOut(duration: 0.9)) { self.audio.ambientScreensaver = true }
+        }
+        idleFade = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 12, execute: work)
+    }
+
+    private func wakeChrome() {
+        idleFade?.cancel()
+        if audio.ambientScreensaver {
+            withAnimation(.easeInOut(duration: 0.4)) { audio.ambientScreensaver = false }
+        }
+        scheduleIdleFade()
+    }
 
     var pal: Palette { Palette(focusMode: audio.focusMode) }
 
@@ -95,20 +118,19 @@ struct HomeView: View {
                 // Focus: cool + energizing — no sleepy stars/moon/breathing glow.
                 FocusBackdrop(accent: pal.accent, reduceMotion: reduceMotion)
             } else {
-                // Sleep: a quiet dark night sky — faint twinkling stars + a moon over the
-                // now much-dimmer gradient. No bright central breathing orb.
-                StarfieldView(accent: pal.accent, reduceMotion: reduceMotion)
+                // Sleep: a realistic night sky. The moon descends its arc as the sleep
+                // timer runs down, sinking into the warm horizon glow; the sky deepens
+                // toward black as the night ends.
+                StarfieldView(paused: audio.ambientScreensaver)
                     .ignoresSafeArea()
-                Image(systemName: "moon.fill")
-                    .font(.system(size: 34))
-                    .foregroundStyle(Color(red: 0.95, green: 0.92, blue: 0.80))
-                    .rotationEffect(.degrees(-20))
-                    .shadow(color: Color(red: 0.95, green: 0.92, blue: 0.80).opacity(0.25), radius: 14)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                    .padding(.leading, 50)
-                    .padding(.top, 200)
+                MoonArc(sleepTimer: audio.sleepTimer)
                     .ignoresSafeArea()
-                    .accessibilityHidden(true)
+                ShootingStarView()
+                    .ignoresSafeArea()
+                Color.black
+                    .opacity(audio.sleepTimer.nightProgress * 0.35)
+                    .ignoresSafeArea()
+                    .allowsHitTesting(false)
             }
             
             // Ambient-minimal foreground: the night sky is the screen. A mode toggle up top,
@@ -137,44 +159,47 @@ struct HomeView: View {
                 Spacer()
 
                 VStack(spacing: 20) {
-                    OrbButton(audio: audio, pal: pal, tap: heroTap)
+                    if audio.focusMode {
+                        // Focus: the depleting Pomodoro ring is the hero. The orb still
+                        // play/pauses audio; the ring + readout report the session.
+                        FocusHero(audio: audio, pomodoro: audio.pomodoro, pal: pal, tap: heroTap)
 
-                    Text(statusText())
-                        .font(.system(.callout, design: .rounded).weight(.medium))
-                        .foregroundColor(pal.dim)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 30)
+                        FocusSessionReadout(pomodoro: audio.pomodoro,
+                                            pal: pal,
+                                            idleStatus: statusText(),
+                                            layers: activeLayers)
+                    } else {
+                        OrbButton(audio: audio, pal: pal, tap: heroTap)
 
-                    if !activeLayers.isEmpty {
-                        HStack(spacing: 8) {
-                            ForEach(activeLayers, id: \.self) { layer in
-                                Text(layer)
-                                    .font(.caption.weight(.semibold))
-                                    .padding(.horizontal, 12).padding(.vertical, 5)
-                                    .background(Capsule().fill(pal.accent.opacity(0.16)))
-                                    .foregroundColor(pal.accent)
-                            }
+                        Text(statusText())
+                            .font(.system(.callout, design: .rounded).weight(.medium))
+                            .foregroundColor(pal.dim)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 30)
+
+                        if !activeLayers.isEmpty {
+                            LayerPills(layers: activeLayers, pal: pal)
                         }
-                    }
 
-                    // Rescued from the old HeroTransport: as the fade is about to cut the
-                    // night off, offer a half-asleep one-tap "+15m" instead of forcing a
-                    // reopen of the timer sheet (which would start a brand-new timer).
-                    if !audio.focusMode, audio.sleepTimer.timerRemaining > 0, audio.sleepTimer.timerRemaining <= 120 {
-                        Button(action: {
-                            audio.sleepTimer.bumpTimer()
-                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                        }) {
-                            HStack(spacing: 6) {
-                                Image(systemName: "plus.circle.fill")
-                                Text("Still awake? +15m").font(.subheadline.weight(.semibold))
+                        // Rescued from the old HeroTransport: as the fade is about to cut the
+                        // night off, offer a half-asleep one-tap "+15m" instead of forcing a
+                        // reopen of the timer sheet (which would start a brand-new timer).
+                        if audio.sleepTimer.timerRemaining > 0, audio.sleepTimer.timerRemaining <= 120 {
+                            Button(action: {
+                                audio.sleepTimer.bumpTimer()
+                                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                            }) {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "plus.circle.fill")
+                                    Text("Still awake? +15m").font(.subheadline.weight(.semibold))
+                                }
+                                .foregroundColor(pal.bg)
+                                .padding(.horizontal, 18).padding(.vertical, 11)
+                                .background(Capsule().fill(pal.accent))
                             }
-                            .foregroundColor(pal.bg)
-                            .padding(.horizontal, 18).padding(.vertical, 11)
-                            .background(Capsule().fill(pal.accent))
+                            .frame(minHeight: 44)
+                            .accessibilityLabel("Still awake, add 15 minutes to the sleep timer")
                         }
-                        .frame(minHeight: 44)
-                        .accessibilityLabel("Still awake, add 15 minutes to the sleep timer")
                     }
                 }
 
@@ -212,6 +237,36 @@ struct HomeView: View {
                 }
                 .padding(.bottom, audio.hasLoadedEpisode ? 84 : 22)
             }
+            .opacity(audio.ambientScreensaver ? 0 : 1)
+            .allowsHitTesting(!audio.ambientScreensaver)
+            .animation(.easeInOut(duration: 0.9), value: audio.ambientScreensaver)
+            // Any touch on the live controls is interaction — push the idle countdown back
+            // (simultaneous so it doesn't steal taps from the buttons underneath).
+            .simultaneousGesture(
+                TapGesture().onEnded {
+                    if !audio.ambientScreensaver { scheduleIdleFade() }
+                }
+            )
+
+            // Once the controls have faded, a transparent layer catches the next tap to
+            // bring them back. The sky + moon stay visible underneath — the screensaver.
+            if audio.ambientScreensaver {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .ignoresSafeArea()
+                    .onTapGesture { wakeChrome() }
+                    .accessibilityLabel("Show controls")
+                    .accessibilityAddTraits(.isButton)
+            }
+        }
+        .onAppear { scheduleIdleFade() }
+        .onChange(of: audio.isAnythingPlaying) { playing in
+            if playing { scheduleIdleFade() } else { wakeChrome() }
+        }
+        .onChange(of: audio.focusMode) { focus in
+            // Never screensaver while focusing — the session readout must stay visible.
+            if focus { idleFade?.cancel(); withAnimation { audio.ambientScreensaver = false } }
+            else { scheduleIdleFade() }
         }
         .fullScreenCover(isPresented: $showBreathing) {
             BreathingView(isPresented: $showBreathing)
@@ -269,6 +324,127 @@ struct OrbButton: View {
     }
 }
 
+// Focus hero — the play orb wrapped in a Pomodoro progress ring. The ring is a faint
+// idle track until a session is running, then it depletes over the current phase so
+// time-left is the focal element of the screen.
+struct FocusHero: View {
+    @ObservedObject var audio: AudioEngine
+    // Observe the Pomodoro directly — a nested ObservableObject reached via `audio`
+    // wouldn't re-render the ring each tick.
+    @ObservedObject var pomodoro: PomodoroService
+    let pal: Palette
+    let tap: () -> Void
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .stroke(pal.text.opacity(0.10), lineWidth: 6)
+                .frame(width: 214, height: 214)
+
+            if pomodoro.isRunning {
+                Circle()
+                    // remaining fraction = 1 − elapsed; the arc shrinks as the phase runs out.
+                    .trim(from: 0, to: CGFloat(1 - pomodoro.progress))
+                    .stroke(pal.accent, style: StrokeStyle(lineWidth: 6, lineCap: .round))
+                    .frame(width: 214, height: 214)
+                    .rotationEffect(.degrees(-90))
+                    .animation(.linear(duration: 1), value: pomodoro.remaining)
+            }
+
+            OrbButton(audio: audio, pal: pal, tap: tap)
+        }
+        .accessibilityElement(children: .contain)
+    }
+}
+
+// Focus session readout — replaces the generic status line in Focus mode. While a
+// session runs it shows the phase, the live countdown, and progress through the set;
+// idle, it falls back to the same "what's playing" line as Sleep.
+struct FocusSessionReadout: View {
+    @ObservedObject var pomodoro: PomodoroService
+    let pal: Palette
+    let idleStatus: String
+    let layers: [String]
+
+    private func clock(_ t: TimeInterval) -> String {
+        let s = max(0, Int(t.rounded()))
+        return String(format: "%d:%02d", s / 60, s % 60)
+    }
+
+    var body: some View {
+        VStack(spacing: 12) {
+            if pomodoro.isRunning {
+                Text(pomodoro.phase == .work ? "Focus" : (pomodoro.restIsLong ? "Long break" : "Break"))
+                    .font(.caption.weight(.semibold))
+                    .tracking(1.5)
+                    .foregroundColor(pal.accent)
+
+                Text(clock(pomodoro.remaining))
+                    .font(.system(size: 40, weight: .medium, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundColor(pal.text)
+                    .accessibilityLabel("\(clock(pomodoro.remaining)) remaining")
+
+                CycleDots(pomodoro: pomodoro, pal: pal)
+            } else {
+                Text(idleStatus)
+                    .font(.system(.callout, design: .rounded).weight(.medium))
+                    .foregroundColor(pal.dim)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 30)
+
+                if !layers.isEmpty {
+                    LayerPills(layers: layers, pal: pal)
+                }
+            }
+        }
+    }
+}
+
+// The set-progress dots under the timer — one per work interval before a long break,
+// filled as cycles complete.
+struct CycleDots: View {
+    @ObservedObject var pomodoro: PomodoroService
+    let pal: Palette
+
+    var body: some View {
+        let n = max(1, pomodoro.cyclesBeforeLongBreak)
+        let done = pomodoro.completedCycles % n
+        HStack(spacing: 8) {
+            HStack(spacing: 5) {
+                ForEach(Array(0..<n), id: \.self) { i in
+                    Circle()
+                        .fill(i < done ? pal.accent : pal.text.opacity(0.18))
+                        .frame(width: 7, height: 7)
+                }
+            }
+            Text("Cycle \(min(done + 1, n)) of \(n)")
+                .font(.caption2)
+                .foregroundColor(pal.dim)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Cycle \(min(done + 1, n)) of \(n)")
+    }
+}
+
+// The active-sound pills shown under the hero — shared by Sleep and idle Focus.
+struct LayerPills: View {
+    let layers: [String]
+    let pal: Palette
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ForEach(layers, id: \.self) { layer in
+                Text(layer)
+                    .font(.caption.weight(.semibold))
+                    .padding(.horizontal, 12).padding(.vertical, 5)
+                    .background(Capsule().fill(pal.accent.opacity(0.16)))
+                    .foregroundColor(pal.accent)
+            }
+        }
+    }
+}
+
 // The "Build mix" drawer — all the detailed controls (mixer, master volume, save / saved
 // mixes) live here so the main screen stays calm and art-first.
 struct MixDrawer: View {
@@ -316,69 +492,316 @@ struct MixDrawer: View {
     }
 }
 
-/// A subtle, slow-twinkling starfield for the upper "sky". Sits behind the content and
-/// dissolves into the amber horizon glow at the bottom. Static under Reduce Motion; not
-/// shown in bedtime mode (true-OLED-black is intentionally lightless overnight).
+/// A realistic night sky for Sleep mode. Power-law brightness (lots of faint stars, a
+/// few bright ones with soft halos), varied colour temperature, and a faint Milky Way
+/// band. A sparse subset twinkles slowly. The twinkle is a gentle opacity fade (not the
+/// vestibular kind of motion), so it runs regardless of system Reduce Motion: a deliberate
+/// dog-food choice so the sky reads alive. It still settles to static ~60s after appearing
+/// and the moment the screensaver engages, for battery.
 struct StarfieldView: View {
-    let accent: Color
-    let reduceMotion: Bool
+    /// Holds the field static when the screensaver engages (battery on an all-night screen).
+    var paused: Bool = false
 
     @State private var twinkle = false
+    /// Latches true ~60s after appear so the sky stops animating even if controls stay up.
+    @State private var settled = false
 
     private struct Star: Identifiable {
         let id: Int
         let x, y, r, baseOpacity, dur, delay: Double
-        let warm: Bool
+        let tint: Color
+        let bright: Bool
+        let twinkles: Bool
     }
 
-    // Deterministic layout (fixed seed). Horizon fade baked into baseOpacity so stars
-    // dissolve toward the bottom of the sky.
-    private static let stars: [Star] = {
+    // Real stars aren't all white — most read cool, some warm, a few blue-white.
+    private static let coolWhite = Color(red: 0.93, green: 0.95, blue: 1.0)
+    private static let warmStar  = Color(red: 1.0,  green: 0.86, blue: 0.66)
+    private static let blueStar  = Color(red: 0.74, green: 0.84, blue: 1.0)
+
+    private static let stars: [Star] = build()
+
+    // Deterministic layout (fixed seed) so the sky is stable across launches.
+    private static func build() -> [Star] {
         var rng: UInt64 = 0x5EED5160_0DECAF01
         func next() -> Double {
             rng ^= rng << 13; rng ^= rng >> 7; rng ^= rng << 17
             return Double(rng % 1_000_000) / 1_000_000.0
         }
-        return (0..<52).map { i in
-            let yb = next()
-            let y = (yb * yb) * 0.62                       // bias toward the top of the sky
-            let horizonFade = 1.0 - (y / 0.62) * 0.45
-            return Star(
-                id: i,
-                x: next(),
-                y: y,
-                r: 0.8 + next() * 1.7,
-                baseOpacity: (0.45 + next() * 0.5) * horizonFade,
-                dur: 1.4 + next() * 2.2,                   // each star pulses on its own clock
-                delay: next() * 2.5,
-                warm: next() < 0.18
-            )
-        }
-    }()
+        var out: [Star] = []
 
-    // CoreAnimation-driven implicit animation (runs on the render server, unlike the
-    // Canvas+TimelineView approach that wasn't ticking). Each star eases between full and
-    // ~30% opacity forever, desynced by per-star duration + delay → a live twinkle.
+        // Scattered field — cube the brightness so most stars are dim and only a handful blaze.
+        for i in 0..<80 {
+            let mag = pow(next(), 3.0)
+            let yb = next()
+            let y = (yb * yb) * 0.72                       // denser toward the top of the sky
+            let horizonFade = 1.0 - (y / 0.72) * 0.5
+            let tt = next()
+            let tint = tt < 0.66 ? coolWhite : (tt < 0.88 ? warmStar : blueStar)
+            out.append(Star(
+                id: i, x: next(), y: y,
+                r: 0.5 + mag * 2.4,
+                baseOpacity: (0.28 + mag * 0.62) * horizonFade,
+                dur: 2.6 + next() * 3.6,                   // slow, each on its own clock
+                delay: next() * 4.0,
+                tint: tint,
+                bright: mag > 0.86,
+                twinkles: next() < 0.34
+            ))
+        }
+
+        // Milky Way — a denser diagonal swath of faint, small stars.
+        for i in 0..<38 {
+            let u = next()
+            let bx = 0.10 + u * 0.82
+            let by = max(0.02, 0.08 + u * 0.52 + (next() - 0.5) * 0.14)
+            let mag = pow(next(), 4.0)
+            out.append(Star(
+                id: 1000 + i, x: bx, y: by,
+                r: 0.4 + mag * 1.0,
+                baseOpacity: 0.16 + mag * 0.38,
+                dur: 3.0 + next() * 3.0,
+                delay: next() * 4.0,
+                tint: coolWhite,
+                bright: false,
+                twinkles: next() < 0.18
+            ))
+        }
+        return out
+    }
+
     var body: some View {
         GeometryReader { geo in
             ZStack {
+                hazeBand(geo.size)
                 ForEach(Self.stars) { s in
-                    Circle()
-                        .fill(s.warm ? accent : Color.white)
-                        .frame(width: s.r * 2, height: s.r * 2)
-                        .position(x: s.x * geo.size.width, y: s.y * geo.size.height)
-                        .opacity(twinkle ? s.baseOpacity * 0.3 : s.baseOpacity)
-                        // Twinkle runs regardless of Reduce Motion — a gentle opacity fade isn't
-                        // the vestibular kind of motion, and the static-stars complaint traced to
-                        // this gate (the device very likely has Reduce Motion on).
-                        .animation(.easeInOut(duration: s.dur).repeatForever(autoreverses: true).delay(s.delay),
-                                   value: twinkle)
+                    star(s, size: geo.size)
                 }
             }
         }
         .allowsHitTesting(false)
         .accessibilityHidden(true)
-        .onAppear { twinkle = true }
+        .onAppear {
+            twinkle = true
+            // Settle to fully static after a minute so an all-night screen isn't animating.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 60) { settled = true }
+        }
+    }
+
+    // The soft luminous band behind the Milky Way stars — adds depth without dots.
+    private func hazeBand(_ size: CGSize) -> some View {
+        Ellipse()
+            .fill(Color.white.opacity(0.035))
+            .frame(width: size.width * 1.5, height: size.height * 0.24)
+            .rotationEffect(.degrees(-24))
+            .position(x: size.width * 0.5, y: size.height * 0.27)
+            .blur(radius: 38)
+    }
+
+    // One star. A plain function (not a ViewBuilder) so we can branch on `active`.
+    private func star(_ s: Star, size: CGSize) -> some View {
+        let active = s.twinkles && !paused && !settled
+        return Circle()
+            .fill(s.tint)
+            .frame(width: s.r * 2, height: s.r * 2)
+            .opacity(active ? (twinkle ? s.baseOpacity * 0.35 : s.baseOpacity) : s.baseOpacity)
+            .shadow(color: s.bright ? s.tint.opacity(0.6) : Color.clear,
+                    radius: s.bright ? s.r * 1.6 : 0)
+            .position(x: s.x * size.width, y: s.y * size.height)
+            .animation(active ? .easeInOut(duration: s.dur).repeatForever(autoreverses: true).delay(s.delay) : nil,
+                       value: twinkle)
+    }
+}
+
+// Tonight's real lunar phase — illuminated fraction (0 new … 1 full) and whether it's
+// waxing, from days since a known new moon. Good enough for a believable moon, not an
+// ephemeris.
+enum MoonPhase {
+    static func current(_ date: Date = Date()) -> (illumination: Double, waxing: Bool) {
+        let synodic = 29.530588853
+        let knownNew = Date(timeIntervalSince1970: 947182440)   // 2000-01-06 18:14 UTC
+        var age = date.timeIntervalSince(knownNew) / 86400.0
+        age = age.truncatingRemainder(dividingBy: synodic)
+        if age < 0 { age += synodic }
+        let illum = (1 - cos(2 * Double.pi * age / synodic)) / 2
+        return (illum, age < synodic / 2)
+    }
+}
+
+// A soft moon rendered at tonight's phase — radial-lit disc, warm halo, faint craters,
+// and a terminator that carves the correct crescent → gibbous. The Sleep counterpart to
+// the Focus ring's focal element.
+struct MoonView: View {
+    var size: CGFloat = 60
+    var illumination: Double = 1.0      // 0 new … 1 full
+    var waxing: Bool = true             // lit limb on the right (N. hemisphere)
+
+    private static let litLight = Color(red: 0.99, green: 0.97, blue: 0.90)
+    private static let litDark  = Color(red: 0.86, green: 0.81, blue: 0.68)
+    private static let nightSide = Color(red: 0.07, green: 0.07, blue: 0.10)
+
+    private var litFill: RadialGradient {
+        RadialGradient(
+            gradient: Gradient(colors: [Self.litLight, Self.litDark]),
+            center: UnitPoint(x: 0.38, y: 0.34),
+            startRadius: 1,
+            endRadius: size * 0.78
+        )
+    }
+
+    var body: some View {
+        ZStack {
+            // Halo dims with the phase so a thin sliver doesn't glow like a full moon.
+            Circle()
+                .fill(Color(red: 0.96, green: 0.92, blue: 0.80))
+                .frame(width: size * 1.7, height: size * 1.7)
+                .blur(radius: 22)
+                .opacity(0.05 + 0.12 * illumination)
+
+            ZStack {
+                Circle()
+                    .fill(litFill)
+                    .overlay(
+                        ZStack {
+                            crater(0.30, -0.18, 0.16)
+                            crater(-0.22, 0.12, 0.22)
+                            crater(0.12, 0.30, 0.12)
+                            crater(0.36, 0.20, 0.09)
+                        }
+                    )
+
+                phaseShadow()
+            }
+            .frame(width: size, height: size)
+            .clipShape(Circle())
+        }
+        .accessibilityHidden(true)
+    }
+
+    // The terminator is a vertical ellipse (the disc scaled horizontally). For a crescent
+    // the ellipse is shadow that carves into the lit side; for a gibbous it's light that
+    // restores the dark side. Plus the far hemisphere is always dark.
+    private func phaseShadow() -> some View {
+        let k = min(max(illumination, 0), 1)
+        let a = (size / 2) * CGFloat(abs(1 - 2 * k))
+        return ZStack {
+            Rectangle()
+                .fill(Self.nightSide)
+                .frame(width: size / 2, height: size)
+                .offset(x: waxing ? -size / 4 : size / 4)
+
+            if k <= 0.5 {
+                Ellipse().fill(Self.nightSide).frame(width: a * 2, height: size)
+            } else {
+                Ellipse().fill(litFill).frame(width: a * 2, height: size)
+            }
+        }
+    }
+
+    private func crater(_ dx: CGFloat, _ dy: CGFloat, _ rel: CGFloat) -> some View {
+        Circle()
+            .fill(Color(red: 0.70, green: 0.65, blue: 0.52).opacity(0.28))
+            .frame(width: size * rel, height: size * rel)
+            .offset(x: dx * size * 0.5, y: dy * size * 0.5)
+    }
+}
+
+// Places the moon along a Bézier arc from a high resting spot down to the horizon,
+// driven by how far through the sleep timer the night is. Idle (no timer) → rests high.
+struct MoonArc: View {
+    @ObservedObject var sleepTimer: SleepTimerService
+
+    var body: some View {
+        GeometryReader { geo in
+            moon(in: geo.size)
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+
+    private func moon(in size: CGSize) -> some View {
+        let p0 = CGPoint(x: size.width * 0.18, y: size.height * 0.16)   // full night: high left
+        let ctrl = CGPoint(x: size.width * 0.52, y: size.height * 0.06)  // gentle rise
+        let p1 = CGPoint(x: size.width * 0.82, y: size.height * 0.66)   // night's end: horizon
+        let t = CGFloat(sleepTimer.nightProgress)
+        let pt = Self.quad(p0, ctrl, p1, t)
+        let phase = MoonPhase.current()
+        return MoonView(size: 60, illumination: phase.illumination, waxing: phase.waxing)
+            .position(pt)
+            // Eased glide regardless of Reduce Motion: a slow drift over the whole timer,
+            // not the jarring kind of motion (the position updates either way; this just
+            // smooths the per-tick steps).
+            .animation(.easeInOut(duration: 1.0), value: t)
+    }
+
+    // Point on a quadratic Bézier at parameter t.
+    static func quad(_ p0: CGPoint, _ c: CGPoint, _ p1: CGPoint, _ t: CGFloat) -> CGPoint {
+        let mt = 1 - t
+        return CGPoint(
+            x: mt * mt * p0.x + 2 * mt * t * c.x + t * t * p1.x,
+            y: mt * mt * p0.y + 2 * mt * t * c.y + t * t * p1.y
+        )
+    }
+}
+
+// A rare delight: every few minutes a meteor streaks across the sky and fades. Schedules
+// itself with random gaps, and runs regardless of Reduce Motion (a deliberate dog-food
+// choice). The self-rescheduling loop is cancelled on disappear so it can't outlive the view.
+struct ShootingStarView: View {
+    @State private var progress: CGFloat = 0
+    @State private var active = false
+    @State private var seed = 0
+    @State private var pending: DispatchWorkItem?
+
+    var body: some View {
+        GeometryReader { geo in
+            streak(in: geo.size)
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+        .onAppear { schedule(first: true) }
+        .onDisappear { pending?.cancel(); pending = nil }
+    }
+
+    private func streak(in size: CGSize) -> some View {
+        let startX = size.width * (0.12 + 0.6 * frac(seed))
+        let startY = size.height * (0.06 + 0.16 * frac(seed &* 7 &+ 3))
+        let len = size.width * 0.55
+        let x = startX + progress * len
+        let y = startY + progress * len * 0.42
+        return Capsule()
+            .fill(LinearGradient(
+                gradient: Gradient(colors: [Color.white.opacity(0), Color.white.opacity(0.9)]),
+                startPoint: .leading, endPoint: .trailing))
+            .frame(width: 66, height: 2)
+            .rotationEffect(.degrees(22.8))
+            .position(x: x, y: y)
+            .opacity(active ? 1 : 0)
+    }
+
+    private func schedule(first: Bool) {
+        let delay = first ? Double.random(in: 10...22) : Double.random(in: 90...210)
+        let appear = DispatchWorkItem {
+            seed &+= 1
+            progress = 0
+            active = true
+            withAnimation(.easeIn(duration: 0.9)) { progress = 1 }
+            let hide = DispatchWorkItem {
+                active = false
+                progress = 0
+                schedule(first: false)
+            }
+            pending = hide
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.95, execute: hide)
+        }
+        pending = appear
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: appear)
+    }
+
+    // Cheap deterministic 0…1 hash so each meteor starts somewhere different.
+    private func frac(_ n: Int) -> CGFloat {
+        let v = sin(Double(n) * 12.9898) * 43758.5453
+        return CGFloat(v - v.rounded(.down))
     }
 }
 

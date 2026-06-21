@@ -15,6 +15,10 @@ final class AudioEngine: ObservableObject {
     let pomodoro = PomodoroService()
     private var cancellables = Set<AnyCancellable>()
 
+    /// True while the Sleep-mode ambient screensaver is showing (home controls faded).
+    /// Lives here so the tab bar + mini-player in ContentView can fade with it. Not persisted.
+    @Published var ambientScreensaver = false
+
     private let genEngine = GenerativeAudioEngine()
     private let podPlayer = PodcastPlayer()
     private let chime = ChimePlayer()

@@ -43,9 +43,14 @@ struct ContentView: View {
             TabView(selection: $selectedTab) {
                 HomeView(audio: audio)
                     .tabItem {
-                        Label("Sleep", systemImage: "moon.stars.fill")
+                        // Reflect the active mode — a cyan "Sleep/moon" tab while focusing
+                        // was disorienting (the tab contradicted the screen).
+                        Label(audio.focusMode ? "Focus" : "Sleep",
+                              systemImage: audio.focusMode ? "bolt.fill" : "moon.stars.fill")
                     }
                     .tag(0)
+                    // Ambient screensaver: drop the tab bar too, for a truly full-screen sky.
+                    .toolbar(audio.ambientScreensaver ? .hidden : .visible, for: .tabBar)
                 
                 LibraryView(audio: audio)
                     .tabItem {
@@ -62,6 +67,9 @@ struct ContentView: View {
             .accentColor(pal.accent)
             
             MiniPlayerView(audio: audio, selectedTab: $selectedTab)
+                .opacity(audio.ambientScreensaver ? 0 : 1)
+                .allowsHitTesting(!audio.ambientScreensaver)
+                .animation(.easeInOut(duration: 0.9), value: audio.ambientScreensaver)
 
             // Full-screen night veil — over the tabs and mini-player both.
             if nightDimmed {
@@ -88,7 +96,9 @@ struct ContentView: View {
             if focus { cancelDim(); withAnimation(.easeInOut(duration: 0.4)) { nightDimmed = false } }
         }
         .onChange(of: selectedTab) { _ in
-            // Navigating is interaction — reset the dim countdown.
+            // Navigating is interaction — reset the dim countdown and drop the screensaver
+            // so it can never hide another tab's tab bar.
+            if audio.ambientScreensaver { audio.ambientScreensaver = false }
             if nightDimmed { wake() } else { scheduleDim() }
         }
     }
