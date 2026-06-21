@@ -4,7 +4,7 @@ enum Theme {
     // Warm Dusk (default) — low-blue-light: amber accent on a warm near-black.
     static let gold     = Color(red: 0.91, green: 0.63, blue: 0.30) // amber #E8A04C
     static let bg       = Color(red: 0.07, green: 0.05, blue: 0.035) // warm near-black
-    static let glow     = Color(red: 0.11, green: 0.075, blue: 0.045) // very faint warmth — the bright glow was overpowering
+    static let glow     = Color(red: 0.075, green: 0.052, blue: 0.032) // barely-there warmth (reduced again)
     static let text     = Color(red: 0.95, green: 0.89, blue: 0.82) // warm cream
     static let textDim  = Color(red: 0.72, green: 0.60, blue: 0.46) // warm muted
 

@@ -19,15 +19,31 @@ struct MiniPlayerView: View {
                     .accessibilityLabel("Episode progress")
                     .accessibilityValue("\(Int(audio.podcastProgress * 100)) percent")
 
-                HStack(spacing: 12) {
+                HStack(spacing: 6) {
+                    Button(action: { audio.seekPodcast(seconds: -15) }) {
+                        Image(systemName: "gobackward.15")
+                            .font(.title3)
+                            .foregroundColor(pal.accent)
+                    }
+                    .frame(minWidth: 40, minHeight: 44)
+                    .accessibilityLabel("Skip back 15 seconds")
+
                     // Play/Pause — its own button, NOT nested inside the open-player button.
                     Button(action: { audio.togglePodcast() }) {
                         Image(systemName: audio.isPodPlaying ? "pause.circle.fill" : "play.circle.fill")
-                            .font(.system(size: min(playGlyph, 44)))
+                            .font(.system(size: min(playGlyph, 40)))
                             .foregroundColor(pal.accent)
                     }
                     .frame(minWidth: 44, minHeight: 44)
                     .accessibilityLabel(audio.isPodPlaying ? "Pause podcast" : "Play podcast")
+
+                    Button(action: { audio.seekPodcast(seconds: 15) }) {
+                        Image(systemName: "goforward.15")
+                            .font(.title3)
+                            .foregroundColor(pal.accent)
+                    }
+                    .frame(minWidth: 40, minHeight: 44)
+                    .accessibilityLabel("Skip forward 15 seconds")
 
                     // Title region — a separate sibling button that opens Now Playing.
                     Button(action: { showNowPlaying = true }) {

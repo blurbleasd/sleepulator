@@ -5,9 +5,45 @@ struct HomeView: View {
     @State private var showTimerActionSheet = false
     @State private var isPlayPressed = false
     @State private var showBreathing = false
+    @State private var showMix = false
     @Environment(\.accessibilityReduceMotion) var reduceMotion
 
     var pal: Palette { Palette(focusMode: audio.focusMode) }
+
+    // The currently-playing layers, shown as pills under the orb.
+    private var activeLayers: [String] {
+        let binLabels = ["delta": "Deep", "theta": "Drift", "alpha": "Relax", "gamma": "Focus"]
+        var p: [String] = []
+        if audio.noiseOn { p.append(audio.noiseType.capitalized) }
+        if audio.binauralOn { p.append(binLabels[audio.binauralPreset] ?? audio.binauralPreset.capitalized) }
+        if audio.isPodPlaying { p.append("Podcast") }
+        return p
+    }
+
+    // Bottom session control — mode-aware: Sleep timer vs Focus Pomodoro.
+    @ViewBuilder private var sessionButton: some View {
+        Button(action: {
+            if audio.focusMode {
+                if audio.pomodoro.isRunning { audio.pomodoro.stop() } else { audio.pomodoro.start() }
+            } else {
+                showTimerActionSheet = true
+            }
+        }) {
+            HStack(spacing: 6) {
+                if audio.focusMode {
+                    Image(systemName: audio.pomodoro.isRunning ? "stop.fill" : "bolt.fill")
+                    Text(audio.pomodoro.isRunning ? "\(Int(audio.pomodoro.remaining / 60))m" : "Focus session")
+                } else {
+                    Image(systemName: "moon.zzz")
+                    Text(audio.sleepTimer.timerRemaining > 0 ? "\(Int(audio.sleepTimer.timerRemaining / 60))m left" : "Sleep timer")
+                }
+            }
+            .font(.subheadline.weight(.medium))
+            .foregroundColor(pal.dim)
+            .padding(.horizontal, 16).padding(.vertical, 13)
+        }
+        .frame(minHeight: 44)
+    }
 
     private func statusText() -> String {
         var parts: [String] = []
@@ -75,56 +111,86 @@ struct HomeView: View {
                     .accessibilityHidden(true)
             }
             
-            ScrollView {
-                VStack(spacing: 18) {
-                    HeaderBar(audio: audio, pal: pal)
-                    
-                    HeroTransport(
-                        audio: audio,
-                        isPlayPressed: $isPlayPressed,
-                        showTimerActionSheet: $showTimerActionSheet,
-                        showBreathing: $showBreathing,
-                        reduceMotion: reduceMotion,
-                        statusText: statusText(),
-                        heroTap: heroTap,
-                        pal: pal
-                    )
-                    
-                    MixPanel(audio: audio, pal: pal)
-                    
-                    if audio.isAnythingPlaying {
-                        Button(action: {
-                            audio.saveCurrentAsPlaylist()
-                            let generator = UIImpactFeedbackGenerator(style: .medium)
-                            generator.impactOccurred()
-                        }) {
-                            HStack {
-                                Image(systemName: "plus.square.on.square")
-                                Text("Save Mix")
-                                    .font(.subheadline.bold())
+            // Ambient-minimal foreground: the night sky is the screen. A mode toggle up top,
+            // a single central orb (play/pause) with the active sounds as pills, and one
+            // "Build mix" control that opens the full mixer in a drawer. Everything detailed
+            // is deliberately tucked away.
+            VStack(spacing: 0) {
+                ModeSwitcher(focusMode: $audio.focusMode, pal: pal)
+                    .padding(.horizontal, 40)
+                    .padding(.top, 6)
+
+                if let note = audio.playbackNote {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                        Text(note).font(.caption).fixedSize(horizontal: false, vertical: true)
+                        Spacer()
+                    }
+                    .foregroundColor(pal.accent)
+                    .padding(10)
+                    .background(pal.text.opacity(0.05))
+                    .cornerRadius(12)
+                    .padding(.horizontal, 24)
+                    .padding(.top, 12)
+                }
+
+                Spacer()
+
+                VStack(spacing: 20) {
+                    OrbButton(audio: audio, pal: pal, tap: heroTap)
+
+                    Text(statusText())
+                        .font(.system(.callout, design: .rounded).weight(.medium))
+                        .foregroundColor(pal.dim)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 30)
+
+                    if !activeLayers.isEmpty {
+                        HStack(spacing: 8) {
+                            ForEach(activeLayers, id: \.self) { layer in
+                                Text(layer)
+                                    .font(.caption.weight(.semibold))
+                                    .padding(.horizontal, 12).padding(.vertical, 5)
+                                    .background(Capsule().fill(pal.accent.opacity(0.16)))
+                                    .foregroundColor(pal.accent)
                             }
-                            .foregroundColor(pal.accent)
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 10)
-                            .background(pal.accent.opacity(0.1))
-                            .cornerRadius(12)
                         }
                     }
-                    
-                    if !audio.savedPlaylists.isEmpty {
-                        SavedMixesList(audio: audio, pal: pal)
+                }
+
+                Spacer()
+
+                VStack(spacing: 6) {
+                    HStack(spacing: 10) {
+                        Button(action: { showMix = true }) {
+                            HStack(spacing: 7) {
+                                Image(systemName: "slider.horizontal.3")
+                                Text("Build mix").font(.subheadline.weight(.semibold))
+                            }
+                            .foregroundColor(pal.text)
+                            .padding(.horizontal, 22).padding(.vertical, 13)
+                            .background(Capsule().fill(pal.text.opacity(0.10)))
+                            .overlay(Capsule().stroke(pal.accent.opacity(0.28), lineWidth: 0.5))
+                        }
+                        .frame(minHeight: 44)
+
+                        sessionButton
+                    }
+
+                    // Breathing is a quiet Sleep-mode extra (re-homed from the old hero).
+                    if !audio.focusMode {
+                        Button(action: { showBreathing = true }) {
+                            HStack(spacing: 5) {
+                                Image(systemName: "wind")
+                                Text("Breathing exercise")
+                            }
+                            .font(.caption.weight(.medium))
+                            .foregroundColor(pal.dim.opacity(0.8))
+                        }
+                        .frame(minHeight: 36)
                     }
                 }
-                .padding(.top, 10)
-                .padding(.bottom, 12)
-            }
-            .safeAreaInset(edge: .bottom) {
-                // Master volume only when NO podcast is loaded. With one, the mini-player owns
-                // the bottom — two stacked sliders down there was the confusing part.
-                if !audio.hasLoadedEpisode {
-                    HomeBottomBar(audio: audio, pal: pal)
-                        .padding(.bottom, 6)
-                }
+                .padding(.bottom, audio.hasLoadedEpisode ? 84 : 22)
             }
         }
         .fullScreenCover(isPresented: $showBreathing) {
@@ -134,6 +200,99 @@ struct HomeView: View {
             TimerSelectionSheet(audio: audio, isPresented: $showTimerActionSheet, pal: pal)
                 .presentationDetents([.fraction(0.5)])
         }
+        .sheet(isPresented: $showMix) {
+            MixDrawer(audio: audio, pal: pal)
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+        }
+    }
+}
+
+// The central play orb — the single focal control of the ambient-minimal home. A soft
+// breathing glow (ambient, runs even under Reduce Motion) + a clean dark disc.
+struct OrbButton: View {
+    @ObservedObject var audio: AudioEngine
+    let pal: Palette
+    let tap: () -> Void
+    @State private var pulse = false
+    @State private var pressed = false
+
+    var body: some View {
+        Button(action: {
+            UIImpactFeedbackGenerator(style: .soft).impactOccurred()
+            tap()
+        }) {
+            ZStack {
+                Circle().fill(pal.accent.opacity(0.09))
+                    .frame(width: 200, height: 200)
+                    .blur(radius: 32)
+                    .scaleEffect(pulse ? 1.06 : 0.92)
+                    .opacity(audio.isAnythingPlaying ? 0.5 : 0.22)
+                Circle().fill(Color(white: 0.09).opacity(0.85))
+                    .frame(width: 132, height: 132)
+                    .overlay(Circle().stroke(pal.accent.opacity(0.35), lineWidth: 1))
+                Image(systemName: audio.isAnythingPlaying ? "pause.fill" : "play.fill")
+                    .font(.system(size: 46, weight: .medium, design: .rounded))
+                    .foregroundColor(pal.accent)
+            }
+        }
+        .buttonStyle(.plain)
+        .scaleEffect(pressed ? 0.96 : 1.0)
+        .animation(.spring(response: 0.3, dampingFraction: 0.9), value: pressed)
+        .simultaneousGesture(DragGesture(minimumDistance: 0)
+            .onChanged { _ in pressed = true }
+            .onEnded { _ in pressed = false })
+        .onAppear {
+            withAnimation(.easeInOut(duration: 4.5).repeatForever(autoreverses: true)) { pulse = true }
+        }
+        .accessibilityLabel(audio.isAnythingPlaying ? "Pause all audio" : "Play")
+    }
+}
+
+// The "Build mix" drawer — all the detailed controls (mixer, master volume, save / saved
+// mixes) live here so the main screen stays calm and art-first.
+struct MixDrawer: View {
+    @ObservedObject var audio: AudioEngine
+    let pal: Palette
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 16) {
+                Text("Your mix")
+                    .font(.system(.headline, design: .rounded).bold())
+                    .foregroundColor(pal.text)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 20)
+
+                MixPanel(audio: audio, pal: pal)
+
+                HomeBottomBar(audio: audio, pal: pal)
+                    .padding(.top, 4)
+
+                if audio.isAnythingPlaying {
+                    Button(action: {
+                        audio.saveCurrentAsPlaylist()
+                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                    }) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "plus.square.on.square")
+                            Text("Save mix").font(.subheadline.bold())
+                        }
+                        .foregroundColor(pal.accent)
+                        .padding(.horizontal, 16).padding(.vertical, 10)
+                        .background(pal.accent.opacity(0.1))
+                        .cornerRadius(12)
+                    }
+                }
+
+                if !audio.savedPlaylists.isEmpty {
+                    SavedMixesList(audio: audio, pal: pal)
+                }
+            }
+            .padding(.vertical, 22)
+        }
+        .background(pal.bg.ignoresSafeArea())
+        .preferredColorScheme(.dark)
     }
 }
 
