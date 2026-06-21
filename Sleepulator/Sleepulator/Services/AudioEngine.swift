@@ -77,13 +77,13 @@ final class AudioEngine: ObservableObject {
         }
     }
     
-    @Published var lastMix: SavedMix?
-    @Published var savedPlaylists: [SavedMix] = [] {
-        didSet {
-            let mixes = savedPlaylists
-            storageQueue.async { StorageManager.shared.save(mixes, to: "mixes.json") }
-        }
-    }
+    // Persisted mixes (Last Night snapshot + saved playlists) and their storage live in
+    // MixStore (Slice A2). Exposed here as read-only passthroughs so views binding to
+    // `audio.lastMix` / `audio.savedPlaylists` are unchanged; MixStore.objectWillChange is
+    // forwarded in init so those views still re-render when a mix is saved or deleted.
+    private let mixStore: MixStore
+    var lastMix: SavedMix? { mixStore.lastMix }
+    var savedPlaylists: [SavedMix] { mixStore.savedPlaylists }
     
     @Published var podTitle = "No episode loaded"
     var hasLoadedEpisode: Bool { podPlayer.hasPlayer }
@@ -194,48 +194,25 @@ final class AudioEngine: ObservableObject {
         // podPlayer.nightLimiterEnabled / .sleepEQEnabled are pushed below, after all
         // stored properties are initialized (reading a @Published mid-init is disallowed).
         
-        if let data = UserDefaults.standard.data(forKey: "lastMix"),
-           var mix = try? JSONDecoder().decode(SavedMix.self, from: data) {
-            mix.noiseType = NoiseType.migrate(mix.noiseType)
-            self.lastMix = mix
-        }
-        
-        // --- Migration & Load ---
-        if let data = UserDefaults.standard.data(forKey: "savedPlaylists"),
-           let mixes = try? JSONDecoder().decode([SavedMix].self, from: data) {
-            let migrated = mixes.map { m -> SavedMix in var m2 = m; m2.noiseType = NoiseType.migrate(m.noiseType); return m2 }
-            StorageManager.shared.save(migrated, to: "mixes.json")
-            UserDefaults.standard.removeObject(forKey: "savedPlaylists")
-            self.savedPlaylists = migrated
-        } else if let mixes: [SavedMix] = StorageManager.shared.load(from: "mixes.json") {
-            let migrated = mixes.map { m -> SavedMix in var m2 = m; m2.noiseType = NoiseType.migrate(m.noiseType); return m2 }
-            self.savedPlaylists = migrated
-        }
-        
-        // One-time seed: only populate library.json from the legacy key if the canonical
-        // file doesn't exist yet. Always clear the legacy key, so a stray legacy write can
-        // never make this migration clobber a newer library on a later launch.
-        if StorageManager.shared.rawData(for: "library.json") == nil,
-           let data = UserDefaults.standard.data(forKey: "savedPodcasts"),
-           let podcasts = try? JSONDecoder().decode([Podcast].self, from: data) {
-            StorageManager.shared.save(podcasts, to: "library.json")
-        }
-        UserDefaults.standard.removeObject(forKey: "savedPodcasts")
-
-        if let data = UserDefaults.standard.dictionary(forKey: "episodePositions") as? [String: Double] {
-            StorageManager.shared.save(data, to: "positions.json")
-            UserDefaults.standard.removeObject(forKey: "episodePositions")
+        // Legacy -> file-store migration (lastMix, mixes, library seed, episode positions),
+        // extracted to PersistenceMigrator (Slice A1). It owns the fragile launch-time legacy
+        // reads and hands back the values to seed @Published state below.
+        let migrated = PersistenceMigrator().run()
+        self.mixStore = MixStore(lastMix: migrated.lastMix,
+                                 savedPlaylists: migrated.savedPlaylists,
+                                 storageQueue: storageQueue)
+        if let positions = migrated.migratedPositions {
             // podPlayer loaded an empty positions map at its own init (it's constructed
             // before this body runs); hand it the migrated data so the first flush to disk
             // can't overwrite positions.json with that empty map.
-            podPlayer.setPositions(data)
+            podPlayer.setPositions(positions)
         }
-        // --- End Migration ---
         
 
         queueManager.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &cancellables)
         sleepTimer.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &cancellables)
         pomodoro.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &cancellables)
+        mixStore.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &cancellables)
         pomodoro.chimeFn = { [weak self] in self?.chime.play() }
         
         queueManager.loadPodcastFn = { [weak self] url, id, title in
@@ -443,10 +420,7 @@ final class AudioEngine: ObservableObject {
             podcastUrl: isPodPlaying ? queueManager.queue.first?.audioUrl : nil,
             podcastId: isPodPlaying ? queueManager.queue.first?.id : nil
         )
-        self.lastMix = mix
-        if let data = try? JSONEncoder().encode(mix) {
-            UserDefaults.standard.set(data, forKey: "lastMix")
-        }
+        mixStore.saveLast(mix)
     }
     
     func resumeMix(_ mix: SavedMix) {
@@ -466,7 +440,7 @@ final class AudioEngine: ObservableObject {
     }
     
     func deleteMix(_ mix: SavedMix) {
-        savedPlaylists.removeAll(where: { $0.id == mix.id })
+        mixStore.delete(mix)
     }
     
     func saveCurrentAsPlaylist() {
@@ -481,7 +455,7 @@ final class AudioEngine: ObservableObject {
             podVolume: podVolume,
             podcastUrl: isPodPlaying ? queueManager.queue.first?.audioUrl : nil
         )
-        savedPlaylists.append(mix)
+        mixStore.add(mix)
     }
 
     func stopAll() {
