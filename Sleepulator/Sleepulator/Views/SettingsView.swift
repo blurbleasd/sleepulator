@@ -3,205 +3,220 @@ import UniformTypeIdentifiers
 
 struct SettingsView: View {
     @ObservedObject var audio: AudioEngine
+    @AppStorage("bedtimeMode") private var bedtimeMode = false
     
-    let noiseOptions = ["brown", "pink", "white", "green", "fan", "rain", "ocean", "forest"]
-    let binauralOptions = ["delta", "theta", "alpha", "gamma"]
-    let speedOptions = [0.8, 1.0, 1.2, 1.5, 2.0]
+    var pal: Palette { Palette(bedtime: bedtimeMode) }
+
+    private var eqAmountLabel: String {
+        switch audio.sleepEQIntensity {
+        case ..<0.05: return "Off"
+        case ..<0.8:  return "Light"
+        case ..<1.3:  return "Medium"
+        default:      return "Strong"
+        }
+    }
+    
+
     
     var body: some View {
         NavigationView {
             ZStack {
-                Color.black.ignoresSafeArea()
+                pal.bg.ignoresSafeArea()
                 
                 ScrollView {
                     VStack(spacing: 24) {
                         
-                        // Ambient Generator
-                        VStack(alignment: .leading, spacing: 16) {
-                            Text("Ambient Generator")
-                                .font(.system(.title3, design: .rounded).bold())
-                                .foregroundColor(.white)
-                            
-                            HStack {
-                                Text("Noise Environment")
-                                    .foregroundColor(.gray)
-                                Spacer()
-                                Picker("Noise Environment", selection: $audio.noiseType) {
-                                    ForEach(noiseOptions, id: \.self) { option in
-                                        Text(option.capitalized).tag(option)
-                                    }
-                                }
-                                .pickerStyle(MenuPickerStyle())
-                                .accentColor(Color(red: 0.9, green: 0.7, blue: 0.4))
-                            }
-                        }
-                        .glassPanel()
-                        .padding(.horizontal)
-                        
-                        // Brainwave Entrainment
-                        VStack(alignment: .leading, spacing: 16) {
-                            Text("Brainwave Entrainment")
-                                .font(.system(.title3, design: .rounded).bold())
-                                .foregroundColor(.white)
-                            
-                            HStack {
-                                Text("Binaural Preset")
-                                    .foregroundColor(.gray)
-                                Spacer()
-                                Picker("Binaural Preset", selection: $audio.binauralPreset) {
-                                    ForEach(binauralOptions, id: \.self) { option in
-                                        Text(option.capitalized).tag(option)
-                                    }
-                                }
-                                .pickerStyle(MenuPickerStyle())
-                                .accentColor(Color(red: 0.9, green: 0.7, blue: 0.4))
-                            }
-                            
-                            Text("Delta (Deep Sleep), Theta (Light Sleep), Alpha (Relaxation), Gamma (Focus)")
-                                .font(.system(.caption, design: .rounded))
-                                .foregroundColor(.gray)
-                        }
-                        .glassPanel()
-                        .padding(.horizontal)
-                        
                         // Podcast Playback & Queue
                         VStack(alignment: .leading, spacing: 16) {
                             Text("Podcast Queue")
-                                .font(.system(.title3, design: .rounded).bold())
-                                .foregroundColor(.white)
+                                .font(.title3.bold())
+                                .foregroundColor(pal.text)
                             
                             Toggle("Auto-Play Next Episode", isOn: $audio.autoPlay)
-                                .toggleStyle(SwitchToggleStyle(tint: Color(red: 0.9, green: 0.7, blue: 0.4)))
-                                .foregroundColor(.gray)
+                                .toggleStyle(SwitchToggleStyle(tint: pal.accent))
+                                .foregroundColor(pal.dim)
                                 
                             Toggle("Shuffle Queue", isOn: $audio.shuffleQueue)
-                                .toggleStyle(SwitchToggleStyle(tint: Color(red: 0.9, green: 0.7, blue: 0.4)))
-                                .foregroundColor(.gray)
+                                .toggleStyle(SwitchToggleStyle(tint: pal.accent))
+                                .foregroundColor(pal.dim)
+                        }
+                        .glassPanel()
+                        .padding(.horizontal)
+                        
+                        // Library & Storage Settings
+                        VStack(alignment: .leading, spacing: 16) {
+                            Text("Library & Storage")
+                                .font(.title3.bold())
+                                .foregroundColor(pal.text)
+                                .padding(.bottom, 4)
                             
+                            Toggle("Delete Played Episodes", isOn: $audio.deleteOnCompletion)
+                                .toggleStyle(SwitchToggleStyle(tint: pal.accent))
+                                .foregroundColor(pal.dim)
+                            Text("Automatically delete the downloaded file when an episode finishes playing.")
+                                .font(.caption)
+                                .foregroundColor(pal.dim)
+                                .padding(.bottom, 8)
+                            
+                            Toggle("Hide Finished Episodes", isOn: $audio.hideFinishedEpisodes)
+                                .toggleStyle(SwitchToggleStyle(tint: pal.accent))
+                                .foregroundColor(pal.dim)
+                        }
+                        .glassPanel()
+                        .padding(.horizontal)
+                        
+                        // Sound
+                        VStack(alignment: .leading, spacing: 12) {
                             HStack {
-                                Text("Playback Speed")
-                                    .foregroundColor(.gray)
+                                Text("Stereo Width")
+                                    .font(.title3.bold())
+                                    .foregroundColor(pal.text)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.7)
                                 Spacer()
-                                Picker("Playback Speed", selection: $audio.playbackSpeed) {
-                                    ForEach(speedOptions, id: \.self) { speed in
-                                        Text("\(speed, specifier: "%.1f")x").tag(speed)
+                                Text(audio.stereoWidth < 0.05 ? "Mono" : "\(Int((audio.stereoWidth / 1.5) * 100))%")
+                                    .font(.caption.monospacedDigit())
+                                    .foregroundColor(pal.dim)
+                                    .fixedSize()
+                            }
+                            Slider(value: $audio.stereoWidth, in: 0...1.5, step: 0.05)
+                                .tint(pal.accent)
+                                .accessibilityLabel("Stereo width")
+                                .accessibilityValue(audio.stereoWidth < 0.05 ? "Mono" : "\(Int((audio.stereoWidth / 1.5) * 100)) percent")
+                            Text("Lower keeps the bass centered on phone and laptop speakers; higher opens the noise up in headphones.")
+                                .font(.caption)
+                                .foregroundColor(pal.dim)
+                        }
+                        .glassPanel()
+                        .padding(.horizontal)
+
+                        // Sleep Safe Settings
+                        VStack(alignment: .leading, spacing: 16) {
+                            Text("Playback Safety")
+                                .font(.title3.bold())
+                                .foregroundColor(pal.text)
+                                
+                            // Trailing-closure label so the long text wraps at large Dynamic Type
+                            // sizes instead of truncating against the fixed-width switch.
+                            Toggle(isOn: $audio.nightLimiter) {
+                                Text("Night Limiter — soften loud spikes")
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            .toggleStyle(SwitchToggleStyle(tint: pal.accent))
+                            .foregroundColor(pal.dim)
+
+                            Toggle(isOn: $audio.sleepEQ) {
+                                Text("Sleep EQ — soften harsh highs & boomy lows")
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            .toggleStyle(SwitchToggleStyle(tint: pal.accent))
+                            .foregroundColor(pal.dim)
+
+                            if audio.sleepEQ {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    HStack {
+                                        Text("Softening amount")
+                                            .font(.subheadline)
+                                            .foregroundColor(pal.text)
+                                            .lineLimit(1)
+                                            .minimumScaleFactor(0.7)
+                                        Spacer()
+                                        Text(eqAmountLabel)
+                                            .font(.caption.monospacedDigit())
+                                            .foregroundColor(pal.dim)
+                                            .fixedSize()
+                                    }
+                                    Slider(value: $audio.sleepEQIntensity, in: 0...2, step: 0.1)
+                                        .tint(pal.accent)
+                                        .accessibilityLabel("Sleep EQ softening amount")
+                                        .accessibilityValue(eqAmountLabel)
+                                }
+                                .padding(.top, 4)
+                            }
+                            Text("Gentle tone shaping for voice clarity at low volume. Podcasts only.")
+                                .font(.caption)
+                                .foregroundColor(pal.dim)
+                        }
+                        .glassPanel()
+                        .padding(.horizontal)
+                        
+                        // Advanced
+                        DisclosureGroup("Advanced") {
+                            VStack(spacing: 24) {
+                                // Proxy Settings
+                                VStack(alignment: .leading, spacing: 16) {
+                                    Text("Network Proxies")
+                                        .font(.headline)
+                                        .foregroundColor(pal.text)
+                                        
+
+                                    
+                                    HStack(alignment: .bottom) {
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            Text("Private RSS Feed Proxy URL")
+                                                .foregroundColor(pal.dim)
+                                                .font(.caption)
+                                            // Palette-aware fill (the system RoundedBorder style glows on true-black bedtime).
+                                            TextField("https://rss.proxy/...", text: $audio.feedProxyUrl)
+                                                .autocapitalization(.none)
+                                                .padding(10)
+                                                .background(RoundedRectangle(cornerRadius: 8).fill(Color.white.opacity(bedtimeMode ? 0.06 : 0.1)))
+                                                .foregroundColor(pal.text)
+                                                .tint(pal.accent)
+                                                .accessibilityLabel("Private RSS feed proxy URL")
+                                        }
+                                        Button(action: { audio.feedProxyUrl = AppConfig.feedProxyUrl }) {
+                                            Image(systemName: "arrow.counterclockwise")
+                                                .foregroundColor(pal.accent)
+                                                .frame(minWidth: 44, minHeight: 44)
+                                        }
+                                        .accessibilityLabel("Reset proxy URL to default")
                                     }
                                 }
-                                .pickerStyle(MenuPickerStyle())
-                                .accentColor(Color(red: 0.9, green: 0.7, blue: 0.4))
-                            }
-                        }
-                        .glassPanel()
-                        .padding(.horizontal)
-                        
-                        // Advanced Audio Mixer
-                        VStack(alignment: .leading, spacing: 20) {
-                            Text("Advanced Audio Mixer")
-                                .font(.system(.title3, design: .rounded).bold())
-                                .foregroundColor(.white)
-                            
-                            Toggle("Auto-Duck Ambient Noise", isOn: $audio.duckAmbient)
-                                .toggleStyle(SwitchToggleStyle(tint: Color(red: 0.9, green: 0.7, blue: 0.4)))
-                                .foregroundColor(.gray)
-                        }
-                        .glassPanel()
-                        .padding(.horizontal)
-                        
-                        // Proxy & Sleep Safe Settings
-                        VStack(alignment: .leading, spacing: 16) {
-                            Text("Network & Safety")
-                                .font(.system(.title3, design: .rounded).bold())
-                                .foregroundColor(.white)
                                 
-                            Toggle("Sleep Safe Audio Limiter", isOn: $audio.sleepSafeAudio)
-                                .toggleStyle(SwitchToggleStyle(tint: Color(red: 0.9, green: 0.7, blue: 0.4)))
-                                .foregroundColor(.gray)
-                                
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("Sleep Safe Proxy URL")
-                                    .foregroundColor(.gray)
-                                    .font(.caption)
-                                TextField("https://proxy.server/...", text: $audio.audioProxyUrl)
-                                    .textFieldStyle(RoundedBorderTextFieldStyle())
-                                    .autocapitalization(.none)
-                            }
-                            
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("Private RSS Feed Proxy URL")
-                                    .foregroundColor(.gray)
-                                    .font(.caption)
-                                TextField("https://rss.proxy/...", text: $audio.feedProxyUrl)
-                                    .textFieldStyle(RoundedBorderTextFieldStyle())
-                                    .autocapitalization(.none)
-                            }
-                        }
-                        .glassPanel()
-                        .padding(.horizontal)
-                        
-                        // Data Backup
-                        VStack(alignment: .leading, spacing: 16) {
-                            Text("Backup & Restore")
-                                .font(.system(.title3, design: .rounded).bold())
-                                .foregroundColor(.white)
-                                
-                            Text("Export your custom mixes, playlists, and settings to a JSON file.")
-                                .font(.caption)
-                                .foregroundColor(.gray)
-                                
-                            HStack {
-                                Button("Export Data") {
-                                    exportData()
-                                }
-                                .padding()
-                                .background(Color.white.opacity(0.1))
-                                .foregroundColor(Color(red: 0.9, green: 0.7, blue: 0.4))
-                                .cornerRadius(8)
-                                
-                                Button("Import Data") {
-                                    isImporting = true
-                                }
-                                .padding()
-                                .background(Color.white.opacity(0.1))
-                                .foregroundColor(Color(red: 0.9, green: 0.7, blue: 0.4))
-                                .cornerRadius(8)
-                            }
-                        }
-                        .glassPanel()
-                        .padding(.horizontal)
-                        
-                        // Engine Status
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text("Audio Engine Status")
-                                .font(.system(.title3, design: .rounded).bold())
-                                .foregroundColor(.white)
-                            
-                            HStack {
-                                Circle()
-                                    .fill((audio.isPodPlaying || audio.noiseOn || audio.binauralOn) ? Color(red: 0.9, green: 0.7, blue: 0.4) : Color.gray)
-                                    .frame(width: 8, height: 8)
-                                Text("AVAudioEngine Running")
-                                    .foregroundColor(.gray)
-                                Spacer()
-                            }
-                            
-                            if audio.isDownloading {
-                                HStack {
-                                    ProgressView().progressViewStyle(CircularProgressViewStyle(tint: Color(red: 0.9, green: 0.7, blue: 0.4)))
-                                        .scaleEffect(0.8)
-                                    Text("Downloading episode...")
-                                        .foregroundColor(Color(red: 0.9, green: 0.7, blue: 0.4))
+                                // Data Backup
+                                VStack(alignment: .leading, spacing: 16) {
+                                    Text("Backup & Restore")
+                                        .font(.headline)
+                                        .foregroundColor(pal.text)
+                                        
+                                    Text("Export your custom mixes, playlists, and settings to a JSON file.")
+                                        .font(.caption)
+                                        .foregroundColor(pal.dim)
+                                        
+                                    HStack {
+                                        Button("Export Data") {
+                                            exportData()
+                                        }
+                                        .padding()
+                                        .background(pal.text.opacity(0.1))
+                                        .foregroundColor(pal.accent)
+                                        .cornerRadius(8)
+                                        .frame(minWidth: 44, minHeight: 44)
+                                        
+                                        Button("Import Data") {
+                                            isImporting = true
+                                        }
+                                        .padding()
+                                        .background(pal.text.opacity(0.1))
+                                        .foregroundColor(pal.accent)
+                                        .cornerRadius(8)
+                                        .frame(minWidth: 44, minHeight: 44)
+                                    }
                                 }
                             }
+                            .padding(.top, 16)
                         }
+                        .accentColor(pal.accent)
                         .glassPanel()
                         .padding(.horizontal)
                         
-                        Spacer().frame(height: 100)
+                        Spacer().frame(height: 80) // 80 is the miniPlayerInset
                     }
                     .padding(.top, 20)
                 }
             }
-            .navigationTitle("Mixer Settings")
+            .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.large)
         }
         .fileImporter(
@@ -212,52 +227,118 @@ struct SettingsView: View {
             do {
                 guard let selectedFile: URL = try result.get().first else { return }
                 if selectedFile.startAccessingSecurityScopedResource() {
+                    defer { selectedFile.stopAccessingSecurityScopedResource() }
                     let data = try Data(contentsOf: selectedFile)
-                    if let dict = try JSONSerialization.jsonObject(with: data, options: []) as? [String: Any] {
-                        for (key, value) in dict {
+                    guard let dict = try JSONSerialization.jsonObject(with: data, options: []) as? [String: Any] else { return }
+
+                    // These collections are file-backed (StorageManager), not UserDefaults.
+                    let fileBacked = ["savedPlaylists": "mixes.json",
+                                      "savedPodcasts": "library.json",
+                                      "upNextQueue": "queue.json",
+                                      "episodePositions": "positions.json"]
+
+                    for (key, value) in dict {
+                        if let file = fileBacked[key] {
+                            if let encoded = try? JSONSerialization.data(withJSONObject: value, options: []) {
+                                StorageManager.shared.writeRaw(encoded, to: file)
+                            }
+                        } else if key == "lastMix" {
+                            // Stored as encoded Data in UserDefaults.
+                            if let encoded = try? JSONSerialization.data(withJSONObject: value, options: []) {
+                                UserDefaults.standard.set(encoded, forKey: key)
+                            }
+                        } else {
                             UserDefaults.standard.set(value, forKey: key)
                         }
                     }
-                    selectedFile.stopAccessingSecurityScopedResource()
+                    alertTitle = "Restore Complete"
+                    alertMessage = "Your data was imported. Restart Sleepulator to load your restored library and mixes."
+                    showAlert = true
                 }
             } catch {
-                print("Import failed: \(error)")
+                alertTitle = "Import Failed"
+                alertMessage = error.localizedDescription
+                showAlert = true
             }
         }
-        .sheet(isPresented: $isExporting) {
-            if let url = exportedFileURL {
-                ShareSheet(activityItems: [url])
+        .fileExporter(isPresented: $isExporting, document: exportDocument, contentType: .json, defaultFilename: "sleepulator-backup") { result in
+            switch result {
+            case .success(let url):
+                print("Exported to \(url)")
+            case .failure(let error):
+                alertTitle = "Export Failed"
+                alertMessage = error.localizedDescription
+                showAlert = true
             }
+        }
+        .alert(alertTitle, isPresented: $showAlert) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(alertMessage)
         }
     }
     
     @State private var isImporting = false
     @State private var isExporting = false
-    @State private var exportedFileURL: URL?
+    @State private var exportDocument: JSONDocument?
+    @State private var alertTitle = ""
+    @State private var alertMessage = ""
+    @State private var showAlert = false
     
     func exportData() {
-        let keys = ["noiseVolume", "noiseType", "noiseOn", "binVolume", "binauralPreset", "binauralOn", "podVolume", "autoPlay", "shuffleQueue", "duckAmbient", "feedProxyUrl", "audioProxyUrl", "sleepSafeAudio", "upNextQueue", "lastMix", "savedPlaylists", "savedPodcasts"]
         var backupDict: [String: Any] = [:]
-        
-        for key in keys {
+
+        // Scalar settings live in UserDefaults.
+        let scalarKeys = ["noiseVolume", "noiseType", "binVolume", "binauralPreset", "podVolume", "stereoWidth", "masterVolume", "autoPlay", "shuffleQueue", "deleteOnCompletion", "hideFinishedEpisodes", "feedProxyUrl", "nightLimiterEnabled", "sleepEQEnabled"]
+        for key in scalarKeys {
             if let val = UserDefaults.standard.object(forKey: key) {
                 backupDict[key] = val
             }
         }
-        
-        if let data = try? JSONSerialization.data(withJSONObject: backupDict, options: .prettyPrinted) {
-            let tempUrl = FileManager.default.temporaryDirectory.appendingPathComponent("sleepulator-backup-\(Date().timeIntervalSince1970).json")
-            try? data.write(to: tempUrl)
-            exportedFileURL = tempUrl
+        // lastMix is stored as encoded Data in UserDefaults.
+        if let data = UserDefaults.standard.data(forKey: "lastMix"),
+           let obj = try? JSONSerialization.jsonObject(with: data, options: .allowFragments) {
+            backupDict["lastMix"] = obj
+        }
+
+        // Mixes, library, queue, and positions were migrated off UserDefaults into
+        // StorageManager files — pull their raw JSON so the backup is actually complete.
+        let fileBacked = [("savedPlaylists", "mixes.json"),
+                          ("savedPodcasts", "library.json"),
+                          ("upNextQueue", "queue.json"),
+                          ("episodePositions", "positions.json")]
+        for (key, file) in fileBacked {
+            if let data = StorageManager.shared.rawData(for: file),
+               let obj = try? JSONSerialization.jsonObject(with: data, options: .allowFragments) {
+                backupDict[key] = obj
+            }
+        }
+
+        do {
+            let data = try JSONSerialization.data(withJSONObject: backupDict, options: .prettyPrinted)
+            exportDocument = JSONDocument(data: data)
             isExporting = true
+        } catch {
+            alertTitle = "Export Failed"
+            alertMessage = error.localizedDescription
+            showAlert = true
         }
     }
 }
 
-struct ShareSheet: UIViewControllerRepresentable {
-    var activityItems: [Any]
-    func makeUIViewController(context: Context) -> UIActivityViewController {
-        UIActivityViewController(activityItems: activityItems, applicationActivities: nil)
+struct JSONDocument: FileDocument {
+    static var readableContentTypes: [UTType] { [.json] }
+    var data: Data
+    
+    init(data: Data) { self.data = data }
+    init(configuration: ReadConfiguration) throws {
+        if let data = configuration.file.regularFileContents {
+            self.data = data
+        } else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
     }
-    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        return FileWrapper(regularFileWithContents: data)
+    }
 }

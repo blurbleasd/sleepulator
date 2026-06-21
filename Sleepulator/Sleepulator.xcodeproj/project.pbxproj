@@ -7,7 +7,11 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		2E448B63520859F2E217098F /* AudioMathTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5D5D733507738D0157791A3 /* AudioMathTests.swift */; };
+		2E448B63520859F2E217098F /* SleepulatorTests/AudioMathTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5D5D733507738D0157791A3 /* SleepulatorTests/AudioMathTests.swift */; };
+		896817F92FE6F20900C5DF4D /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 896817F82FE6F20900C5DF4D /* WidgetKit.framework */; };
+		896817FB2FE6F20900C5DF4D /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 896817FA2FE6F20900C5DF4D /* SwiftUI.framework */; };
+		8968180C2FE6F20E00C5DF4D /* SleepulatorWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 896817F72FE6F20900C5DF4D /* SleepulatorWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		BB02BB02BB02BB02BB02BB02 /* SleepulatorTests/AudioStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA01AA01AA01AA01AA01AA01 /* SleepulatorTests/AudioStateTests.swift */; };
 		FE194EFB101EFDEB44D73448 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = AB899D16B0611E1DE7BE7027 /* Foundation.framework */; };
 /* End PBXBuildFile section */
 
@@ -19,14 +23,39 @@
 			remoteGlobalIDString = 896815A42FE42DE100C5DF4D;
 			remoteInfo = Sleepulator;
 		};
+		8968180A2FE6F20E00C5DF4D /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 8968159D2FE42DE100C5DF4D /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 896817F62FE6F20900C5DF4D;
+			remoteInfo = SleepulatorWidgetExtension;
+		};
 /* End PBXContainerItemProxy section */
 
+/* Begin PBXCopyFilesBuildPhase section */
+		896818112FE6F20E00C5DF4D /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				8968180C2FE6F20E00C5DF4D /* SleepulatorWidgetExtension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
-		017F902453F66EBD5997209E /* SleepulatorTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; name = SleepulatorTests.xctest; path = .xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		017F902453F66EBD5997209E /* SleepulatorTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SleepulatorTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		18E370CCB927FE199F422346 /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		896815A52FE42DE100C5DF4D /* Sleepulator.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Sleepulator.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		896817F72FE6F20900C5DF4D /* SleepulatorWidgetExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = SleepulatorWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		896817F82FE6F20900C5DF4D /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
+		896817FA2FE6F20900C5DF4D /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
+		AA01AA01AA01AA01AA01AA01 /* SleepulatorTests/AudioStateTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SleepulatorTests/AudioStateTests.swift; sourceTree = "<group>"; };
 		AB899D16B0611E1DE7BE7027 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
-		C5D5D733507738D0157791A3 /* AudioMathTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AudioMathTests.swift; sourceTree = "<group>"; };
+		C5D5D733507738D0157791A3 /* SleepulatorTests/AudioMathTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SleepulatorTests/AudioMathTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -37,6 +66,20 @@
 			);
 			target = 896815A42FE42DE100C5DF4D /* Sleepulator */;
 		};
+		896818102FE6F20E00C5DF4D /* Exceptions for "SleepulatorWidget" folder in "SleepulatorWidgetExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 896817F62FE6F20900C5DF4D /* SleepulatorWidgetExtension */;
+		};
+		896818152FE6F38600C5DF4D /* Exceptions for "Sleepulator" folder in "SleepulatorWidgetExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Models/SleepTimerAttributes.swift,
+			);
+			target = 896817F62FE6F20900C5DF4D /* SleepulatorWidgetExtension */;
+		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -44,8 +87,17 @@
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
 				896815C32FE42E9900C5DF4D /* Exceptions for "Sleepulator" folder in "Sleepulator" target */,
+				896818152FE6F38600C5DF4D /* Exceptions for "Sleepulator" folder in "SleepulatorWidgetExtension" target */,
 			);
 			path = Sleepulator;
+			sourceTree = "<group>";
+		};
+		896817FC2FE6F20900C5DF4D /* SleepulatorWidget */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				896818102FE6F20E00C5DF4D /* Exceptions for "SleepulatorWidget" folder in "SleepulatorWidgetExtension" target */,
+			);
+			path = SleepulatorWidget;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -55,6 +107,15 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		896817F42FE6F20900C5DF4D /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				896817FB2FE6F20900C5DF4D /* SwiftUI.framework in Frameworks */,
+				896817F92FE6F20900C5DF4D /* WidgetKit.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -73,7 +134,8 @@
 			isa = PBXGroup;
 			children = (
 				18E370CCB927FE199F422346 /* Info.plist */,
-				C5D5D733507738D0157791A3 /* AudioMathTests.swift */,
+				C5D5D733507738D0157791A3 /* SleepulatorTests/AudioMathTests.swift */,
+				AA01AA01AA01AA01AA01AA01 /* SleepulatorTests/AudioStateTests.swift */,
 			);
 			name = SleepulatorTests;
 			sourceTree = "<group>";
@@ -82,6 +144,7 @@
 			isa = PBXGroup;
 			children = (
 				896815A72FE42DE100C5DF4D /* Sleepulator */,
+				896817FC2FE6F20900C5DF4D /* SleepulatorWidget */,
 				896815A62FE42DE100C5DF4D /* Products */,
 				B26D83E539600E117FE3FDF8 /* Frameworks */,
 				4F0F1F3D849D37D9576573B5 /* SleepulatorTests */,
@@ -93,6 +156,7 @@
 			children = (
 				896815A52FE42DE100C5DF4D /* Sleepulator.app */,
 				017F902453F66EBD5997209E /* SleepulatorTests.xctest */,
+				896817F72FE6F20900C5DF4D /* SleepulatorWidgetExtension.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -101,6 +165,8 @@
 			isa = PBXGroup;
 			children = (
 				E1197F814EACD75E6B2355CE /* iOS */,
+				896817F82FE6F20900C5DF4D /* WidgetKit.framework */,
+				896817FA2FE6F20900C5DF4D /* SwiftUI.framework */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
@@ -123,10 +189,12 @@
 				896815A12FE42DE100C5DF4D /* Sources */,
 				896815A22FE42DE100C5DF4D /* Frameworks */,
 				896815A32FE42DE100C5DF4D /* Resources */,
+				896818112FE6F20E00C5DF4D /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				8968180B2FE6F20E00C5DF4D /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				896815A72FE42DE100C5DF4D /* Sleepulator */,
@@ -135,6 +203,28 @@
 			productName = Sleepulator;
 			productReference = 896815A52FE42DE100C5DF4D /* Sleepulator.app */;
 			productType = "com.apple.product-type.application";
+		};
+		896817F62FE6F20900C5DF4D /* SleepulatorWidgetExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 8968180D2FE6F20E00C5DF4D /* Build configuration list for PBXNativeTarget "SleepulatorWidgetExtension" */;
+			buildPhases = (
+				896817F32FE6F20900C5DF4D /* Sources */,
+				896817F42FE6F20900C5DF4D /* Frameworks */,
+				896817F52FE6F20900C5DF4D /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				896817FC2FE6F20900C5DF4D /* SleepulatorWidget */,
+			);
+			name = SleepulatorWidgetExtension;
+			packageProductDependencies = (
+			);
+			productName = SleepulatorWidgetExtension;
+			productReference = 896817F72FE6F20900C5DF4D /* SleepulatorWidgetExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
 		};
 		8AE58C823E021E6F069D7576 /* SleepulatorTests */ = {
 			isa = PBXNativeTarget;
@@ -167,6 +257,9 @@
 					896815A42FE42DE100C5DF4D = {
 						CreatedOnToolsVersion = 26.5;
 					};
+					896817F62FE6F20900C5DF4D = {
+						CreatedOnToolsVersion = 26.5;
+					};
 					8AE58C823E021E6F069D7576 = {
 						TestTargetID = 896815A42FE42DE100C5DF4D;
 					};
@@ -188,12 +281,20 @@
 			targets = (
 				896815A42FE42DE100C5DF4D /* Sleepulator */,
 				8AE58C823E021E6F069D7576 /* SleepulatorTests */,
+				896817F62FE6F20900C5DF4D /* SleepulatorWidgetExtension */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		896815A32FE42DE100C5DF4D /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		896817F52FE6F20900C5DF4D /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -214,7 +315,8 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				2E448B63520859F2E217098F /* AudioMathTests.swift in Sources */,
+				2E448B63520859F2E217098F /* SleepulatorTests/AudioMathTests.swift in Sources */,
+				BB02BB02BB02BB02BB02BB02 /* SleepulatorTests/AudioStateTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -225,9 +327,21 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		896817F32FE6F20900C5DF4D /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		8968180B2FE6F20E00C5DF4D /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 896817F62FE6F20900C5DF4D /* SleepulatorWidgetExtension */;
+			targetProxy = 8968180A2FE6F20E00C5DF4D /* PBXContainerItemProxy */;
+		};
 		F7E88F4CD88B0955BE344FDF /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			name = Sleepulator;
@@ -243,6 +357,7 @@
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				INFOPLIST_FILE = SleepulatorTests/Info.plist;
 				PRODUCT_BUNDLE_IDENTIFIER = app.sleepulator.SleepulatorTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -257,6 +372,7 @@
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				INFOPLIST_FILE = SleepulatorTests/Info.plist;
 				PRODUCT_BUNDLE_IDENTIFIER = app.sleepulator.SleepulatorTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -317,7 +433,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 26.5;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
@@ -375,7 +491,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 26.5;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
@@ -451,6 +567,68 @@
 			};
 			name = Release;
 		};
+		8968180E2FE6F20E00C5DF4D /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = C84UD6LFJQ;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = SleepulatorWidget/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = SleepulatorWidget;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.6;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = app.sleepulator.Sleepulator.SleepulatorWidget;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		8968180F2FE6F20E00C5DF4D /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = C84UD6LFJQ;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = SleepulatorWidget/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = SleepulatorWidget;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.6;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = app.sleepulator.Sleepulator.SleepulatorWidget;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -468,6 +646,15 @@
 			buildConfigurations = (
 				896815B12FE42DE300C5DF4D /* Debug */,
 				896815B22FE42DE300C5DF4D /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		8968180D2FE6F20E00C5DF4D /* Build configuration list for PBXNativeTarget "SleepulatorWidgetExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				8968180E2FE6F20E00C5DF4D /* Debug */,
+				8968180F2FE6F20E00C5DF4D /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

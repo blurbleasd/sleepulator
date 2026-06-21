@@ -5,18 +5,29 @@ struct PodcastDetailView: View {
     @ObservedObject var audio: AudioEngine
     @Binding var libraryPodcasts: [Podcast]
     
+    @State private var opmlExporting = false
+    @State private var exportedOPMLUrl: URL?
+    
+    @AppStorage("bedtimeMode") private var bedtimeMode = false
+    var pal: Palette { Palette(bedtime: bedtimeMode) }
+    
     @State private var isLoading = false
     @State private var errorMessage: String? = nil
+    @State private var episodeSearch = ""
     
     var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
+            pal.bg.ignoresSafeArea()
             
             ScrollView {
                 VStack(spacing: 16) {
-                    if isLoading && podcast.episodes.isEmpty {
+                    if !audio.isOnline && podcast.episodes.isEmpty {
+                        Text("You're offline — connect to load feeds.")
+                            .foregroundColor(.red)
+                            .padding()
+                    } else if isLoading && podcast.episodes.isEmpty {
                         ProgressView()
-                            .progressViewStyle(CircularProgressViewStyle(tint: Color(red: 0.9, green: 0.7, blue: 0.4)))
+                            .progressViewStyle(CircularProgressViewStyle(tint: pal.accent))
                             .padding(.top, 40)
                     } else if let err = errorMessage {
                         Text(err)
@@ -24,51 +35,85 @@ struct PodcastDetailView: View {
                             .padding()
                     } else if podcast.episodes.isEmpty {
                         Text("No episodes found.")
-                            .foregroundColor(.gray)
+                            .foregroundColor(pal.dim)
                             .padding()
                     } else {
-                        // Action buttons
-                        HStack(spacing: 12) {
-                            if let first = podcast.episodes.first {
-                                Button(action: {
-                                    audio.playEpisode(first)
-                                }) {
-                                    Text("Play Latest")
-                                        .font(.system(.subheadline, design: .rounded).bold())
-                                        .foregroundColor(.black)
-                                        .padding(.horizontal, 16)
-                                        .padding(.vertical, 10)
-                                        .background(Color(red: 0.9, green: 0.7, blue: 0.4))
-                                        .cornerRadius(10)
-                                }
-                            }
-                            
-                            Button(action: {
-                                for ep in podcast.episodes {
-                                    if !audio.queue.contains(where: { $0.id == ep.id }) {
-                                        audio.queue.append(ep)
+                        // Podcast Header
+                        VStack(spacing: 16) {
+                            if let artStr = podcast.artworkUrl, let url = URL(string: artStr) {
+                                AsyncImage(url: url) { phase in
+                                    if let image = phase.image {
+                                        image.resizable().aspectRatio(contentMode: .fill)
+                                    } else {
+                                        Color.gray.opacity(0.3)
                                     }
                                 }
-                            }) {
-                                Text("Add All to Queue")
-                                    .font(.system(.subheadline, design: .rounded).bold())
-                                    .foregroundColor(Color(red: 0.9, green: 0.7, blue: 0.4))
-                                    .padding(.horizontal, 16)
-                                    .padding(.vertical, 10)
-                                    .background(Color.white.opacity(0.1))
-                                    .cornerRadius(10)
+                                .frame(width: 160, height: 160)
+                                .cornerRadius(16)
+                                .shadow(color: .black.opacity(0.15), radius: 8, y: 4)
+                            }
+                            
+                            Text(podcast.name)
+                                .font(.system(.title2, design: .rounded).weight(.bold))
+                                .multilineTextAlignment(.center)
+                                .foregroundColor(pal.text)
+                                .padding(.horizontal)
+                        }
+                        .padding(.top, 24)
+                        .padding(.bottom, 16)
+                        
+                        // Action buttons
+                        HStack(spacing: 12) {
+                            if !podcast.episodes.isEmpty {
+                                Button(action: {
+                                    audio.playAll(podcast.episodes)
+                                }) {
+                                    Text("Play All")
+                                        .font(.headline)
+                                        .foregroundColor(pal.bg)   // on pal.accent = 8.85:1 (white was 2.18:1, fails AA)
+                                        .padding(.horizontal, 24)
+                                        .padding(.vertical, 12)
+                                        .background(pal.accent)
+                                        .cornerRadius(24)
+                                }
+                                
+                                Button(action: {
+                                    audio.playAll(podcast.episodes.shuffled())
+                                }) {
+                                    Text("Shuffle All")
+                                        .font(.headline)
+                                        .foregroundColor(pal.accent)
+                                        .padding(.horizontal, 24)
+                                        .padding(.vertical, 12)
+                                        .background(pal.bg)
+                                        .cornerRadius(24)
+                                        .overlay(RoundedRectangle(cornerRadius: 24).stroke(pal.accent, lineWidth: 1))
+                                }
                             }
                             Spacer()
                         }
                         .padding(.horizontal)
+                        .padding(.bottom, 8)
                         
-                        VStack(alignment: .leading, spacing: 0) {
-                            ForEach(podcast.episodes) { ep in
-                                EpisodeRowView(ep: ep, audio: audio, podcast: podcast)
-                                    .padding(.vertical, 8)
-                                
-                                if ep.id != podcast.episodes.last?.id {
-                                    Divider().background(Color.white.opacity(0.1))
+                        let visibleEpisodes = podcast.episodes.filter { ep in
+                            let notHidden = !audio.hideFinishedEpisodes || !audio.finishedEpisodes.contains(ep.id)
+                            let matchesSearch = episodeSearch.isEmpty || ep.title.localizedCaseInsensitiveContains(episodeSearch)
+                            return notHidden && matchesSearch
+                        }
+                        
+                        LazyVStack(alignment: .leading, spacing: 0) {
+                            if visibleEpisodes.isEmpty {
+                                Text(episodeSearch.isEmpty ? "All episodes played!" : "No episodes match \u{201C}\(episodeSearch)\u{201D}")
+                                    .foregroundColor(pal.dim)
+                                    .padding()
+                            } else {
+                                ForEach(visibleEpisodes) { ep in
+                                    EpisodeRowView(ep: ep, audio: audio, podcast: podcast)
+                                        .padding(.vertical, 8)
+                                    
+                                    if ep.id != visibleEpisodes.last?.id {
+                                        Divider().background(pal.text.opacity(0.1))
+                                    }
                                 }
                             }
                         }
@@ -76,13 +121,14 @@ struct PodcastDetailView: View {
                         .padding(.horizontal)
                     }
                     
-                    Spacer().frame(height: 100)
+                    Spacer().frame(height: 80)
                 }
                 .padding(.top, 16)
             }
         }
         .navigationTitle(podcast.name)
         .navigationBarTitleDisplayMode(.inline)
+        .searchable(text: $episodeSearch, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search episodes")
         .onAppear {
             loadFeed()
         }
@@ -96,12 +142,20 @@ struct PodcastDetailView: View {
         Task {
             let parser = PodcastParser()
             do {
-                let eps = try await parser.parseFeed(url: url)
+                let feed = try await parser.parseFeed(url: url)
                 DispatchQueue.main.async {
-                    self.podcast.episodes = eps
+                    self.podcast.episodes = feed.episodes
+                    if self.podcast.artworkUrl == nil && feed.artworkUrl != nil {
+                        self.podcast.artworkUrl = feed.artworkUrl
+                    }
+                    if self.podcast.name.isEmpty || self.podcast.name == "Podcast" || self.podcast.name.contains(".com") {
+                        if !feed.title.isEmpty {
+                            self.podcast.name = feed.title
+                        }
+                    }
                     // Update in library
                     if let idx = libraryPodcasts.firstIndex(where: { $0.id == podcast.id }) {
-                        libraryPodcasts[idx].episodes = eps
+                        libraryPodcasts[idx] = self.podcast
                         self.savePodcasts()
                     }
                     self.isLoading = false
@@ -116,8 +170,9 @@ struct PodcastDetailView: View {
     }
     
     private func savePodcasts() {
-        if let data = try? JSONEncoder().encode(libraryPodcasts) {
-            UserDefaults.standard.set(data, forKey: "savedPodcasts")
-        }
+        // Write the canonical library.json (the same store LibraryView uses). Writing the
+        // legacy "savedPodcasts" UserDefaults key here re-armed the launch-time migration,
+        // which then clobbered newer library edits on the next cold launch.
+        StorageManager.shared.save(libraryPodcasts, to: "library.json")
     }
 }

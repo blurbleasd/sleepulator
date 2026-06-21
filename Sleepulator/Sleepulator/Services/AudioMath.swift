@@ -19,10 +19,14 @@ public struct AudioMath {
     
     public static func getFadeMultiplier(timerRemaining: Double, fadeDuration: Double = 600.0) -> Float {
         if timerRemaining <= 0 {
-            return 0.0
+            return 0.0   // hard stop fires here; fully silent
         } else if timerRemaining <= fadeDuration {
             let linear = timerRemaining / fadeDuration
-            return Float(pow(linear, 2.0))
+            // Floor above zero while the timer is still running: a fully-silent engine lets
+            // iOS curtail background execution, which can stop the GCD timer that fires the
+            // terminal stop in noise-only mode. Staying barely audible keeps the app alive
+            // through the fade; the hard stop at timerRemaining<=0 cuts it.
+            return max(Float(pow(linear, 2.0)), 0.03)
         } else {
             return 1.0
         }

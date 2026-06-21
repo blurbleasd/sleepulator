@@ -23,6 +23,8 @@ struct OPMLSelectionView: View {
                     Text("OPML Import")
                         .font(.system(.title3, design: .rounded).bold())
                         .foregroundColor(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.5)   // shrink before shoving "Import" off the row
                     Spacer()
                     Button(action: {
                         let selected = feeds.filter { selectedUrls.contains($0.url) }
@@ -74,16 +76,19 @@ struct OPMLSelectionView: View {
                                     Image(systemName: selectedUrls.contains(feed.url) ? "checkmark.circle.fill" : "circle")
                                         .font(.title2)
                                         .foregroundColor(selectedUrls.contains(feed.url) ? Color(red: 0.9, green: 0.7, blue: 0.4) : .gray)
-                                    
+                                        .accessibilityHidden(true)
+
                                     VStack(alignment: .leading, spacing: 4) {
                                         Text(feed.name)
                                             .font(.system(.headline, design: .rounded))
                                             .foregroundColor(.white)
-                                            .lineLimit(1)
+                                            .lineLimit(2)
+                                            .minimumScaleFactor(0.75)
                                         Text(feed.url)
                                             .font(.system(.caption2, design: .rounded))
                                             .foregroundColor(.gray)
                                             .lineLimit(1)
+                                            .minimumScaleFactor(0.7)
                                     }
                                     Spacer()
                                 }
@@ -91,6 +96,9 @@ struct OPMLSelectionView: View {
                                 .background(Color.white.opacity(0.05))
                                 .cornerRadius(12)
                             }
+                            .accessibilityLabel(feed.name)
+                            .accessibilityValue(selectedUrls.contains(feed.url) ? "Selected" : "Not selected")
+                            .accessibilityAddTraits(selectedUrls.contains(feed.url) ? [.isButton, .isSelected] : .isButton)
                         }
                     }
                     .padding(.horizontal, 16)

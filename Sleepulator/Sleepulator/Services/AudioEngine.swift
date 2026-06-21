@@ -1,25 +1,36 @@
 import Foundation
 import Combine
 import AVFoundation
+import Network
+import SwiftUI
+
+enum AppConfig {
+    static let feedProxyUrl  = "https://sleepulator-feed-proxy.chesteraarfer.workers.dev"
+    static let nightLimiterEnabled = true
+}
 
 final class AudioEngine: ObservableObject {
+    let queueManager = PodcastQueueManager()
+    let sleepTimer = SleepTimerService()
+    let pomodoro = PomodoroService()
+    private var cancellables = Set<AnyCancellable>()
+
     private let genEngine = GenerativeAudioEngine()
     private let podPlayer = PodcastPlayer()
-    
-    @Published var isDownloading = false // Deprecated logically since we stream, keeping for UI parity for now.
+    private let chime = ChimePlayer()
+    private let storageQueue = DispatchQueue(label: "app.sleepulator.storage", qos: .utility)
     
     // MARK: UI-facing state (Persisted via UserDefaults)
     @Published var noiseVolume: Double {
-        didSet { UserDefaults.standard.set(noiseVolume, forKey: "noiseVolume"); syncGenEngine() }
-    }
-    @Published var binVolume: Double {
-        didSet { UserDefaults.standard.set(binVolume, forKey: "binVolume"); syncGenEngine() }
-    }
-    @Published var podVolume: Double {
-        didSet { UserDefaults.standard.set(podVolume, forKey: "podVolume"); syncPodPlayer() }
+        didSet { let v = noiseVolume; storageQueue.async { UserDefaults.standard.set(v, forKey: "noiseVolume") }; syncGenEngine() }
     }
     
-    // Removed eqEnabled and podPan
+    @Published var binVolume: Double {
+        didSet { let v = binVolume; storageQueue.async { UserDefaults.standard.set(v, forKey: "binVolume") }; syncGenEngine() }
+    }
+    @Published var podVolume: Double {
+        didSet { let v = podVolume; storageQueue.async { UserDefaults.standard.set(v, forKey: "podVolume") }; syncAllVolumes() }
+    }
     
     @Published var noiseType: String {
         didSet { UserDefaults.standard.set(noiseType, forKey: "noiseType"); syncGenEngine() }
@@ -31,82 +42,206 @@ final class AudioEngine: ObservableObject {
         didSet { UserDefaults.standard.set(playbackSpeed, forKey: "playbackSpeed"); podPlayer.setSpeed(playbackSpeed) }
     }
     
-    @Published var queue: [Episode] = [] {
-        didSet { if let data = try? JSONEncoder().encode(queue) { UserDefaults.standard.set(data, forKey: "upNextQueue") } }
-    }
-    
-    @Published var timerRemaining: TimeInterval = 0
-    @Published var autoPlay: Bool {
-        didSet { UserDefaults.standard.set(autoPlay, forKey: "autoPlay") }
-    }
-    @Published var shuffleQueue: Bool {
-        didSet { UserDefaults.standard.set(shuffleQueue, forKey: "shuffleQueue") }
-    }
-    @Published var duckAmbient: Bool {
-        didSet { UserDefaults.standard.set(duckAmbient, forKey: "duckAmbient"); syncGenEngine() }
-    }
-    
     // Phase 6 Proxies
     @Published var feedProxyUrl: String {
         didSet { UserDefaults.standard.set(feedProxyUrl, forKey: "feedProxyUrl") }
     }
-    @Published var audioProxyUrl: String {
-        didSet { UserDefaults.standard.set(audioProxyUrl, forKey: "audioProxyUrl") }
+    @Published var nightLimiter: Bool {
+        didSet {
+            UserDefaults.standard.set(nightLimiter, forKey: "nightLimiterEnabled")
+            podPlayer.nightLimiterEnabled = nightLimiter
+        }
     }
-    @Published var sleepSafeAudio: Bool {
-        didSet { UserDefaults.standard.set(sleepSafeAudio, forKey: "sleepSafeAudio") }
+    @Published var sleepEQ: Bool {
+        didSet {
+            UserDefaults.standard.set(sleepEQ, forKey: "sleepEQEnabled")
+            podPlayer.sleepEQEnabled = sleepEQ
+        }
+    }
+    @Published var sleepEQIntensity: Double {
+        didSet {
+            UserDefaults.standard.set(sleepEQIntensity, forKey: "sleepEQIntensity")
+            podPlayer.sleepEQIntensity = sleepEQIntensity
+        }
     }
     
     @Published var lastMix: SavedMix?
-    @Published var savedPlaylists: [SavedMix] = []
-    
-    @Published var podTitle = "No episode loaded"
-    @Published var isPodPlaying = false {
-        didSet { syncGenEngine() }
+    @Published var savedPlaylists: [SavedMix] = [] {
+        didSet {
+            let mixes = savedPlaylists
+            storageQueue.async { StorageManager.shared.save(mixes, to: "mixes.json") }
+        }
     }
     
-    @Published var noiseOn = false { didSet { syncGenEngine() } }
-    @Published var binauralOn = false { didSet { syncGenEngine() } }
+    @Published var podTitle = "No episode loaded"
+    var hasLoadedEpisode: Bool { podPlayer.hasPlayer }
+    @Published var podcastProgress: Double = 0.0
+    @Published var podcastElapsed: Double = 0.0
+    @Published var podcastDuration: Double = 1.0
     
-    private var sleepTimer: Timer?
-    private var sleepTimerEnd: Date?
-    private var fadeMultiplier: Double = 1.0 {
-        didSet { 
-            genEngine.setFade(multiplier: fadeMultiplier)
-            podPlayer.setVolume(podVolume * fadeMultiplier)
+    @Published var isOnline = true
+    @Published var playbackNote: String?
+    private let monitor = NWPathMonitor()
+    
+    private var lastActiveSnapshot: (noise: Bool, bin: Bool, pod: Bool) = (false, false, false)
+    private var isMasterPauseTransition = false
+    
+    @Published var noiseOn = false { didSet { syncGenEngine(); if !isMasterPauseTransition { lastActiveSnapshot.noise = noiseOn } } }
+    @Published var binauralOn = false { didSet { syncGenEngine(); if !isMasterPauseTransition { lastActiveSnapshot.bin = binauralOn } } }
+    @Published var isPodPlaying = false { didSet { syncGenEngine(); if !isMasterPauseTransition { lastActiveSnapshot.pod = isPodPlaying } } }
+    var isAnythingPlaying: Bool { isPodPlaying || noiseOn || binauralOn }
+    
+    @Published var rmsPower: Double = 0.0
+    
+    @Published var masterVolume: Double {
+        didSet {
+            UserDefaults.standard.set(masterVolume, forKey: "masterVolume")
+            syncAllVolumes()
         }
+    }
+    @Published var stereoWidth: Double {
+        didSet {
+            UserDefaults.standard.set(stereoWidth, forKey: "stereoWidth")
+            genEngine.setWidth(stereoWidth)
+        }
+    }
+    // Curated sound palettes per mode — Sleep and Focus deliberately share no sounds.
+    static let sleepNoises = ["brown", "rain", "ocean"]
+    static let focusNoises = ["pink", "fan", "white"]
+    static let sleepBinaurals = ["delta", "theta"]
+    static let focusBinaurals = ["alpha", "gamma"]
+
+    @Published var focusMode: Bool {
+        didSet {
+            UserDefaults.standard.set(focusMode, forKey: "focusMode")
+            // The two timers are mutually exclusive: leaving one mode stops its timer.
+            if focusMode { sleepTimer.cancelTimer() } else { pomodoro.stop() }
+            // Snap the active sounds into the new mode's palette so nothing cross-mode lingers.
+            reconcileSoundsToMode()
+        }
+    }
+
+    /// Force the active noise + binaural selections into the current mode's palette.
+    /// Called on every mode switch and once at launch, so a persisted cross-mode sound
+    /// (e.g. brown noise while entering Focus) can't leak across.
+    func reconcileSoundsToMode() {
+        let noises = focusMode ? Self.focusNoises : Self.sleepNoises
+        let binaurals = focusMode ? Self.focusBinaurals : Self.sleepBinaurals
+        if !noises.contains(noiseType) { noiseType = noises.first! }
+        if !binaurals.contains(binauralPreset) { binauralPreset = binaurals.first! }
+    }
+    @Published var isMuted: Bool = false { didSet { syncAllVolumes() } }
+    
+    private var fadeMultiplier: Double = 1.0 {
+        didSet { syncAllVolumes() }
+    }
+    
+    func toggleMute() {
+        isMuted.toggle()
+    }
+    
+    private func syncAllVolumes() {
+        let masterMult = isMuted ? 0.0 : masterVolume
+        // Master is a fast, per-sample-smoothed multiplier; the timer fade is the slow
+        // ramp. Keep them separate so the master slider responds immediately.
+        genEngine.setMaster(masterMult)
+        genEngine.setFade(multiplier: fadeMultiplier)
+        podPlayer.setVolume(podVolume * masterMult * fadeMultiplier)
     }
     
     init() {
-        self.noiseVolume = UserDefaults.standard.object(forKey: "noiseVolume") as? Double ?? 0.5
-        self.binVolume = UserDefaults.standard.object(forKey: "binVolume") as? Double ?? 0.4
-        self.podVolume = UserDefaults.standard.object(forKey: "podVolume") as? Double ?? 0.8
+        self.noiseVolume = UserDefaults.standard.object(forKey: "noiseVolume") as? Double ?? 0.4
+        self.binVolume = UserDefaults.standard.object(forKey: "binVolume") as? Double ?? 0.3
+        self.podVolume = UserDefaults.standard.object(forKey: "podVolume") as? Double ?? 0.7
         
-        self.noiseType = UserDefaults.standard.string(forKey: "noiseType") ?? "brown"
+        self.noiseType = NoiseType.migrate(UserDefaults.standard.string(forKey: "noiseType") ?? "brown")
         self.binauralPreset = UserDefaults.standard.string(forKey: "binauralPreset") ?? "delta"
         self.playbackSpeed = UserDefaults.standard.object(forKey: "playbackSpeed") as? Double ?? 1.0
+        self.masterVolume = UserDefaults.standard.object(forKey: "masterVolume") as? Double ?? 1.0
+        self.stereoWidth = UserDefaults.standard.object(forKey: "stereoWidth") as? Double ?? 1.0
+        self.focusMode = UserDefaults.standard.object(forKey: "focusMode") as? Bool ?? false
         
-        self.autoPlay = UserDefaults.standard.object(forKey: "autoPlay") as? Bool ?? true
-        self.shuffleQueue = UserDefaults.standard.object(forKey: "shuffleQueue") as? Bool ?? false
-        self.duckAmbient = UserDefaults.standard.object(forKey: "duckAmbient") as? Bool ?? false
+        let savedFeed = UserDefaults.standard.string(forKey: "feedProxyUrl")
+        self.feedProxyUrl = (savedFeed?.isEmpty == false) ? savedFeed! : AppConfig.feedProxyUrl
         
-        self.feedProxyUrl = UserDefaults.standard.string(forKey: "feedProxyUrl") ?? ""
-        self.audioProxyUrl = UserDefaults.standard.string(forKey: "audioProxyUrl") ?? ""
-        self.sleepSafeAudio = UserDefaults.standard.object(forKey: "sleepSafeAudio") as? Bool ?? false
+        // Migration: if old sleepSafeAudio exists, remove old proxy settings
+        if UserDefaults.standard.object(forKey: "sleepSafeAudio") != nil {
+            UserDefaults.standard.removeObject(forKey: "sleepSafeAudio")
+            UserDefaults.standard.removeObject(forKey: "audioProxyUrl")
+        }
+        
+        self.nightLimiter = UserDefaults.standard.object(forKey: "nightLimiterEnabled") as? Bool ?? AppConfig.nightLimiterEnabled
+        self.sleepEQ = UserDefaults.standard.object(forKey: "sleepEQEnabled") as? Bool ?? false
+        self.sleepEQIntensity = UserDefaults.standard.object(forKey: "sleepEQIntensity") as? Double ?? 1.0
+        // podPlayer.nightLimiterEnabled / .sleepEQEnabled are pushed below, after all
+        // stored properties are initialized (reading a @Published mid-init is disallowed).
         
         if let data = UserDefaults.standard.data(forKey: "lastMix"),
-           let mix = try? JSONDecoder().decode(SavedMix.self, from: data) {
+           var mix = try? JSONDecoder().decode(SavedMix.self, from: data) {
+            mix.noiseType = NoiseType.migrate(mix.noiseType)
             self.lastMix = mix
         }
         
+        // --- Migration & Load ---
         if let data = UserDefaults.standard.data(forKey: "savedPlaylists"),
            let mixes = try? JSONDecoder().decode([SavedMix].self, from: data) {
-            self.savedPlaylists = mixes
+            let migrated = mixes.map { m -> SavedMix in var m2 = m; m2.noiseType = NoiseType.migrate(m.noiseType); return m2 }
+            StorageManager.shared.save(migrated, to: "mixes.json")
+            UserDefaults.standard.removeObject(forKey: "savedPlaylists")
+            self.savedPlaylists = migrated
+        } else if let mixes: [SavedMix] = StorageManager.shared.load(from: "mixes.json") {
+            let migrated = mixes.map { m -> SavedMix in var m2 = m; m2.noiseType = NoiseType.migrate(m.noiseType); return m2 }
+            self.savedPlaylists = migrated
         }
         
-        if let data = UserDefaults.standard.data(forKey: "upNextQueue"),
-           let savedQueue = try? JSONDecoder().decode([Episode].self, from: data) {
-            self.queue = savedQueue
+        // One-time seed: only populate library.json from the legacy key if the canonical
+        // file doesn't exist yet. Always clear the legacy key, so a stray legacy write can
+        // never make this migration clobber a newer library on a later launch.
+        if StorageManager.shared.rawData(for: "library.json") == nil,
+           let data = UserDefaults.standard.data(forKey: "savedPodcasts"),
+           let podcasts = try? JSONDecoder().decode([Podcast].self, from: data) {
+            StorageManager.shared.save(podcasts, to: "library.json")
+        }
+        UserDefaults.standard.removeObject(forKey: "savedPodcasts")
+
+        if let data = UserDefaults.standard.dictionary(forKey: "episodePositions") as? [String: Double] {
+            StorageManager.shared.save(data, to: "positions.json")
+            UserDefaults.standard.removeObject(forKey: "episodePositions")
+            // podPlayer loaded an empty positions map at its own init (it's constructed
+            // before this body runs); hand it the migrated data so the first flush to disk
+            // can't overwrite positions.json with that empty map.
+            podPlayer.setPositions(data)
+        }
+        // --- End Migration ---
+        
+
+        queueManager.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &cancellables)
+        sleepTimer.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &cancellables)
+        pomodoro.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &cancellables)
+        pomodoro.chimeFn = { [weak self] in self?.chime.play() }
+        
+        queueManager.loadPodcastFn = { [weak self] url, id, title in
+            self?.podTitle = title
+            self?.loadPodcast(url, id: id)
+        }
+        queueManager.pausePodcastFn = { [weak self] in
+            self?.podPlayer.pause()
+            self?.podTitle = "Queue finished"
+        }
+        sleepTimer.stopAllFn = { [weak self] in
+            self?.stopAll()
+        }
+        sleepTimer.updateFadeMultFn = { [weak self] mult in
+            self?.fadeMultiplier = mult
+        }
+        
+        genEngine.onRMSUpdate = { [weak self] power in
+            self?.rmsPower = power
+            // Noise-only keep-alive for the sleep timer: without a podcast there's no
+            // AVPlayer time-observer feeding backgroundTick, so the fade/terminal-stop would
+            // ride only the GCD timer (which iOS can curtail). The RMS tap fires whenever the
+            // engine renders, giving the timer the same belt-and-suspenders as the pod path.
+            self?.sleepTimer.backgroundTick()
         }
         
         podPlayer.onPlaybackStateChanged = { [weak self] isPlaying in
@@ -117,20 +252,90 @@ final class AudioEngine: ObservableObject {
             DispatchQueue.main.async { self?.podTitle = title }
         }
         
-        podPlayer.onQueueAdvance = { [weak self] in
-            DispatchQueue.main.async { self?.advanceQueue() }
+        podPlayer.onTimeUpdate = { [weak self] elapsed, duration in
+            DispatchQueue.main.async {
+                self?.podcastElapsed = elapsed
+                self?.podcastDuration = duration
+                if duration > 0 {
+                    self?.podcastProgress = elapsed / duration
+                }
+            }
         }
+        
+        podPlayer.onPlaybackFailed = { [weak self] errorMsg in
+            DispatchQueue.main.async {
+                self?.playbackNote = "Failed: \(errorMsg)"
+                self?.isPodPlaying = false
+            }
+        }
+
+        // Non-destructive note (e.g. limiter couldn't attach to a stream). Unlike
+        // onPlaybackFailed, this never changes isPodPlaying — the audio is fine.
+        podPlayer.onPlaybackNote = { [weak self] note in
+            DispatchQueue.main.async { self?.playbackNote = note }
+        }
+        
+        podPlayer.onQueueAdvance = { [weak self] finishedEpId in
+            DispatchQueue.main.async {
+                if let id = finishedEpId {
+                    self?.queueManager.finishedEpisodes.insert(id)
+                }
+                self?.queueManager.advanceQueue(finishedEpId: finishedEpId)
+            }
+        }
+        
+        podPlayer.onNearEnd = { [weak self] in
+            DispatchQueue.main.async {
+                guard let self = self, self.queueManager.autoPlay, !self.queueManager.shuffleQueue, self.queueManager.queue.count > 1 else { return }
+                let nextEp = self.queueManager.queue[1]
+                let url = self.resolveAudioUrl(nextEp.audioUrl)
+                self.podPlayer.preload(url: url)
+            }
+        }
+        
+        podPlayer.backgroundTick = { [weak self] in
+            self?.sleepTimer.backgroundTick()
+        }
+        
+        monitor.pathUpdateHandler = { [weak self] path in
+            DispatchQueue.main.async { self?.isOnline = path.status == .satisfied }
+        }
+        monitor.start(queue: DispatchQueue(label: "NetworkMonitor"))
         
         setupAudioSession()
         
         NotificationCenter.default.addObserver(self, selector: #selector(handleInterruption), name: AVAudioSession.interruptionNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(handleRouteChange), name: AVAudioSession.routeChangeNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(handleAppBackground), name: Notification.Name("AppDidEnterBackground"), object: nil)
         
-        if let first = queue.first { podTitle = first.title }
+        NotificationCenter.default.addObserver(forName: Notification.Name("StartSleepulatorMix"), object: nil, queue: .main) { [weak self] _ in
+            guard let self = self else { return }
+            if !self.isAnythingPlaying {
+                if let last = self.lastMix {
+                    self.resumeMix(last)
+                } else {
+                    self.noiseOn = true
+                    self.binauralOn = true
+                }
+            }
+        }
+        
+        NotificationCenter.default.addObserver(forName: Notification.Name("SetSleepulatorTimer"), object: nil, queue: .main) { [weak self] note in
+            if let mins = note.userInfo?["minutes"] as? Int {
+                self?.sleepTimer.startSleepTimer(minutes: mins)
+            }
+        }
+        
+        if let first = queueManager.queue.first { podTitle = first.title }
         
         podPlayer.setSpeed(playbackSpeed)
+        podPlayer.nightLimiterEnabled = nightLimiter
+        podPlayer.sleepEQEnabled = sleepEQ
+        podPlayer.sleepEQIntensity = sleepEQIntensity
         syncGenEngine()
-        syncPodPlayer()
+        genEngine.setWidth(stereoWidth)
+        syncAllVolumes()
+        reconcileSoundsToMode()
     }
     
     private func setupAudioSession() {
@@ -142,48 +347,64 @@ final class AudioEngine: ObservableObject {
     private func syncGenEngine() {
         genEngine.setNoise(on: noiseOn, volume: noiseVolume, type: noiseType)
         genEngine.setBinaural(on: binauralOn, volume: binVolume, preset: binauralPreset)
-        genEngine.setDucking(enabled: duckAmbient, isPodPlaying: isPodPlaying)
-    }
-    
-    private func syncPodPlayer() {
-        podPlayer.setVolume(podVolume * fadeMultiplier)
+        updateEnginePower()
     }
 
-    // MARK: Queue Logic
-    func playEpisode(_ episode: Episode) {
-        if !queue.contains(where: { $0.id == episode.id }) { queue.insert(episode, at: 0) }
-        else { queue.removeAll(where: { $0.id == episode.id }); queue.insert(episode, at: 0) }
-        podTitle = episode.title
-        loadPodcast(episode.audioUrl)
-    }
-
-    func addToQueue(_ episode: Episode) {
-        if !queue.contains(where: { $0.id == episode.id }) { queue.append(episode) }
-    }
-
-    func advanceQueue() {
-        if !self.queue.isEmpty { self.queue.removeFirst() }
-        
-        if !self.autoPlay || self.queue.isEmpty {
-            self.podPlayer.pause()
-            self.podTitle = "Queue finished"
-            return
+    private var suspendWorkItem: DispatchWorkItem?
+    /// Run the generative engine only while noise or binaural is on. When both are off
+    /// we suspend it (after the fade-out finishes) so it isn't rendering silence all
+    /// night; we resume immediately when either turns back on.
+    private func updateEnginePower() {
+        suspendWorkItem?.cancel()
+        suspendWorkItem = nil
+        if noiseOn || binauralOn {
+            genEngine.resumeIfNeeded()
+        } else {
+            let work = DispatchWorkItem { [weak self] in
+                guard let self = self, !self.noiseOn, !self.binauralOn else { return }
+                self.genEngine.suspendEngine()
+            }
+            suspendWorkItem = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.7, execute: work) // > the ~0.24s gain fade
         }
-        
-        let nextIndex = self.shuffleQueue ? Int.random(in: 0..<self.queue.count) : 0
-        let next = self.queue[nextIndex]
-        
-        if self.shuffleQueue {
-            self.queue.remove(at: nextIndex)
-            self.queue.insert(next, at: 0)
+    }
+
+    func resumePodcast() {
+        if podPlayer.hasPlayer {
+            podPlayer.resume()
+        } else if let first = queueManager.queue.first {
+            podTitle = first.title
+            loadPodcast(first.audioUrl, id: first.id)
         }
-        
-        self.podTitle = next.title
-        self.loadPodcast(next.audioUrl)
     }
     
     func togglePodcast() {
-        _ = podPlayer.toggle()
+        if isPodPlaying { podPlayer.pause() } else { resumePodcast() }
+    }
+    
+    func toggleMasterTransport() {
+        if isAnythingPlaying {
+            lastActiveSnapshot = (noiseOn, binauralOn, isPodPlaying)
+            pauseAll()
+        } else {
+            let snap = lastActiveSnapshot
+            if !snap.noise && !snap.bin && !snap.pod {
+                noiseOn = true
+            } else {
+                if snap.noise { noiseOn = true }
+                if snap.bin   { binauralOn = true }
+                if snap.pod   { resumePodcast() }
+            }
+        }
+    }
+    
+    func pauseAll() {
+        isMasterPauseTransition = true
+        saveLastMix()
+        noiseOn = false
+        binauralOn = false
+        if isPodPlaying { podPlayer.pause() }
+        isMasterPauseTransition = false
     }
     
     func saveLastMix() {
@@ -196,7 +417,8 @@ final class AudioEngine: ObservableObject {
             binVolume: binVolume,
             binauralPreset: binauralPreset,
             podVolume: podVolume,
-            podcastUrl: isPodPlaying ? queue.first?.audioUrl : nil
+            podcastUrl: isPodPlaying ? queueManager.queue.first?.audioUrl : nil,
+            podcastId: isPodPlaying ? queueManager.queue.first?.id : nil
         )
         self.lastMix = mix
         if let data = try? JSONEncoder().encode(mix) {
@@ -205,7 +427,7 @@ final class AudioEngine: ObservableObject {
     }
     
     func resumeMix(_ mix: SavedMix) {
-        self.noiseType = mix.noiseType
+        self.noiseType = NoiseType.migrate(mix.noiseType)
         self.noiseVolume = mix.noiseVolume
         self.noiseOn = mix.noiseOn
         
@@ -216,8 +438,27 @@ final class AudioEngine: ObservableObject {
         self.podVolume = mix.podVolume
         
         if let urlStr = mix.podcastUrl {
-            loadPodcast(urlStr)
+            loadPodcast(urlStr, id: mix.podcastId ?? urlStr)
         }
+    }
+    
+    func deleteMix(_ mix: SavedMix) {
+        savedPlaylists.removeAll(where: { $0.id == mix.id })
+    }
+    
+    func saveCurrentAsPlaylist() {
+        let mix = SavedMix(
+            name: queueManager.queue.first?.title ?? "Custom Mix",
+            noiseOn: noiseOn,
+            noiseVolume: noiseVolume,
+            noiseType: noiseType,
+            binauralOn: binauralOn,
+            binVolume: binVolume,
+            binauralPreset: binauralPreset,
+            podVolume: podVolume,
+            podcastUrl: isPodPlaying ? queueManager.queue.first?.audioUrl : nil
+        )
+        savedPlaylists.append(mix)
     }
 
     func stopAll() {
@@ -225,29 +466,61 @@ final class AudioEngine: ObservableObject {
         noiseOn = false
         binauralOn = false
         podPlayer.stop()
-        cancelTimer()
+        sleepTimer.cancelTimer()
     }
 
     // MARK: Podcast playback
-    func loadPodcast(_ urlStr: String) {
-        var finalUrlStr = urlStr
-        if sleepSafeAudio && !audioProxyUrl.isEmpty {
-            if let encoded = urlStr.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
-                finalUrlStr = "\(audioProxyUrl)\(encoded)"
-            }
-        }
-        
+    private func resolveAudioUrl(_ urlStr: String) -> String {
         if let origUrl = URL(string: urlStr), let cached = AudioDownloader.shared.getCachedUrl(for: origUrl) {
-            finalUrlStr = cached.absoluteString
+            return cached.absoluteString
         }
-        
-        podPlayer.play(url: finalUrlStr, title: podTitle)
+        return urlStr
+    }
+
+    func loadPodcast(_ urlStr: String, id: String) {
+        playbackNote = nil
+        let finalUrlStr = resolveAudioUrl(urlStr)
+        podPlayer.play(url: finalUrlStr, id: id, title: podTitle)
     }
 
     func seekPodcast(seconds: TimeInterval) {
         podPlayer.seek(seconds: seconds)
     }
+    
+    func seekPodcast(to progress: Double) {
+        let seconds = progress * podcastDuration
+        podPlayer.seekTo(seconds: seconds)
+    }
 
+    func playAll(_ episodes: [Episode]) {
+        queueManager.playAll(episodes)
+    }
+    
+    var finishedEpisodes: Set<String> {
+        return queueManager.finishedEpisodes
+    }
+    
+    var autoPlay: Bool {
+        get { queueManager.autoPlay }
+        set { queueManager.autoPlay = newValue }
+    }
+    
+    var shuffleQueue: Bool {
+        get { queueManager.shuffleQueue }
+        set { queueManager.shuffleQueue = newValue }
+    }
+    
+    var deleteOnCompletion: Bool {
+        get { queueManager.deleteOnCompletion }
+        set { queueManager.deleteOnCompletion = newValue }
+    }
+    
+    var hideFinishedEpisodes: Bool {
+        get { queueManager.hideFinishedEpisodes }
+        set { queueManager.hideFinishedEpisodes = newValue }
+    }
+    
+    // MARK: - Queue Delegation
     // MARK: Interruption
     @objc private func handleInterruption(note: Notification) {
         guard let typeValue = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
@@ -259,8 +532,21 @@ final class AudioEngine: ObservableObject {
         } else if type == .ended {
             guard let optionsValue = note.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt else { return }
             let options = AVAudioSession.InterruptionOptions(rawValue: optionsValue)
-            if options.contains(.shouldResume) {
+
+            // A power-save suspend scheduled just before the call must not fire after we
+            // restart the engine below — it would silently re-pause the bed mid-night.
+            suspendWorkItem?.cancel()
+            suspendWorkItem = nil
+
+            // Reactivate the session before resuming whichever source was active. Previously
+            // only the generative branch did this, so a podcast-only user got silence.
+            try? AVAudioSession.sharedInstance().setActive(true)
+
+            if noiseOn || binauralOn {
                 genEngine.handleInterruption(shouldResume: true)
+            }
+
+            if options.contains(.shouldResume) {
                 if isPodPlaying { podPlayer.resume() }
             }
         }
@@ -270,49 +556,25 @@ final class AudioEngine: ObservableObject {
         guard let reasonValue = note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt,
               let reason = AVAudioSession.RouteChangeReason(rawValue: reasonValue) else { return }
         
+        // Headphones unplugged: follow the HIG for spoken media — pause the podcast so a
+        // voice doesn't suddenly play out the phone speaker (waking the room). Keep the
+        // ambient noise bed going — it's a calibrated, limiter-bounded background you fall
+        // asleep to; cutting it would do the opposite of the app's job. Binaural is
+        // meaningless on a mono speaker, so drop it.
         if reason == .oldDeviceUnavailable {
             if binauralOn { binauralOn = false }
+            if isPodPlaying { podPlayer.pause() }
+        }
+
+        // Any route transition (Bluetooth / dock / CarPlay connect, etc.) can silently stop
+        // the engine without a clean configuration-change rebuild. Re-assert it if the bed
+        // should still be playing — resumeIfNeeded() no-ops when already running.
+        if noiseOn || binauralOn {
+            genEngine.resumeIfNeeded()
         }
     }
 
-    // MARK: Timer
-    func startSleepTimer(minutes: Int) {
-        cancelTimer()
-        sleepTimerEnd = Date().addingTimeInterval(Double(minutes) * 60)
-        self.timerRemaining = Double(minutes) * 60
-        self.fadeMultiplier = 1.0
-        
-        sleepTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-            guard let self = self, let end = self.sleepTimerEnd else { return }
-            let remaining = end.timeIntervalSince(Date())
-            self.timerRemaining = remaining
-            
-            if remaining <= 0 {
-                self.stopAll()
-                self.cancelTimer()
-            } else {
-                self.fadeMultiplier = Double(AudioMath.getFadeMultiplier(timerRemaining: remaining))
-            }
-        }
-    }
-
-    func bumpTimer() {
-        if let currentEnd = sleepTimerEnd {
-            sleepTimerEnd = currentEnd.addingTimeInterval(15 * 60)
-            self.timerRemaining += 15 * 60
-            
-            // If we bumped it back above 10 minutes, restore the volume fully.
-            if self.timerRemaining > 600 {
-                self.fadeMultiplier = 1.0
-            }
-        }
-    }
-
-    func cancelTimer() {
-        sleepTimer?.invalidate()
-        sleepTimer = nil
-        sleepTimerEnd = nil
-        timerRemaining = 0
-        fadeMultiplier = 1.0
+    @objc private func handleAppBackground() {
+        podPlayer.flushPositionsToDisk()
     }
 }

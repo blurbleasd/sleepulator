@@ -2,6 +2,7 @@ import SwiftUI
 
 struct BreathingView: View {
     @Binding var isPresented: Bool
+    @Environment(\.accessibilityReduceMotion) var reduceMotion
     
     @State private var scale: CGFloat = 1.0
     @State private var opacity: Double = 0.5
@@ -22,7 +23,7 @@ struct BreathingView: View {
                         Color.clear
                     ]), center: .center, startRadius: 10, endRadius: 250)
                 )
-                .scaleEffect(scale)
+                .scaleEffect(scale)   // the breathing pacer must move even under Reduce Motion
                 .frame(width: 400, height: 400)
                 .blur(radius: 50)
             
@@ -37,40 +38,55 @@ struct BreathingView: View {
                             .font(.title)
                             .foregroundColor(.gray)
                             .padding()
+                            .frame(minWidth: 44, minHeight: 44)
                     }
+                    .accessibilityLabel("Close breathing exercise")
                 }
-                
+
                 HStack(spacing: 20) {
                     Button("4-7-8") {
                         mode = "478"
                         startBreathing()
                     }
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
                     .padding(.horizontal, 20)
                     .padding(.vertical, 10)
+                    .frame(minHeight: 44)
                     .background(mode == "478" ? Color(red: 0.9, green: 0.7, blue: 0.4) : Color.white.opacity(0.1))
                     .foregroundColor(mode == "478" ? .black : .gray)
-                    .cornerRadius(20)
+                    .clipShape(Capsule())
                     .font(.system(.headline, design: .rounded))
-                    
+                    .accessibilityLabel("4-7-8 breathing")
+                    .accessibilityAddTraits(mode == "478" ? .isSelected : [])
+
                     Button("Box 4-4-4-4") {
                         mode = "box"
                         startBreathing()
                     }
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
                     .padding(.horizontal, 20)
                     .padding(.vertical, 10)
+                    .frame(minHeight: 44)
                     .background(mode == "box" ? Color(red: 0.9, green: 0.7, blue: 0.4) : Color.white.opacity(0.1))
                     .foregroundColor(mode == "box" ? .black : .gray)
-                    .cornerRadius(20)
+                    .clipShape(Capsule())
                     .font(.system(.headline, design: .rounded))
+                    .accessibilityLabel("Box breathing")
+                    .accessibilityAddTraits(mode == "box" ? .isSelected : [])
                 }
                 .padding(.top, 20)
-                
+
                 Spacer()
-                
+
                 Text(instruction)
-                    .font(.system(size: 40, weight: .bold, design: .rounded))
+                    .font(.system(.largeTitle, design: .rounded).weight(.bold))
                     .foregroundColor(instructionColor)
-                    .animation(.easeInOut, value: instruction)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+                    .animation(reduceMotion ? nil : .easeInOut, value: instruction)
+                    .accessibilityLabel(instruction)
                 
                 Spacer()
             }
@@ -99,13 +115,13 @@ struct BreathingView: View {
         instruction = "Inhale"
         instructionColor = Color(red: 0.9, green: 0.7, blue: 0.4)
         withAnimation(.easeInOut(duration: 4.0)) { scale = 1.3; opacity = 0.8 }
-        
+
         // Hold (7s)
         DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) {
             instruction = "Hold"
             instructionColor = .white
         }
-        
+
         // Exhale (8s)
         DispatchQueue.main.asyncAfter(deadline: .now() + 11.0) {
             instruction = "Exhale"
@@ -113,26 +129,26 @@ struct BreathingView: View {
             withAnimation(.easeInOut(duration: 8.0)) { scale = 1.0; opacity = 0.3 }
         }
     }
-    
+
     func runBox() {
         // Inhale (4s)
         instruction = "Inhale"
         instructionColor = Color(red: 0.9, green: 0.7, blue: 0.4)
         withAnimation(.easeInOut(duration: 4.0)) { scale = 1.3; opacity = 0.8 }
-        
+
         // Hold (4s)
         DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) {
             instruction = "Hold"
             instructionColor = .white
         }
-        
+
         // Exhale (4s)
         DispatchQueue.main.asyncAfter(deadline: .now() + 8.0) {
             instruction = "Exhale"
             instructionColor = Color(red: 0.4, green: 0.6, blue: 0.9)
             withAnimation(.easeInOut(duration: 4.0)) { scale = 1.0; opacity = 0.3 }
         }
-        
+
         // Hold (4s)
         DispatchQueue.main.asyncAfter(deadline: .now() + 12.0) {
             instruction = "Hold"

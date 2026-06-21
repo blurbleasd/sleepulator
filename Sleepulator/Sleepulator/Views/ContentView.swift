@@ -2,28 +2,35 @@ import SwiftUI
 
 struct ContentView: View {
     @StateObject private var audio = AudioEngine()
+    @State private var selectedTab = 0
+    @AppStorage("bedtimeMode") private var bedtimeMode = false
+    
+    var pal: Palette { Palette(bedtime: bedtimeMode) }
     
     var body: some View {
         ZStack(alignment: .bottom) {
-            TabView {
+            TabView(selection: $selectedTab) {
                 HomeView(audio: audio)
                     .tabItem {
-                        Label("Mixer", systemImage: "slider.vertical.3")
+                        Label("Sleep", systemImage: "moon.stars.fill")
                     }
+                    .tag(0)
                 
                 LibraryView(audio: audio)
                     .tabItem {
-                        Label("Podcasts", systemImage: "play.circle")
+                        Label("Podcasts", systemImage: "music.note.list")
                     }
+                    .tag(1)
                 
                 SettingsView(audio: audio)
                     .tabItem {
                         Label("Settings", systemImage: "gear")
                     }
+                    .tag(2)
             }
-            .accentColor(Color(red: 0.9, green: 0.7, blue: 0.4))
+            .accentColor(pal.accent)
             
-            MiniPlayerView(audio: audio)
+            MiniPlayerView(audio: audio, selectedTab: $selectedTab)
         }
         // Force dark mode for bedtime aesthetic
         .preferredColorScheme(.dark)
