@@ -268,6 +268,7 @@ struct AddPodcastSheet: View {
     @State private var searchResults: [ITunesPodcast] = []
     @State private var isSearching = false
     @State private var searchQuery = ""
+    @State private var searchTask: Task<Void, Never>? = nil
     
     var body: some View {
         ZStack {
@@ -294,22 +295,37 @@ struct AddPodcastSheet: View {
                     .foregroundColor(pal.text)
                     .padding(.horizontal, 24)
                     .onChange(of: searchQuery) { newValue in
+                        // Cancel any in-flight search; a per-keystroke fan-out used to race,
+                        // and a slow early request could overwrite a newer query's results.
+                        searchTask?.cancel()
+
                         if newValue.lowercased().starts(with: "http") {
                             feedUrlInput = newValue
-                        } else {
-                            if newValue.count > 2 && audio.isOnline {
-                                Task {
-                                    isSearching = true
-                                    do {
-                                        searchResults = try await ITunesSearchManager.shared.search(query: newValue)
-                                    } catch {
-                                        // ignore
-                                    }
-                                    isSearching = false
-                                }
+                            searchResults = []
+                            isSearching = false
+                            return
+                        }
+                        guard newValue.count > 2, audio.isOnline else {
+                            searchResults = []
+                            isSearching = false
+                            return
+                        }
+
+                        searchTask = Task {
+                            // Debounce: wait for typing to settle before hitting the network.
+                            try? await Task.sleep(nanoseconds: 300_000_000)
+                            if Task.isCancelled { return }
+                            await MainActor.run { isSearching = true }
+                            let results = (try? await ITunesSearchManager.shared.search(query: newValue)) ?? []
+                            if Task.isCancelled { return }
+                            await MainActor.run {
+                                // Ignore results whose query no longer matches the field.
+                                if newValue == searchQuery { searchResults = results }
+                                isSearching = false
                             }
                         }
                     }
+                    .onDisappear { searchTask?.cancel() }
                 
                 if let err = errorMessage {
                     Text(err)
@@ -388,7 +404,9 @@ struct EpisodeRowView: View {
     let ep: Episode
     @ObservedObject var audio: AudioEngine
     let podcast: Podcast
-    
+    // Resume progress, computed once by the parent from positions.json (was decoded per row).
+    var savedProgress: Double = 0
+
     @AppStorage("bedtimeMode") private var bedtimeMode = false
     var pal: Palette { Palette(bedtime: bedtimeMode) }
     
@@ -569,10 +587,7 @@ struct EpisodeRowView: View {
             if let url = URL(string: ep.audioUrl), AudioDownloader.shared.getCachedUrl(for: url) != nil {
                 isDownloaded = true
             }
-            if let positions: [String: Double] = StorageManager.shared.load(from: "positions.json"),
-               let pos = positions[ep.id], let duration = ep.duration, duration > 0 {
-                progress = min(1.0, pos / duration)
-            }
+            progress = savedProgress
         }
     }
 }

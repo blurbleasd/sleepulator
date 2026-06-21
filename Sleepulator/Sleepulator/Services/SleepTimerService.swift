@@ -10,6 +10,10 @@ final class SleepTimerService: ObservableObject {
     @Published var timerRemaining: TimeInterval = 0
     private var sleepTimer: DispatchSourceTimer?
     private var sleepTimerEnd: Date?
+    // tick() runs from the GCD timer AND from backgroundTick() (RMS tap + AVPlayer observer),
+    // so several threads can hit expiry at once. This guards the terminal stop to fire exactly
+    // once. Checked/set only on the main queue, so no extra locking is needed.
+    private var didFire = false
 
     
     #if canImport(ActivityKit)
@@ -23,6 +27,7 @@ final class SleepTimerService: ObservableObject {
         cancelTimer()
         let endDate = Date().addingTimeInterval(Double(minutes) * 60)
         sleepTimerEnd = endDate
+        didFire = false
         self.timerRemaining = Double(minutes) * 60
         updateFadeMultFn?(1.0)
         
@@ -50,6 +55,8 @@ final class SleepTimerService: ObservableObject {
         DispatchQueue.main.async {
             self.timerRemaining = remaining
             if remaining <= 0 {
+                guard !self.didFire else { return }
+                self.didFire = true
                 self.stopAllFn?()
                 self.cancelTimer()
             } else {

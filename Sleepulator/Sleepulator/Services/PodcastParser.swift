@@ -32,16 +32,21 @@ class PodcastParser: NSObject, XMLParserDelegate {
             let status = (response as? HTTPURLResponse)?.statusCode ?? -1
             throw NSError(domain: "PodcastParser", code: status, userInfo: [NSLocalizedDescriptionKey: "HTTP Error \(status)"])
         }
-        
+
+        let data = try Data(contentsOf: tempFileUrl)
+        return try parse(data: data)
+    }
+
+    /// Parse feed XML from in-memory bytes. Split out from the network fetch so the parsing
+    /// logic (CDATA, dates, durations, artwork) is unit-testable without hitting the network.
+    func parse(data: Data) throws -> ParsedFeed {
         self.episodes = []
         self.channelTitle = ""
         self.channelArtworkUrl = nil
         self.inItem = false
         self.inImage = false
-        
-        guard let parser = XMLParser(contentsOf: tempFileUrl) else {
-            throw NSError(domain: "PodcastParser", code: 2, userInfo: [NSLocalizedDescriptionKey: "Could not create parser for file"])
-        }
+
+        let parser = XMLParser(data: data)
         parser.delegate = self
         if parser.parse() {
             // Sort by pubDate descending
@@ -89,17 +94,28 @@ class PodcastParser: NSObject, XMLParserDelegate {
     }
     
     func parser(_ parser: XMLParser, foundCharacters string: String) {
+        accumulate(string)
+    }
+
+    // Most real feeds wrap <description>/<content:encoded> (and sometimes <title>) in
+    // CDATA, which XMLParser delivers here — NOT via foundCharacters. Without this,
+    // episode show-notes came back empty for the majority of podcasts.
+    func parser(_ parser: XMLParser, foundCDATABlock CDATABlock: Data) {
+        if let string = String(data: CDATABlock, encoding: .utf8) {
+            accumulate(string)
+        }
+    }
+
+    /// Append text (plain or CDATA) to the buffer the current element maps to.
+    private func accumulate(_ string: String) {
         if inItem {
-            if currentElement == "title" {
-                currentTitle += string
-            } else if currentElement == "guid" {
-                currentGuid += string
-            } else if currentElement == "description" || currentElement == "content:encoded" {
-                currentDescription += string
-            } else if currentElement == "pubDate" {
-                currentPubDate += string
-            } else if currentElement == "itunes:duration" {
-                currentDuration += string
+            switch currentElement {
+            case "title":                       currentTitle += string
+            case "guid":                        currentGuid += string
+            case "description", "content:encoded": currentDescription += string
+            case "pubDate":                     currentPubDate += string
+            case "itunes:duration":             currentDuration += string
+            default:                            break
             }
         } else {
             if currentElement == "title" && !inImage {
@@ -113,7 +129,8 @@ class PodcastParser: NSObject, XMLParserDelegate {
     func parser(_ parser: XMLParser, didEndElement elementName: String, namespaceURI: String?, qualifiedName qName: String?) {
         if elementName == "item" {
             inItem = false
-            let id = currentGuid.isEmpty ? currentAudioUrl : currentGuid
+            let trimmedGuid = currentGuid.trimmingCharacters(in: .whitespacesAndNewlines)
+            let id = trimmedGuid.isEmpty ? currentAudioUrl.trimmingCharacters(in: .whitespacesAndNewlines) : trimmedGuid
             if !currentAudioUrl.isEmpty {
                 let desc = currentDescription.trimmingCharacters(in: .whitespacesAndNewlines)
                 
@@ -134,6 +151,9 @@ class PodcastParser: NSObject, XMLParserDelegate {
                 channelArtworkUrl = tempImageUrl.trimmingCharacters(in: .whitespacesAndNewlines)
             }
         }
+        // Clear the current element so whitespace between tags doesn't leak into the next
+        // buffer — it was accumulating into currentGuid, leaving ids like "ep-1\n            ".
+        currentElement = ""
     }
     
     private func parseDate(_ dateStr: String) -> Date? {

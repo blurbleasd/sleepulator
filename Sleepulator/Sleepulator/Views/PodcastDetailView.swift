@@ -14,6 +14,14 @@ struct PodcastDetailView: View {
     @State private var isLoading = false
     @State private var errorMessage: String? = nil
     @State private var episodeSearch = ""
+    // Loaded once here instead of re-decoding positions.json in every EpisodeRowView.onAppear
+    // (which janked the main thread while scrolling a long episode list).
+    @State private var episodePositions: [String: Double] = [:]
+
+    private func progress(for ep: Episode) -> Double {
+        guard let pos = episodePositions[ep.id], let dur = ep.duration, dur > 0 else { return 0 }
+        return min(1.0, pos / dur)
+    }
     
     var body: some View {
         ZStack {
@@ -108,7 +116,7 @@ struct PodcastDetailView: View {
                                     .padding()
                             } else {
                                 ForEach(visibleEpisodes) { ep in
-                                    EpisodeRowView(ep: ep, audio: audio, podcast: podcast)
+                                    EpisodeRowView(ep: ep, audio: audio, podcast: podcast, savedProgress: progress(for: ep))
                                         .padding(.vertical, 8)
                                     
                                     if ep.id != visibleEpisodes.last?.id {
@@ -130,6 +138,7 @@ struct PodcastDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $episodeSearch, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search episodes")
         .onAppear {
+            episodePositions = StorageManager.shared.load(from: "positions.json") ?? [:]
             loadFeed()
         }
     }

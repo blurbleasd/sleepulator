@@ -52,6 +52,18 @@ final class AudioEngine: ObservableObject {
             podPlayer.nightLimiterEnabled = nightLimiter
         }
     }
+    /// When on, the Night Limiter follows the mode: ON while sleeping (soften loud spikes so
+    /// they don't jolt you awake), OFF while focusing (keep full dynamics).
+    @Published var limiterByMode: Bool {
+        didSet {
+            UserDefaults.standard.set(limiterByMode, forKey: "limiterByMode")
+            applyLimiterForMode()
+        }
+    }
+
+    private func applyLimiterForMode() {
+        if limiterByMode { nightLimiter = !focusMode }
+    }
     @Published var sleepEQ: Bool {
         didSet {
             UserDefaults.standard.set(sleepEQ, forKey: "sleepEQEnabled")
@@ -91,7 +103,10 @@ final class AudioEngine: ObservableObject {
     @Published var isPodPlaying = false { didSet { syncGenEngine(); if !isMasterPauseTransition { lastActiveSnapshot.pod = isPodPlaying } } }
     var isAnythingPlaying: Bool { isPodPlaying || noiseOn || binauralOn }
     
-    @Published var rmsPower: Double = 0.0
+    // Not @Published: no view renders this, and the RMS tap fires ~20×/sec. Publishing it
+    // invalidated HomeView + every child holding `audio` 20 times a second all night for a
+    // value nothing displays. Kept as a plain property in case a future visual wants it.
+    var rmsPower: Double = 0.0
     
     @Published var masterVolume: Double {
         didSet {
@@ -118,6 +133,8 @@ final class AudioEngine: ObservableObject {
             if focusMode { sleepTimer.cancelTimer() } else { pomodoro.stop() }
             // Snap the active sounds into the new mode's palette so nothing cross-mode lingers.
             reconcileSoundsToMode()
+            // If the limiter follows the mode, update it (Sleep = on, Focus = off).
+            applyLimiterForMode()
         }
     }
 
@@ -171,6 +188,7 @@ final class AudioEngine: ObservableObject {
         }
         
         self.nightLimiter = UserDefaults.standard.object(forKey: "nightLimiterEnabled") as? Bool ?? AppConfig.nightLimiterEnabled
+        self.limiterByMode = UserDefaults.standard.object(forKey: "limiterByMode") as? Bool ?? false
         self.sleepEQ = UserDefaults.standard.object(forKey: "sleepEQEnabled") as? Bool ?? false
         self.sleepEQIntensity = UserDefaults.standard.object(forKey: "sleepEQIntensity") as? Double ?? 1.0
         // podPlayer.nightLimiterEnabled / .sleepEQEnabled are pushed below, after all
@@ -243,7 +261,11 @@ final class AudioEngine: ObservableObject {
             // engine renders, giving the timer the same belt-and-suspenders as the pod path.
             self?.sleepTimer.backgroundTick()
         }
-        
+
+        genEngine.onEngineError = { [weak self] msg in
+            DispatchQueue.main.async { self?.playbackNote = msg }
+        }
+
         podPlayer.onPlaybackStateChanged = { [weak self] isPlaying in
             DispatchQueue.main.async { self?.isPodPlaying = isPlaying }
         }
@@ -278,7 +300,7 @@ final class AudioEngine: ObservableObject {
         podPlayer.onQueueAdvance = { [weak self] finishedEpId in
             DispatchQueue.main.async {
                 if let id = finishedEpId {
-                    self?.queueManager.finishedEpisodes.insert(id)
+                    self?.queueManager.markFinished(id)
                 }
                 self?.queueManager.advanceQueue(finishedEpId: finishedEpId)
             }
@@ -336,6 +358,7 @@ final class AudioEngine: ObservableObject {
         genEngine.setWidth(stereoWidth)
         syncAllVolumes()
         reconcileSoundsToMode()
+        applyLimiterForMode()
     }
     
     private func setupAudioSession() {

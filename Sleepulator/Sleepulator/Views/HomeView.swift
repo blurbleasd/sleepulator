@@ -156,6 +156,26 @@ struct HomeView: View {
                             }
                         }
                     }
+
+                    // Rescued from the old HeroTransport: as the fade is about to cut the
+                    // night off, offer a half-asleep one-tap "+15m" instead of forcing a
+                    // reopen of the timer sheet (which would start a brand-new timer).
+                    if !audio.focusMode, audio.sleepTimer.timerRemaining > 0, audio.sleepTimer.timerRemaining <= 120 {
+                        Button(action: {
+                            audio.sleepTimer.bumpTimer()
+                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                        }) {
+                            HStack(spacing: 6) {
+                                Image(systemName: "plus.circle.fill")
+                                Text("Still awake? +15m").font(.subheadline.weight(.semibold))
+                            }
+                            .foregroundColor(pal.bg)
+                            .padding(.horizontal, 18).padding(.vertical, 11)
+                            .background(Capsule().fill(pal.accent))
+                        }
+                        .frame(minHeight: 44)
+                        .accessibilityLabel("Still awake, add 15 minutes to the sleep timer")
+                    }
                 }
 
                 Spacer()
@@ -401,50 +421,6 @@ struct FocusBackdrop: View {
     }
 }
 
-struct HeaderBar: View {
-    @ObservedObject var audio: AudioEngine
-    let pal: Palette
-
-    var body: some View {
-        VStack(spacing: 16) {
-            HStack(spacing: 8) {
-                titleView
-                Spacer()
-            }
-            .padding(.horizontal, 20)
-
-            // Prominent Sleep | Focus selector — the primary frame of the whole app.
-            ModeSwitcher(focusMode: $audio.focusMode, pal: pal)
-                .padding(.horizontal, 20)
-
-            if let note = audio.playbackNote {
-                HStack(alignment: .firstTextBaseline) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                    Text(note)
-                        .font(.caption)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Spacer()
-                }
-                .foregroundColor(pal.accent)
-                .padding()
-                .background(pal.text.opacity(0.05))
-                .cornerRadius(12)
-                .padding(.horizontal, 20)
-            }
-        }
-    }
-
-    private var titleView: some View {
-        Text("SLEEPULATOR")
-            .font(.system(.title3, design: .rounded).bold())
-            .foregroundColor(pal.text)
-            .tracking(2)
-            .lineLimit(1)
-            .minimumScaleFactor(0.6)
-    }
-
-}
-
 // Prominent two-segment Sleep | Focus selector. The active segment fills with the accent.
 struct ModeSwitcher: View {
     @Binding var focusMode: Bool
@@ -489,184 +465,6 @@ struct ModeSwitcher: View {
         .buttonStyle(.plain)
         .accessibilityLabel("\(title) mode")
         .accessibilityAddTraits(isActive ? [.isButton, .isSelected] : .isButton)
-    }
-}
-
-struct HeroTransport: View {
-    @ObservedObject var audio: AudioEngine
-    @Binding var isPlayPressed: Bool
-    @Binding var showTimerActionSheet: Bool
-    @Binding var showBreathing: Bool
-    let reduceMotion: Bool
-    let statusText: String
-    let heroTap: () -> Void
-    let pal: Palette
-
-    // Hero scales with Dynamic Type (so the "find-it-in-the-dark" button doesn't shrink
-    // relative to enlarged text), clamped so it can't overflow at the largest AX sizes.
-    @ScaledMetric(relativeTo: .largeTitle) private var heroDiameter: CGFloat = 110
-    @ScaledMetric(relativeTo: .largeTitle) private var heroGlyph: CGFloat = 40
-    @State private var haloBreath = false
-
-    static func fmt(_ s: TimeInterval) -> String {
-        let total = max(0, Int(s))
-        return String(format: "%d:%02d", total / 60, total % 60)
-    }
-
-    var body: some View {
-        VStack(spacing: 16) {
-            // Giant Play/Pause button
-            VStack(spacing: 8) {
-                Button(action: {
-                    if reduceMotion {
-                        heroTap()
-                    } else {
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.9)) {
-                            heroTap()
-                        }
-                    }
-                    // Soft, not heavy — this is the settling-down action, not a game button.
-                    UIImpactFeedbackGenerator(style: .soft).impactOccurred()
-                }) {
-                    ZStack {
-                        // Idle "breathing" halo — a soft, slow glow that invites the first tap.
-                        if !audio.isAnythingPlaying {
-                            Circle()
-                                .fill(pal.accent.opacity(0.10))
-                                .frame(width: min(heroDiameter, 150) + 28, height: min(heroDiameter, 150) + 28)
-                                .blur(radius: 14)
-                                .scaleEffect(haloBreath ? 1.08 : 0.96)
-                                .opacity(haloBreath ? 0.26 : 0.11)
-                                .animation(.easeInOut(duration: 3.0).repeatForever(autoreverses: true), value: haloBreath)
-                                .allowsHitTesting(false)
-                        }
-                        Circle()
-                            .fill(Color(white: 0.1).opacity(0.8))
-                            .frame(width: min(heroDiameter, 150), height: min(heroDiameter, 150))
-                            .shadow(color: pal.accent.opacity(0.15), radius: isPlayPressed ? 10 : 25)
-                            .overlay(
-                                Circle()
-                                    .stroke(pal.accent.opacity(0.3), lineWidth: 1)
-                            )
-
-                        Image(systemName: audio.isAnythingPlaying ? "pause.fill" : "play.fill")
-                            .font(.system(size: min(heroGlyph, 56), weight: .medium, design: .rounded))
-                            .foregroundColor(pal.accent)
-                    }
-                }
-                .scaleEffect(isPlayPressed ? 0.95 : 1.0)
-                .animation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.9), value: isPlayPressed)
-                .accessibilityLabel(audio.isAnythingPlaying ? "Pause all audio" : "Play")
-                .simultaneousGesture(
-                    DragGesture(minimumDistance: 0)
-                        .onChanged { _ in isPlayPressed = true }
-                        .onEnded { _ in isPlayPressed = false }
-                )
-                .onAppear { haloBreath = true }
-
-                Text(statusText)
-                    .font(.system(.callout, design: .rounded).bold())
-                    .foregroundColor(pal.dim)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .minimumScaleFactor(0.8)
-                    .padding(.horizontal, 24)
-            }
-
-            // Focus mode: Pomodoro controls (no fade, no auto-stop)
-            if audio.focusMode {
-                if audio.pomodoro.isRunning {
-                    VStack(spacing: 8) {
-                        Text("\(audio.pomodoro.phase == .work ? "Focus" : "Break") · \(HeroTransport.fmt(audio.pomodoro.remaining))")
-                            .font(.headline)
-                            .foregroundColor(pal.accent)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.7)
-                        Button(action: { audio.pomodoro.stop() }) {
-                            HStack(alignment: .firstTextBaseline) {
-                                Image(systemName: "stop.fill")
-                                Text("Stop")
-                                    .font(.headline)
-                                    .lineLimit(1)
-                                    .minimumScaleFactor(0.8)
-                            }
-                            .foregroundColor(.red.opacity(0.8))
-                            .glassPanel()
-                        }
-                        .frame(minHeight: 44)
-                    }
-                } else {
-                    Button(action: { audio.pomodoro.start() }) {
-                        HStack(alignment: .firstTextBaseline) {
-                            Image(systemName: "bolt.fill")
-                            Text("Start Focus (\(audio.pomodoro.workMinutes)/\(audio.pomodoro.restMinutes))")
-                                .font(.headline)
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.7)
-                        }
-                        .foregroundColor(pal.accent)
-                        .glassPanel()
-                    }
-                    .frame(minHeight: 44)
-                }
-            }
-            // Sleep Timer
-            else if audio.sleepTimer.timerRemaining > 0 {
-                if audio.sleepTimer.timerRemaining <= 60 {
-                    Button(action: { audio.sleepTimer.bumpTimer() }) {
-                        HStack(alignment: .firstTextBaseline) {
-                            Image(systemName: "plus.circle.fill")
-                            Text("Still Awake? (+15m)")
-                                .font(.headline)
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.8)
-                        }
-                        .foregroundColor(pal.bg)
-                        .padding()
-                        .background(pal.accent)
-                        .cornerRadius(16)
-                    }
-                    .frame(minHeight: 44)
-                } else {
-                    Button(action: { audio.sleepTimer.cancelTimer() }) {
-                        HStack(alignment: .firstTextBaseline) {
-                            Image(systemName: "moon.stars.fill")
-                            Text("Cancel (\(Int(audio.sleepTimer.timerRemaining / 60))m)")
-                                .font(.headline)
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.8)
-                        }
-                        .foregroundColor(.red.opacity(0.8))
-                        .glassPanel()
-                    }
-                    .frame(minHeight: 44)
-                    .accessibilityLabel("Cancel sleep timer")
-                    .accessibilityValue("\(Int(audio.sleepTimer.timerRemaining / 60)) minutes remaining")
-                }
-            } else {
-                Button(action: { showTimerActionSheet = true }) {
-                    HStack(spacing: 5) {
-                        Image(systemName: "moon.zzz")
-                        Text("Set sleep timer")
-                    }
-                    .font(.subheadline.weight(.medium))
-                    .foregroundColor(pal.dim)
-                }
-                .frame(minHeight: 44)
-            }
-
-            // Breathing is a quiet Sleep-mode extra — a subtle link, not a prominent button.
-            if !audio.focusMode {
-                Button(action: { showBreathing = true }) {
-                    HStack(spacing: 5) {
-                        Image(systemName: "wind")
-                        Text("Breathing exercise")
-                    }
-                    .font(.caption.weight(.medium))
-                    .foregroundColor(pal.dim.opacity(0.85))
-                }
-            }
-        }
     }
 }
 
@@ -804,7 +602,6 @@ struct SavedMixesList: View {
         }
     }
 }
-
 
 struct WarmMixerRow: View {
     let icon: String

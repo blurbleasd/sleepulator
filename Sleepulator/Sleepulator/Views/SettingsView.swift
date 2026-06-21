@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 struct SettingsView: View {
     @ObservedObject var audio: AudioEngine
     @AppStorage("bedtimeMode") private var bedtimeMode = false
+    @AppStorage("autoNightDim") private var autoNightDim = true
     
     var pal: Palette { Palette(bedtime: bedtimeMode) }
 
@@ -98,7 +99,16 @@ struct SettingsView: View {
                             // Trailing-closure label so the long text wraps at large Dynamic Type
                             // sizes instead of truncating against the fixed-width switch.
                             Toggle(isOn: $audio.nightLimiter) {
-                                Text("Night Limiter — soften loud spikes")
+                                Text(audio.limiterByMode ? "Night Limiter — following mode" : "Night Limiter — soften loud spikes")
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            .toggleStyle(SwitchToggleStyle(tint: pal.accent))
+                            .foregroundColor(pal.dim)
+                            .disabled(audio.limiterByMode)
+                            .opacity(audio.limiterByMode ? 0.45 : 1)
+
+                            Toggle(isOn: $audio.limiterByMode) {
+                                Text("Limiter follows mode — on while sleeping, off while focusing")
                                     .fixedSize(horizontal: false, vertical: true)
                             }
                             .toggleStyle(SwitchToggleStyle(tint: pal.accent))
@@ -138,6 +148,26 @@ struct SettingsView: View {
                         .glassPanel()
                         .padding(.horizontal)
                         
+                        // Display
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Display")
+                                .font(.title3.bold())
+                                .foregroundColor(pal.text)
+
+                            Toggle(isOn: $autoNightDim) {
+                                Text("Auto-dim at night")
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            .toggleStyle(SwitchToggleStyle(tint: pal.accent))
+                            .foregroundColor(pal.dim)
+
+                            Text("Once a sleep timer is running, the screen fades to black after a minute so it doesn't light the room. Tap to wake.")
+                                .font(.caption)
+                                .foregroundColor(pal.dim)
+                        }
+                        .glassPanel()
+                        .padding(.horizontal)
+
                         // Advanced
                         DisclosureGroup("Advanced") {
                             VStack(spacing: 24) {
@@ -287,7 +317,7 @@ struct SettingsView: View {
         var backupDict: [String: Any] = [:]
 
         // Scalar settings live in UserDefaults.
-        let scalarKeys = ["noiseVolume", "noiseType", "binVolume", "binauralPreset", "podVolume", "stereoWidth", "masterVolume", "autoPlay", "shuffleQueue", "deleteOnCompletion", "hideFinishedEpisodes", "feedProxyUrl", "nightLimiterEnabled", "sleepEQEnabled"]
+        let scalarKeys = ["noiseVolume", "noiseType", "binVolume", "binauralPreset", "podVolume", "stereoWidth", "masterVolume", "autoPlay", "shuffleQueue", "deleteOnCompletion", "hideFinishedEpisodes", "feedProxyUrl", "nightLimiterEnabled", "sleepEQEnabled", "sleepEQIntensity", "limiterByMode"]
         for key in scalarKeys {
             if let val = UserDefaults.standard.object(forKey: key) {
                 backupDict[key] = val

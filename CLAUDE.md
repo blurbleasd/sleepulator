@@ -1,5 +1,20 @@
 # SLEEPULATOR — agent guide
 
+> ⚠️ **STATUS (2026-06): the guide below is STALE.** The shipping app is now a
+> **native SwiftUI iOS app** under `Sleepulator/` (Swift services in
+> `Sleepulator/Sleepulator/Services/`, XCTest in `SleepulatorTests/`, a Live Activity
+> widget in `SleepulatorWidget/`). The React/Vite **PWA described below is archived** in
+> `archive_webapp/` and is no longer built or deployed. The server-side "Sleep Safe"
+> ffmpeg proxy has been **removed** and replaced by on-device limiting (see
+> `AUDIO-LIMITER-SPEC.md`); the only live proxy now is the Cloudflare feed proxy
+> (`AppConfig.feedProxyUrl`). The audio invariants below (WAV-baked volume,
+> NATIVE_MEDIA_VOLUME_LOCK, 12k/8k sample-rate floors) are **webapp-only** and do not
+> apply to the Swift engine (`AVAudioEngine` + `AVAudioSourceNode`). See
+> `AUDIT-2026-06.md` and `DESIGN-REVIEW-2026-06.md` for current state. The device
+> verification gate at the bottom still applies. **TODO: rewrite this file for the Swift app.**
+
+---
+
 A PWA for falling asleep: layer ambient noise + binaural beats, mix in a podcast,
 set a sleep timer that fades everything out. Optimized for **installed iPhone PWA,
 screen locked, playing all night** — that use case drives most of the hard

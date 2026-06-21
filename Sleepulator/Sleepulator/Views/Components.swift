@@ -31,59 +31,6 @@ extension View {
 }
 
 // MARK: - Breathing Orb
-struct BreathingOrb: View {
-    @State private var scale: CGFloat = 1.0
-    @State private var opacity: Double = 0.5
-    @State private var timer: Timer?
-    var rmsPower: Double = 0.0
-    var accent: Color = Theme.gold
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    var body: some View {
-        ZStack {
-            Color.black.ignoresSafeArea()
-
-            Circle()
-                .fill(
-                    RadialGradient(gradient: Gradient(colors: [
-                        accent.opacity(reduceMotion ? 0.5 : opacity),
-                        Color.clear
-                    ]), center: .center, startRadius: 10, endRadius: 250)
-                )
-                // Calm breathing pulse only. No audio-reactive bump — a sleep backdrop
-                // shouldn't brighten on loud moments (stimulating, not settling).
-                // Reduce Motion: a fully static glow.
-                .scaleEffect(reduceMotion ? 1.0 : scale)
-                .frame(width: 400, height: 400)
-                .blur(radius: 50)
-                .onAppear { if !reduceMotion { start478Breathing() } }
-                .onDisappear { timer?.invalidate() }
-        }
-    }
-    
-    func start478Breathing() {
-        runCycle()
-        timer = Timer.scheduledTimer(withTimeInterval: 19.0, repeats: true) { _ in
-            runCycle()
-        }
-    }
-    
-    func runCycle() {
-        // 4s Inhale
-        withAnimation(.easeInOut(duration: 4.0)) {
-            scale = 1.3
-            opacity = 0.8
-        }
-        // 7s Hold
-        // 8s Exhale
-        DispatchQueue.main.asyncAfter(deadline: .now() + 11.0) {
-            withAnimation(.easeInOut(duration: 8.0)) {
-                scale = 1.0
-                opacity = 0.5
-            }
-        }
-    }
-}
 
 // MARK: - Warm Custom Slider removed in favor of native Slider
 

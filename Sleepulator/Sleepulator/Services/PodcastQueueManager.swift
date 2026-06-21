@@ -32,6 +32,11 @@ final class PodcastQueueManager: ObservableObject {
     }
     
     private let storageQueue = DispatchQueue(label: "app.sleepulator.queueStorage", qos: .utility)
+
+    // Recency order (newest last) that bounds `finishedEpisodes` — without it the set grew
+    // forever in UserDefaults as every episode you ever finished accumulated.
+    private var finishedOrder: [String] = []
+    private let finishedCap = 1000
     
     // Dependencies
     var loadPodcastFn: ((_ url: String, _ id: String, _ title: String) -> Void)?
@@ -44,7 +49,10 @@ final class PodcastQueueManager: ObservableObject {
         self.hideFinishedEpisodes = UserDefaults.standard.object(forKey: "hideFinishedEpisodes") as? Bool ?? false
         
         if let arr = UserDefaults.standard.array(forKey: "finishedEpisodes") as? [String] {
-            self.finishedEpisodes = Set(arr)
+            // Trim any legacy bloat from before the cap existed (assignment re-persists it).
+            let capped = arr.count > finishedCap ? Array(arr.suffix(finishedCap)) : arr
+            self.finishedOrder = capped
+            self.finishedEpisodes = Set(capped)
         }
         
         if let savedQueue: [Episode] = StorageManager.shared.load(from: "queue.json") {
@@ -54,6 +62,17 @@ final class PodcastQueueManager: ObservableObject {
 
     }
     
+    /// Mark an episode finished, keeping the set bounded by recency. Replaces a raw
+    /// `finishedEpisodes.insert`, which had no upper limit.
+    func markFinished(_ id: String) {
+        finishedOrder.removeAll { $0 == id }
+        finishedOrder.append(id)
+        if finishedOrder.count > finishedCap {
+            finishedOrder.removeFirst(finishedOrder.count - finishedCap)
+        }
+        finishedEpisodes = Set(finishedOrder)   // triggers the persist in didSet
+    }
+
     func playEpisode(_ episode: Episode) {
         if !self.queue.contains(where: { $0.id == episode.id }) {
             self.queue.insert(episode, at: 0)

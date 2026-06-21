@@ -56,6 +56,9 @@ final class GenerativeAudioEngine {
     private var statePtr: UnsafeMutablePointer<AudioRenderState>
     
     var onRMSUpdate: ((Double) -> Void)?
+    /// Fired when the engine can't be started even after a retry — lets the owner surface a
+    /// non-destructive note instead of the bed silently failing to play all night.
+    var onEngineError: ((String) -> Void)?
 
     
     init() {
@@ -331,7 +334,7 @@ final class GenerativeAudioEngine {
         
         engine.prepare()
         if startEngine {
-            try? engine.start()
+            startEngineSafely("setup")
         }
     }
     
@@ -387,11 +390,33 @@ final class GenerativeAudioEngine {
         }
     }
 
+    /// Start the engine, retrying once after re-asserting the audio session (the usual cause
+    /// of a failed start is the session losing activation in a race). Logs and reports on
+    /// final failure rather than swallowing the error with `try?`.
+    @discardableResult
+    private func startEngineSafely(_ context: String) -> Bool {
+        if engine.isRunning { return true }
+        do {
+            try engine.start()
+            return true
+        } catch {
+            do {
+                try AVAudioSession.sharedInstance().setActive(true)
+                try engine.start()
+                return true
+            } catch {
+                print("GenerativeAudioEngine.start failed [\(context)]: \(error)")
+                onEngineError?("Sound engine couldn't start — tap play to retry")
+                return false
+            }
+        }
+    }
+
     /// Start rendering if it isn't already (called before noise/binaural turn on).
     func resumeIfNeeded() {
         guard !engine.isRunning else { return }
         try? AVAudioSession.sharedInstance().setActive(true)
-        try? engine.start()
+        startEngineSafely("resume")
     }
 
     /// Stop rendering to save power when nothing generative is playing. Does NOT
@@ -422,7 +447,7 @@ final class GenerativeAudioEngine {
         if shouldResume {
             let session = AVAudioSession.sharedInstance()
             try? session.setActive(true)
-            try? engine.start()
+            startEngineSafely("interruption")
         } else {
             engine.pause()
         }

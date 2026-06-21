@@ -320,13 +320,20 @@ final class PodcastPlayer: NSObject {
     
     private func setupRemoteCommands() {
         let center = MPRemoteCommandCenter.shared()
-        center.playCommand.addTarget { [weak self] _ in 
-            let _ = self?.toggle()
-            return .success 
+        // Distinct play/pause (not toggle): when the system or CarPlay sends an explicit
+        // "play" while already playing — common right after a route change — a toggle would
+        // pause, the opposite of the request, and desync the lock-screen transport.
+        center.playCommand.addTarget { [weak self] _ in
+            self?.resume() == true ? .success : .commandFailed
         }
-        center.pauseCommand.addTarget { [weak self] _ in 
+        center.pauseCommand.addTarget { [weak self] _ in
+            guard let self = self, self.player != nil else { return .commandFailed }
+            self.pause()
+            return .success
+        }
+        center.togglePlayPauseCommand.addTarget { [weak self] _ in
             let _ = self?.toggle()
-            return .success 
+            return .success
         }
         center.skipForwardCommand.addTarget { [weak self] _ in
             self?.seek(seconds: 15)

@@ -579,7 +579,7 @@
 				INFOPLIST_FILE = SleepulatorWidget/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = SleepulatorWidget;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				IPHONEOS_DEPLOYMENT_TARGET = 17.6;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -610,7 +610,7 @@
 				INFOPLIST_FILE = SleepulatorWidget/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = SleepulatorWidget;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				IPHONEOS_DEPLOYMENT_TARGET = 17.6;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
