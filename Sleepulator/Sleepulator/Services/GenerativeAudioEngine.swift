@@ -51,7 +51,12 @@ final class GenerativeAudioEngine {
     private var limiterNode: AVAudioUnitEffect!
     
     private var paramsBuffer: UnsafeMutablePointer<AudioRenderParams>
-    private var readIdxPtr: UnsafeMutablePointer<Int>
+    // Which slot of paramsBuffer the render thread should read. Published with release
+    // ordering by the main thread (updateParams) and read with acquire ordering by the audio
+    // render block, so the param-struct write always lands before the index that points at it.
+    // Plain-Int before; the missing barrier let the render thread briefly pair a new index
+    // with stale params. SLPAtomicIndex is a lock-free C cell (see Sleepulator-Bridging-Header.h).
+    private let readIdx: OpaquePointer
     private var writeIdx: Int = 0
     private var statePtr: UnsafeMutablePointer<AudioRenderState>
     
@@ -65,9 +70,8 @@ final class GenerativeAudioEngine {
         paramsBuffer = UnsafeMutablePointer<AudioRenderParams>.allocate(capacity: 2)
         paramsBuffer.initialize(repeating: AudioRenderParams(), count: 2)
         
-        readIdxPtr = UnsafeMutablePointer<Int>.allocate(capacity: 1)
-        readIdxPtr.initialize(to: 0)
-        
+        readIdx = SLPAtomicIndexCreate(0)
+
         statePtr = UnsafeMutablePointer<AudioRenderState>.allocate(capacity: 1)
         statePtr.initialize(to: AudioRenderState())
         
@@ -77,10 +81,16 @@ final class GenerativeAudioEngine {
     
     deinit {
         NotificationCenter.default.removeObserver(self)
+        // Quiesce the render thread BEFORE freeing the buffers it reads. The source-node
+        // render blocks capture paramsBuffer / readIdx / statePtr as raw pointers (not self),
+        // so without an explicit stop a callback can still fire after these are freed — a
+        // use-after-free. (Latent all along; surfaced as a hard crash once the index cell
+        // moved to malloc/free, which Debug malloc scribbles.) stop() ends audio I/O so no
+        // render callback runs past this point.
+        engine.stop()
         paramsBuffer.deinitialize(count: 2)
         paramsBuffer.deallocate()
-        readIdxPtr.deinitialize(count: 1)
-        readIdxPtr.deallocate()
+        SLPAtomicIndexDestroy(readIdx)
         statePtr.deinitialize(count: 1)
         statePtr.deallocate()
     }
@@ -108,13 +118,13 @@ final class GenerativeAudioEngine {
         statePtr.pointee.sampleRate = Float(session.sampleRate)
         let format = AVAudioFormat(standardFormatWithSampleRate: session.sampleRate, channels: 2)!
         
-        noiseNode = AVAudioSourceNode { [statePtr, paramsBuffer, readIdxPtr] _, _, frameCount, ablPtr -> OSStatus in
+        noiseNode = AVAudioSourceNode { [statePtr, paramsBuffer, readIdx] _, _, frameCount, ablPtr -> OSStatus in
             let abl = UnsafeMutableAudioBufferListPointer(ablPtr)
             let ch0 = abl[0].mData!.assumingMemoryBound(to: Float.self)
             let ch1 = abl.count > 1 ? abl[1].mData!.assumingMemoryBound(to: Float.self) : ch0
             let isStereo = abl.count > 1
-            
-            let p = paramsBuffer[readIdxPtr.pointee]
+
+            let p = paramsBuffer[SLPAtomicIndexLoadAcquire(readIdx)]
             
             // Smooth the fade target locally to prevent zipper noise
             if statePtr.pointee.fadeMult > p.targetFadeMult {
@@ -245,12 +255,12 @@ final class GenerativeAudioEngine {
             return noErr
         }
         
-        binauralNode = AVAudioSourceNode { [statePtr, paramsBuffer, readIdxPtr] _, _, frameCount, ablPtr -> OSStatus in
+        binauralNode = AVAudioSourceNode { [statePtr, paramsBuffer, readIdx] _, _, frameCount, ablPtr -> OSStatus in
             let abl = UnsafeMutableAudioBufferListPointer(ablPtr)
             let ch0 = abl[0].mData!.assumingMemoryBound(to: Float.self)
             let ch1 = abl.count > 1 ? abl[1].mData!.assumingMemoryBound(to: Float.self) : ch0
-            
-            let p = paramsBuffer[readIdxPtr.pointee]
+
+            let p = paramsBuffer[SLPAtomicIndexLoadAcquire(readIdx)]
             
             let targetG = p.binGain * statePtr.pointee.fadeMult * p.masterMult
             let sr = statePtr.pointee.sampleRate
@@ -341,11 +351,22 @@ final class GenerativeAudioEngine {
     // MARK: - Thread-Safe Updaters
     
     private func updateParams(_ closure: (inout AudioRenderParams) -> Void) {
+        // Single-writer invariant: the writeIdx/readIdx double-buffer hand-off is only safe
+        // with exactly one writer. Every caller reaches here on the main thread (UI didSets,
+        // @MainActor intents, and the sleep-timer fade which hops to main in tick()). Assert
+        // it in DEBUG so a future off-main caller traps here instead of silently corrupting
+        // the buffer. DEBUG-only on purpose: a false trap must never reach a shipping
+        // all-night build.
+        #if DEBUG
+        dispatchPrecondition(condition: .onQueue(.main))
+        #endif
         let nextIdx = (writeIdx + 1) % 2
         var nextParams = paramsBuffer[writeIdx]
         closure(&nextParams)
         paramsBuffer[nextIdx] = nextParams
-        readIdxPtr.pointee = nextIdx
+        // Release-store: guarantees the param write above is visible to the render thread's
+        // acquire-load before it observes the new index (see readIdx declaration).
+        SLPAtomicIndexStoreRelease(readIdx, nextIdx)
         writeIdx = nextIdx
     }
     
