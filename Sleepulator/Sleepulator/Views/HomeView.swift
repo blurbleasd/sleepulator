@@ -12,6 +12,16 @@ struct HomeView: View {
     @State private var idleFade: DispatchWorkItem?
     @Environment(\.accessibilityReduceMotion) var reduceMotion
 
+    // Selected backdrop scene per mode (persisted). Changing it re-renders the home; the
+    // Build-mix drawer writes these via SceneSelector.
+    @AppStorage("sceneSleep") private var sleepSceneId = "night-sky"
+    @AppStorage("sceneFocus") private var focusSceneId = "energy"
+
+    private var currentScene: any AmbientScene {
+        let mood: SceneMood = audio.focusMode ? .focus : .sleep
+        return SceneRegistry.scene(id: audio.focusMode ? focusSceneId : sleepSceneId, mood: mood)
+    }
+
     private func scheduleIdleFade() {
         idleFade?.cancel()
         guard !audio.focusMode, audio.isAnythingPlaying else { return }
@@ -114,17 +124,16 @@ struct HomeView: View {
             )
             .ignoresSafeArea()
 
-            // Backdrop is a registered AmbientScene (Phase 1 of SCREENSAVER-LIBRARY-SPEC):
-            // the night sky and the focus energy sweep now live behind a protocol + registry,
-            // so adding a scene is "conform + register," not editing this branch. One scene
-            // per mood today, so selection is effectively the default until a picker exists.
-            SceneRegistry.selected(for: audio.focusMode ? .focus : .sleep)
-                .makeBackdrop(SceneContext(
-                    palette: pal,
-                    reduceMotion: reduceMotion,
-                    paused: audio.ambientScreensaver,
-                    sleepTimer: audio.sleepTimer
-                ))
+            // Backdrop is the selected AmbientScene for the current mode (Phase 1 of
+            // SCREENSAVER-LIBRARY-SPEC): scenes live behind a protocol + registry, so adding
+            // one is "conform + register," not editing this branch. Picked in the Build-mix
+            // drawer; selection persists per mode.
+            currentScene.makeBackdrop(SceneContext(
+                palette: pal,
+                reduceMotion: reduceMotion,
+                paused: audio.ambientScreensaver,
+                sleepTimer: audio.sleepTimer
+            ))
             
             // Ambient-minimal foreground: the night sky is the screen. A mode toggle up top,
             // a single central orb (play/pause) with the active sounds as pills, and one
@@ -443,6 +452,8 @@ struct LayerPills: View {
 struct MixDrawer: View {
     @ObservedObject var audio: AudioEngine
     let pal: Palette
+    @AppStorage("sceneSleep") private var sleepSceneId = "night-sky"
+    @AppStorage("sceneFocus") private var focusSceneId = "energy"
 
     var body: some View {
         ScrollView {
@@ -477,11 +488,53 @@ struct MixDrawer: View {
                 if !audio.savedPlaylists.isEmpty {
                     SavedMixesList(audio: audio, pal: pal)
                 }
+
+                SceneSelector(mood: audio.focusMode ? .focus : .sleep,
+                              selectedId: audio.focusMode ? $focusSceneId : $sleepSceneId,
+                              pal: pal)
             }
             .padding(.vertical, 22)
         }
         .background(pal.bg.ignoresSafeArea())
         .preferredColorScheme(.dark)
+    }
+}
+
+/// A minimal backdrop picker for the current mode — chips of the available scenes, the
+/// selected one highlighted. Writes the per-mode @AppStorage key, which re-renders the home.
+/// The "simple toggle" the screensaver spec calls for until there are enough scenes to want a
+/// full grid picker.
+struct SceneSelector: View {
+    let mood: SceneMood
+    @Binding var selectedId: String
+    let pal: Palette
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Backdrop")
+                .font(.system(.subheadline, design: .rounded).weight(.semibold))
+                .foregroundColor(pal.text)
+
+            HStack(spacing: 8) {
+                ForEach(SceneRegistry.scenes(for: mood), id: \.id) { scene in
+                    let on = scene.id == selectedId
+                    Button {
+                        selectedId = scene.id
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    } label: {
+                        Text(scene.title)
+                            .font(.caption.weight(.semibold))
+                            .padding(.horizontal, 14).padding(.vertical, 8)
+                            .background(Capsule().fill(on ? pal.accent.opacity(0.18) : pal.text.opacity(0.06)))
+                            .overlay(Capsule().stroke(on ? pal.accent.opacity(0.55) : .clear, lineWidth: 1))
+                            .foregroundColor(on ? pal.accent : pal.dim)
+                    }
+                    .accessibilityLabel("\(scene.title) backdrop\(on ? ", selected" : "")")
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 20)
     }
 }
 

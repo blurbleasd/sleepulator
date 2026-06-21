@@ -68,30 +68,33 @@ struct EnergyScene: AmbientScene {
     }
 }
 
+/// "Rain on glass": a misted window with soft lights behind and droplets sliding down the
+/// glass. Ambient (not time-reactive); pairs naturally with the rain sound.
+struct RainOnGlassScene: AmbientScene {
+    let id = "rain-on-glass"
+    let title = "Rain on glass"
+    let mood = SceneMood.sleep
+
+    func makeBackdrop(_ ctx: SceneContext) -> AnyView {
+        AnyView(RainGlassView(paused: ctx.paused))
+    }
+}
+
 // MARK: - Registry
 
-/// Lists every scene and resolves the selected one per mood. Selection persists in
-/// UserDefaults (`sceneSleep` / `sceneFocus`) and defaults to the mood's first registered
-/// scene — so with one scene per mood today, this is effectively the default until a picker
-/// exists. Invariant: every mood has at least one scene.
+/// Lists every scene and resolves a persisted selection id to a scene. Selection itself lives
+/// as @AppStorage in the views (keys `sceneSleep` / `sceneFocus`) so changing it re-renders
+/// the home; the registry just enumerates + resolves. Invariant: every mood has >= 1 scene.
 enum SceneRegistry {
-    static let all: [any AmbientScene] = [NightSkyScene(), EnergyScene()]
+    static let all: [any AmbientScene] = [NightSkyScene(), RainOnGlassScene(), EnergyScene()]
 
     static func scenes(for mood: SceneMood) -> [any AmbientScene] {
         all.filter { $0.mood == mood }
     }
 
-    private static func key(for mood: SceneMood) -> String {
-        mood == .sleep ? "sceneSleep" : "sceneFocus"
-    }
-
-    static func selected(for mood: SceneMood) -> any AmbientScene {
+    /// Resolve a selection id to a scene, falling back to the mood's first registered scene.
+    static func scene(id: String, mood: SceneMood) -> any AmbientScene {
         let candidates = scenes(for: mood)
-        let saved = UserDefaults.standard.string(forKey: key(for: mood))
-        return candidates.first(where: { $0.id == saved }) ?? candidates[0]
-    }
-
-    static func select(_ scene: any AmbientScene) {
-        UserDefaults.standard.set(scene.id, forKey: key(for: scene.mood))
+        return candidates.first(where: { $0.id == id }) ?? candidates[0]
     }
 }
