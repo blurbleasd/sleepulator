@@ -1,4 +1,90 @@
 import SwiftUI
+import UIKit
+import ImageIO
+
+// MARK: - Cached artwork
+
+/// Decoded-thumbnail cache for list artwork. Plain `AsyncImage` re-fetches and re-decodes
+/// per row, and a long episode list shares one podcast artwork URL — so the same image was
+/// decoded dozens of times on the main actor while scrolling. This caches a downsampled,
+/// already-decoded `UIImage` keyed by URL + target size, and decodes off the main actor.
+final class ThumbnailCache {
+    static let shared = ThumbnailCache()
+    private let cache = NSCache<NSString, UIImage>()
+    private init() { cache.countLimit = 256 }
+    func image(forKey key: String) -> UIImage? { cache.object(forKey: key as NSString) }
+    func insert(_ image: UIImage, forKey key: String) { cache.setObject(image, forKey: key as NSString) }
+}
+
+/// Drop-in replacement for the small square `AsyncImage`s in the lists. Same visual (fill +
+/// rounded corners, gray placeholder), but cached + downsampled so scrolling a long list
+/// doesn't re-decode the same artwork on the main thread.
+struct CachedAsyncImage: View {
+    let url: URL?
+    let size: CGFloat
+    var cornerRadius: CGFloat = 8
+    @State private var image: UIImage?
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(uiImage: image).resizable().aspectRatio(contentMode: .fill)
+            } else {
+                Color.gray.opacity(0.3)
+            }
+        }
+        .frame(width: size, height: size)
+        .clipped()
+        .cornerRadius(cornerRadius)
+        .task(id: url) { await load(url: url, size: size) }
+    }
+
+    @MainActor private func load(url: URL?, size: CGFloat) async {
+        guard let url else { image = nil; return }
+        let key = "\(url.absoluteString)@\(Int(size))"
+        if let cached = ThumbnailCache.shared.image(forKey: key) {
+            image = cached
+            return
+        }
+        // Cache miss on a (possibly recycled) row: clear first so we never flash the
+        // previous episode's artwork while this one decodes.
+        image = nil
+        let maxPixels = size * UIScreen.main.scale
+        let decoded = await Self.fetchAndDownsample(url: url, maxPixels: maxPixels)
+        if Task.isCancelled { return }
+        if let decoded {
+            ThumbnailCache.shared.insert(decoded, forKey: key)
+            image = decoded
+        }
+    }
+
+    /// Fetch (file or network) then downsample, both off the main actor.
+    private static func fetchAndDownsample(url: URL, maxPixels: CGFloat) async -> UIImage? {
+        var data: Data?
+        if url.isFileURL {
+            data = try? Data(contentsOf: url)
+        } else if let result = try? await URLSession.shared.data(from: url) {
+            data = result.0
+        }
+        guard let data else { return nil }
+        return await Task.detached(priority: .utility) {
+            downsample(data: data, maxPixels: maxPixels)
+        }.value
+    }
+
+    private static func downsample(data: Data, maxPixels: CGFloat) -> UIImage? {
+        let srcOptions = [kCGImageSourceShouldCache: false] as CFDictionary
+        guard let src = CGImageSourceCreateWithData(data as CFData, srcOptions) else { return nil }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: max(1, maxPixels)
+        ]
+        guard let cg = CGImageSourceCreateThumbnailAtIndex(src, 0, options as CFDictionary) else { return nil }
+        return UIImage(cgImage: cg)
+    }
+}
 
 // MARK: - Glass Panel Modifier
 struct GlassPanel: ViewModifier {

@@ -63,19 +63,30 @@ final class SleepTimerService: ObservableObject {
     private func tick() {
         guard let end = self.sleepTimerEnd else { return }
         let remaining = end.timeIntervalSince(Date())
-        
+
         DispatchQueue.main.async {
-            self.timerRemaining = remaining
             if remaining <= 0 {
+                // Publish the terminal value once, then fire exactly once.
+                if self.timerRemaining != 0 { self.timerRemaining = 0 }
                 guard !self.didFire else { return }
                 self.didFire = true
                 self.stopAllFn?()
                 self.cancelTimer(resetMoon: false)
-            } else {
-                self.updateFadeMultFn?(Double(AudioMath.getFadeMultiplier(timerRemaining: remaining)))
-                // Update live activity periodically (e.g., every 15 mins or when a bump occurs)
-                // ActivityKit doesn't recommend updating every second.
+                return
             }
+
+            // Coalesce the @Published write to ~1Hz. backgroundTick() fires ~20×/sec from the
+            // limiter RMS tap (the all-night keep-alive that drives the fade + terminal stop
+            // even when iOS curtails the GCD timer), but publishing `timerRemaining` 20×/sec
+            // re-rendered every view observing the engine — the podcast-list scroll storm.
+            // Only the SwiftUI publish is throttled to whole-second changes (the display is in
+            // minutes anyway); the fade update + expiry check below still run on every tick.
+            if Int(remaining) != Int(self.timerRemaining) {
+                self.timerRemaining = remaining
+            }
+            self.updateFadeMultFn?(Double(AudioMath.getFadeMultiplier(timerRemaining: remaining)))
+            // Update live activity periodically (e.g., every 15 mins or when a bump occurs)
+            // ActivityKit doesn't recommend updating every second.
         }
     }
 

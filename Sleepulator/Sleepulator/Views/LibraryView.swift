@@ -45,16 +45,8 @@ struct LibraryView: View {
                             NavigationLink(value: podcast.id) {
                                 HStack(spacing: 16) {
                                     if let art = podcast.artworkUrl, let url = URL(string: art) {
-                                        AsyncImage(url: url) { phase in
-                                            if let image = phase.image {
-                                                image.resizable().aspectRatio(contentMode: .fill)
-                                            } else {
-                                                Color.gray.opacity(0.3)
-                                            }
-                                        }
-                                        .frame(width: 64, height: 64)
-                                        .cornerRadius(12)
-                                        .shadow(color: .black.opacity(0.1), radius: 4, y: 2)
+                                        CachedAsyncImage(url: url, size: 64, cornerRadius: 12)
+                                            .shadow(color: .black.opacity(0.1), radius: 4, y: 2)
                                     } else {
                                         Image(systemName: "dot.radiowaves.left.and.right")
                                             .foregroundColor(pal.accent)
@@ -402,14 +394,21 @@ struct AddPodcastSheet: View {
 
 struct EpisodeRowView: View {
     let ep: Episode
-    @ObservedObject var audio: AudioEngine
+    // Was `@ObservedObject var audio: AudioEngine`. The row displays nothing from the engine,
+    // but observing it meant every per-second (AVPlayer) and ~20×/sec (sleep-timer) publish
+    // re-rendered every realized row — the podcast-list scroll storm. It only needs the queue
+    // manager to act on taps, held as a plain reference (deliberately NOT observed).
+    let queueManager: PodcastQueueManager
     let podcast: Podcast
     // Resume progress, computed once by the parent from positions.json (was decoded per row).
     var savedProgress: Double = 0
+    // Whether this episode is already downloaded — precomputed once by the parent (was a
+    // synchronous per-row disk stat + MD5 hash in onAppear while scrolling).
+    var initiallyDownloaded: Bool = false
 
     @AppStorage("bedtimeMode") private var bedtimeMode = false
     var pal: Palette { Palette(bedtime: bedtimeMode) }
-    
+
     @State private var isDownloaded = false
     @State private var downloadProgress: Double? = nil
     @State private var progress: Double = 0
@@ -422,11 +421,16 @@ struct EpisodeRowView: View {
             return String(format: "%d min", Int(d) / 60)
         }
     }
-    
+
+    // Static: allocating a RelativeDateTimeFormatter (ICU/locale-backed) per row body eval
+    // showed up as a per-row cost under the re-render storm. Main-thread use only.
+    private static let relativeFormatter: RelativeDateTimeFormatter = {
+        let f = RelativeDateTimeFormatter()
+        f.unitsStyle = .abbreviated
+        return f
+    }()
     private func relativeDate(_ date: Date) -> String {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .abbreviated
-        return formatter.localizedString(for: date, relativeTo: Date())
+        Self.relativeFormatter.localizedString(for: date, relativeTo: Date())
     }
     
     var body: some View {
@@ -434,15 +438,7 @@ struct EpisodeRowView: View {
             HStack(alignment: .center, spacing: 12) {
                 // Thumbnail
                 if let artStr = ep.artworkUrl ?? podcast.artworkUrl, let url = URL(string: artStr) {
-                    AsyncImage(url: url) { phase in
-                        if let image = phase.image {
-                            image.resizable().aspectRatio(contentMode: .fill)
-                        } else {
-                            Color.gray.opacity(0.3)
-                        }
-                    }
-                    .frame(width: 48, height: 48)
-                    .cornerRadius(8)
+                    CachedAsyncImage(url: url, size: 48, cornerRadius: 8)
                 } else {
                     Image(systemName: "mic.fill")
                         .foregroundColor(pal.accent)
@@ -493,7 +489,7 @@ struct EpisodeRowView: View {
                 .accessibilityAddTraits(.isButton)
                 .accessibilityHint(isExpanded ? "Double-tap to play" : "Double-tap to expand")
                 .accessibilityAction {
-                    if isExpanded { audio.queueManager.playEpisode(ep) }
+                    if isExpanded { queueManager.playEpisode(ep) }
                     else { isExpanded = true }
                 }
                 Spacer()
@@ -513,17 +509,17 @@ struct EpisodeRowView: View {
                 
                 Menu {
                     Button(action: {
-                        if !audio.queueManager.queue.isEmpty {
-                            audio.queueManager.queue.insert(ep, at: 1)
+                        if !queueManager.queue.isEmpty {
+                            queueManager.queue.insert(ep, at: 1)
                         } else {
-                            audio.queueManager.playEpisode(ep)
+                            queueManager.playEpisode(ep)
                         }
                     }) {
                         Label("Play Next", systemImage: "text.insert")
                     }
-                    
+
                     Button(action: {
-                        audio.queueManager.addToQueue(ep)
+                        queueManager.addToQueue(ep)
                     }) {
                         Label("Add to Queue", systemImage: "text.append")
                     }
@@ -569,7 +565,7 @@ struct EpisodeRowView: View {
             .contentShape(Rectangle())
             .onTapGesture {
                 if isExpanded {
-                    audio.queueManager.playEpisode(ep)
+                    queueManager.playEpisode(ep)
                 } else {
                     withAnimation { isExpanded = true }
                 }
@@ -584,9 +580,8 @@ struct EpisodeRowView: View {
         }
         .padding(.vertical, 4)
         .onAppear {
-            if let url = URL(string: ep.audioUrl), AudioDownloader.shared.getCachedUrl(for: url) != nil {
-                isDownloaded = true
-            }
+            // Seeded from the parent's precomputed set — no per-row disk I/O on scroll.
+            isDownloaded = initiallyDownloaded
             progress = savedProgress
         }
     }

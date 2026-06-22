@@ -111,6 +111,27 @@ class AudioDownloader {
         return fm.fileExists(atPath: localUrl.path) ? localUrl : nil
     }
 
+    /// Which of these remote URL strings have a cached download (new App Support store or an
+    /// un-migrated legacy Documents copy). One directory listing + an in-memory filename test
+    /// per URL — replaces the per-row `getCachedUrl` (`fileExists` + MD5 + legacy migration)
+    /// that ran in every `EpisodeRowView.onAppear` and janked the main thread while scrolling.
+    /// Call once (e.g. on a detail view's appear / after a feed load), not per row.
+    func downloadedUrlStrings(among urlStrings: [String]) -> Set<String> {
+        let newNames = Set((try? fm.contentsOfDirectory(atPath: cacheDir.path)) ?? [])
+        let legacyNames: Set<String> = {
+            guard let docDir = fm.urls(for: .documentDirectory, in: .userDomainMask).first,
+                  let names = try? fm.contentsOfDirectory(atPath: docDir.path) else { return [] }
+            return Set(names)
+        }()
+        var result = Set<String>()
+        for s in urlStrings {
+            guard let url = URL(string: s) else { continue }
+            let name = filename(for: url)
+            if newNames.contains(name) || legacyNames.contains(name) { result.insert(s) }
+        }
+        return result
+    }
+
     func deleteCachedEpisode(for url: URL) {
         if let new = getLocalUrl(for: url), fm.fileExists(atPath: new.path) {
             try? fm.removeItem(at: new)
