@@ -23,7 +23,10 @@
 			<string>NSPrivacyAccessedAPICategoryFileTimestamp</string>
 			<key>NSPrivacyAccessedAPITypeReasons</key>
 			<array>
-				<string>C617.1</string>
+				<!-- DDA9.1: metadata of files inside the app's own container. AudioDownloader
+				     reads contentAccessDate/fileSize of cached episodes (App Support) for LRU
+				     eviction — internal, not user-granted files (C617.1 was the wrong code). -->
+				<string>DDA9.1</string>
 			</array>
 		</dict>
 	</array>

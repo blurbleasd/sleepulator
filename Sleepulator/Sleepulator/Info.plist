@@ -8,6 +8,10 @@
 	</array>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
+	<!-- ATS justification (for App Review): users add arbitrary podcast RSS feeds, and a
+	     large share of episode enclosures are still served over cleartext http://. This is
+	     scoped to MEDIA only (AVPlayer audio) — NOT NSAllowsArbitraryLoads — so app API/web
+	     traffic still requires HTTPS. Host-allowlisting isn't feasible for user-supplied feeds. -->
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoadsInMedia</key>
