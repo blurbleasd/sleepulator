@@ -101,5 +101,10 @@ struct ContentView: View {
             if audio.ambientScreensaver { audio.ambientScreensaver = false }
             if nightDimmed { wake() } else { scheduleDim() }
         }
+        .onChange(of: nightDimmed) { dimmed in
+            // Freeze the backdrop scene only when the veil actually occludes the screen —
+            // it keeps animating through the lighter controls-faded screensaver.
+            audio.screenDimmed = dimmed
+        }
     }
 }

@@ -2,16 +2,16 @@ import SwiftUI
 
 /// A stylized "rain on glass" backdrop for Sleep mode: soft blurred lights behind a misted
 /// window, with droplets sliding down the glass leaving faint trails. Generative + cheap —
-/// the moving drops are one `TimelineView`/`Canvas` redraw loop (capped ~30 fps) that stops
-/// when the screensaver engages or ~60s after appearing, leaving the still misted glass + the
-/// lights behind it (a calm, near-zero-cost end state for an all-night screen). The motion is
-/// gentle (slow slides + a soft fade), so it runs regardless of system Reduce Motion, matching
-/// the night-sky scene's dog-food choice.
+/// the moving drops are one `TimelineView`/`Canvas` redraw loop (capped ~30 fps). It keeps
+/// raining the whole time you're watching (right through the controls-faded screensaver) and
+/// freezes to the still misted glass only once the deep night-dim veil has occluded the screen
+/// (`paused`), so it's never a wasted redraw. Gentle by design; runs regardless of system
+/// Reduce Motion.
 struct RainGlassView: View {
+    /// True only when the screen is occluded by the deep night-dim veil — freeze for battery.
     var paused: Bool = false
-    @State private var settled = false
 
-    private var active: Bool { !paused && !settled }
+    private var active: Bool { !paused }
 
     // MARK: deterministic fields (fixed seeds → stable across launches)
 
@@ -120,10 +120,6 @@ struct RainGlassView: View {
         .accessibilityHidden(true)
         .ignoresSafeArea()
         .animation(.easeInOut(duration: 1.2), value: active)
-        .onAppear {
-            // Settle to a still window ~60s in, for battery.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 60) { settled = true }
-        }
     }
 
     private static func draw(_ d: Drop, ctx: GraphicsContext, size: CGSize, t: Double) {

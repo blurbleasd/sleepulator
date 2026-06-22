@@ -30,9 +30,9 @@ protocol AmbientScene {
 
 // MARK: - The built-in scenes (wrap today's backdrops verbatim)
 
-/// The default Sleep backdrop: a realistic night sky with a phase-correct setting moon that
-/// rides the sleep timer down its arc, a rare meteor, and a sky that deepens toward black as
-/// the night ends. (Composed exactly as the old hardcoded HomeView branch.)
+/// The default Sleep backdrop: a calm, slowly drifting starfield with a gentle breathing
+/// brightness, a rare meteor, and a sky that deepens toward black as the sleep timer winds
+/// down. Built to lull — continuous + dim, with no bright focal point.
 struct NightSkyScene: AmbientScene {
     let id = "night-sky"
     let title = "Night sky"
@@ -42,8 +42,6 @@ struct NightSkyScene: AmbientScene {
         AnyView(
             ZStack {
                 StarfieldView(paused: ctx.paused)
-                    .ignoresSafeArea()
-                MoonArc(sleepTimer: ctx.sleepTimer)
                     .ignoresSafeArea()
                 ShootingStarView()
                     .ignoresSafeArea()

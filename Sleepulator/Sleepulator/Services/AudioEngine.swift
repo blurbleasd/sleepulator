@@ -19,6 +19,12 @@ final class AudioEngine: ObservableObject {
     /// Lives here so the tab bar + mini-player in ContentView can fade with it. Not persisted.
     @Published var ambientScreensaver = false
 
+    /// True only once the deep night-dim veil has covered the screen. Distinct from
+    /// `ambientScreensaver` (controls faded, sky still shown): backdrop scenes keep animating
+    /// through the screensaver and freeze only here, when the screen is occluded and the
+    /// motion would be a wasted redraw. Not persisted.
+    @Published var screenDimmed = false
+
     private let genEngine = GenerativeAudioEngine()
     private let podPlayer = PodcastPlayer()
     private let chime = ChimePlayer()

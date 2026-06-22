@@ -131,7 +131,7 @@ struct HomeView: View {
             currentScene.makeBackdrop(SceneContext(
                 palette: pal,
                 reduceMotion: reduceMotion,
-                paused: audio.ambientScreensaver,
+                paused: audio.screenDimmed,
                 sleepTimer: audio.sleepTimer
             ))
             
@@ -538,255 +538,114 @@ struct SceneSelector: View {
     }
 }
 
-/// A realistic night sky for Sleep mode. Power-law brightness (lots of faint stars, a
-/// few bright ones with soft halos), varied colour temperature, and a faint Milky Way
-/// band. A sparse subset twinkles slowly. The twinkle is a gentle opacity fade (not the
-/// vestibular kind of motion), so it runs regardless of system Reduce Motion: a deliberate
-/// dog-food choice so the sky reads alive. It still settles to static ~60s after appearing
-/// and the moment the screensaver engages, for battery.
+/// A calm night sky for Sleep mode, built to lull rather than impress: faint stars in varied
+/// colour temperature over a soft Milky Way haze, the whole field drifting down very slowly
+/// while a gentle collective "breath" rises and falls the brightness on a slow sleep cadence.
+/// One TimelineView/Canvas loop (~30fps); freezes only when the deep night-dim veil has
+/// occluded the screen. Runs regardless of system Reduce Motion. No bright focal point.
 struct StarfieldView: View {
-    /// Holds the field static when the screensaver engages (battery on an all-night screen).
+    /// True only when the screen is occluded by the deep night-dim veil — freeze for battery.
     var paused: Bool = false
 
-    @State private var twinkle = false
-    /// Latches true ~60s after appear so the sky stops animating even if controls stay up.
-    @State private var settled = false
-
-    private struct Star: Identifiable {
-        let id: Int
-        let x, y, r, baseOpacity, dur, delay: Double
+    private struct Star {
+        let x, y, r, baseOpacity: Double
         let tint: Color
         let bright: Bool
-        let twinkles: Bool
+        let twAmp, twSpeed, twPhase: Double
     }
 
-    // Real stars aren't all white — most read cool, some warm, a few blue-white.
     private static let coolWhite = Color(red: 0.93, green: 0.95, blue: 1.0)
     private static let warmStar  = Color(red: 1.0,  green: 0.86, blue: 0.66)
     private static let blueStar  = Color(red: 0.74, green: 0.84, blue: 1.0)
 
+    // Tuning knobs — all slow on purpose (a sleep aid, not a screensaver demo).
+    private static let driftPeriod: Double = 300    // seconds to drift one screen-height down
+    private static let breathPeriod: Double = 9     // seconds per breath (brightness rise + fall)
+    private static let breathDepth: Double = 0.22   // how much the breath dims the field at the trough
+
     private static let stars: [Star] = build()
 
-    // Deterministic layout (fixed seed) so the sky is stable across launches.
     private static func build() -> [Star] {
         var rng: UInt64 = 0x5EED5160_0DECAF01
-        func next() -> Double {
-            rng ^= rng << 13; rng ^= rng >> 7; rng ^= rng << 17
-            return Double(rng % 1_000_000) / 1_000_000.0
-        }
+        func n() -> Double { rng ^= rng << 13; rng ^= rng >> 7; rng ^= rng << 17; return Double(rng % 1_000_000) / 1_000_000 }
+        func tint() -> Color { let t = n(); return t < 0.66 ? coolWhite : (t < 0.88 ? warmStar : blueStar) }
         var out: [Star] = []
-
-        // Scattered field — cube the brightness so most stars are dim and only a handful blaze.
-        for i in 0..<80 {
-            let mag = pow(next(), 3.0)
-            let yb = next()
-            let y = (yb * yb) * 0.72                       // denser toward the top of the sky
-            let horizonFade = 1.0 - (y / 0.72) * 0.5
-            let tt = next()
-            let tint = tt < 0.66 ? coolWhite : (tt < 0.88 ? warmStar : blueStar)
-            out.append(Star(
-                id: i, x: next(), y: y,
-                r: 0.5 + mag * 2.4,
-                baseOpacity: (0.28 + mag * 0.62) * horizonFade,
-                dur: 2.6 + next() * 3.6,                   // slow, each on its own clock
-                delay: next() * 4.0,
-                tint: tint,
-                bright: mag > 0.86,
-                twinkles: next() < 0.34
-            ))
+        // Scattered field — cube the brightness so most stars are dim and only a few brighter.
+        for _ in 0..<90 {
+            let mag = pow(n(), 3.0)
+            out.append(Star(x: n(), y: n(),
+                            r: 0.5 + mag * 2.2,
+                            baseOpacity: 0.22 + mag * 0.6,
+                            tint: tint(),
+                            bright: mag > 0.88,
+                            twAmp: 0.25 + n() * 0.45, twSpeed: 0.5 + n() * 1.2, twPhase: n() * 6.283))
         }
-
-        // Milky Way — a denser diagonal swath of faint, small stars.
-        for i in 0..<38 {
-            let u = next()
-            let bx = 0.10 + u * 0.82
-            let by = max(0.02, 0.08 + u * 0.52 + (next() - 0.5) * 0.14)
-            let mag = pow(next(), 4.0)
-            out.append(Star(
-                id: 1000 + i, x: bx, y: by,
-                r: 0.4 + mag * 1.0,
-                baseOpacity: 0.16 + mag * 0.38,
-                dur: 3.0 + next() * 3.0,
-                delay: next() * 4.0,
-                tint: coolWhite,
-                bright: false,
-                twinkles: next() < 0.18
-            ))
+        // A denser diagonal Milky Way swath of faint stars.
+        for _ in 0..<40 {
+            let u = n()
+            let mag = pow(n(), 4.0)
+            out.append(Star(x: 0.08 + u * 0.86,
+                            y: 0.06 + u * 0.5 + (n() - 0.5) * 0.16,
+                            r: 0.4 + mag * 0.9,
+                            baseOpacity: 0.12 + mag * 0.34,
+                            tint: coolWhite,
+                            bright: false,
+                            twAmp: 0.2 + n() * 0.3, twSpeed: 0.4 + n() * 0.8, twPhase: n() * 6.283))
         }
         return out
     }
 
     var body: some View {
-        GeometryReader { geo in
-            ZStack {
-                hazeBand(geo.size)
-                ForEach(Self.stars) { s in
-                    star(s, size: geo.size)
+        ZStack {
+            hazeBand
+            if paused {
+                Canvas { ctx, size in Self.draw(ctx, size, t: 0) }      // occluded: one static frame
+            } else {
+                TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { tl in
+                    Canvas { ctx, size in Self.draw(ctx, size, t: tl.date.timeIntervalSinceReferenceDate) }
                 }
             }
         }
         .allowsHitTesting(false)
         .accessibilityHidden(true)
-        .onAppear {
-            twinkle = true
-            // Settle to fully static after a minute so an all-night screen isn't animating.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 60) { settled = true }
-        }
+        .ignoresSafeArea()
     }
 
-    // The soft luminous band behind the Milky Way stars — adds depth without dots.
-    private func hazeBand(_ size: CGSize) -> some View {
-        Ellipse()
-            .fill(Color.white.opacity(0.035))
-            .frame(width: size.width * 1.5, height: size.height * 0.24)
-            .rotationEffect(.degrees(-24))
-            .position(x: size.width * 0.5, y: size.height * 0.27)
-            .blur(radius: 38)
-    }
-
-    // One star. A plain function (not a ViewBuilder) so we can branch on `active`.
-    private func star(_ s: Star, size: CGSize) -> some View {
-        let active = s.twinkles && !paused && !settled
-        return Circle()
-            .fill(s.tint)
-            .frame(width: s.r * 2, height: s.r * 2)
-            .opacity(active ? (twinkle ? s.baseOpacity * 0.35 : s.baseOpacity) : s.baseOpacity)
-            .shadow(color: s.bright ? s.tint.opacity(0.6) : Color.clear,
-                    radius: s.bright ? s.r * 1.6 : 0)
-            .position(x: s.x * size.width, y: s.y * size.height)
-            .animation(active ? .easeInOut(duration: s.dur).repeatForever(autoreverses: true).delay(s.delay) : nil,
-                       value: twinkle)
-    }
-}
-
-// Tonight's real lunar phase — illuminated fraction (0 new … 1 full) and whether it's
-// waxing, from days since a known new moon. Good enough for a believable moon, not an
-// ephemeris.
-enum MoonPhase {
-    static func current(_ date: Date = Date()) -> (illumination: Double, waxing: Bool) {
-        let synodic = 29.530588853
-        let knownNew = Date(timeIntervalSince1970: 947182440)   // 2000-01-06 18:14 UTC
-        var age = date.timeIntervalSince(knownNew) / 86400.0
-        age = age.truncatingRemainder(dividingBy: synodic)
-        if age < 0 { age += synodic }
-        let illum = (1 - cos(2 * Double.pi * age / synodic)) / 2
-        return (illum, age < synodic / 2)
-    }
-}
-
-// A soft moon rendered at tonight's phase — radial-lit disc, warm halo, faint craters,
-// and a terminator that carves the correct crescent → gibbous. The Sleep counterpart to
-// the Focus ring's focal element.
-struct MoonView: View {
-    var size: CGFloat = 60
-    var illumination: Double = 1.0      // 0 new … 1 full
-    var waxing: Bool = true             // lit limb on the right (N. hemisphere)
-
-    private static let litLight = Color(red: 0.99, green: 0.97, blue: 0.90)
-    private static let litDark  = Color(red: 0.86, green: 0.81, blue: 0.68)
-    private static let nightSide = Color(red: 0.07, green: 0.07, blue: 0.10)
-
-    private var litFill: RadialGradient {
-        RadialGradient(
-            gradient: Gradient(colors: [Self.litLight, Self.litDark]),
-            center: UnitPoint(x: 0.38, y: 0.34),
-            startRadius: 1,
-            endRadius: size * 0.78
-        )
-    }
-
-    var body: some View {
-        ZStack {
-            // Halo dims with the phase so a thin sliver doesn't glow like a full moon.
-            Circle()
-                .fill(Color(red: 0.96, green: 0.92, blue: 0.80))
-                .frame(width: size * 1.7, height: size * 1.7)
-                .blur(radius: 22)
-                .opacity(0.05 + 0.12 * illumination)
-
-            ZStack {
-                Circle()
-                    .fill(litFill)
-                    .overlay(
-                        ZStack {
-                            crater(0.30, -0.18, 0.16)
-                            crater(-0.22, 0.12, 0.22)
-                            crater(0.12, 0.30, 0.12)
-                            crater(0.36, 0.20, 0.09)
-                        }
-                    )
-
-                phaseShadow()
-            }
-            .frame(width: size, height: size)
-            .clipShape(Circle())
-        }
-        .accessibilityHidden(true)
-    }
-
-    // The terminator is a vertical ellipse (the disc scaled horizontally). For a crescent
-    // the ellipse is shadow that carves into the lit side; for a gibbous it's light that
-    // restores the dark side. Plus the far hemisphere is always dark.
-    private func phaseShadow() -> some View {
-        let k = min(max(illumination, 0), 1)
-        let a = (size / 2) * CGFloat(abs(1 - 2 * k))
-        return ZStack {
-            Rectangle()
-                .fill(Self.nightSide)
-                .frame(width: size / 2, height: size)
-                .offset(x: waxing ? -size / 4 : size / 4)
-
-            if k <= 0.5 {
-                Ellipse().fill(Self.nightSide).frame(width: a * 2, height: size)
-            } else {
-                Ellipse().fill(litFill).frame(width: a * 2, height: size)
-            }
-        }
-    }
-
-    private func crater(_ dx: CGFloat, _ dy: CGFloat, _ rel: CGFloat) -> some View {
-        Circle()
-            .fill(Color(red: 0.70, green: 0.65, blue: 0.52).opacity(0.28))
-            .frame(width: size * rel, height: size * rel)
-            .offset(x: dx * size * 0.5, y: dy * size * 0.5)
-    }
-}
-
-// Places the moon along a Bézier arc from a high resting spot down to the horizon,
-// driven by how far through the sleep timer the night is. Idle (no timer) → rests high.
-struct MoonArc: View {
-    @ObservedObject var sleepTimer: SleepTimerService
-
-    var body: some View {
+    // Soft luminous band behind the Milky Way (static — drawn once, not per frame).
+    private var hazeBand: some View {
         GeometryReader { geo in
-            moon(in: geo.size)
+            Ellipse()
+                .fill(Color.white.opacity(0.03))
+                .frame(width: geo.size.width * 1.5, height: geo.size.height * 0.26)
+                .rotationEffect(.degrees(-22))
+                .position(x: geo.size.width * 0.5, y: geo.size.height * 0.28)
+                .blur(radius: 40)
         }
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
     }
 
-    private func moon(in size: CGSize) -> some View {
-        let p0 = CGPoint(x: size.width * 0.18, y: size.height * 0.16)   // full night: high left
-        let ctrl = CGPoint(x: size.width * 0.52, y: size.height * 0.06)  // gentle rise
-        let p1 = CGPoint(x: size.width * 0.82, y: size.height * 0.66)   // night's end: horizon
-        let t = CGFloat(sleepTimer.nightProgress)
-        let pt = Self.quad(p0, ctrl, p1, t)
-        let phase = MoonPhase.current()
-        return MoonView(size: 60, illumination: phase.illumination, waxing: phase.waxing)
-            .position(pt)
-            // Eased glide regardless of Reduce Motion: a slow drift over the whole timer,
-            // not the jarring kind of motion (the position updates either way; this just
-            // smooths the per-tick steps).
-            .animation(.easeInOut(duration: 1.0), value: t)
-    }
+    private static func draw(_ ctx: GraphicsContext, _ size: CGSize, t: Double) {
+        // Collective breath: a slow brightness envelope (1.0 at the top of the breath).
+        let breath = 1.0 - breathDepth * (0.5 - 0.5 * cos(t * 2 * .pi / breathPeriod))
+        // Field drift: everything sinks slowly, wrapping top <-> bottom.
+        let drift = (t / driftPeriod).truncatingRemainder(dividingBy: 1.0)
 
-    // Point on a quadratic Bézier at parameter t.
-    static func quad(_ p0: CGPoint, _ c: CGPoint, _ p1: CGPoint, _ t: CGFloat) -> CGPoint {
-        let mt = 1 - t
-        return CGPoint(
-            x: mt * mt * p0.x + 2 * mt * t * c.x + t * t * p1.x,
-            y: mt * mt * p0.y + 2 * mt * t * c.y + t * t * p1.y
-        )
+        for s in stars {
+            var yy = (s.y + drift).truncatingRemainder(dividingBy: 1.0)
+            if yy < 0 { yy += 1 }
+            let edge = min(1.0, min(yy, 1 - yy) / 0.06)               // fade the wrap seam
+            let twinkle = 1.0 - s.twAmp * (0.5 - 0.5 * cos(t * s.twSpeed + s.twPhase))
+            let op = s.baseOpacity * breath * edge * twinkle
+            let x = s.x * size.width
+            let y = yy * size.height
+            if s.bright {
+                let g = s.r * 2.4
+                ctx.fill(Path(ellipseIn: CGRect(x: x - g, y: y - g, width: g * 2, height: g * 2)),
+                         with: .radialGradient(Gradient(colors: [s.tint.opacity(op * 0.5), .clear]),
+                                               center: CGPoint(x: x, y: y), startRadius: 0, endRadius: g))
+            }
+            ctx.fill(Path(ellipseIn: CGRect(x: x - s.r, y: y - s.r, width: s.r * 2, height: s.r * 2)),
+                     with: .color(s.tint.opacity(op)))
+        }
     }
 }
 
