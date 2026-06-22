@@ -78,13 +78,25 @@ struct RainOnGlassScene: AmbientScene {
     }
 }
 
+/// "Breathe": a soft warm glow that swells and fades on a slow breath cadence — follow it and
+/// your own breath slows. The most directly lulling scene (entrainment, not just ambience).
+struct BreathingBloomScene: AmbientScene {
+    let id = "breathing-bloom"
+    let title = "Breathe"
+    let mood = SceneMood.sleep
+
+    func makeBackdrop(_ ctx: SceneContext) -> AnyView {
+        AnyView(BreathingBloomView(paused: ctx.paused))
+    }
+}
+
 // MARK: - Registry
 
 /// Lists every scene and resolves a persisted selection id to a scene. Selection itself lives
 /// as @AppStorage in the views (keys `sceneSleep` / `sceneFocus`) so changing it re-renders
 /// the home; the registry just enumerates + resolves. Invariant: every mood has >= 1 scene.
 enum SceneRegistry {
-    static let all: [any AmbientScene] = [NightSkyScene(), RainOnGlassScene(), EnergyScene()]
+    static let all: [any AmbientScene] = [NightSkyScene(), RainOnGlassScene(), BreathingBloomScene(), EnergyScene()]
 
     static func scenes(for mood: SceneMood) -> [any AmbientScene] {
         all.filter { $0.mood == mood }
