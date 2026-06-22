@@ -12,6 +12,13 @@ struct ContentView: View {
 
     private var timerActive: Bool { audio.sleepTimer.timerRemaining > 0 }
 
+    // The screensaver may only hide chrome while Home is the *active* tab. Without the
+    // selectedTab guard, an idle-fade timer that fires after you've switched to Podcasts /
+    // Settings would hide the whole TabView's tab bar (the modifier below propagates app-wide)
+    // and the mini-player, leaving no way back to Home — the screensaver's tap-to-wake catcher
+    // only exists on the Home screen.
+    private var homeScreensaver: Bool { audio.ambientScreensaver && selectedTab == 0 }
+
     // App-wide night-dim: ~60s into a sleep session, drop a black veil over the whole app
     // (tabs + mini-player) so a bedside screen goes dark. Tap to wake; re-arms after each
     // wake and on tab changes (navigating counts as interaction). When the timer ends we
@@ -49,8 +56,9 @@ struct ContentView: View {
                               systemImage: audio.focusMode ? "bolt.fill" : "moon.stars.fill")
                     }
                     .tag(0)
-                    // Ambient screensaver: drop the tab bar too, for a truly full-screen sky.
-                    .toolbar(audio.ambientScreensaver ? .hidden : .visible, for: .tabBar)
+                    // Ambient screensaver: drop the tab bar too, for a truly full-screen sky —
+                    // but ONLY while Home is the active tab (see homeScreensaver).
+                    .toolbar(homeScreensaver ? .hidden : .visible, for: .tabBar)
                 
                 LibraryView(audio: audio)
                     .tabItem {
@@ -67,9 +75,9 @@ struct ContentView: View {
             .accentColor(pal.accent)
             
             MiniPlayerView(audio: audio, selectedTab: $selectedTab)
-                .opacity(audio.ambientScreensaver ? 0 : 1)
-                .allowsHitTesting(!audio.ambientScreensaver)
-                .animation(.easeInOut(duration: 0.9), value: audio.ambientScreensaver)
+                .opacity(homeScreensaver ? 0 : 1)
+                .allowsHitTesting(!homeScreensaver)
+                .animation(.easeInOut(duration: 0.9), value: homeScreensaver)
 
             // Full-screen night veil — over the tabs and mini-player both.
             if nightDimmed {

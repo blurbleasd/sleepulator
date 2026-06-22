@@ -262,6 +262,9 @@ struct HomeView: View {
             }
         }
         .onAppear { scheduleIdleFade() }
+        // Leaving Home (tab switch, sheet, etc.): kill the pending idle-fade so the screensaver
+        // can't engage while another tab is showing and hide its tab bar (the "stuck off Home" bug).
+        .onDisappear { idleFade?.cancel() }
         .onChange(of: audio.isAnythingPlaying) { playing in
             if playing { scheduleIdleFade() } else { wakeChrome() }
         }
