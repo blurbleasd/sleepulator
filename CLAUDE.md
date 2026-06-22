@@ -1,99 +1,69 @@
 # SLEEPULATOR — agent guide
 
-> ⚠️ **STATUS (2026-06): the guide below is STALE.** The shipping app is now a
-> **native SwiftUI iOS app** under `Sleepulator/` (Swift services in
-> `Sleepulator/Sleepulator/Services/`, XCTest in `SleepulatorTests/`, a Live Activity
-> widget in `SleepulatorWidget/`). The React/Vite **PWA described below is archived** in
-> `archive_webapp/` and is no longer built or deployed. The server-side "Sleep Safe"
-> ffmpeg proxy has been **removed** and replaced by on-device limiting (see
-> `AUDIO-LIMITER-SPEC.md`); the only live proxy now is the Cloudflare feed proxy
-> (`AppConfig.feedProxyUrl`). The audio invariants below (WAV-baked volume,
-> NATIVE_MEDIA_VOLUME_LOCK, 12k/8k sample-rate floors) are **webapp-only** and do not
-> apply to the Swift engine (`AVAudioEngine` + `AVAudioSourceNode`). See
-> `AUDIT-2026-06.md` and `DESIGN-REVIEW-2026-06.md` for current state. The device
-> verification gate at the bottom still applies. **TODO: rewrite this file for the Swift app.**
+A native SwiftUI iOS app for falling asleep and focusing: layer generative ambient noise +
+binaural beats, optionally mix in a podcast, and set a sleep timer that fades everything out.
+Two moods — **Sleep** (warm "dusk") and **Focus** (cool, Pomodoro). Built for the hard case
+that drives most decisions: **installed on iPhone, screen locked, playing all night.**
 
----
+> The original React/Vite **PWA is archived** in `archive_webapp/` (not built or deployed).
+> The server-side "Sleep Safe" ffmpeg proxy is **gone**, replaced by an on-device Night
+> Limiter (see `AUDIO-LIMITER-SPEC.md`). The only live service is the Cloudflare **feed proxy**
+> (`AppConfig.feedProxyUrl` in `AudioEngine.swift`).
 
-A PWA for falling asleep: layer ambient noise + binaural beats, mix in a podcast,
-set a sleep timer that fades everything out. Optimized for **installed iPhone PWA,
-screen locked, playing all night** — that use case drives most of the hard
-decisions below.
+## Layout (Xcode project at `Sleepulator/Sleepulator.xcodeproj`)
+- **App** — `Sleepulator/Sleepulator/`
+  - `SleepulatorApp.swift` (entry); `ContentView.swift` — the `TabView` root (Home / Podcasts / Settings).
+  - `Views/` — SwiftUI screens + components (HomeView, LibraryView, PodcastDetailView,
+    NowPlayingSheet, MiniPlayerView, SettingsView, BreathingView, the `AmbientScene` backdrop
+    library, Components, Theme).
+  - `Services/` — the engine + plumbing (below).
+  - `Models/Models.swift` — `Podcast`, `Episode`, `SavedMix`, `NoiseType`.
+  - `PrivacyInfo.xcprivacy`, `Info.plist`.
+- **Widget** — `SleepulatorWidget/` (sleep-timer Live Activity).
+- **Tests** — `SleepulatorTests/` (XCTest: `AudioMathTests`, `AudioStateTests`).
 
-## Stack
-- React 18 + Vite (`base: './'`), no router. UI is one provider + a layout tree.
-- Raw **Web Audio** for the engine (NOT Tone.js — ignore any old notes that say otherwise).
-- Vitest + Testing Library (happy-dom) for unit/integration tests.
-- Ships to **GitHub Pages** via `.github/workflows/deploy.yml` on push to `main`
-  (runs `npm test`, builds, publishes `dist/`). A network-first service worker
-  (`public/sw.js`) caches the shell.
+## Services (the core)
+- `AudioEngine` — the app-facing `ObservableObject` facade. Owns UI state + policy, delegates
+  to the engines below; forwards child `objectWillChange` (queue, timer, mixes).
+- `GenerativeAudioEngine` — `AVAudioEngine` + `AVAudioSourceNode`. Renders noise/binaural on the
+  **real-time render thread**, reading params **lock-free** via an atomic double-buffer.
+- `PodcastPlayer` — `AVPlayer` + an `MTAudioProcessingTap` Night Limiter (loudness-bounded so
+  spikes don't wake you). Owns remote commands, the time observer, and gapless preload.
+- `AudioSessionController` — session activation + interruption / route / background observers.
+- `SleepTimerService` (+ `PomodoroService`, `ChimePlayer`) — the fade-out sleep timer and the
+  Focus Pomodoro. `AudioMath` holds the fade curve.
+- `PodcastQueueManager`, `MixStore`, `PersistenceMigrator`, `StorageManager` (JSON file store),
+  `AudioDownloader` (offline cache), `PodcastParser` / `OPMLParser` / `ITunesSearchManager`.
 
-## Architecture
-- `src/context/AppContext.jsx` — the single provider. Owns ambient, binaural,
-  sleep timer, podcast playback, EQ/comp/pan, offline episode caching, MediaSession,
-  persistence. **It's a ~1.5k-line god-context** (known debt; see TODOS.md). When
-  adding state, follow the existing pattern but prefer extracting a domain hook if
-  you're touching a whole subsystem.
-- `src/audio/MixBus.js` — the Web Audio engine. One module-level singleton
-  (`mixBus`). Per-source chain: `MediaElementSource → [eq] → [comp] → [pan] → gain
-  → duckBus (ambient/bin) | masterGain (pod) → destination`.
-- `src/utils/core.js` — pure helpers: noise/binaural generators, WAV builders,
-  seamless-loop math, feed parsing, URL/proxy helpers. Most unit-testable logic lives here.
-- `src/components/*` — presentational; read everything from `useAppContext()`.
+## Audio + state invariants (the hard-won stuff — change with care)
+- **Never block the render thread.** It reads params lock-free; hand-offs are atomic. No locks,
+  allocation, or `DispatchQueue` work inside the `AVAudioSourceNode` render block.
+- **`AudioEngine` is a coarse `ObservableObject`** — *any* `@Published` change invalidates
+  *every* observing view. Keep high-frequency values OUT of `@Published` (`rmsPower` is a plain
+  property; the sleep-timer republish is throttled to 1Hz in `SleepTimerService.tick`). Don't
+  give a view `@ObservedObject var audio` unless it actually displays engine state — that
+  re-render storm is what overwhelmed the podcast list (`perf(podcasts)` fix, 2026-06).
+- **The Night Limiter (on-device tap) replaced the server proxy.** Loudness-bounded so a loud
+  podcast spike can't jolt you awake; it can follow the mode (on for Sleep, off for Focus).
+- **Downloads live in Application Support**, not Documents (Apple 2.5.x: re-downloadable content
+  must not be iCloud-backed). `isExcludedFromBackup`, ~2GB LRU cap (`AudioDownloader`).
+- **Persistence is per-key JSON** via `StorageManager`; one oversized write must not abort the
+  rest. `PersistenceMigrator` owns the fragile launch-time legacy reads.
+- **Sound palettes are mode-scoped** — Sleep and Focus deliberately share no sounds
+  (`AudioEngine.reconcileSoundsToMode`).
 
-## Audio-engine invariants (the hard-won stuff — change with care)
-- **iOS uses the native `<audio loop>` path, not gain nodes.** `NATIVE_MEDIA_VOLUME_LOCK`
-  (true on iOS) means programmatic `audio.volume` is ignored, so ambient/binaural
-  volume is **baked into the generated WAV** and muting uses `audio.muted` / pausing.
-  A muted element routed through a `MediaElementSource` can still leak — at true
-  zero volume we `pause()` the element (not just mute).
-- **Sample-rate floor.** iOS/Safari's decoder is unreliable below ~8 kHz and will
-  play a too-low-rate WAV as silence. Ambient = 12 kHz, binaural = 8 kHz. Do not
-  drop these. (Binaural also needs **headphones** — the carrier is ~180 Hz.)
-- **Seamless loops** use an equal-power (cos/sin) crossfade in `makeSeamlessLoop`,
-  not linear — linear dips ~3 dB mid-seam on uncorrelated noise (audible "gap").
-- **Context recovery is implemented and tested.** `MixBus` handles both
-  suspend→resume (`reconnectAllSources`) and full teardown (`rebuild()` → fresh
-  context → `onRebuild` callback recreates elements). `AppContext` registers the
-  callback. The remaining open item is auto-resume while backgrounded (iOS limit).
-- **Ducking** routes ambient+bin through a shared `duckBus`; an analyser on the pod
-  taps loudness and rides the bus gain. Suspended during the sleep-timer fade so the
-  two don't fight. Unverified by ear — treat as experimental.
-- **Headphone auto-pause**: only on a real present→absent transition with readable
-  device labels. On iOS labels are blank, so it must NOT pause then (false pauses
-  killed all audio).
+## Build / run
+- **Native Xcode build** — open `Sleepulator/Sleepulator.xcodeproj`. NOT Capacitor/CLI; there's
+  no `npm` / `cap sync` step (that was the archived PWA).
+- Deployment target **iOS 17.0** (uses SwiftUI `Shader`/`.layerEffect`, `.contentMargins`).
 
-## localStorage budget rule
-iOS gives localStorage a tight budget. Persistence in `AppContext` saves **each key
-independently** (one oversized write must not abort the rest) and **strips the heavy
-`description` field** from persisted episodes. If you add persisted state, keep it
-small and never put it in a single shared try-block ahead of the queue/subs writes.
-
-## Infra / proxies (3 services — see render.yaml, public/config.js)
-- App: GitHub Pages (`https://blurbleasd.github.io`).
-- Feed proxy: Cloudflare Worker (CORS-fetches RSS).
-- Audio proxy ("Sleep Safe"): Render Docker service running **ffmpeg** loudnorm +
-  limiter so volume spikes don't wake you. Free tier sleeps → first play after idle
-  is slow. `ALLOWED_ORIGINS` is dashboard-managed (falls back to a default in
-  `server.js`); `ALLOWED_AUDIO_HOSTS` gates which podcast hosts may be proxied.
-  Note: ffmpeg means this can't trivially move to a Worker.
-
-## Build / deploy notes
-- `vite.config.js` injects `__BUILD_ID__` (git short SHA) → shown as "build <id>" at
-  the bottom of the home screen, and stamped into `dist/sw.js`'s cache name so each
-  deploy auto-busts the shell. To verify a device is on the latest code, compare that
-  hash to the latest commit.
-- `public/` files are copied verbatim (no Vite `define` substitution) — that's why
-  the SW build id needs the `stamp-sw` plugin.
-
-## The verification gate (read before claiming an audio fix works)
-**Unit tests cannot catch the iOS audio bugs** (no real AudioContext in happy-dom;
-sample-rate, muting, looping, background behavior are device-specific). Any change to
-the audio engine, volume path, or looping must be verified on a **real iPhone,
-installed as a PWA, screen locked** — see TESTING.md. State clearly in a summary when
-something is shipped-but-unverified-on-device.
-
----
+## Verification gate (read before claiming an audio fix works)
+Unit tests can't catch the iOS audio bugs (no real render thread / session in XCTest):
+interruptions, route changes, background keep-alive, looping, the limiter, and the sleep-timer
+**fade + terminal stop** are device-specific. Anything touching the engine, session, limiter, or
+timer must be verified on a **real iPhone, installed, screen locked, over a full timer run.**
+State clearly when something is shipped-but-unverified-on-device. (Note: `TESTING.md` still
+describes the archived web PWA — there is no written native device-test pass yet.)
 
 ## Skill routing
 
