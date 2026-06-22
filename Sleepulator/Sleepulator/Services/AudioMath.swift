@@ -6,6 +6,8 @@ public struct AudioMath {
         switch preset {
         case "theta": return (200.0, 6.0)
         case "alpha": return (220.0, 10.0)
+        case "smr":   return (220.0, 13.0) // sensorimotor rhythm — "calm-alert"
+        case "beta":  return (220.0, 16.0) // concentration band
         case "gamma": return (220.0, 40.0)
         default: return (180.0, 4.0) // delta
         }

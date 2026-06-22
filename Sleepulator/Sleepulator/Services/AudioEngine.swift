@@ -144,10 +144,13 @@ final class AudioEngine: ObservableObject {
         }
     }
     // Curated sound palettes per mode — Sleep and Focus deliberately share no sounds.
-    static let sleepNoises = ["brown", "rain", "ocean"]
+    // Mode-scoped palettes. Pink is the one deliberate cross-mode sound: it has the strongest
+    // slow-wave-sleep evidence, so it earns a place in Sleep too (AUDIO-PALETTE-SPEC §3 R5) —
+    // a sanctioned exception to the otherwise-strict "modes share no sounds" rule.
+    static let sleepNoises = ["brown", "rain", "ocean", "pink"]
     static let focusNoises = ["pink", "fan", "white"]
     static let sleepBinaurals = ["delta", "theta"]
-    static let focusBinaurals = ["alpha", "gamma"]
+    static let focusBinaurals = ["alpha", "smr", "beta", "gamma"]
 
     @Published var focusMode: Bool {
         didSet {

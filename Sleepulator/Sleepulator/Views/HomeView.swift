@@ -45,7 +45,7 @@ struct HomeView: View {
 
     // The currently-playing layers, shown as pills under the orb.
     private var activeLayers: [String] {
-        let binLabels = ["delta": "Deep", "theta": "Drift", "alpha": "Relax", "gamma": "Focus"]
+        let binLabels = ["delta": "Deep", "theta": "Drift", "alpha": "Relax", "smr": "Calm", "beta": "Concentrate", "gamma": "Focus"]
         var p: [String] = []
         if audio.noiseOn { p.append(audio.noiseType.capitalized) }
         if audio.binauralOn { p.append(binLabels[audio.binauralPreset] ?? audio.binauralPreset.capitalized) }
@@ -827,7 +827,7 @@ struct MixPanel: View {
                 isOn: $audio.noiseOn,
                 volume: $audio.noiseVolume,
                 pal: pal,
-                options: audio.focusMode ? ["pink", "fan", "white"] : ["brown", "rain", "ocean"],
+                options: audio.focusMode ? ["pink", "fan", "white"] : ["brown", "rain", "ocean", "pink"],
                 selection: $audio.noiseType
             )
             .glassPanel()
@@ -838,8 +838,8 @@ struct MixPanel: View {
                 isOn: $audio.binauralOn,
                 volume: $audio.binVolume,
                 pal: pal,
-                options: audio.focusMode ? ["alpha", "gamma"] : ["delta", "theta"],
-                optionLabels: ["delta":"Deep","theta":"Drift","alpha":"Relax","gamma":"Focus"],
+                options: audio.focusMode ? ["alpha", "smr", "beta", "gamma"] : ["delta", "theta"],
+                optionLabels: ["delta":"Deep","theta":"Drift","alpha":"Relax","smr":"Calm","beta":"Concentrate","gamma":"Focus"],
                 selection: $audio.binauralPreset
             )
             .glassPanel()
