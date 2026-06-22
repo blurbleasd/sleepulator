@@ -122,17 +122,20 @@ struct RainGlassDepthView: View {
     private static let blobs: [Blob] = {
         let n = rng(0xB0BACAFE_12345678)
         var out: [Blob] = []
-        // Scattered field — brighter + denser than the old 5 dim blobs so the lens has
-        // something to bend in the majority of drops (spec §6.1).
-        for _ in 0..<14 {
-            out.append(Blob(x: 0.08 + n() * 0.84, y: 0.28 + n() * 0.52,
-                            r: 70 + n() * 150, op: 0.30 + n() * 0.42, warmish: n() < 0.7))
+        // A NIGHT window: mostly black, with brightness living in small, bright, distant
+        // lights — not a full bokeh wash (that read like a backlit glass of soda, and an
+        // all-night-bright screen is wrong for OLED). A few faint, larger far glows give
+        // depth without lighting the room…
+        for _ in 0..<5 {
+            out.append(Blob(x: 0.10 + n() * 0.80, y: 0.16 + n() * 0.44,
+                            r: 34 + n() * 56, op: 0.07 + n() * 0.09, warmish: n() < 0.7))
         }
-        // A low band of distant windows / streetlights — small, concentrated, bright: the
-        // classic rain-on-glass cityscape that fills the beads with bent light.
-        for _ in 0..<11 {
-            out.append(Blob(x: 0.05 + n() * 0.90, y: 0.70 + n() * 0.22,
-                            r: 24 + n() * 44, op: 0.45 + n() * 0.45, warmish: n() < 0.82))
+        // …and small, bright streetlight/window points, concentrated low in the frame, so
+        // every drop that crosses one bends a vivid light (the lens), while the rest of the
+        // glass stays dark. Brightness is in tiny spots, never spread across the pane.
+        for _ in 0..<18 {
+            out.append(Blob(x: 0.05 + n() * 0.90, y: 0.46 + n() * 0.50,
+                            r: 6 + n() * 24, op: 0.50 + n() * 0.42, warmish: n() < 0.82))
         }
         return out
     }()

@@ -39,15 +39,16 @@ using namespace metal;
 namespace rg {
 
 // ---- tunables (edit + rebuild) ---------------------------------------------------
-constant float RAIN_SPEED  = 0.18;   // overall fall speed (smaller = calmer)
-constant float REFRACT     = 0.55;   // lens displacement strength (× the refraction uniform)
-constant float SPEC_SCALE  = 60.0;   // catch-light sensitivity to drop slope
-constant float SPEC_BRIGHT = 0.50;   // catch-light brightness
-constant float FOG_DIM     = 0.45;   // how dark the dry (fogged) glass is vs a clear drop
-constant float FOG_MILK    = 0.04;   // faint milky lift on the fogged glass
+constant float RAIN_SPEED  = 0.14;   // overall fall speed (smaller = calmer)
+constant float DROP_SCALE  = 2.1;    // >1 = smaller, denser drops (fixes "massive bubbles")
+constant float REFRACT     = 0.32;   // lens displacement strength (× the refraction uniform)
+constant float SPEC_SCALE  = 45.0;   // catch-light sensitivity to drop slope
+constant float SPEC_BRIGHT = 0.16;   // catch-light brightness (low → no bright combs)
+constant float FOG_DIM     = 0.55;   // how dark the dry (fogged) glass is vs a clear drop
+constant float FOG_MILK    = 0.012;  // faint milky lift on the fogged glass (low → stays dark)
 constant float PARALLAX_UV = 0.02;   // max gyro far-world shift, uv units (held-only bonus)
-constant float STATIC_AMT  = 0.55;   // baseline static-mist amount (× the density uniform)
-constant float TRAIL_SHEEN = 0.05;   // faint wet sheen along trails
+constant float STATIC_AMT  = 0.40;   // baseline static-mist amount (× the density uniform)
+constant float TRAIL_SHEEN = 0.03;   // faint wet sheen along trails
 
 // -- hashing (Heartfelt's) ---------------------------------------------------------
 inline float  N(float x) { return fract(sin(x * 12.9898) * 43758.5453); }
@@ -127,20 +128,25 @@ half4 rainGlassLens(float2 pos, SwiftUI::Layer layer,
                     float refraction, float density) {
     using namespace rg;
 
-    float2 uv = pos / size.y;                 // aspect-square: uv * size.y == pos
+    // Heartfelt assumes bottom-up Y (Shadertoy); `.layerEffect` is top-down, so flip
+    // into a bottom-up uv → drops FALL down. DROP_SCALE shrinks/densifies the field.
+    float2 uv = float2(pos.x, size.y - pos.y) / size.y;   // bottom-up, v in [0,1]
     float t = time * RAIN_SPEED;
+    float2 duv = uv * DROP_SCALE;
 
     // height field + its gradient (3 taps, no extra texture samples).
     float trail = 0.0, tx = 0.0, ty = 0.0;
-    float m  = dropMask(uv, t, density, trail);
-    float e  = 1.5 / size.y;                   // ~1.5px in uv
-    float mx = dropMask(uv + float2(e, 0.0), t, density, tx);
-    float my = dropMask(uv + float2(0.0, e), t, density, ty);
-    float2 nrm = float2(mx - m, my - m);       // slope of the wet surface
+    float e  = 1.0 / size.y;                    // ~1px in uv
+    float m  = dropMask(duv, t, density, trail);
+    float mx = dropMask((uv + float2(e, 0.0)) * DROP_SCALE, t, density, tx);
+    float my = dropMask((uv + float2(0.0, e)) * DROP_SCALE, t, density, ty);
+    float2 nrm = float2(mx - m, my - m);       // slope of the wet surface (∂mask/∂uv)
 
-    // refraction: bend the far-world sample by the drop slope → the lens.
+    // refraction: bend the far-world sample by the drop slope → the lens. Work in
+    // bottom-up uv, then flip the sample point back to real (top-down) pixels.
     float2 sUV = uv - nrm * (REFRACT * refraction) + gyro * PARALLAX_UV;
-    float2 px = clamp(sUV * size.y, float2(0.0), size);
+    float2 pbu = sUV * size.y;
+    float2 px = clamp(float2(pbu.x, size.y - pbu.y), float2(0.0), size);
     half3 far = layer.sample(px).rgb;
 
     // differential focus: dry glass is fogged + dim, drops are clear windows.
