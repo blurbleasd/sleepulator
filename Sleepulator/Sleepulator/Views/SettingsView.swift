@@ -144,6 +144,28 @@ struct SettingsView: View {
                             Text("Gentle tone shaping for voice clarity at low volume. Podcasts only.")
                                 .font(.caption)
                                 .foregroundColor(pal.dim)
+
+                            Divider().background(pal.dim.opacity(0.2))
+
+                            // How the entrainment beats render. A true binaural beat needs per-ear
+                            // isolation (headphones); on a speaker the two tones sum in the air and
+                            // the beat vanishes — so render an isochronic (pulsed mono) tone there.
+                            // Auto follows the current output route.
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("Beats output")
+                                    .font(.subheadline).foregroundColor(pal.text)
+                                Picker("Beats output", selection: $audio.beatRouting) {
+                                    Text("Auto").tag("auto")
+                                    Text("Headphones").tag("headphones")
+                                    Text("Speaker").tag("speaker")
+                                }
+                                .pickerStyle(.segmented)
+                                Text(audio.beatRouting == "headphones" ? "Always true binaural (assumes headphones)."
+                                   : audio.beatRouting == "speaker" ? "Always isochronic — a speaker-safe pulsed tone."
+                                   : "Binaural with headphones, isochronic on the speaker.")
+                                    .font(.caption).foregroundColor(pal.dim)
+                            }
+                            .padding(.top, 4)
                         }
                         .glassPanel()
                         .padding(.horizontal)
@@ -317,7 +339,7 @@ struct SettingsView: View {
         var backupDict: [String: Any] = [:]
 
         // Scalar settings live in UserDefaults.
-        let scalarKeys = ["noiseVolume", "noiseType", "binVolume", "binauralPreset", "podVolume", "stereoWidth", "masterVolume", "autoPlay", "shuffleQueue", "deleteOnCompletion", "hideFinishedEpisodes", "feedProxyUrl", "nightLimiterEnabled", "sleepEQEnabled", "sleepEQIntensity", "limiterByMode"]
+        let scalarKeys = ["noiseVolume", "noiseType", "binVolume", "binauralPreset", "podVolume", "stereoWidth", "masterVolume", "autoPlay", "shuffleQueue", "deleteOnCompletion", "hideFinishedEpisodes", "feedProxyUrl", "nightLimiterEnabled", "sleepEQEnabled", "sleepEQIntensity", "limiterByMode", "beatRouting"]
         for key in scalarKeys {
             if let val = UserDefaults.standard.object(forKey: key) {
                 backupDict[key] = val

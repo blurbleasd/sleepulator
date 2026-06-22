@@ -86,6 +86,15 @@ final class AudioEngine: ObservableObject {
             podPlayer.sleepEQIntensity = sleepEQIntensity
         }
     }
+    /// Which output the entrainment beats should assume: "auto" (follow the route), "headphones"
+    /// (always true binaural), or "speaker" (always isochronic). A true binaural beat collapses
+    /// on a speaker, so this picks the speaker-safe isochronic path when there are no headphones.
+    @Published var beatRouting: String {
+        didSet {
+            UserDefaults.standard.set(beatRouting, forKey: "beatRouting")
+            syncBeatMode()
+        }
+    }
     
     // Persisted mixes (Last Night resume snapshot + saved sound presets) and their storage live
     // in MixStore (Slice A2). Exposed here as read-only passthroughs; MixStore.objectWillChange
@@ -205,6 +214,7 @@ final class AudioEngine: ObservableObject {
         self.limiterByMode = UserDefaults.standard.object(forKey: "limiterByMode") as? Bool ?? false
         self.sleepEQ = UserDefaults.standard.object(forKey: "sleepEQEnabled") as? Bool ?? false
         self.sleepEQIntensity = UserDefaults.standard.object(forKey: "sleepEQIntensity") as? Double ?? 1.0
+        self.beatRouting = UserDefaults.standard.string(forKey: "beatRouting") ?? "auto"
         // podPlayer.nightLimiterEnabled / .sleepEQEnabled are pushed below, after all
         // stored properties are initialized (reading a @Published mid-init is disallowed).
         
@@ -359,9 +369,29 @@ final class AudioEngine: ObservableObject {
         notificationTokens.forEach { NotificationCenter.default.removeObserver($0) }
     }
 
+    /// True when beats should render isochronically (speaker-safe) rather than as a true binaural.
+    var isochronicActive: Bool {
+        switch beatRouting {
+        case "headphones": return false                        // force true binaural
+        case "speaker":    return true                         // force isochronic
+        default:           return !Self.binauralCapableRoute()  // auto: binaural only with headphones
+        }
+    }
+
+    /// Whether the current output route can carry a true binaural beat (per-ear isolation).
+    private static func binauralCapableRoute() -> Bool {
+        let caps: Set<AVAudioSession.Port> = [.headphones, .bluetoothA2DP, .bluetoothLE, .usbAudio]
+        return AVAudioSession.sharedInstance().currentRoute.outputs.contains { caps.contains($0.portType) }
+    }
+
+    private func syncBeatMode() {
+        genEngine.setBeatMode(isochronic: isochronicActive)
+    }
+
     private func syncGenEngine() {
         genEngine.setNoise(on: noiseOn, volume: noiseVolume, type: noiseType)
         genEngine.setBinaural(on: binauralOn, volume: binVolume, preset: binauralPreset)
+        syncBeatMode()
         updateEnginePower()
     }
 
@@ -610,12 +640,15 @@ final class AudioEngine: ObservableObject {
         // Headphones unplugged: follow the HIG for spoken media — pause the podcast so a
         // voice doesn't suddenly play out the phone speaker (waking the room). Keep the
         // ambient noise bed going — it's a calibrated, limiter-bounded background you fall
-        // asleep to; cutting it would do the opposite of the app's job. Binaural is
-        // meaningless on a mono speaker, so drop it.
+        // asleep to; cutting it would do the opposite of the app's job. The beats stay on too:
+        // syncBeatMode() below switches them to isochronic, which (unlike a true binaural beat)
+        // actually works on a speaker.
         if reason == .oldDeviceUnavailable {
-            if binauralOn { binauralOn = false }
             if isPodPlaying { podPlayer.pause() }
         }
+
+        // Any route transition re-picks true-binaural (headphones) vs isochronic (speaker).
+        syncBeatMode()
 
         // Any route transition (Bluetooth / dock / CarPlay connect, etc.) can silently stop
         // the engine without a clean configuration-change rebuild. Re-assert it if the bed

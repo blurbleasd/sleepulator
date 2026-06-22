@@ -21,6 +21,7 @@ struct AudioRenderParams {
     var targetFadeMult: Float = 1.0   // sleep-timer fade only (slow ramp)
     var masterMult: Float = 1.0       // master volume (fast, per-sample smoothed)
     var stereoWidth: Float = 1.0 // user width multiplier on the per-type base width
+    var binMode: Int = 0 // 0 = true binaural (needs headphones), 1 = isochronic (speaker-safe)
 }
 
 struct AudioRenderState {
@@ -39,6 +40,7 @@ struct AudioRenderState {
     var rainLowL: Float = 0, rainLowR: Float = 0 // rain low-rumble bed
     var noiseGCur: Float = 0, binGCur: Float = 0 // smoothed gains (declick)
     var carrierCur: Float = 180.0, beatCur: Float = 4.0 // glided binaural carrier/beat
+    var modPhase: Double = 0 // isochronic AM-envelope phase (advances at the beat rate)
     var globalFrameCount: UInt64 = 0
     var rng: UInt32 = 0x9E3779B9
     var rngR: UInt32 = 0x1A2B3C4D
@@ -270,25 +272,51 @@ final class GenerativeAudioEngine {
             // so there's no click either way; this just makes the transition musical.
             statePtr.pointee.carrierCur += (p.carrier - statePtr.pointee.carrierCur) * 0.05
             statePtr.pointee.beatCur    += (p.beat    - statePtr.pointee.beatCur)    * 0.05
-            let deltas = AudioMath.getBinauralPhaseDeltas(carrier: statePtr.pointee.carrierCur, beat: statePtr.pointee.beatCur, sampleRate: sr)
-            let dL = deltas.dL
-            let dR = deltas.dR
-            
-            for f in 0..<Int(frameCount) {
-                // Per-sample gain smoothing → no click when binaural toggles or its volume changes.
-                // Flush to exact zero once inaudible (denormal guard — see noise node).
-                statePtr.pointee.binGCur += (targetG - statePtr.pointee.binGCur) * 0.0015
-                if statePtr.pointee.binGCur < 1e-8 { statePtr.pointee.binGCur = 0 }
-                let g = statePtr.pointee.binGCur
-                // Left and Right channels get separate phases to create the binaural interference
-                ch0[f] = Float(sin(statePtr.pointee.phaseL)) * g
-                ch1[f] = Float(sin(statePtr.pointee.phaseR)) * g
-                
-                statePtr.pointee.phaseL += dL
-                statePtr.pointee.phaseR += dR
-                
-                if statePtr.pointee.phaseL > 2 * .pi { statePtr.pointee.phaseL -= 2 * .pi }
-                if statePtr.pointee.phaseR > 2 * .pi { statePtr.pointee.phaseR -= 2 * .pi }
+            if p.binMode == 1 {
+                // Isochronic / speaker-safe: one MONO carrier tone, amplitude-modulated at the
+                // beat rate, written to both channels. A true binaural beat needs per-ear
+                // isolation; on a speaker the L/R tones sum in the air and the beat vanishes —
+                // an isochronic pulse survives. Carrier phase stays continuous across a mode
+                // switch (reuses phaseL), so plugging/unplugging headphones doesn't click.
+                let twoPi = 2.0 * Double.pi
+                let dC = twoPi * Double(statePtr.pointee.carrierCur) / Double(sr)
+                let dM = twoPi * Double(statePtr.pointee.beatCur)    / Double(sr)
+                for f in 0..<Int(frameCount) {
+                    statePtr.pointee.binGCur += (targetG - statePtr.pointee.binGCur) * 0.0015
+                    if statePtr.pointee.binGCur < 1e-8 { statePtr.pointee.binGCur = 0 }
+                    let g = statePtr.pointee.binGCur
+                    // Raised-cosine AM envelope (0…1): smooth pulse, click-free, gentle for sleep.
+                    let env = Float(0.5 - 0.5 * cos(statePtr.pointee.modPhase))
+                    // 1.4: nudge peak loudness toward the continuous binaural tone — tune by ear.
+                    let s = Float(sin(statePtr.pointee.phaseL)) * env * g * 1.4
+                    ch0[f] = s
+                    ch1[f] = s
+                    statePtr.pointee.phaseL   += dC
+                    statePtr.pointee.modPhase += dM
+                    if statePtr.pointee.phaseL   > twoPi { statePtr.pointee.phaseL   -= twoPi }
+                    if statePtr.pointee.modPhase > twoPi { statePtr.pointee.modPhase -= twoPi }
+                }
+            } else {
+                // True binaural: separate L/R phases (carrier ∓ beat/2) create the inter-aural beat.
+                let deltas = AudioMath.getBinauralPhaseDeltas(carrier: statePtr.pointee.carrierCur, beat: statePtr.pointee.beatCur, sampleRate: sr)
+                let dL = deltas.dL
+                let dR = deltas.dR
+                for f in 0..<Int(frameCount) {
+                    // Per-sample gain smoothing → no click when binaural toggles or its volume changes.
+                    // Flush to exact zero once inaudible (denormal guard — see noise node).
+                    statePtr.pointee.binGCur += (targetG - statePtr.pointee.binGCur) * 0.0015
+                    if statePtr.pointee.binGCur < 1e-8 { statePtr.pointee.binGCur = 0 }
+                    let g = statePtr.pointee.binGCur
+                    // Left and Right channels get separate phases to create the binaural interference
+                    ch0[f] = Float(sin(statePtr.pointee.phaseL)) * g
+                    ch1[f] = Float(sin(statePtr.pointee.phaseR)) * g
+
+                    statePtr.pointee.phaseL += dL
+                    statePtr.pointee.phaseR += dR
+
+                    if statePtr.pointee.phaseL > 2 * .pi { statePtr.pointee.phaseL -= 2 * .pi }
+                    if statePtr.pointee.phaseR > 2 * .pi { statePtr.pointee.phaseR -= 2 * .pi }
+                }
             }
             return noErr
         }
@@ -389,6 +417,11 @@ final class GenerativeAudioEngine {
             p.carrier = params.carrier
             p.beat = params.beat
         }
+    }
+
+    /// Pick the beat render path: true binaural (headphones) or isochronic (speaker-safe).
+    func setBeatMode(isochronic: Bool) {
+        updateParams { p in p.binMode = isochronic ? 1 : 0 }
     }
     
     
