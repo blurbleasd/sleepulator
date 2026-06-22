@@ -237,7 +237,10 @@ struct HomeView: View {
                         .frame(minHeight: 36)
                     }
                 }
-                .padding(.bottom, 22)   // mini-player clearance is handled by the safeAreaInset now
+                // Clear the floating mini-player when an episode is loaded (it spans ~114–180pt
+                // up from the screen bottom; the controls sit above the tab bar, so they need a
+                // generous inset to clear its top). Tune by eye on device.
+                .padding(.bottom, audio.hasLoadedEpisode ? 112 : 22)
             }
             .opacity(audio.ambientScreensaver ? 0 : 1)
             .allowsHitTesting(!audio.ambientScreensaver)

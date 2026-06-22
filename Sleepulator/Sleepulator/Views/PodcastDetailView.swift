@@ -86,7 +86,7 @@ struct PodcastDetailView: View {
                 }
                 .listStyle(.insetGrouped)
                 .scrollContentBackground(.hidden)
-                // mini-player clearance now comes from the app-level safeAreaInset
+                .contentMargins(.bottom, 80, for: .scrollContent)   // clear the floating mini-player
             }
         }
         .navigationTitle(podcast.name)
