@@ -11,14 +11,23 @@ import Foundation
 struct PersistenceMigrator {
     struct Result {
         var lastMix: SavedMix?
-        var savedPlaylists: [SavedMix]
+        var savedPresets: [SoundPreset]
         /// Non-nil only when legacy `episodePositions` was migrated this launch; the caller
         /// hands it to `PodcastPlayer` so its first flush can't clobber positions.json.
         var migratedPositions: [String: Double]?
     }
 
+    /// A legacy podcast-coupled `SavedMix` → a pure `SoundPreset`: drop the transient podcast,
+    /// migrate any retired noise type, and tag it Sleep (old saves predate mode-scoping).
+    private func toPreset(_ m: SavedMix) -> SoundPreset {
+        SoundPreset(name: m.name, mode: "sleep",
+                    noiseOn: m.noiseOn, noiseType: NoiseType.migrate(m.noiseType), noiseVolume: m.noiseVolume,
+                    binauralOn: m.binauralOn, binauralPreset: m.binauralPreset, binVolume: m.binVolume,
+                    sceneId: nil)
+    }
+
     func run() -> Result {
-        var result = Result(lastMix: nil, savedPlaylists: [], migratedPositions: nil)
+        var result = Result(lastMix: nil, savedPresets: [], migratedPositions: nil)
         let defaults = UserDefaults.standard
 
         // lastMix lived in UserDefaults as JSON; migrate any retired noise type forward.
@@ -28,17 +37,21 @@ struct PersistenceMigrator {
             result.lastMix = mix
         }
 
-        // savedPlaylists: migrate the legacy UserDefaults blob → mixes.json once, else load
-        // the canonical file. Retired noise types are migrated on the way through either path.
+        // Saved presets live in mixes.json. New schema is [SoundPreset]; older data (a legacy
+        // UserDefaults blob, or a mixes.json from before the preset rework) is [SavedMix] and is
+        // migrated forward once — dropping the podcast that never belonged in a reusable recipe.
         if let data = defaults.data(forKey: "savedPlaylists"),
            let mixes = try? JSONDecoder().decode([SavedMix].self, from: data) {
-            let migrated = mixes.map { m -> SavedMix in var m2 = m; m2.noiseType = NoiseType.migrate(m.noiseType); return m2 }
-            StorageManager.shared.save(migrated, to: "mixes.json")
+            let presets = mixes.map(toPreset)
+            StorageManager.shared.save(presets, to: "mixes.json")
             defaults.removeObject(forKey: "savedPlaylists")
-            result.savedPlaylists = migrated
-        } else if let mixes: [SavedMix] = StorageManager.shared.load(from: "mixes.json") {
-            let migrated = mixes.map { m -> SavedMix in var m2 = m; m2.noiseType = NoiseType.migrate(m.noiseType); return m2 }
-            result.savedPlaylists = migrated
+            result.savedPresets = presets
+        } else if let presets: [SoundPreset] = StorageManager.shared.load(from: "mixes.json") {
+            result.savedPresets = presets.map { var p = $0; p.noiseType = NoiseType.migrate(p.noiseType); return p }
+        } else if let oldMixes: [SavedMix] = StorageManager.shared.load(from: "mixes.json") {
+            let presets = oldMixes.map(toPreset)
+            StorageManager.shared.save(presets, to: "mixes.json")   // rewrite in the new schema
+            result.savedPresets = presets
         }
 
         // One-time library.json seed from the legacy savedPodcasts key. Only seed if the

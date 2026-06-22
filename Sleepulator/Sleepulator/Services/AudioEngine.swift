@@ -87,13 +87,12 @@ final class AudioEngine: ObservableObject {
         }
     }
     
-    // Persisted mixes (Last Night snapshot + saved playlists) and their storage live in
-    // MixStore (Slice A2). Exposed here as read-only passthroughs so views binding to
-    // `audio.lastMix` / `audio.savedPlaylists` are unchanged; MixStore.objectWillChange is
-    // forwarded in init so those views still re-render when a mix is saved or deleted.
+    // Persisted mixes (Last Night resume snapshot + saved sound presets) and their storage live
+    // in MixStore (Slice A2). Exposed here as read-only passthroughs; MixStore.objectWillChange
+    // is forwarded in init so views re-render when a preset is saved, renamed, or deleted.
     private let mixStore: MixStore
     var lastMix: SavedMix? { mixStore.lastMix }
-    var savedPlaylists: [SavedMix] { mixStore.savedPlaylists }
+    var savedPresets: [SoundPreset] { mixStore.savedPresets }
     
     @Published var podTitle = "No episode loaded"
     var hasLoadedEpisode: Bool { podPlayer.hasPlayer }
@@ -214,7 +213,7 @@ final class AudioEngine: ObservableObject {
         // reads and hands back the values to seed @Published state below.
         let migrated = PersistenceMigrator().run()
         self.mixStore = MixStore(lastMix: migrated.lastMix,
-                                 savedPlaylists: migrated.savedPlaylists,
+                                 savedPresets: migrated.savedPresets,
                                  storageQueue: storageQueue)
         if let positions = migrated.migratedPositions {
             // podPlayer loaded an empty positions map at its own init (it's constructed
@@ -455,23 +454,62 @@ final class AudioEngine: ObservableObject {
         }
     }
     
-    func deleteMix(_ mix: SavedMix) {
-        mixStore.delete(mix)
+    // MARK: Saved sound presets (reusable recipes — no podcast)
+
+    /// A recipe-derived default name for the current soundscape ("Brown + Delta"), used to
+    /// prefill the name-it prompt. Never the podcast title — a preset is about the sounds.
+    func defaultPresetName() -> String {
+        var parts: [String] = []
+        if noiseOn { parts.append(noiseType.capitalized) }
+        if binauralOn { parts.append(binauralPreset.capitalized) }
+        return parts.isEmpty ? "My Mix" : parts.joined(separator: " + ")
     }
-    
-    func saveCurrentAsPlaylist() {
-        let mix = SavedMix(
-            name: queueManager.queue.first?.title ?? "Custom Mix",
-            noiseOn: noiseOn,
-            noiseVolume: noiseVolume,
-            noiseType: noiseType,
-            binauralOn: binauralOn,
-            binVolume: binVolume,
-            binauralPreset: binauralPreset,
-            podVolume: podVolume,
-            podcastUrl: isPodPlaying ? queueManager.queue.first?.audioUrl : nil
-        )
-        mixStore.add(mix)
+
+    /// Save the current ambient recipe as a named preset for this mode. A same-name preset in
+    /// the same mode is overwritten, not duplicated. Captures the current backdrop too.
+    func savePreset(named name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let finalName = trimmed.isEmpty ? defaultPresetName() : trimmed
+        let mode = focusMode ? "focus" : "sleep"
+        var preset = SoundPreset(
+            name: finalName, mode: mode,
+            noiseOn: noiseOn, noiseType: noiseType, noiseVolume: noiseVolume,
+            binauralOn: binauralOn, binauralPreset: binauralPreset, binVolume: binVolume,
+            sceneId: UserDefaults.standard.string(forKey: mode == "focus" ? "sceneFocus" : "sceneSleep"))
+        if let existing = mixStore.savedPresets.first(where: {
+            $0.mode == mode && $0.name.caseInsensitiveCompare(finalName) == .orderedSame
+        }) {
+            preset.id = existing.id              // overwrite in place
+            mixStore.replacePreset(preset)
+        } else {
+            mixStore.addPreset(preset)
+        }
+    }
+
+    /// Apply a saved preset: swap in its sounds + binaural (+ its backdrop, if any). Leaves any
+    /// playing podcast untouched — a preset only changes the ambient layer.
+    func applyPreset(_ p: SoundPreset) {
+        noiseType = NoiseType.migrate(p.noiseType)
+        noiseVolume = p.noiseVolume
+        noiseOn = p.noiseOn
+
+        binauralPreset = p.binauralPreset
+        binVolume = p.binVolume
+        binauralOn = p.binauralOn
+
+        if let scene = p.sceneId {
+            UserDefaults.standard.set(scene, forKey: p.mode == "focus" ? "sceneFocus" : "sceneSleep")
+        }
+    }
+
+    func renamePreset(_ p: SoundPreset, to name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        mixStore.renamePreset(p.id, to: trimmed)
+    }
+
+    func deletePreset(_ p: SoundPreset) {
+        mixStore.deletePreset(p)
     }
 
     func stopAll() {

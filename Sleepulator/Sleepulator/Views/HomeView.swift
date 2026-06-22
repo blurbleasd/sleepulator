@@ -457,6 +457,12 @@ struct MixDrawer: View {
     let pal: Palette
     @AppStorage("sceneSleep") private var sleepSceneId = "night-sky"
     @AppStorage("sceneFocus") private var focusSceneId = "energy"
+    @State private var showNameDialog = false
+    @State private var draftName = ""
+
+    private var currentMode: String { audio.focusMode ? "focus" : "sleep" }
+    private var modePresets: [SoundPreset] { audio.savedPresets.filter { $0.mode == currentMode } }
+    private var canSaveMix: Bool { audio.noiseOn || audio.binauralOn }
 
     var body: some View {
         ScrollView {
@@ -472,10 +478,10 @@ struct MixDrawer: View {
                 HomeBottomBar(audio: audio, pal: pal)
                     .padding(.top, 4)
 
-                if audio.isAnythingPlaying {
+                if canSaveMix {
                     Button(action: {
-                        audio.saveCurrentAsPlaylist()
-                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                        draftName = audio.defaultPresetName()
+                        showNameDialog = true
                     }) {
                         HStack(spacing: 6) {
                             Image(systemName: "plus.square.on.square")
@@ -488,8 +494,8 @@ struct MixDrawer: View {
                     }
                 }
 
-                if !audio.savedPlaylists.isEmpty {
-                    SavedMixesList(audio: audio, pal: pal)
+                if !modePresets.isEmpty {
+                    SavedMixesList(audio: audio, presets: modePresets, pal: pal)
                 }
 
                 SceneSelector(mood: audio.focusMode ? .focus : .sleep,
@@ -500,6 +506,16 @@ struct MixDrawer: View {
         }
         .background(pal.bg.ignoresSafeArea())
         .preferredColorScheme(.dark)
+        .alert("Name your mix", isPresented: $showNameDialog) {
+            TextField("Mix name", text: $draftName)
+            Button("Save") {
+                audio.savePreset(named: draftName)
+                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("Save this soundscape to reuse it anytime.")
+        }
     }
 }
 
@@ -879,18 +895,20 @@ struct HomeBottomBar: View {
 
 struct SavedMixesList: View {
     @ObservedObject var audio: AudioEngine
+    let presets: [SoundPreset]
     let pal: Palette
+    @State private var renaming: SoundPreset?
+    @State private var draftName = ""
 
-    private func mixSummary(_ mix: SavedMix) -> String {
+    private func mixSummary(_ p: SoundPreset) -> String {
         var parts: [String] = []
-        if mix.noiseOn { parts.append(mix.noiseType.capitalized) }
-        if mix.binauralOn { parts.append(mix.binauralPreset.capitalized) }
-        if mix.podcastUrl != nil { parts.append("Podcast") }
+        if p.noiseOn { parts.append(p.noiseType.capitalized) }
+        if p.binauralOn { parts.append(p.binauralPreset.capitalized) }
         return parts.isEmpty ? "Silent" : parts.joined(separator: " + ")
     }
 
-    // A horizontal row of compact mix cards — tap to load, long-press to delete. Replaces
-    // the old full-width list of name + Load + Delete + divider rows.
+    // A horizontal row of compact preset cards — tap to apply (sounds swap, any podcast keeps
+    // playing), long-press to rename or delete.
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Saved mixes")
@@ -900,8 +918,11 @@ struct SavedMixesList: View {
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 10) {
-                    ForEach(audio.savedPlaylists, id: \.id) { (mix: SavedMix) in
-                        Button(action: { audio.resumeMix(mix) }) {
+                    ForEach(presets, id: \.id) { (mix: SoundPreset) in
+                        Button(action: {
+                            audio.applyPreset(mix)
+                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        }) {
                             VStack(alignment: .leading, spacing: 3) {
                                 Text(mix.name)
                                     .font(.system(.subheadline, design: .rounded).weight(.semibold))
@@ -920,16 +941,28 @@ struct SavedMixesList: View {
                         }
                         .buttonStyle(.plain)
                         .contextMenu {
-                            Button(role: .destructive) { audio.deleteMix(mix) } label: {
+                            Button { draftName = mix.name; renaming = mix } label: {
+                                Label("Rename", systemImage: "pencil")
+                            }
+                            Button(role: .destructive) { audio.deletePreset(mix) } label: {
                                 Label("Delete", systemImage: "trash")
                             }
                         }
-                        .accessibilityLabel("Load mix \(mix.name)")
-                        .accessibilityHint("Long press to delete")
+                        .accessibilityLabel("Apply mix \(mix.name)")
+                        .accessibilityHint("Long press to rename or delete")
                     }
                 }
                 .padding(.horizontal, 20)
             }
+        }
+        .alert("Rename mix", isPresented: Binding(get: { renaming != nil },
+                                                  set: { if !$0 { renaming = nil } })) {
+            TextField("Mix name", text: $draftName)
+            Button("Save") {
+                if let m = renaming { audio.renamePreset(m, to: draftName) }
+                renaming = nil
+            }
+            Button("Cancel", role: .cancel) { renaming = nil }
         }
     }
 }
