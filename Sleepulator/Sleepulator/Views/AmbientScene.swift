@@ -78,6 +78,22 @@ struct RainOnGlassScene: AmbientScene {
     }
 }
 
+#if DEBUG
+/// DEBUG-only A/B sibling of `RainOnGlassScene`: the depth edition (a procedural droplet-as-lens
+/// Metal shader over a brightened far world — RAIN-ON-GLASS-DEPTH-SPEC.md). Registered alongside
+/// the shipping rain scene so the two can be compared on a real device, propped at the bedside,
+/// over a full timer run (§10). Retire `RainOnGlassScene` once this clearly wins on look + power.
+struct RainOnGlassDepthScene: AmbientScene {
+    let id = "rain-on-glass-depth"
+    let title = "Rain (depth)"
+    let mood = SceneMood.sleep
+
+    func makeBackdrop(_ ctx: SceneContext) -> AnyView {
+        AnyView(RainGlassDepthView(paused: ctx.paused))
+    }
+}
+#endif
+
 /// "Breathe": a soft warm glow that swells and fades on a slow breath cadence — follow it and
 /// your own breath slows. The most directly lulling scene (entrainment, not just ambience).
 struct BreathingBloomScene: AmbientScene {
@@ -96,7 +112,14 @@ struct BreathingBloomScene: AmbientScene {
 /// as @AppStorage in the views (keys `sceneSleep` / `sceneFocus`) so changing it re-renders
 /// the home; the registry just enumerates + resolves. Invariant: every mood has >= 1 scene.
 enum SceneRegistry {
-    static let all: [any AmbientScene] = [NightSkyScene(), RainOnGlassScene(), BreathingBloomScene(), EnergyScene()]
+    static let all: [any AmbientScene] = {
+        var scenes: [any AmbientScene] = [NightSkyScene(), RainOnGlassScene()]
+        #if DEBUG
+        scenes.append(RainOnGlassDepthScene())   // A/B sibling, DEBUG builds only
+        #endif
+        scenes.append(contentsOf: [BreathingBloomScene(), EnergyScene()] as [any AmbientScene])
+        return scenes
+    }()
 
     static func scenes(for mood: SceneMood) -> [any AmbientScene] {
         all.filter { $0.mood == mood }
