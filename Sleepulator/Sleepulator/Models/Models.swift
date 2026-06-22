@@ -59,14 +59,12 @@ struct SoundPreset: Codable, Identifiable {
 }
 
 enum NoiseType {
-    static let valid: Set<String> = ["brown", "pink", "rain", "ocean", "fan"]
-    
+    // Every real generator string. green/forest/gray/white are now first-class sounds with
+    // their own render cases — they used to be folded away in migrate() (and white collapsed to
+    // pink), which is the inconsistency the audio-palette review flagged.
+    static let valid: Set<String> = ["brown", "pink", "rain", "ocean", "fan", "white", "green", "forest", "gray"]
+
     static func migrate(_ raw: String) -> String {
-        switch raw {
-        case "green": return "brown"
-        case "white": return "pink"
-        case "forest": return "rain"
-        default: return valid.contains(raw) ? raw : "brown"
-        }
+        valid.contains(raw) ? raw : "brown"
     }
 }

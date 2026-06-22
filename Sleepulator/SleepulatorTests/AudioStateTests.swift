@@ -66,10 +66,13 @@ class AudioStateTests: XCTestCase {
 
 // Pure migration map — saved mixes break if these stop mapping (NoiseType.migrate).
 final class NoiseMigrationTests: XCTestCase {
-    func testRetiredSoundsRemap() {
-        XCTAssertEqual(NoiseType.migrate("green"), "brown")
-        XCTAssertEqual(NoiseType.migrate("white"), "pink")
-        XCTAssertEqual(NoiseType.migrate("forest"), "rain")
+    // green / white / forest / gray are now first-class sounds with their own render cases, so
+    // migrate() passes them through instead of folding them away (the audio-palette change).
+    func testNewColoursPassThrough() {
+        XCTAssertEqual(NoiseType.migrate("green"), "green")
+        XCTAssertEqual(NoiseType.migrate("white"), "white")
+        XCTAssertEqual(NoiseType.migrate("forest"), "forest")
+        XCTAssertEqual(NoiseType.migrate("gray"), "gray")
     }
 
     func testValidPassesThroughAndUnknownFallsBack() {
@@ -188,13 +191,13 @@ final class AudioEngineBehaviorTests: XCTestCase {
         XCTAssertTrue(engine.binauralOn)
     }
 
-    func testResumeMixMigratesRetiredNoiseType() {
+    func testResumeMixKeepsNowValidNoiseType() {
         let engine = AudioEngine()
         let mix = SavedMix(name: "old", noiseOn: true, noiseVolume: 0.4, noiseType: "green",
                            binauralOn: false, binVolume: 0.3, binauralPreset: "delta",
                            podVolume: 0.7, podcastUrl: nil, podcastId: nil)
         engine.resumeMix(mix)
-        XCTAssertEqual(engine.noiseType, "brown")    // green → brown via NoiseType.migrate
+        XCTAssertEqual(engine.noiseType, "green")    // green is a real sound now (NoiseType.migrate)
     }
 
     func testModeSwitchReconcilesSoundsIntoPalette() {

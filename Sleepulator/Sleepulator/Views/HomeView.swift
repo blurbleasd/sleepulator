@@ -827,7 +827,7 @@ struct MixPanel: View {
                 isOn: $audio.noiseOn,
                 volume: $audio.noiseVolume,
                 pal: pal,
-                options: audio.focusMode ? ["pink", "fan", "white"] : ["brown", "rain", "ocean", "pink"],
+                options: audio.focusMode ? ["pink", "fan", "white", "gray"] : ["brown", "rain", "ocean", "pink", "green", "forest"],
                 selection: $audio.noiseType
             )
             .glassPanel()

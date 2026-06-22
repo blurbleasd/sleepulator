@@ -38,6 +38,9 @@ struct AudioRenderState {
     var rainBedL: Float = 0, rainBedR: Float = 0
     var rainBed2L: Float = 0, rainBed2R: Float = 0 // rain 2nd low-pass pole
     var rainLowL: Float = 0, rainLowR: Float = 0 // rain low-rumble bed
+    var greenAL: Float = 0, greenAR: Float = 0, greenBL: Float = 0, greenBR: Float = 0 // green mid-band poles
+    var forestMidL: Float = 0, forestMidR: Float = 0 // forest soft-body low-pass
+    var grayLowL: Float = 0, grayLowR: Float = 0 // gray low-boost low-pass
     var noiseGCur: Float = 0, binGCur: Float = 0 // smoothed gains (declick)
     var carrierCur: Float = 180.0, beatCur: Float = 4.0 // glided binaural carrier/beat
     var modPhase: Double = 0 // isochronic AM-envelope phase (advances at the beat rate)
@@ -219,6 +222,35 @@ final class GenerativeAudioEngine {
                     sampleL = statePtr.pointee.brownL * 3.6 * lfo   // loudness-matched (was 4.5)
                     sampleR = statePtr.pointee.brownR * 3.6 * lfo
                     
+                case 3: // green (Sleep): mid-band emphasis — a "natural", centred-mids bed.
+                    // Two cascaded one-pole low-passes; their difference is a band (~470Hz–1.7k).
+                    // Loudness scalars are first-draft — tune by ear on device.
+                    statePtr.pointee.greenAL = statePtr.pointee.greenAL * 0.80 + whiteL * 0.20  // LP ~1.7k
+                    statePtr.pointee.greenBL = statePtr.pointee.greenBL * 0.94 + statePtr.pointee.greenAL * 0.06 // LP ~470
+                    let gMidL = statePtr.pointee.greenAL - statePtr.pointee.greenBL
+                    sampleL = (gMidL * 1.7 + statePtr.pointee.greenBL * 0.55) * 1.25
+                    statePtr.pointee.greenAR = statePtr.pointee.greenAR * 0.80 + whiteR * 0.20
+                    statePtr.pointee.greenBR = statePtr.pointee.greenBR * 0.94 + statePtr.pointee.greenAR * 0.06
+                    let gMidR = statePtr.pointee.greenAR - statePtr.pointee.greenBR
+                    sampleR = (gMidR * 1.7 + statePtr.pointee.greenBR * 0.55) * 1.25
+
+                case 7: // forest (Sleep): soft broadband outdoors bed with a faint slow breeze swell.
+                    statePtr.pointee.brownL = (statePtr.pointee.brownL + 0.02 * whiteL) / 1.02
+                    statePtr.pointee.brownR = (statePtr.pointee.brownR + 0.02 * whiteR) / 1.02
+                    statePtr.pointee.forestMidL = statePtr.pointee.forestMidL * 0.86 + whiteL * 0.14 // soft body LP ~1.1k
+                    statePtr.pointee.forestMidR = statePtr.pointee.forestMidR * 0.86 + whiteR * 0.14
+                    let breeze = Float((sin(2 * .pi * 0.05 * t) + 1) / 2) * 0.35 + 0.65 // very slow swell, 0.65…1.0
+                    sampleL = (statePtr.pointee.brownL * 1.7 + statePtr.pointee.forestMidL * 0.45) * breeze * 1.2
+                    sampleR = (statePtr.pointee.brownR * 1.7 + statePtr.pointee.forestMidR * 0.45) * breeze * 1.2
+
+                case 8: // gray (Focus): approx equal-loudness masking — white with boosted lows, so
+                    // it reads flatter / less harsh than raw white. A true gray needs an
+                    // equal-loudness EQ; this is a cheap approximation — tune by ear.
+                    statePtr.pointee.grayLowL = statePtr.pointee.grayLowL * 0.95 + whiteL * 0.05 // low boost LP ~390
+                    statePtr.pointee.grayLowR = statePtr.pointee.grayLowR * 0.95 + whiteR * 0.05
+                    sampleL = whiteL * 0.13 + statePtr.pointee.grayLowL * 1.7
+                    sampleR = whiteR * 0.13 + statePtr.pointee.grayLowR * 1.7
+
                 default: // 0 = brown
                     statePtr.pointee.brownL = (statePtr.pointee.brownL + 0.02 * whiteL) / 1.02
                     statePtr.pointee.brownR = (statePtr.pointee.brownR + 0.02 * whiteR) / 1.02
@@ -490,9 +522,12 @@ final class GenerativeAudioEngine {
         switch type {
         case "white": return 1
         case "pink": return 2
+        case "green": return 3
         case "fan": return 4
         case "rain": return 5
         case "ocean": return 6
+        case "forest": return 7
+        case "gray": return 8
         default: return 0 // brown
         }
     }
