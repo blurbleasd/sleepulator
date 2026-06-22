@@ -88,7 +88,7 @@ struct MiniPlayerView: View {
                     .stroke(pal.text.opacity(0.1), lineWidth: 1)
             )
             .padding(.horizontal)
-            .padding(.bottom, 80) // Elevate above tab bar
+            .padding(.bottom, 6)   // small gap above the tab bar (docked via safeAreaInset)
             .sheet(isPresented: $showNowPlaying) {
                 NowPlayingSheet(audio: audio, isPresented: $showNowPlaying, pal: pal)
             }

@@ -73,11 +73,15 @@ struct ContentView: View {
                     .tag(2)
             }
             .accentColor(pal.accent)
-            
-            MiniPlayerView(audio: audio, selectedTab: $selectedTab)
-                .opacity(homeScreensaver ? 0 : 1)
-                .allowsHitTesting(!homeScreensaver)
-                .animation(.easeInOut(duration: 0.9), value: homeScreensaver)
+            // Mini-player docks just above the tab bar as a bottom safe-area inset, so every
+            // tab's content is inset by its ACTUAL height. No more per-view "clear the floating
+            // mini-player" magic numbers (the mismatched ones crowded the Home controls).
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                MiniPlayerView(audio: audio, selectedTab: $selectedTab)
+                    .opacity(homeScreensaver ? 0 : 1)
+                    .allowsHitTesting(!homeScreensaver)
+                    .animation(.easeInOut(duration: 0.9), value: homeScreensaver)
+            }
 
             // Full-screen night veil — over the tabs and mini-player both.
             if nightDimmed {

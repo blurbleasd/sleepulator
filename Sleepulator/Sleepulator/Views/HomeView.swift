@@ -237,7 +237,7 @@ struct HomeView: View {
                         .frame(minHeight: 36)
                     }
                 }
-                .padding(.bottom, audio.hasLoadedEpisode ? 84 : 22)
+                .padding(.bottom, 22)   // mini-player clearance is handled by the safeAreaInset now
             }
             .opacity(audio.ambientScreensaver ? 0 : 1)
             .allowsHitTesting(!audio.ambientScreensaver)
