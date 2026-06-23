@@ -10,6 +10,10 @@ import SwiftUI
 struct RainGlassView: View {
     /// True only when the screen is occluded by the deep night-dim veil — freeze for battery.
     var paused: Bool = false
+    /// The sleep timer, read *live* (not observed) inside the redraw so the rain eases off as
+    /// the night progresses. Plain property on purpose — observing it here would re-render the
+    /// whole scene every tick (the `rmsPower`/`@Published` storm CLAUDE.md warns about).
+    var sleepTimer: SleepTimerService? = nil
 
     private var active: Bool { !paused }
 
@@ -81,17 +85,12 @@ struct RainGlassView: View {
                          Color(red: 0.04, green: 0.05, blue: 0.09)],
                 startPoint: .top, endPoint: .bottom)
 
-            // Blurred lights behind the glass.
-            GeometryReader { geo in
-                ForEach(0..<Self.bokeh.count, id: \.self) { i in
-                    let b = Self.bokeh[i]
-                    Circle()
-                        .fill(b.color)
-                        .frame(width: b.r, height: b.r)
-                        .blur(radius: b.r * 0.5)
-                        .opacity(0.20)
-                        .position(x: b.x * geo.size.width, y: b.y * geo.size.height)
-                }
+            // Blurred lights behind the glass — they dim out as the night settles, leaving a
+            // dark fogged pane (isolated 1 Hz leaf; the animating drops dim separately, live).
+            if let timer = sleepTimer {
+                NightFade(timer: timer, maxDim: 0.9) { bokehLights }
+            } else {
+                bokehLights
             }
 
             // Static misted-glass specks (drawn once, not per frame).
@@ -107,9 +106,11 @@ struct RainGlassView: View {
             // settles, so there's no redraw loop on an all-night screen.
             if active {
                 TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { tl in
+                    // Sample nightProgress fresh each tick — live read, no observation.
+                    let night = sleepTimer?.nightProgress ?? 0
                     Canvas { ctx, size in
                         let t = tl.date.timeIntervalSinceReferenceDate
-                        for d in Self.drops { Self.draw(d, ctx: ctx, size: size, t: t) }
+                        for d in Self.drops { Self.draw(d, ctx: ctx, size: size, t: t, night: night) }
                     }
                 }
                 .blur(radius: 0.4)                 // a touch of wet-glass softness
@@ -122,7 +123,34 @@ struct RainGlassView: View {
         .animation(.easeInOut(duration: 1.2), value: active)
     }
 
-    private static func draw(_ d: Drop, ctx: GraphicsContext, size: CGSize, t: Double) {
+    /// Out-of-focus warm/cool lights behind the pane. Extracted so the night-fade leaf can dim
+    /// them without observing the timer from the parent.
+    private var bokehLights: some View {
+        GeometryReader { geo in
+            ForEach(0..<Self.bokeh.count, id: \.self) { i in
+                let b = Self.bokeh[i]
+                Circle()
+                    .fill(b.color)
+                    .frame(width: b.r, height: b.r)
+                    .blur(radius: b.r * 0.5)
+                    .opacity(0.20)
+                    .position(x: b.x * geo.size.width, y: b.y * geo.size.height)
+            }
+        }
+    }
+
+    /// - Parameter night: `nightProgress` (0 at the start of a sleep timer, →1 as it expires;
+    ///   0 when idle). As it rises the rain eases off — each drop fades over a window, with
+    ///   higher-`phase` drops retiring first, so the glass thins gradually to a still pane.
+    ///   The fall *rate* is left untouched (scaling absolute `t` would jump the drop) — the
+    ///   thinning alone reads as the rain letting up.
+    private static func draw(_ d: Drop, ctx: GraphicsContext, size: CGSize, t: Double, night: Double = 0) {
+        let p = min(1, max(0, night))
+        // Per-drop fade window (~0.3 wide); larger-phase drops stop sooner. 0 → fully retired.
+        let fade = max(0.0, min(1.0, (1.0 - p - d.phase * 0.7) / 0.3))
+        if fade <= 0.001 { return }
+        let op = d.opacity * fade
+
         let fall = size.height + 80
         let cycle = (t * d.speed + d.phase).truncatingRemainder(dividingBy: 1.0)
         let y = pow(cycle, 1.3) * fall - 40          // accelerate as it slides (off-screen wrap)
@@ -132,14 +160,14 @@ struct RainGlassView: View {
         let trail = Path(roundedRect: CGRect(x: x - d.r * 0.5, y: y - d.len, width: d.r, height: d.len),
                          cornerRadius: d.r * 0.5)
         ctx.fill(trail, with: .linearGradient(
-            Gradient(colors: [.white.opacity(0), .white.opacity(d.opacity * 0.5)]),
+            Gradient(colors: [.white.opacity(0), .white.opacity(op * 0.5)]),
             startPoint: CGPoint(x: x, y: y - d.len), endPoint: CGPoint(x: x, y: y)))
 
         // Head + a small catch-light.
         ctx.fill(Path(ellipseIn: CGRect(x: x - d.r, y: y - d.r, width: d.r * 2, height: d.r * 2)),
-                 with: .color(.white.opacity(d.opacity)))
+                 with: .color(.white.opacity(op)))
         ctx.fill(Path(ellipseIn: CGRect(x: x - d.r * 0.4, y: y - d.r * 0.7,
                                         width: d.r * 0.6, height: d.r * 0.6)),
-                 with: .color(.white.opacity(d.opacity * 0.7)))
+                 with: .color(.white.opacity(op * 0.7)))
     }
 }

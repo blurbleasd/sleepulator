@@ -5,7 +5,6 @@ import Network
 import SwiftUI
 
 enum AppConfig {
-    static let feedProxyUrl  = "https://sleepulator-feed-proxy.chesteraarfer.workers.dev"
     static let nightLimiterEnabled = true
 }
 
@@ -49,6 +48,21 @@ final class AudioEngine: ObservableObject {
     @Published var noiseType: String {
         didSet { UserDefaults.standard.set(noiseType, forKey: "noiseType"); syncGenEngine() }
     }
+    /// Cap on *extra* stacked noise layers (the primary `noiseType` is always layer 0).
+    static let maxExtraLayers = kMaxNoiseLayers - 1
+    /// Additional simultaneous noise generators stacked on the primary noise (rain + brown, …).
+    /// Gated by `noiseOn` like the primary; persisted as JSON; capped at `maxExtraLayers`.
+    @Published var extraLayers: [ExtraNoiseLayer] = [] {
+        didSet {
+            let v = extraLayers
+            storageQueue.async {
+                if let data = try? JSONEncoder().encode(v) {
+                    UserDefaults.standard.set(data, forKey: "extraLayers")
+                }
+            }
+            syncGenEngine()
+        }
+    }
     @Published var binauralPreset: String {
         didSet { UserDefaults.standard.set(binauralPreset, forKey: "binauralPreset"); syncGenEngine() }
     }
@@ -75,10 +89,6 @@ final class AudioEngine: ObservableObject {
         Self.skipGlyphSizes.contains(Int(skipInterval)) ? "goforward.\(Int(skipInterval))" : "goforward"
     }
     
-    // Phase 6 Proxies
-    @Published var feedProxyUrl: String {
-        didSet { UserDefaults.standard.set(feedProxyUrl, forKey: "feedProxyUrl") }
-    }
     @Published var nightLimiter: Bool {
         didSet {
             UserDefaults.standard.set(nightLimiter, forKey: "nightLimiterEnabled")
@@ -159,6 +169,15 @@ final class AudioEngine: ObservableObject {
     // invalidated HomeView + every child holding `audio` 20 times a second all night for a
     // value nothing displays. Kept as a plain property in case a future visual wants it.
     var rmsPower: Double = 0.0
+
+    /// A heavily smoothed, normalized version of `rmsPower` (~0…1) for audio-reactive ambient
+    /// scenes — a slow "breath" that follows the generative bed (fire crackle, ocean swell),
+    /// not a jittery meter. Also a plain property on purpose: scenes sample it *live* inside
+    /// their own redraw (see `SceneContext.audioLevel`). Pushing it through `@Published` would
+    /// reintroduce the exact 20 Hz re-render storm the `rmsPower` comment above describes.
+    /// Driven by the generative engine's render callback, so a podcast playing with no noise
+    /// bed won't move it — that's an accepted limitation of v1.
+    var audioLevel: Double = 0.0
     
     @Published var masterVolume: Double {
         didSet {
@@ -201,6 +220,10 @@ final class AudioEngine: ObservableObject {
         let binaurals = focusMode ? Self.focusBinaurals : Self.sleepBinaurals
         if !noises.contains(noiseType) { noiseType = noises.first! }
         if !binaurals.contains(binauralPreset) { binauralPreset = binaurals.first! }
+        // Drop any extra layer whose sound isn't in the new mode's palette, so a cross-mode layer
+        // can't leak across (same rule the primary noise follows above).
+        let filtered = extraLayers.filter { noises.contains($0.type) }
+        if filtered.count != extraLayers.count { extraLayers = filtered }
     }
     @Published var isMuted: Bool = false { didSet { syncAllVolumes() } }
     
@@ -227,16 +250,19 @@ final class AudioEngine: ObservableObject {
         self.podVolume = UserDefaults.standard.object(forKey: "podVolume") as? Double ?? 0.7
         
         self.noiseType = NoiseType.migrate(UserDefaults.standard.string(forKey: "noiseType") ?? "brown")
+        if let data = UserDefaults.standard.data(forKey: "extraLayers"),
+           let layers = try? JSONDecoder().decode([ExtraNoiseLayer].self, from: data) {
+            self.extraLayers = layers.prefix(Self.maxExtraLayers).map {
+                ExtraNoiseLayer(id: $0.id, type: NoiseType.migrate($0.type), volume: $0.volume)
+            }
+        }
         self.binauralPreset = UserDefaults.standard.string(forKey: "binauralPreset") ?? "delta"
         self.playbackSpeed = UserDefaults.standard.object(forKey: "playbackSpeed") as? Double ?? 1.0
         self.skipInterval = UserDefaults.standard.object(forKey: "skipInterval") as? Double ?? 15
         self.masterVolume = UserDefaults.standard.object(forKey: "masterVolume") as? Double ?? 1.0
         self.stereoWidth = UserDefaults.standard.object(forKey: "stereoWidth") as? Double ?? 1.0
         self.focusMode = UserDefaults.standard.object(forKey: "focusMode") as? Bool ?? false
-        
-        let savedFeed = UserDefaults.standard.string(forKey: "feedProxyUrl")
-        self.feedProxyUrl = (savedFeed?.isEmpty == false) ? savedFeed! : AppConfig.feedProxyUrl
-        
+
         // Migration: if old sleepSafeAudio exists, remove old proxy settings
         if UserDefaults.standard.object(forKey: "sleepSafeAudio") != nil {
             UserDefaults.standard.removeObject(forKey: "sleepSafeAudio")
@@ -294,12 +320,18 @@ final class AudioEngine: ObservableObject {
         }
         
         genEngine.onRMSUpdate = { [weak self] power in
-            self?.rmsPower = power
+            guard let self else { return }
+            self.rmsPower = power
+            // Low-pass into a slow, organic level for audio-reactive scenes (TiltSource's
+            // discipline: smooth at the source, never publish). Gentle gain then clamp; the
+            // ~0.08 factor at ~20 Hz gives a ~0.6 s breath. Tuned by ear — adjust on device.
+            let target = min(1.0, max(0.0, power * 3.0))
+            self.audioLevel += (target - self.audioLevel) * 0.08
             // Noise-only keep-alive for the sleep timer: without a podcast there's no
             // AVPlayer time-observer feeding backgroundTick, so the fade/terminal-stop would
             // ride only the GCD timer (which iOS can curtail). The RMS tap fires whenever the
             // engine renders, giving the timer the same belt-and-suspenders as the pod path.
-            self?.sleepTimer.backgroundTick()
+            self.sleepTimer.backgroundTick()
         }
 
         genEngine.onEngineError = { [weak self] msg in
@@ -375,9 +407,9 @@ final class AudioEngine: ObservableObject {
         }
         
         // Audio-session plumbing is owned by AudioSessionController (Slice A3). It forwards
-        // each event here via closures; the handler policy below is unchanged and still runs
-        // on the notification's posting thread (the controller registers selector-based,
-        // queue-less, exactly as before).
+        // each event here via closures, hopping to the main queue first (AVAudioSession delivers
+        // these on an arbitrary system thread) so the handlers can safely touch @Published state
+        // and updateParams (main-queue + single-writer on the lock-free param buffer).
         sessionController.onInterruption = { [weak self] note in self?.handleInterruption(note: note) }
         sessionController.onRouteChange = { [weak self] note in self?.handleRouteChange(note: note) }
         sessionController.onAppBackground = { [weak self] in self?.handleAppBackground() }
@@ -452,10 +484,45 @@ final class AudioEngine: ObservableObject {
     }
 
     private func syncGenEngine() {
-        genEngine.setNoise(on: noiseOn, volume: noiseVolume, type: noiseType)
+        genEngine.setNoiseLayers(buildNoiseLayers(), on: noiseOn)
         genEngine.setBinaural(on: binauralOn, volume: binVolume, preset: binauralPreset)
         syncBeatMode()
         updateEnginePower()
+    }
+
+    /// The full ordered noise stack handed to the engine: the primary noise (layer 0) plus any
+    /// extra layers (capped). The engine silences everything when `noiseOn` is false.
+    private func buildNoiseLayers() -> [(type: String, volume: Double)] {
+        var layers: [(type: String, volume: Double)] = [(noiseType, noiseVolume)]
+        for l in extraLayers.prefix(Self.maxExtraLayers) {
+            layers.append((l.type, l.volume))
+        }
+        return layers
+    }
+
+    // MARK: Extra noise layers (stacked simultaneous sounds)
+
+    /// Add an extra noise layer, defaulting to a palette sound not already in the stack.
+    func addExtraLayer() {
+        guard extraLayers.count < Self.maxExtraLayers else { return }
+        let palette = focusMode ? Self.focusNoises : Self.sleepNoises
+        let used = Set([noiseType] + extraLayers.map { $0.type })
+        let type = palette.first(where: { !used.contains($0) }) ?? palette.first ?? "brown"
+        extraLayers.append(ExtraNoiseLayer(type: type, volume: 0.3))
+    }
+
+    func removeExtraLayer(_ id: String) {
+        extraLayers.removeAll { $0.id == id }
+    }
+
+    func setExtraLayerType(_ id: String, _ type: String) {
+        guard let i = extraLayers.firstIndex(where: { $0.id == id }) else { return }
+        extraLayers[i].type = type
+    }
+
+    func setExtraLayerVolume(_ id: String, _ volume: Double) {
+        guard let i = extraLayers.firstIndex(where: { $0.id == id }) else { return }
+        extraLayers[i].volume = volume
     }
 
     private var suspendWorkItem: DispatchWorkItem?
@@ -490,6 +557,15 @@ final class AudioEngine: ObservableObject {
         if isPodPlaying { podPlayer.pause() } else { resumePodcast() }
     }
     
+    /// First-run "show me the magic" start: bring up a layered noise + binaural bed (using the
+    /// stored defaults — brown + delta for Sleep) so the very first tap demonstrates that the app
+    /// *layers* sounds, rather than playing a single bare noise. Used only when there's nothing
+    /// playing and no last mix to resume.
+    func startDefaultMix() {
+        noiseOn = true
+        binauralOn = true
+    }
+
     func toggleMasterTransport() {
         if isAnythingPlaying {
             lastActiveSnapshot = (noiseOn, binauralOn, isPodPlaying)
@@ -532,7 +608,8 @@ final class AudioEngine: ObservableObject {
             podVolume: podVolume,
             podcastUrl: hasPodcast ? queueManager.queue.first?.audioUrl : nil,
             podcastId: hasPodcast ? queueManager.queue.first?.id : nil,
-            podcastPosition: hasPodcast ? podcastElapsed : nil
+            podcastPosition: hasPodcast ? podcastElapsed : nil,
+            extraLayers: extraLayers.isEmpty ? nil : extraLayers
         )
         mixStore.saveLast(mix)
     }
@@ -540,6 +617,9 @@ final class AudioEngine: ObservableObject {
     func resumeMix(_ mix: SavedMix) {
         self.noiseType = NoiseType.migrate(mix.noiseType)
         self.noiseVolume = mix.noiseVolume
+        self.extraLayers = (mix.extraLayers ?? []).prefix(Self.maxExtraLayers).map {
+            ExtraNoiseLayer(id: $0.id, type: NoiseType.migrate($0.type), volume: $0.volume)
+        }
         self.noiseOn = mix.noiseOn
         
         self.binauralPreset = mix.binauralPreset
@@ -561,7 +641,10 @@ final class AudioEngine: ObservableObject {
     /// prefill the name-it prompt. Never the podcast title — a preset is about the sounds.
     func defaultPresetName() -> String {
         var parts: [String] = []
-        if noiseOn { parts.append(noiseType.capitalized) }
+        if noiseOn {
+            parts.append(noiseType.capitalized)
+            parts.append(contentsOf: extraLayers.map { $0.type.capitalized })
+        }
         if binauralOn { parts.append(binauralPreset.capitalized) }
         return parts.isEmpty ? "My Mix" : parts.joined(separator: " + ")
     }
@@ -576,7 +659,8 @@ final class AudioEngine: ObservableObject {
             name: finalName, mode: mode,
             noiseOn: noiseOn, noiseType: noiseType, noiseVolume: noiseVolume,
             binauralOn: binauralOn, binauralPreset: binauralPreset, binVolume: binVolume,
-            sceneId: UserDefaults.standard.string(forKey: mode == "focus" ? "sceneFocus" : "sceneSleep"))
+            sceneId: UserDefaults.standard.string(forKey: mode == "focus" ? "sceneFocus" : "sceneSleep"),
+            extraLayers: extraLayers.isEmpty ? nil : extraLayers)
         if let existing = mixStore.savedPresets.first(where: {
             $0.mode == mode && $0.name.caseInsensitiveCompare(finalName) == .orderedSame
         }) {
@@ -593,6 +677,9 @@ final class AudioEngine: ObservableObject {
         noiseType = NoiseType.migrate(p.noiseType)
         noiseVolume = p.noiseVolume
         noiseOn = p.noiseOn
+        extraLayers = (p.extraLayers ?? []).prefix(Self.maxExtraLayers).map {
+            ExtraNoiseLayer(id: $0.id, type: NoiseType.migrate($0.type), volume: $0.volume)
+        }
 
         binauralPreset = p.binauralPreset
         binVolume = p.binVolume
@@ -633,6 +720,14 @@ final class AudioEngine: ObservableObject {
         binVolume = d.object(forKey: "binVolume") as? Double ?? 0.3
         podVolume = d.object(forKey: "podVolume") as? Double ?? 0.7
         noiseType = NoiseType.migrate(d.string(forKey: "noiseType") ?? "brown")
+        if let data = d.data(forKey: "extraLayers"),
+           let layers = try? JSONDecoder().decode([ExtraNoiseLayer].self, from: data) {
+            extraLayers = layers.prefix(Self.maxExtraLayers).map {
+                ExtraNoiseLayer(id: $0.id, type: NoiseType.migrate($0.type), volume: $0.volume)
+            }
+        } else {
+            extraLayers = []
+        }
         binauralPreset = d.string(forKey: "binauralPreset") ?? "delta"
         playbackSpeed = d.object(forKey: "playbackSpeed") as? Double ?? 1.0
         skipInterval = d.object(forKey: "skipInterval") as? Double ?? 15
@@ -643,8 +738,6 @@ final class AudioEngine: ObservableObject {
         limiterByMode = d.object(forKey: "limiterByMode") as? Bool ?? false
         sleepEQ = d.object(forKey: "sleepEQEnabled") as? Bool ?? false
         sleepEQIntensity = d.object(forKey: "sleepEQIntensity") as? Double ?? 1.0
-        let savedFeed = d.string(forKey: "feedProxyUrl")
-        feedProxyUrl = (savedFeed?.isEmpty == false) ? savedFeed! : AppConfig.feedProxyUrl
         focusMode = d.object(forKey: "focusMode") as? Bool ?? false   // didSet reconciles palette
 
         mixStore.reloadFromDisk()

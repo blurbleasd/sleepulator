@@ -9,6 +9,16 @@ import SwiftUI
 struct AuroraView: View {
     /// True only when the screen is occluded by the deep night-dim veil — freeze for battery.
     var paused: Bool = false
+    /// The sleep timer, read *live* (not observed) inside the redraw so the curtains wind down
+    /// as the night progresses. A plain property on purpose: observing it here would re-render
+    /// the whole scene every tick (the `rmsPower`/`@Published` storm CLAUDE.md warns about).
+    var sleepTimer: SleepTimerService? = nil
+    /// Smoothed audio level (~0…1), sampled live so the curtains glow a little brighter as the
+    /// generative bed swells (e.g. the Ocean swell). Closure, not observed — same discipline.
+    var audioLevel: (() -> Double)? = nil
+    /// Smoothed gyro tilt (x = roll, y = pitch), sampled live to parallax the curtains by depth
+    /// (near curtains shift more). `.zero` on a nightstand, so this is a watching-window bonus.
+    var tilt: (() -> SIMD2<Float>)? = nil
 
     private struct Curtain {
         let yTop, yBottom: Double   // vertical band (0…1)
@@ -58,10 +68,15 @@ struct AuroraView: View {
                 .ignoresSafeArea()
             Canvas { ctx, size in Self.drawStars(ctx, size) }      // static depth layer
             if paused {
-                Canvas { ctx, size in Self.drawAurora(ctx, size, t: 0) }
+                let g = tilt?() ?? .zero
+                Canvas { ctx, size in Self.drawAurora(ctx, size, t: 0, night: sleepTimer?.nightProgress ?? 0, audio: audioLevel?() ?? 0, tiltX: Double(g.x), tiltY: Double(g.y)) }
             } else {
                 TimelineView(.animation(minimumInterval: 1.0 / 20.0)) { tl in
-                    Canvas { ctx, size in Self.drawAurora(ctx, size, t: tl.date.timeIntervalSinceReferenceDate) }
+                    // Sample nightProgress + audio + tilt fresh each tick — live reads, no observation.
+                    let night = sleepTimer?.nightProgress ?? 0
+                    let level = audioLevel?() ?? 0
+                    let g = tilt?() ?? .zero
+                    Canvas { ctx, size in Self.drawAurora(ctx, size, t: tl.date.timeIntervalSinceReferenceDate, night: night, audio: level, tiltX: Double(g.x), tiltY: Double(g.y)) }
                 }
             }
             // Faint ground haze the curtains seem to rise from.
@@ -85,15 +100,34 @@ struct AuroraView: View {
         }
     }
 
-    private static func drawAurora(_ ctx: GraphicsContext, _ size: CGSize, t: Double) {
+    /// - Parameter night: `nightProgress` (0 at the start of a sleep timer, →1 as it expires;
+    ///   0 when no timer runs). As it rises the curtains dim, calm, and read progressively more
+    ///   violet — the teal/green base fades faster than the violet tips, and the faster (nearer)
+    ///   curtains recede first. Flow *rate* is left untouched on purpose: scaling the absolute
+    ///   `t` here would jump the phase; we reduce motion *amplitude* instead, which reads as
+    ///   "settling" without artifacts.
+    /// - Parameter audio: smoothed audio level (~0…1). The curtains glow a little brighter as the
+    ///   generative bed swells — a slow breath, not a meter.
+    /// - Parameters tiltX, tiltY: smoothed gyro tilt (~[-1, 1]). Shifts each curtain by its depth
+    ///   (near curtains move more) for parallax. Both 0 on a flat nightstand → no shift.
+    private static func drawAurora(_ ctx: GraphicsContext, _ size: CGSize, t: Double, night: Double = 0, audio: Double = 0, tiltX: Double = 0, tiltY: Double = 0) {
         var ctx = ctx
         ctx.blendMode = .plusLighter
-        // Slow collective breath (~11s) so the whole sky gently swells and settles.
-        let breath = 0.82 + 0.18 * (0.5 - 0.5 * cos(t * 2 * .pi / 11.0))
+        let p = min(1, max(0, night))
+        let glow = 1.0 + 0.4 * min(1, max(0, audio))      // swell brightens the curtains
+        let calm = (1.0 - 0.45 * p) * glow                // overall dim toward night, lifted by audio
+        // Slow collective breath (~11s); its swell shrinks as the night settles.
+        let breath = 0.82 + 0.18 * (1.0 - 0.4 * p) * (0.5 - 0.5 * cos(t * 2 * .pi / 11.0))
 
         for c in curtains {
-            let sway = sin(t * c.flow * 0.7 + c.phase) * c.drift * size.width
-            let bandX0 = c.x0 * size.width + sway
+            // Faster (nearer) curtains recede first, so the field winds down to a single slow,
+            // far, violet-tipped wash.
+            let recede = max(0.0, 1.0 - p * (0.5 + c.flow * 3.0))
+            let sway = sin(t * c.flow * 0.7 + c.phase) * c.drift * (1.0 - 0.5 * p) * size.width
+            // Depth parallax: nearer (brighter) curtains shift more with tilt.
+            let parX = tiltX * c.bright * size.width * 0.05
+            let parY = tiltY * c.bright * size.height * 0.02
+            let bandX0 = c.x0 * size.width + sway + parX
             let bandW = (c.x1 - c.x0) * size.width
             let spacing = max(4.0, 8.0 * c.soft)
             let rayW = spacing * 2.6                      // overlap → continuous soft curtain
@@ -105,20 +139,26 @@ struct AuroraView: View {
                 // Two incommensurate folds → an organic, non-repeating ripple of brightness.
                 let f1 = 0.5 + 0.5 * sin(fx * c.foldFreq * 2 * .pi + t * c.flow * 6.0 + c.phase)
                 let f2 = 0.5 + 0.5 * sin(fx * c.foldFreq * 1.73 * 2 * .pi - t * c.flow * 3.3 + c.phase * 1.4)
-                let intensity = pow(f1 * 0.6 + f2 * 0.4, 2.2) * c.bright * breath
+                let intensity = pow(f1 * 0.6 + f2 * 0.4, 2.2) * c.bright * breath * calm * recede
                 if intensity < 0.015 { continue }
 
+                // Bias toward violet as the night deepens: fade the warm teal/green base faster
+                // than the violet tip so the end state is a dim violet glow.
+                let topO = 0.45 * intensity * (1.0 - 0.15 * p)
+                let midO = 0.55 * intensity * (1.0 - 0.65 * p)
+                let botO = 0.65 * intensity * (1.0 - 0.85 * p)
+
                 // The curtain's top edge wavers, so the lower rim folds like cloth.
-                let topY = (c.yTop + 0.04 * sin(fx * 9 + t * c.flow * 4 + c.phase)) * size.height
-                let botY = c.yBottom * size.height
+                let topY = (c.yTop + 0.04 * sin(fx * 9 + t * c.flow * 4 + c.phase)) * size.height + parY
+                let botY = c.yBottom * size.height + parY
                 let rect = CGRect(x: x - rayW / 2, y: topY, width: rayW, height: botY - topY)
 
                 ctx.fill(Path(rect), with: .linearGradient(
                     Gradient(stops: [
                         .init(color: c.top.opacity(0.0), location: 0.0),
-                        .init(color: c.top.opacity(0.45 * intensity), location: 0.18),
-                        .init(color: c.mid.opacity(0.55 * intensity), location: 0.55),
-                        .init(color: c.bot.opacity(0.65 * intensity), location: 0.86),
+                        .init(color: c.top.opacity(topO), location: 0.18),
+                        .init(color: c.mid.opacity(midO), location: 0.55),
+                        .init(color: c.bot.opacity(botO), location: 0.86),
                         .init(color: c.bot.opacity(0.0), location: 1.0)
                     ]),
                     startPoint: CGPoint(x: x, y: topY),

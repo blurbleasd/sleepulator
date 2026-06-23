@@ -173,17 +173,30 @@ struct LibraryView: View {
             .presentationDetents([.fraction(0.8), .large])
         }
         .fileImporter(isPresented: $opmlImporting, allowedContentTypes: [.xml, .plainText, .data], allowsMultipleSelection: false) { result in
+            let selectedFile: URL
             do {
-                guard let selectedFile: URL = try result.get().first else { return }
-                if selectedFile.startAccessingSecurityScopedResource() {
-                    let feeds = OPMLParser().parse(url: selectedFile)
-                    selectedFile.stopAccessingSecurityScopedResource()
-                    
-                    self.opmlFeeds = feeds
-                    self.showOPMLSelector = true
-                }
+                guard let file = try result.get().first else { return }
+                selectedFile = file
             } catch {
                 Log.network.error("OPML import failed: \(error.localizedDescription, privacy: .public)")
+                return
+            }
+            // Parse off the main thread — a large OPML file would otherwise freeze the UI
+            // inside this importer callback. Hop back to the main actor only to publish state.
+            Task {
+                let feeds = await Task.detached(priority: .userInitiated) { () -> [OPMLFeed] in
+                    guard selectedFile.startAccessingSecurityScopedResource() else { return [] }
+                    defer { selectedFile.stopAccessingSecurityScopedResource() }
+                    return OPMLParser().parse(url: selectedFile)
+                }.value
+                guard !feeds.isEmpty else {
+                    // Don't open an empty selector — tell the user why nothing happened.
+                    self.alertMessage = "No podcast subscriptions were found in that file."
+                    self.showAlert = true
+                    return
+                }
+                self.opmlFeeds = feeds
+                self.showOPMLSelector = true
             }
         }
         .sheet(isPresented: $showOPMLSelector) {

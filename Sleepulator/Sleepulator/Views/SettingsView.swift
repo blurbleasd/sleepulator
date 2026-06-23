@@ -17,7 +17,7 @@ struct SettingsView: View {
     private static let backupScalarKeys: [String] = [
         "noiseVolume", "noiseType", "binVolume", "binauralPreset", "podVolume", "stereoWidth",
         "masterVolume", "autoPlay", "shuffleQueue", "deleteOnCompletion", "hideFinishedEpisodes",
-        "feedProxyUrl", "nightLimiterEnabled", "sleepEQEnabled", "sleepEQIntensity", "limiterByMode",
+        "nightLimiterEnabled", "sleepEQEnabled", "sleepEQIntensity", "limiterByMode",
         "beatRouting", "skipInterval", "playbackSpeed", "focusMode", "sceneSleep", "sceneFocus",
         "bedtimeMode", "autoNightDim", "timerMinutes", "pomoWork", "pomoRest", "pomoLongRest",
         "pomoCycles"
@@ -46,7 +46,7 @@ struct SettingsView: View {
 
     
     var body: some View {
-        NavigationView {
+        NavigationStack {
             ZStack {
                 pal.bg.ignoresSafeArea()
                 
@@ -241,37 +241,6 @@ struct SettingsView: View {
                         // Advanced
                         DisclosureGroup("Advanced") {
                             VStack(spacing: 24) {
-                                // Proxy Settings
-                                VStack(alignment: .leading, spacing: 16) {
-                                    Text("Network Proxies")
-                                        .font(.headline)
-                                        .foregroundColor(pal.text)
-                                        
-
-                                    
-                                    HStack(alignment: .bottom) {
-                                        VStack(alignment: .leading, spacing: 4) {
-                                            Text("Private RSS Feed Proxy URL")
-                                                .foregroundColor(pal.dim)
-                                                .font(.caption)
-                                            // Palette-aware fill (the system RoundedBorder style glows on true-black bedtime).
-                                            TextField("https://rss.proxy/...", text: $audio.feedProxyUrl)
-                                                .autocapitalization(.none)
-                                                .padding(10)
-                                                .background(RoundedRectangle(cornerRadius: 8).fill(Color.white.opacity(bedtimeMode ? 0.06 : 0.1)))
-                                                .foregroundColor(pal.text)
-                                                .tint(pal.accent)
-                                                .accessibilityLabel("Private RSS feed proxy URL")
-                                        }
-                                        Button(action: { audio.feedProxyUrl = AppConfig.feedProxyUrl }) {
-                                            Image(systemName: "arrow.counterclockwise")
-                                                .foregroundColor(pal.accent)
-                                                .frame(minWidth: 44, minHeight: 44)
-                                        }
-                                        .accessibilityLabel("Reset proxy URL to default")
-                                    }
-                                }
-                                
                                 // Data Backup
                                 VStack(alignment: .leading, spacing: 16) {
                                     Text("Backup & Restore")
@@ -322,57 +291,24 @@ struct SettingsView: View {
             allowedContentTypes: [.json],
             allowsMultipleSelection: false
         ) { result in
+            let selectedFile: URL
             do {
-                guard let selectedFile: URL = try result.get().first else { return }
-                if selectedFile.startAccessingSecurityScopedResource() {
-                    defer { selectedFile.stopAccessingSecurityScopedResource() }
-                    let data = try Data(contentsOf: selectedFile)
-                    guard let dict = try JSONSerialization.jsonObject(with: data, options: []) as? [String: Any] else {
-                        alertTitle = "Import Failed"
-                        alertMessage = "That file isn't a valid Sleepulator backup."
-                        showAlert = true
-                        return
-                    }
-
-                    let allowedScalars = Set(Self.backupScalarKeys)
-                    var restored = 0
-                    var skipped = 0
-
-                    for (key, value) in dict {
-                        if let file = Self.backupFileBacked[key] {
-                            // Only write a collection that actually decodes into its expected
-                            // type — a malformed section is skipped, never written as garbage.
-                            if let validated = Self.validatedFileData(key: key, value: value) {
-                                StorageManager.shared.writeRaw(validated, to: file)
-                                restored += 1
-                            } else { skipped += 1 }
-                        } else if key == "lastMix" {
-                            if let encoded = try? JSONSerialization.data(withJSONObject: value, options: []),
-                               (try? JSONDecoder().decode(SavedMix.self, from: encoded)) != nil {
-                                UserDefaults.standard.set(encoded, forKey: key)
-                                restored += 1
-                            } else { skipped += 1 }
-                        } else if allowedScalars.contains(key) {
-                            UserDefaults.standard.set(value, forKey: key)
-                            restored += 1
-                        } else {
-                            // Unknown key — never blind-write it into UserDefaults.
-                            skipped += 1
-                        }
-                    }
-
-                    // Apply the restored data in-process — no relaunch needed.
-                    audio.reloadAfterRestore()
-
-                    alertTitle = "Restore Complete"
-                    alertMessage = skipped > 0
-                        ? "Imported \(restored) item(s); skipped \(skipped) unrecognized."
-                        : "Your data was imported."
-                    showAlert = true
-                }
+                guard let file = try result.get().first else { return }
+                selectedFile = file
             } catch {
                 alertTitle = "Import Failed"
                 alertMessage = error.localizedDescription
+                showAlert = true
+                return
+            }
+            // Read + parse + validate + write off the main thread; a large backup would
+            // otherwise freeze the UI. Return only the user-facing outcome, then apply the
+            // in-process reload and surface the alert back on the main actor.
+            Task {
+                let outcome = await Self.performImport(url: selectedFile)
+                if outcome.didRestore { audio.reloadAfterRestore() }
+                alertTitle = outcome.title
+                alertMessage = outcome.message
                 showAlert = true
             }
         }
@@ -422,39 +358,120 @@ struct SettingsView: View {
         return valid ? data : nil
     }
 
+    /// User-facing result of a backup import, produced off the main thread.
+    private struct ImportOutcome {
+        let title: String
+        let message: String
+        let didRestore: Bool
+    }
+
+    /// Read, parse, validate, and write a backup file on a background executor. Touches only
+    /// UserDefaults / StorageManager (both safe off-main); returns the outcome for the caller
+    /// to apply on the main actor.
+    private static func performImport(url: URL) async -> ImportOutcome {
+        await Task.detached(priority: .userInitiated) { () -> ImportOutcome in
+            guard url.startAccessingSecurityScopedResource() else {
+                return ImportOutcome(title: "Import Failed",
+                                     message: "Couldn't access the selected file.",
+                                     didRestore: false)
+            }
+            defer { url.stopAccessingSecurityScopedResource() }
+            do {
+                let data = try Data(contentsOf: url)
+                guard let dict = try JSONSerialization.jsonObject(with: data, options: []) as? [String: Any] else {
+                    return ImportOutcome(title: "Import Failed",
+                                         message: "That file isn't a valid Sleepulator backup.",
+                                         didRestore: false)
+                }
+
+                let allowedScalars = Set(Self.backupScalarKeys)
+                var restored = 0
+                var skipped = 0
+
+                for (key, value) in dict {
+                    if let file = Self.backupFileBacked[key] {
+                        // Only write a collection that actually decodes into its expected
+                        // type — a malformed section is skipped, never written as garbage.
+                        if let validated = Self.validatedFileData(key: key, value: value) {
+                            StorageManager.shared.writeRaw(validated, to: file)
+                            restored += 1
+                        } else { skipped += 1 }
+                    } else if key == "lastMix" {
+                        if let encoded = try? JSONSerialization.data(withJSONObject: value, options: []),
+                           (try? JSONDecoder().decode(SavedMix.self, from: encoded)) != nil {
+                            UserDefaults.standard.set(encoded, forKey: key)
+                            restored += 1
+                        } else { skipped += 1 }
+                    } else if allowedScalars.contains(key) {
+                        UserDefaults.standard.set(value, forKey: key)
+                        restored += 1
+                    } else {
+                        // Unknown key — never blind-write it into UserDefaults.
+                        skipped += 1
+                    }
+                }
+
+                let message = skipped > 0
+                    ? "Imported \(restored) item(s); skipped \(skipped) unrecognized."
+                    : "Your data was imported."
+                return ImportOutcome(title: "Restore Complete", message: message, didRestore: true)
+            } catch {
+                return ImportOutcome(title: "Import Failed",
+                                     message: error.localizedDescription,
+                                     didRestore: false)
+            }
+        }.value
+    }
+
     func exportData() {
-        var backupDict: [String: Any] = [:]
-
-        // Scalar settings live in UserDefaults.
-        for key in Self.backupScalarKeys {
-            if let val = UserDefaults.standard.object(forKey: key) {
-                backupDict[key] = val
+        // Gather + serialize the backup off the main thread; only flip the @State that drives
+        // the exporter/alert back on the main actor.
+        Task {
+            let result = await Self.buildExportDocument()
+            switch result {
+            case .success(let document):
+                exportDocument = document
+                isExporting = true
+            case .failure(let error):
+                alertTitle = "Export Failed"
+                alertMessage = error.localizedDescription
+                showAlert = true
             }
         }
-        // lastMix is stored as encoded Data in UserDefaults.
-        if let data = UserDefaults.standard.data(forKey: "lastMix"),
-           let obj = try? JSONSerialization.jsonObject(with: data, options: .allowFragments) {
-            backupDict["lastMix"] = obj
-        }
+    }
 
-        // Mixes, library, queue, and positions were migrated off UserDefaults into
-        // StorageManager files — pull their raw JSON so the backup is actually complete.
-        for (key, file) in Self.backupFileBacked {
-            if let data = StorageManager.shared.rawData(for: file),
+    private static func buildExportDocument() async -> Result<JSONDocument, Error> {
+        await Task.detached(priority: .userInitiated) { () -> Result<JSONDocument, Error> in
+            var backupDict: [String: Any] = [:]
+
+            // Scalar settings live in UserDefaults.
+            for key in Self.backupScalarKeys {
+                if let val = UserDefaults.standard.object(forKey: key) {
+                    backupDict[key] = val
+                }
+            }
+            // lastMix is stored as encoded Data in UserDefaults.
+            if let data = UserDefaults.standard.data(forKey: "lastMix"),
                let obj = try? JSONSerialization.jsonObject(with: data, options: .allowFragments) {
-                backupDict[key] = obj
+                backupDict["lastMix"] = obj
             }
-        }
 
-        do {
-            let data = try JSONSerialization.data(withJSONObject: backupDict, options: .prettyPrinted)
-            exportDocument = JSONDocument(data: data)
-            isExporting = true
-        } catch {
-            alertTitle = "Export Failed"
-            alertMessage = error.localizedDescription
-            showAlert = true
-        }
+            // Mixes, library, queue, and positions were migrated off UserDefaults into
+            // StorageManager files — pull their raw JSON so the backup is actually complete.
+            for (key, file) in Self.backupFileBacked {
+                if let data = StorageManager.shared.rawData(for: file),
+                   let obj = try? JSONSerialization.jsonObject(with: data, options: .allowFragments) {
+                    backupDict[key] = obj
+                }
+            }
+
+            do {
+                let data = try JSONSerialization.data(withJSONObject: backupDict, options: .prettyPrinted)
+                return .success(JSONDocument(data: data))
+            } catch {
+                return .failure(error)
+            }
+        }.value
     }
 }
 

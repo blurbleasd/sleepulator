@@ -89,6 +89,12 @@ final class PodcastPlayer: NSObject {
     
     private var hasFiredNearEnd = false
     private var preloadedItem: AVPlayerItem?
+    /// Fire-and-forget tasks that attach the limiter tap (which awaits `loadTracks`, a
+    /// cancellable asset/network load). Held so we can cancel an in-flight load when it's
+    /// superseded by a new track and, critically, in `deinit` — otherwise a player torn
+    /// down mid-load leaves a zombie `loadTracks` running against a dead instance.
+    private var preloadTapTask: Task<Void, Never>?
+    private var playbackTask: Task<Void, Never>?
     
     var nightLimiterEnabled: Bool = true {
         didSet {
@@ -137,6 +143,9 @@ final class PodcastPlayer: NSObject {
         }
         currentItem?.removeObserver(self, forKeyPath: "status")
         fadeTimer?.cancel()
+        // Cancel any in-flight tap/track loads so they don't outlive this instance.
+        preloadTapTask?.cancel()
+        playbackTask?.cancel()
         flushPositionsToDisk()
     }
     
@@ -176,8 +185,9 @@ final class PodcastPlayer: NSObject {
         let item = AVPlayerItem(url: nsurl)
         preloadedItem = item
         
-        Task { @MainActor in
-            await attachLimiterTap(to: item)
+        preloadTapTask?.cancel()
+        preloadTapTask = Task { @MainActor [weak self] in
+            _ = await self?.attachLimiterTap(to: item)
         }
     }
     
@@ -215,7 +225,9 @@ final class PodcastPlayer: NSObject {
         
         playerItem.addObserver(self, forKeyPath: "status", options: [.new, .old], context: nil)
         
-        Task { @MainActor in
+        playbackTask?.cancel()
+        playbackTask = Task { @MainActor [weak self] in
+            guard let self else { return }
             if playerItem.audioMix == nil {
                 let success = await attachLimiterTap(to: playerItem)
                 if !success {

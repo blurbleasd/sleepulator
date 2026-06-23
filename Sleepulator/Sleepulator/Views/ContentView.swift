@@ -3,6 +3,7 @@ import Combine
 
 struct ContentView: View {
     @StateObject private var audio = AudioEngine()
+    @Environment(\.scenePhase) private var scenePhase
     @State private var selectedTab = 0
     @AppStorage("bedtimeMode") private var bedtimeMode = false
     @AppStorage("autoNightDim") private var autoNightDim = true
@@ -53,7 +54,7 @@ struct ContentView: View {
     var body: some View {
         ZStack(alignment: .bottom) {
             TabView(selection: $selectedTab) {
-                HomeView(audio: audio, mixStore: audio.mixStore)
+                HomeView(audio: audio, mixStore: audio.mixStore, selectedTab: $selectedTab)
                     .tabItem {
                         // Reflect the active mode — a cyan "Sleep/moon" tab while focusing
                         // was disorienting (the tab contradicted the screen).
@@ -127,6 +128,12 @@ struct ContentView: View {
             // Freeze the backdrop scene only when the veil actually occludes the screen —
             // it keeps animating through the lighter controls-faded screensaver.
             audio.screenDimmed = dimmed
+        }
+        .onChange(of: scenePhase) { _, phase in
+            // Fail-safe: if iOS suspended us through a duration timer's deadline, the in-process
+            // tick never fired. Reconcile the instant we're foregrounded so audio can't keep
+            // playing past the timer. No-op when nothing expired.
+            if phase == .active { audio.sleepTimer.reconcileIfExpired() }
         }
     }
 }

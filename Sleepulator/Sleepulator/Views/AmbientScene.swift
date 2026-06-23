@@ -17,6 +17,14 @@ struct SceneContext {
     let sleepTimer: SleepTimerService
     /// The Pomodoro, for time-reactive Focus scenes (work/break phase + progress).
     let pomodoro: PomodoroService
+    /// A smoothed, normalized audio level (~0…1) for audio-reactive scenes. A *closure* (not a
+    /// stored value) so scenes sample it live inside their own redraw without observing — and
+    /// without reaching into `AudioEngine` directly. Defaults to silence for previews/tests.
+    var audioLevel: () -> Double = { 0 }
+    /// Smoothed gyro tilt (x = roll, y = pitch, each ~[-1, 1]) for parallax scenes — sampled
+    /// live, never observed. `.zero` when no motion-using scene is active. Closure for the same
+    /// reasons as `audioLevel`.
+    var tilt: () -> SIMD2<Float> = { .zero }
 }
 
 /// A self-contained ambient backdrop for the home screen. The point of the protocol is that
@@ -27,7 +35,15 @@ protocol AmbientScene {
     var id: String { get }
     var title: String { get }
     var mood: SceneMood { get }
+    /// True if the scene reads `SceneContext.tilt` for gyro parallax — the owner uses this to
+    /// gate CoreMotion so it runs *only* for a motion-using, on-screen, non-dimmed scene.
+    var usesMotion: Bool { get }
     func makeBackdrop(_ ctx: SceneContext) -> AnyView
+}
+
+extension AmbientScene {
+    /// Most scenes don't use motion; they opt in by overriding this.
+    var usesMotion: Bool { false }
 }
 
 // MARK: - The built-in scenes (wrap today's backdrops verbatim)
@@ -66,6 +82,22 @@ private struct NightDarken: View {
             .opacity(timer.nightProgress * 0.35)
             .ignoresSafeArea()
             .allowsHitTesting(false)
+    }
+}
+
+/// Fades arbitrary backdrop content toward dark as the sleep timer winds down — the
+/// general-purpose sibling of `NightDarken`, used for the warm static layers (the embers
+/// hearth glow, the rain-glass bokeh) that should dim with the night. Isolated so it
+/// re-renders only on the timer's ~1 Hz republish, never dragging its parent (or a sibling
+/// `TimelineView` animation loop) into a re-render. Animating Canvas layers don't use this —
+/// they read `nightProgress` live inside their own redraw instead.
+struct NightFade<Content: View>: View {
+    @ObservedObject var timer: SleepTimerService
+    /// Opacity removed at full night (`nightProgress == 1`). 0.8 → fades to a faint glow.
+    var maxDim: Double = 0.8
+    @ViewBuilder var content: Content
+    var body: some View {
+        content.opacity(1 - maxDim * timer.nightProgress)
     }
 }
 
@@ -124,7 +156,7 @@ struct RainOnGlassScene: AmbientScene {
     let mood = SceneMood.sleep
 
     func makeBackdrop(_ ctx: SceneContext) -> AnyView {
-        AnyView(RainGlassView(paused: ctx.paused))
+        AnyView(RainGlassView(paused: ctx.paused, sleepTimer: ctx.sleepTimer))
     }
 }
 
@@ -156,39 +188,117 @@ struct BreathingBloomScene: AmbientScene {
     }
 }
 
-/// "Aurora": slow curtains of dim color sway and breathe over near-black, blended additively so
-/// overlaps glow. Wandering, focal-point-free — the eye drifts and settles.
+/// "Aurora": flowing curtains of dim light over near-black. Now a Metal fragment shader
+/// (`AuroraShader.metal`) — a continuous domain-warped FBM field with dithering + a filmic
+/// roll-off, replacing the old striated-rectangle Canvas. Wandering, focal-point-free.
 struct AuroraScene: AmbientScene {
     let id = "aurora"
     let title = "Aurora"
     let mood = SceneMood.sleep
+    var usesMotion: Bool { true }   // curtains shift with gyro parallax during the watching window
 
     func makeBackdrop(_ ctx: SceneContext) -> AnyView {
-        AnyView(AuroraView(paused: ctx.paused))
+        AnyView(AuroraMetalView(paused: ctx.paused, sleepTimer: ctx.sleepTimer,
+                                audioLevel: ctx.audioLevel, tilt: ctx.tilt))
     }
 }
 
-/// "Embers": warm motes drift up from a faint hearth glow and fade — the cozy, candle-lit
-/// counterpart to the cool starfield.
+#if DEBUG
+/// DEBUG-only A/B sibling: the original CPU `AuroraView` (Canvas striations). Registered next to
+/// the shipping Metal aurora so the two can be compared on a real device over a full timer run
+/// (the CLAUDE.md device gate). Retire `AuroraView.swift` once the shader clearly wins on look +
+/// power.
+struct AuroraCanvasScene: AmbientScene {
+    let id = "aurora-canvas"
+    let title = "Aurora (canvas)"
+    let mood = SceneMood.sleep
+    var usesMotion: Bool { true }
+
+    func makeBackdrop(_ ctx: SceneContext) -> AnyView {
+        AnyView(AuroraView(paused: ctx.paused, sleepTimer: ctx.sleepTimer,
+                           audioLevel: ctx.audioLevel, tilt: ctx.tilt))
+    }
+}
+#endif
+
+/// "Embers": smoldering coals — a dark field of deep reds slowly churning on a gentle swirl.
+/// A Metal fragment shader (`EmbersShader.metal`), dark + hypnotic with slow motion (the first
+/// fire take was reverted as too stimulating; this one caps brightness and drops the sparks).
 struct EmbersScene: AmbientScene {
     let id = "embers"
     let title = "Embers"
     let mood = SceneMood.sleep
 
     func makeBackdrop(_ ctx: SceneContext) -> AnyView {
-        AnyView(EmbersView(paused: ctx.paused))
+        AnyView(EmbersMetalView(paused: ctx.paused, sleepTimer: ctx.sleepTimer, audioLevel: ctx.audioLevel))
     }
 }
 
-/// "Still water": faint concentric ripples spread and fade on a dark moonlit pond — predictable
-/// and rhythmic, meditative rather than attention-grabbing. Pairs with the rain / ocean sound.
+#if DEBUG
+/// DEBUG-only A/B sibling: the original CPU `EmbersView` (drifting motes), for on-device
+/// comparison against the dark smoldering shader.
+struct EmbersCanvasScene: AmbientScene {
+    let id = "embers-canvas"
+    let title = "Embers (canvas)"
+    let mood = SceneMood.sleep
+
+    func makeBackdrop(_ ctx: SceneContext) -> AnyView {
+        AnyView(EmbersView(paused: ctx.paused, sleepTimer: ctx.sleepTimer, audioLevel: ctx.audioLevel))
+    }
+}
+#endif
+
+/// "Still water": a low moon over a dark pond, its reflected path shimmering on the surface with
+/// faint concentric ripples. Now a Metal fragment shader (`StillWaterShader.metal`) — a per-pixel
+/// FBM wave field with real specular glints, replacing the old wireframe ellipse rings.
 struct StillWaterScene: AmbientScene {
     let id = "still-water"
     let title = "Still water"
     let mood = SceneMood.sleep
 
     func makeBackdrop(_ ctx: SceneContext) -> AnyView {
-        AnyView(StillWaterView(paused: ctx.paused))
+        AnyView(StillWaterMetalView(paused: ctx.paused, sleepTimer: ctx.sleepTimer, audioLevel: ctx.audioLevel))
+    }
+}
+
+#if DEBUG
+/// DEBUG-only A/B sibling: the original CPU `StillWaterView` (stroked ellipse rings), kept for
+/// on-device comparison against the Metal shader over a full timer run. Retire `StillWaterView.swift`
+/// once the shader clearly wins on look + power.
+struct StillWaterCanvasScene: AmbientScene {
+    let id = "still-water-canvas"
+    let title = "Still water (canvas)"
+    let mood = SceneMood.sleep
+
+    func makeBackdrop(_ ctx: SceneContext) -> AnyView {
+        AnyView(StillWaterView(paused: ctx.paused, sleepTimer: ctx.sleepTimer, audioLevel: ctx.audioLevel))
+    }
+}
+#endif
+
+/// "Deep space" (Sleep): a slow nebula of domain-warped FBM cloud over a parallax star field,
+/// with a rare comet. A Metal showpiece (`DeepSpaceShader.metal`); no CPU predecessor.
+struct DeepSpaceScene: AmbientScene {
+    let id = "deep-space"
+    let title = "Deep space"
+    let mood = SceneMood.sleep
+    var usesMotion: Bool { true }   // nebula + star tiers parallax with gyro during the watching window
+
+    func makeBackdrop(_ ctx: SceneContext) -> AnyView {
+        AnyView(DeepSpaceMetalView(paused: ctx.paused, sleepTimer: ctx.sleepTimer,
+                                   audioLevel: ctx.audioLevel, tilt: ctx.tilt))
+    }
+}
+
+/// "Sandfall" (Focus): an abstract hourglass whose sand level tracks the Pomodoro — a tactile,
+/// numberless read on how far through the current interval you are.
+struct SandfallScene: AmbientScene {
+    let id = "sandfall"
+    let title = "Sandfall"
+    let mood = SceneMood.focus
+
+    func makeBackdrop(_ ctx: SceneContext) -> AnyView {
+        AnyView(SandfallView(paused: ctx.paused, pomodoro: ctx.pomodoro))
     }
 }
 
@@ -201,11 +311,14 @@ enum SceneRegistry {
     static let all: [any AmbientScene] = {
         var scenes: [any AmbientScene] = [NightSkyScene(), RainOnGlassScene()]
         #if DEBUG
-        scenes.append(RainOnGlassDepthScene())   // A/B sibling, DEBUG builds only
+        scenes.append(RainOnGlassDepthScene())     // A/B sibling, DEBUG builds only
+        scenes.append(AuroraCanvasScene())         // A/B vs the Metal aurora, DEBUG builds only
+        scenes.append(StillWaterCanvasScene())     // A/B vs the Metal still water, DEBUG builds only
+        scenes.append(EmbersCanvasScene())         // A/B vs the dark Metal embers, DEBUG builds only
         #endif
         scenes.append(contentsOf: [
-            BreathingBloomScene(), AuroraScene(), EmbersScene(), StillWaterScene(),
-            EnergyScene(), CurrentScene(), TideScene(), DeepWorkScene()
+            BreathingBloomScene(), AuroraScene(), EmbersScene(), StillWaterScene(), DeepSpaceScene(),
+            EnergyScene(), CurrentScene(), TideScene(), DeepWorkScene(), SandfallScene()
         ] as [any AmbientScene])
         return scenes
     }()
@@ -217,6 +330,6 @@ enum SceneRegistry {
     /// Resolve a selection id to a scene, falling back to the mood's first registered scene.
     static func scene(id: String, mood: SceneMood) -> any AmbientScene {
         let candidates = scenes(for: mood)
-        return candidates.first(where: { $0.id == id }) ?? candidates[0]
+        return candidates.first(where: { $0.id == id }) ?? candidates.first ?? NightSkyScene()
     }
 }

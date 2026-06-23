@@ -34,7 +34,7 @@ struct BreathingBloomView: View {
             if paused {
                 bloom(Self.breath(0))
             } else {
-                TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { tl in
+                TimelineView(.animation(minimumInterval: 1.0 / 20.0)) { tl in
                     bloom(Self.breath(tl.date.timeIntervalSinceReferenceDate))
                 }
             }

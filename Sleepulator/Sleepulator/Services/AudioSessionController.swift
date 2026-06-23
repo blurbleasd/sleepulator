@@ -9,9 +9,9 @@ import Network
 /// AudioEngine through closures, so the actual policy (what to pause / resume / re-assert)
 /// stays in AudioEngine, unchanged.
 ///
-/// The notification observers are selector-based and queue-less, exactly as before, so the
-/// interruption / route handlers still run synchronously on the notification's posting thread
-/// (a system thread, not main) — the original timing is preserved, not changed.
+/// AVAudioSession delivers interruption / route notifications on an arbitrary system thread, so
+/// each forward below hops to the main queue before invoking the handler — the handlers mutate
+/// @Published state and reach the generative engine's updateParams (main-queue + single-writer).
 final class AudioSessionController {
     var onInterruption: ((Notification) -> Void)?
     var onRouteChange: ((Notification) -> Void)?
@@ -42,9 +42,15 @@ final class AudioSessionController {
         nc.addObserver(self, selector: #selector(forwardAppBackground), name: Notification.Name("AppDidEnterBackground"), object: nil)
     }
 
-    @objc private func forwardInterruption(_ note: Notification) { onInterruption?(note) }
-    @objc private func forwardRouteChange(_ note: Notification) { onRouteChange?(note) }
-    @objc private func forwardAppBackground() { onAppBackground?() }
+    @objc private func forwardInterruption(_ note: Notification) {
+        DispatchQueue.main.async { [weak self] in self?.onInterruption?(note) }
+    }
+    @objc private func forwardRouteChange(_ note: Notification) {
+        DispatchQueue.main.async { [weak self] in self?.onRouteChange?(note) }
+    }
+    @objc private func forwardAppBackground() {
+        DispatchQueue.main.async { [weak self] in self?.onAppBackground?() }
+    }
 
     deinit {
         monitor.cancel()

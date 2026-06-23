@@ -114,7 +114,11 @@ final class StorageManager {
     /// new). MUST run on `ioQueue`.
     private func writeBoth(_ data: Data, filename: String) throws {
         try data.write(to: fileURL(for: filename), options: .atomic)
-        try? data.write(to: backupURL(for: filename), options: .atomic)
+        do {
+            try data.write(to: backupURL(for: filename), options: .atomic)
+        } catch {
+            Log.storage.error("Backup write failed for \(filename, privacy: .public): \(error.localizedDescription, privacy: .public)")
+        }
     }
 
     /// Block until all queued writes have flushed to disk. Used by the in-process Restore so a

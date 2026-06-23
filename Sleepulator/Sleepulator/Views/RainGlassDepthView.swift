@@ -34,7 +34,7 @@ struct RainGlassDepthView: View {
     private let refraction: Double = 1.0
     private let density: Double = 0.55
 
-    @State private var motion = RainGlassMotion()
+    @State private var motion = TiltSource()
     @State private var t0 = Date().timeIntervalSinceReferenceDate   // elapsed stays Float-precise all night
 
     var body: some View {

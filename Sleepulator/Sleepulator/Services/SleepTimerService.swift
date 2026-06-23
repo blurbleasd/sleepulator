@@ -2,10 +2,59 @@ import Foundation
 import UIKit
 import Combine
 import AVFoundation
+import UserNotifications
 import os
 #if canImport(ActivityKit)
 import ActivityKit
 #endif
+
+/// A redundant, out-of-process backstop for the sleep timer's terminal stop. The in-process
+/// fade + stop (GCD timer + RMS/AVPlayer keep-alive) is the primary path; this only exists so
+/// that if iOS suspends the app *through* the deadline, there is still (a) a user-visible signal
+/// in Notification Center, and (b) a launch hook that lets `reconcileIfExpired` stop audio the
+/// instant the app is foregrounded again. Injected so it can be spied in unit tests.
+protocol SleepTimerBackstopScheduling {
+    /// Schedule the backstop to fire `seconds` from now, replacing any previously scheduled one.
+    func schedule(after seconds: TimeInterval)
+    /// Remove any pending/delivered backstop (the in-process stop fired, or the timer was cancelled).
+    func cancel()
+}
+
+/// Default backstop: a single local notification. Uses *provisional* authorization, which is
+/// granted silently (no permission prompt) and delivers quietly to Notification Center — a net
+/// that never nags a user whose timer ended normally (we cancel it on the in-process fire).
+final class NotificationBackstopScheduler: SleepTimerBackstopScheduling {
+    static let identifier = "app.sleepulator.sleeptimer.backstop"
+    private var requestedAuth = false
+
+    func schedule(after seconds: TimeInterval) {
+        guard seconds > 0 else { return }
+        let center = UNUserNotificationCenter.current()
+        requestProvisionalAuthIfNeeded(center)
+
+        let content = UNMutableNotificationContent()
+        content.title = "Sleep timer finished"
+        content.body = "Sleepulator stopped playback."
+        content.sound = nil   // quiet — the point is to stop sound, not make more
+
+        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: max(1, seconds), repeats: false)
+        let req = UNNotificationRequest(identifier: Self.identifier, content: content, trigger: trigger)
+        center.removePendingNotificationRequests(withIdentifiers: [Self.identifier])
+        center.add(req)
+    }
+
+    func cancel() {
+        let center = UNUserNotificationCenter.current()
+        center.removePendingNotificationRequests(withIdentifiers: [Self.identifier])
+        center.removeDeliveredNotifications(withIdentifiers: [Self.identifier])
+    }
+
+    private func requestProvisionalAuthIfNeeded(_ center: UNUserNotificationCenter) {
+        guard !requestedAuth else { return }
+        requestedAuth = true
+        center.requestAuthorization(options: [.alert, .provisional]) { _, _ in }
+    }
+}
 
 final class SleepTimerService: ObservableObject {
     /// What kind of timer is running. `.endOfEpisode` is driven by the podcast playback clock
@@ -41,7 +90,10 @@ final class SleepTimerService: ObservableObject {
     
     var stopAllFn: (() -> Void)?
     var updateFadeMultFn: ((Double) -> Void)?
-    
+
+    /// Out-of-process safety net for the terminal stop (see protocol doc). Injectable for tests.
+    var backstop: SleepTimerBackstopScheduling = NotificationBackstopScheduler()
+
     func startSleepTimer(minutes: Int) {
         cancelTimer()
         kind = .duration
@@ -52,7 +104,7 @@ final class SleepTimerService: ObservableObject {
         self.timerTotal = Double(minutes) * 60
         updateFadeMultFn?(1.0)
 
-
+        backstop.schedule(after: Double(minutes) * 60)
 
         startLiveActivity()
 
@@ -77,7 +129,24 @@ final class SleepTimerService: ObservableObject {
         self.timerRemaining = remaining
         self.timerTotal = remaining
         updateFadeMultFn?(1.0)
+        // Approximate net only — the real episode end is driven by the playback clock via
+        // externalTick, but if the app is suspended through it this still flags the deadline.
+        backstop.schedule(after: remaining)
         startLiveActivity()
+    }
+
+    /// Called when the app returns to the foreground. If a fixed-duration timer's deadline already
+    /// passed while the app was suspended (so neither the GCD tick nor the keep-alive could fire),
+    /// run the terminal stop immediately. The end-of-episode timer needs no equivalent: its stop is
+    /// driven by the playback clock, which resumes ticking — and fires `onQueueAdvance` at the true
+    /// episode end — as soon as the player is foregrounded.
+    func reconcileIfExpired() {
+        guard kind == .duration, !didFire, let end = sleepTimerEnd else { return }
+        guard Date() >= end else { return }
+        if timerRemaining != 0 { timerRemaining = 0 }
+        didFire = true
+        stopAllFn?()
+        cancelTimer(resetMoon: false)
     }
 
     /// Drive the end-of-episode timer from the podcast clock. Runs on the main queue (its caller
@@ -103,13 +172,17 @@ final class SleepTimerService: ObservableObject {
     }
     
     private func tick() {
-        // Only the wall-clock duration timer ticks here. The end-of-episode timer is driven by
-        // externalTick() off the playback clock; backgroundTick() still calls this ~20×/sec, so
-        // without this guard the (approximate) wall-clock end would race the real episode end.
-        guard kind == .duration, let end = self.sleepTimerEnd else { return }
-        let remaining = end.timeIntervalSince(Date())
+        // tick() runs on the GCD timer's global queue AND from backgroundTick() (RMS tap / AVPlayer
+        // observer). Read all timer state on the main queue to avoid racing the main-thread writers
+        // (start/cancel); only the fire time is captured off-main here.
+        let now = Date()
 
         DispatchQueue.main.async {
+            // Only the wall-clock duration timer ticks here. The end-of-episode timer is driven by
+            // externalTick() off the playback clock; backgroundTick() still calls this ~20×/sec, so
+            // without this guard the (approximate) wall-clock end would race the real episode end.
+            guard self.kind == .duration, let end = self.sleepTimerEnd else { return }
+            let remaining = end.timeIntervalSince(now)
             if remaining <= 0 {
                 // Publish the terminal value once, then fire exactly once.
                 if self.timerRemaining != 0 { self.timerRemaining = 0 }
@@ -148,7 +221,10 @@ final class SleepTimerService: ObservableObject {
             if self.timerRemaining > 600 {
                 self.updateFadeMultFn?(1.0)
             }
-            
+
+            // Move the out-of-process net to the new, later deadline.
+            backstop.schedule(after: self.timerRemaining)
+
             updateLiveActivity()
         }
     }
@@ -159,6 +235,9 @@ final class SleepTimerService: ObservableObject {
         sleepTimerEnd = nil
         kind = .none
         timerRemaining = 0
+        // Tear down the out-of-process net too: the in-process stop fired, or the user/mode
+        // switch cancelled the timer. (Also fires on the terminal stop, which calls this.)
+        backstop.cancel()
         // On a natural finish, keep timerTotal so nightProgress stays 1 and the moon stays
         // set at the horizon instead of gliding back up the instant the night ends. A fresh
         // startSleepTimer resets it; an explicit cancel (mode switch / UI) resets it here.
@@ -288,10 +367,11 @@ final class PomodoroService: ObservableObject {
     }
 
     private func tick() {
-        guard let end = phaseEnd else { return }
-        let r = end.timeIntervalSince(Date())
+        // Runs on the GCD timer's global queue; read phaseEnd on main to avoid racing start/stop.
+        let now = Date()
         DispatchQueue.main.async {
-            guard self.isRunning else { return }
+            guard self.isRunning, let end = self.phaseEnd else { return }
+            let r = end.timeIntervalSince(now)
             if r <= 0 {
                 self.chimeFn?()
                 if self.phase == .work {

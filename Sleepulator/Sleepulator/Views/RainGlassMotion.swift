@@ -2,11 +2,13 @@ import CoreMotion
 import simd
 import Foundation
 
-/// Held-only gyro parallax source for `RainGlassDepthView` (RAIN-ON-GLASS-DEPTH-SPEC §6.2).
+/// Held-only gyro parallax source, shared by any scene that wants a subtle tilt-driven
+/// parallax (originally `RainGlassDepthView`, now also general scenes via `SceneContext.tilt`).
 ///
-/// Owns a single `CMMotionManager`, started only while a depth scene is on screen and
+/// Owns a single `CMMotionManager`, started only while a motion-using scene is on screen and
 /// animating, and stopped the moment it settles or disappears — so it costs nothing on the
-/// all-night occluded screen the app is built for.
+/// all-night occluded screen the app is built for. `setActive(_:)` is the one-call reconcile
+/// the owner uses to gate it.
 ///
 /// Crucially it does **not** publish per frame. The smoothed tilt is a plain property that the
 /// view reads inside its existing `TimelineView` redraw; pushing it through `@Published` would
@@ -16,9 +18,8 @@ import Foundation
 /// Parallax is **relative to the hold position when the scene appears** (attitude is taken
 /// against a reference frame captured on the first sample). That means it recentres each time
 /// and is orientation-independent — and when the phone lies flat on a nightstand, tilt stays ~0,
-/// so depth must read from focus + refraction alone (the spec's load-bearing cue), with
-/// parallax as a pure bonus.
-final class RainGlassMotion {
+/// so parallax is a pure bonus during the watching window, not a load-bearing cue.
+final class TiltSource {
     /// Smoothed tilt, roughly [-1, 1] per axis: x = roll (left/right), y = pitch (toward/away).
     /// Written on the main queue by CoreMotion; read on the main thread in the render loop.
     private(set) var tilt = SIMD2<Float>(0, 0)
@@ -55,6 +56,10 @@ final class RainGlassMotion {
             self.tilt = self.smoothed
         }
     }
+
+    /// One-call reconcile for the owner: start when a motion-using scene is active and visible,
+    /// stop otherwise. Idempotent (start/stop already guard redundant calls).
+    func setActive(_ on: Bool) { on ? start() : stop() }
 
     func stop() {
         guard running else { return }
