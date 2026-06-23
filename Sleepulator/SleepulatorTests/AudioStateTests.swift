@@ -39,7 +39,7 @@ class AudioStateTests: XCTestCase {
         qm.shuffleQueue = true
         qm.queue = [makeEpisode("1"), makeEpisode("2"), makeEpisode("3")]
         var loadedId: String?
-        qm.loadPodcastFn = { _, id, _ in loadedId = id }
+        qm.loadPodcastFn = { _, id, _, _ in loadedId = id }
 
         qm.advanceQueue(finishedEpId: "1")
         XCTAssertEqual(qm.queue.count, 2)
@@ -47,6 +47,24 @@ class AudioStateTests: XCTestCase {
         XCTAssertNotNil(loadedId)
         XCTAssertNotEqual(loadedId, "1")
         XCTAssertEqual(qm.queue.first?.id, loadedId)         // the loaded item is promoted to head
+    }
+
+    // Bug 2 (next-track-not-at-zero): an auto-advanced next track must load as a fresh start
+    // (resume == false) so it begins at 0, while a user-initiated play resumes (resume == true).
+    // This locks in the load-intent flag that the position-poison fix relies on.
+    func testLoadIntentFreshOnAdvanceResumeOnPlayEpisode() {
+        let qm = PodcastQueueManager()
+        qm.autoPlay = true
+        qm.shuffleQueue = false
+        qm.queue = [makeEpisode("1"), makeEpisode("2")]
+        var lastResume: Bool?
+        qm.loadPodcastFn = { _, _, _, resume in lastResume = resume }
+
+        qm.advanceQueue(finishedEpId: "1")
+        XCTAssertEqual(lastResume, false)   // next queued track starts at the beginning
+
+        qm.playEpisode(makeEpisode("9"))
+        XCTAssertEqual(lastResume, true)    // tapping an episode resumes where you left off
     }
 
     func testMarkFinishedThenUnfinished() {

@@ -49,6 +49,12 @@ final class PodcastPlayer: NSObject {
     
     private var currentUrl: String?
     private var currentId: String?
+    /// True from the moment a new item starts loading until its resume-seek completes. While set,
+    /// the periodic time observer skips writing positions / progress — otherwise a trailing tick on
+    /// the OLD item lands under the NEW episode's id and the resume-seek jumps the next track partway
+    /// in (the "next podcast doesn't start at the beginning" race). The sleep-timer keep-alive
+    /// (backgroundTick) is intentionally NOT gated by this — it must keep firing across a swap.
+    private var isLoadingItem = false
     private var currentItem: AVPlayerItem?
     private var currentTitle: String = "No episode loaded"
     private var playbackSpeed: Float = 1.0
@@ -175,7 +181,13 @@ final class PodcastPlayer: NSObject {
         }
     }
     
-    func play(url: String, id: String, title: String) {
+    /// - Parameters:
+    ///   - resume: when true (default), an existing saved position (`positions.json[id]`) is honored
+    ///     so the episode continues where you left off. Pass false for a fresh start — e.g. the queue
+    ///     auto-advancing to the NEXT track, which must begin at 0.
+    ///   - startAt: an explicit position to seek to (seconds), overriding both `resume` and the saved
+    ///     map. Used by "Resume Last Night" so the restore doesn't depend on `positions.json`.
+    func play(url: String, id: String, title: String, resume: Bool = true, startAt: TimeInterval? = nil) {
         // Resolve the item FIRST so a malformed URL returns *before* we touch the KVO
         // observer. Otherwise we'd remove the observer, bail on the guard, and leave
         // currentItem unbalanced — crashing the next play() with "observer not registered"
@@ -193,6 +205,7 @@ final class PodcastPlayer: NSObject {
         currentId = id
         currentTitle = title
         hasFiredNearEnd = false
+        isLoadingItem = true             // block position writes until the swap + resume-seek finish
 
         currentItem?.removeObserver(self, forKeyPath: "status")
         self.currentItem = playerItem
@@ -220,36 +233,48 @@ final class PodcastPlayer: NSObject {
                 
                 let interval = CMTime(seconds: 1.0, preferredTimescale: 1000)
                 timeObserver = player?.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
-                    guard let self = self, let epId = self.currentId else { return }
-                    self.cachedPositions?[epId] = time.seconds
-                    
-                    if let item = self.currentItem {
-                        let duration = item.duration.seconds
-                        if duration.isFinite {
-                            self.onTimeUpdate?(time.seconds, duration)
-                            if (duration - time.seconds) <= 30.0, !self.hasFiredNearEnd {
-                                self.hasFiredNearEnd = true
-                                self.onNearEnd?()
+                    guard let self = self else { return }
+                    // Skip position/progress work while a new item is loading: a trailing tick on the
+                    // old item would otherwise record under the new episode's id and poison its
+                    // resume-seek. backgroundTick stays outside this guard (sleep-timer keep-alive).
+                    if !self.isLoadingItem, let epId = self.currentId {
+                        self.cachedPositions?[epId] = time.seconds
+
+                        if let item = self.currentItem {
+                            let duration = item.duration.seconds
+                            if duration.isFinite {
+                                self.onTimeUpdate?(time.seconds, duration)
+                                if (duration - time.seconds) <= 30.0, !self.hasFiredNearEnd {
+                                    self.hasFiredNearEnd = true
+                                    self.onNearEnd?()
+                                }
                             }
                         }
+
+                        if Date().timeIntervalSince(self.lastFlushTime) > 30.0 {
+                            self.lastFlushTime = Date()
+                            self.flushPositionsToDisk()
+                        }
                     }
-                    
-                    if Date().timeIntervalSince(self.lastFlushTime) > 30.0 {
-                        self.lastFlushTime = Date()
-                        self.flushPositionsToDisk()
-                    }
-                    
+
                     self.backgroundTick?()
                 }
             } else {
                 player?.replaceCurrentItem(with: playerItem)
             }
             
-            if let positions = cachedPositions,
-               let savedTime = positions[id], savedTime > 5.0 {
+            // Resume position, in priority order: an explicit startAt (Resume Last Night) > the
+            // saved map when resuming > nothing (fresh start at 0, e.g. the next queued track).
+            if let startAt = startAt {
+                await player?.seek(to: CMTime(seconds: max(0, startAt), preferredTimescale: 1000))
+            } else if resume,
+                      let positions = cachedPositions,
+                      let savedTime = positions[id], savedTime > 5.0 {
                 await player?.seek(to: CMTime(seconds: savedTime - 2.0, preferredTimescale: 1000))
             }
-            
+            // Swap + seek are done; let the observer record positions for the new item again.
+            self.isLoadingItem = false
+
             pausedAt = nil                   // a fresh load isn't a "resume after pause"
             startFadeIn()                    // ease in from silence (applies saved volume as the target)
             player?.play()

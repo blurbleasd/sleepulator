@@ -278,9 +278,9 @@ final class AudioEngine: ObservableObject {
         //   - mixStore (user-action): HomeView (lastMix) + MixDrawer (savedPresets) observe it.
         pomodoro.chimeFn = { [weak self] in self?.chime.play() }
         
-        queueManager.loadPodcastFn = { [weak self] url, id, title in
+        queueManager.loadPodcastFn = { [weak self] url, id, title, resume in
             self?.podTitle = title
-            self?.loadPodcast(url, id: id)
+            self?.loadPodcast(url, id: id, resume: resume)
         }
         queueManager.pausePodcastFn = { [weak self] in
             self?.podPlayer.pause()
@@ -516,6 +516,11 @@ final class AudioEngine: ObservableObject {
     }
     
     func saveLastMix() {
+        // Capture the last-loaded podcast whenever one is selected in the mixer (an episode is
+        // loaded), not only when it happens to be playing at this instant. saveLastMix runs from
+        // pauseAll/stopAll, and a sleep-timer terminal stop pauses the player first — the old
+        // `isPodPlaying` gate dropped the podcast from the snapshot, so Resume restored nothing.
+        let hasPodcast = hasLoadedEpisode && queueManager.queue.first != nil
         let mix = SavedMix(
             name: "Last Night",
             noiseOn: noiseOn,
@@ -525,8 +530,9 @@ final class AudioEngine: ObservableObject {
             binVolume: binVolume,
             binauralPreset: binauralPreset,
             podVolume: podVolume,
-            podcastUrl: isPodPlaying ? queueManager.queue.first?.audioUrl : nil,
-            podcastId: isPodPlaying ? queueManager.queue.first?.id : nil
+            podcastUrl: hasPodcast ? queueManager.queue.first?.audioUrl : nil,
+            podcastId: hasPodcast ? queueManager.queue.first?.id : nil,
+            podcastPosition: hasPodcast ? podcastElapsed : nil
         )
         mixStore.saveLast(mix)
     }
@@ -543,7 +549,9 @@ final class AudioEngine: ObservableObject {
         self.podVolume = mix.podVolume
         
         if let urlStr = mix.podcastUrl {
-            loadPodcast(urlStr, id: mix.podcastId ?? urlStr)
+            // Seek straight to the snapshot's stored position; fall back to the saved-position map
+            // (resume: true) for older snapshots that predate podcastPosition.
+            loadPodcast(urlStr, id: mix.podcastId ?? urlStr, resume: true, startAt: mix.podcastPosition)
         }
     }
     
@@ -658,10 +666,10 @@ final class AudioEngine: ObservableObject {
         return urlStr
     }
 
-    func loadPodcast(_ urlStr: String, id: String) {
+    func loadPodcast(_ urlStr: String, id: String, resume: Bool = true, startAt: TimeInterval? = nil) {
         playbackNote = nil
         let finalUrlStr = resolveAudioUrl(urlStr)
-        podPlayer.play(url: finalUrlStr, id: id, title: podTitle)
+        podPlayer.play(url: finalUrlStr, id: id, title: podTitle, resume: resume, startAt: startAt)
     }
 
     /// Start a sleep timer that ends when the current episode finishes (fading the ambient bed

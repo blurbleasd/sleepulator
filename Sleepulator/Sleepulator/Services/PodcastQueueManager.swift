@@ -39,7 +39,9 @@ final class PodcastQueueManager: ObservableObject {
     private let finishedCap = 1000
     
     // Dependencies
-    var loadPodcastFn: ((_ url: String, _ id: String, _ title: String) -> Void)?
+    /// `resume`: continue at the saved position (true for user-initiated plays) vs. start fresh at 0
+    /// (false for auto-advancing to the next queued track).
+    var loadPodcastFn: ((_ url: String, _ id: String, _ title: String, _ resume: Bool) -> Void)?
     var pausePodcastFn: (() -> Void)?
     
     init() {
@@ -107,13 +109,13 @@ final class PodcastQueueManager: ObservableObject {
             self.queue.removeAll(where: { $0.id == episode.id })
             self.queue.insert(episode, at: 0)
         }
-        loadPodcastFn?(episode.audioUrl, episode.id, episode.title)
+        loadPodcastFn?(episode.audioUrl, episode.id, episode.title, true)
     }
-    
+
     func playAll(_ episodes: [Episode]) {
         guard let first = episodes.first else { return }
         self.queue = episodes
-        loadPodcastFn?(first.audioUrl, first.id, first.title)
+        loadPodcastFn?(first.audioUrl, first.id, first.title, true)
     }
 
     func addToQueue(_ episode: Episode) {
@@ -162,6 +164,7 @@ final class PodcastQueueManager: ObservableObject {
             self.queue.insert(next, at: 0)
         }
         
-        loadPodcastFn?(next.audioUrl, next.id, next.title)
+        // Fresh start: the next queued track must begin at 0, never resume a stale/poisoned position.
+        loadPodcastFn?(next.audioUrl, next.id, next.title, false)
     }
 }

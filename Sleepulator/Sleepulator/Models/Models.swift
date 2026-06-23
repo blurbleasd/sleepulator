@@ -38,6 +38,10 @@ struct SavedMix: Codable, Identifiable {
     var podVolume: Double
     var podcastUrl: String?
     var podcastId: String?
+    /// Elapsed seconds of the captured episode, stored in the snapshot so "Resume Last Night" seeks
+    /// here directly instead of depending on positions.json. Optional → old snapshots decode as nil
+    /// and fall back to the saved-position map.
+    var podcastPosition: Double? = nil
 }
 
 /// A reusable saved sound recipe — the user's named soundscapes ("Brown + Delta"). Pure
