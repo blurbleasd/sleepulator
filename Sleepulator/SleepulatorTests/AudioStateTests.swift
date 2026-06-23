@@ -31,6 +31,34 @@ class AudioStateTests: XCTestCase {
         XCTAssertEqual(qm.queue.count, 3)
     }
 
+    // The previously-untested branch: shuffle + autoplay should drop the finished head, then
+    // promote a random remaining episode to the front and load it.
+    func testAdvanceShuffleAutoplayLoadsRemaining() {
+        let qm = PodcastQueueManager()
+        qm.autoPlay = true
+        qm.shuffleQueue = true
+        qm.queue = [makeEpisode("1"), makeEpisode("2"), makeEpisode("3")]
+        var loadedId: String?
+        qm.loadPodcastFn = { _, id, _ in loadedId = id }
+
+        qm.advanceQueue(finishedEpId: "1")
+        XCTAssertEqual(qm.queue.count, 2)
+        XCTAssertFalse(qm.queue.contains { $0.id == "1" })   // finished head removed
+        XCTAssertNotNil(loadedId)
+        XCTAssertNotEqual(loadedId, "1")
+        XCTAssertEqual(qm.queue.first?.id, loadedId)         // the loaded item is promoted to head
+    }
+
+    func testMarkFinishedThenUnfinished() {
+        let qm = PodcastQueueManager()
+        qm.markFinished("abc")
+        XCTAssertTrue(qm.finishedEpisodes.contains("abc"))
+        qm.markUnfinished("abc")
+        XCTAssertFalse(qm.finishedEpisodes.contains("abc"))
+        qm.markUnfinished("never-seen")     // no-op, no crash
+        XCTAssertFalse(qm.finishedEpisodes.contains("never-seen"))
+    }
+
     // The giant button snapshots the active layers on pause and restores them on the next press.
     func testMasterTransportSnapshotResume() {
         let engine = AudioEngine()
@@ -61,6 +89,25 @@ class AudioStateTests: XCTestCase {
         let saved: [String: Double]? = StorageManager.shared.load(from: "positions.json")
         XCTAssertNotNil(saved)
         XCTAssertLessThanOrEqual(saved!.count, 100)
+    }
+}
+
+// Adaptive rewind — the longer playback was paused, the further back resume nudges.
+final class AdaptiveRewindTests: XCTestCase {
+    func testRewindCurve() {
+        XCTAssertEqual(PodcastPlayer.adaptiveRewind(forPause: 2),    0)   // a blink: don't move
+        XCTAssertEqual(PodcastPlayer.adaptiveRewind(forPause: 30),   3)   // short pause
+        XCTAssertEqual(PodcastPlayer.adaptiveRewind(forPause: 300),  10)  // few minutes away
+        XCTAssertEqual(PodcastPlayer.adaptiveRewind(forPause: 1800), 20)  // up to an hour
+        XCTAssertEqual(PodcastPlayer.adaptiveRewind(forPause: 36000), 30) // fell asleep / next day
+    }
+
+    func testBoundariesAreMonotonic() {
+        // Never rewinds *less* as the gap grows — a monotonic, non-negative curve.
+        let gaps: [TimeInterval] = [0, 9, 10, 59, 60, 599, 600, 3599, 3600, 100000]
+        let rewinds = gaps.map { PodcastPlayer.adaptiveRewind(forPause: $0) }
+        for i in 1..<rewinds.count { XCTAssertGreaterThanOrEqual(rewinds[i], rewinds[i-1]) }
+        XCTAssertTrue(rewinds.allSatisfy { $0 >= 0 })
     }
 }
 
@@ -152,6 +199,153 @@ final class PodcastParserTests: XCTestCase {
         let feed = try parse(xml)
         XCTAssertEqual(feed.episodes.count, 0)
     }
+
+    // Malformed-feed guard: a giant <description> must be capped, not accumulated unbounded.
+    func testGiantDescriptionIsCapped() throws {
+        let huge = String(repeating: "A", count: 500_000)
+        let xml = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <rss><channel><title>S</title>
+          <item><title>Ep</title><guid>g</guid>
+            <enclosure url="https://example.com/a.mp3"/>
+            <description>\(huge)</description>
+          </item>
+        </channel></rss>
+        """
+        let feed = try parse(xml)
+        let ep = try XCTUnwrap(feed.episodes.first)
+        let desc = try XCTUnwrap(ep.description)
+        XCTAssertLessThanOrEqual(desc.count, 200_000, "description must be bounded")
+        XCTAssertGreaterThan(desc.count, 0)
+    }
+}
+
+// Durable persistence: missing files are benign, and a corrupt primary is recovered from the
+// .bak sibling that every successful save mirrors.
+final class StorageManagerTests: XCTestCase {
+    private func uniqueName() -> String { "test_\(UUID().uuidString).json" }
+
+    private func storageURL(_ name: String) -> URL {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        return base.appendingPathComponent("Sleepulator").appendingPathComponent(name)
+    }
+
+    func testSaveLoadRoundTrip() {
+        let name = uniqueName()
+        defer { StorageManager.shared.delete(filename: name) }
+        StorageManager.shared.save(["a": 1, "b": 2], to: name)
+        StorageManager.shared.flush()
+        let loaded: [String: Int]? = StorageManager.shared.load(from: name)
+        XCTAssertEqual(loaded, ["a": 1, "b": 2])
+    }
+
+    func testMissingFileIsBenign() {
+        let name = uniqueName()
+        let r: (value: [String: Int]?, outcome: StorageManager.LoadOutcome) =
+            StorageManager.shared.loadResult(from: name)
+        XCTAssertNil(r.value)
+        XCTAssertEqual(r.outcome, .missing)
+    }
+
+    func testRecoversFromBackupWhenPrimaryCorrupt() throws {
+        let name = uniqueName()
+        defer { StorageManager.shared.delete(filename: name) }
+        StorageManager.shared.save(["x": 7], to: name)
+        StorageManager.shared.flush()
+
+        // Corrupt the primary in place; the .bak sibling still holds valid bytes.
+        try Data("not valid json".utf8).write(to: storageURL(name))
+
+        let r: (value: [String: Int]?, outcome: StorageManager.LoadOutcome) =
+            StorageManager.shared.loadResult(from: name)
+        XCTAssertEqual(r.value, ["x": 7])
+        XCTAssertEqual(r.outcome, .recovered)
+    }
+}
+
+// Network retry/backoff classification + control flow (pure, no real network).
+final class NetRetryTests: XCTestCase {
+    private struct Boom: Error {}
+
+    func testIsRetryableClassification() {
+        XCTAssertTrue(Net.isRetryable(HTTPStatusError(statusCode: 503)))
+        XCTAssertFalse(Net.isRetryable(HTTPStatusError(statusCode: 404)))
+        XCTAssertTrue(Net.isRetryable(URLError(.timedOut)))
+        XCTAssertTrue(Net.isRetryable(URLError(.networkConnectionLost)))
+        XCTAssertFalse(Net.isRetryable(URLError(.userAuthenticationRequired)))
+    }
+
+    func testSucceedsAfterTransientFailures() async throws {
+        var calls = 0
+        let result = try await Net.retry(attempts: 3, baseDelay: 0.0, isRetryable: { _ in true }) { () -> Int in
+            calls += 1
+            if calls < 3 { throw Boom() }
+            return 42
+        }
+        XCTAssertEqual(result, 42)
+        XCTAssertEqual(calls, 3)
+    }
+
+    func testStopsImmediatelyOnNonRetryable() async {
+        var calls = 0
+        do {
+            _ = try await Net.retry(attempts: 5, baseDelay: 0.0, isRetryable: { _ in false }) { () -> Int in
+                calls += 1
+                throw Boom()
+            }
+            XCTFail("expected throw")
+        } catch {
+            XCTAssertEqual(calls, 1)
+        }
+    }
+
+    func testGivesUpAfterAttempts() async {
+        var calls = 0
+        do {
+            _ = try await Net.retry(attempts: 3, baseDelay: 0.0, isRetryable: { _ in true }) { () -> Int in
+                calls += 1
+                throw Boom()
+            }
+            XCTFail("expected throw")
+        } catch {
+            XCTAssertEqual(calls, 3)
+        }
+    }
+}
+
+// Pure cache-eviction policy: least-recently-used first, a re-touched file survives.
+final class CacheEvictionTests: XCTestCase {
+    private func file(_ name: String, _ size: UInt64, _ recency: Date) -> AudioDownloader.CacheFile {
+        AudioDownloader.CacheFile(url: URL(fileURLWithPath: "/tmp/\(name)"), size: size, recency: recency)
+    }
+
+    func testNoEvictionUnderLimit() {
+        let now = Date()
+        let files = [file("a", 100, now), file("b", 100, now)]
+        XCTAssertTrue(AudioDownloader.evictionPlan(files: files, maxBytes: 1000).isEmpty)
+    }
+
+    func testEvictsLeastRecentFirstUntilUnderCap() {
+        let now = Date()
+        let files = [
+            file("recent", 600, now),
+            file("old",    600, now.addingTimeInterval(-3600)),
+            file("older",  600, now.addingTimeInterval(-7200)),
+        ]
+        // total 1800, cap 1000 → drop older (→1200), then old (→600); recent survives.
+        let plan = AudioDownloader.evictionPlan(files: files, maxBytes: 1000)
+        XCTAssertEqual(plan.map { $0.lastPathComponent }, ["older", "old"])
+    }
+
+    func testRecentlyTouchedLargeFileSurvivesOverStaleSmallOne() {
+        let now = Date()
+        let files = [
+            file("touchedBig", 1500, now),                              // downloaded long ago, re-played now
+            file("staleSmall", 600, now.addingTimeInterval(-99_999)),   // old, untouched
+        ]
+        let plan = AudioDownloader.evictionPlan(files: files, maxBytes: 1500)
+        XCTAssertEqual(plan.map { $0.lastPathComponent }, ["staleSmall"])
+    }
 }
 
 // Characterization tests (Slice A0 of ARCHITECTURE-REFACTOR-PLAN.md): pin the AudioEngine
@@ -211,5 +405,42 @@ final class AudioEngineBehaviorTests: XCTestCase {
                       "noise must snap into the Focus palette on mode switch")
         XCTAssertTrue(AudioEngine.focusBinaurals.contains(engine.binauralPreset),
                       "binaural must snap into the Focus palette on mode switch")
+    }
+}
+
+// End-of-episode sleep timer — driven by the playback clock via externalTick. Deterministic and
+// synchronous (no GCD timer / audio session); Live Activity is a no-op when unauthorized in tests.
+@MainActor
+final class EndOfEpisodeTimerTests: XCTestCase {
+    func testFiresExactlyOnceAndIgnoresBump() {
+        let svc = SleepTimerService()
+        var stops = 0
+        svc.stopAllFn = { stops += 1 }
+
+        svc.startEndOfEpisode(remaining: 100)
+        XCTAssertTrue(svc.isEndOfEpisode)
+
+        svc.externalTick(remaining: 95)          // before the fade window — still running
+        XCTAssertEqual(stops, 0)
+
+        svc.bumpTimer()                          // bump is a no-op for an episode timer
+        XCTAssertTrue(svc.isEndOfEpisode)
+
+        svc.externalTick(remaining: 0.2)         // crosses the terminal threshold
+        XCTAssertEqual(stops, 1)
+        XCTAssertFalse(svc.isEndOfEpisode)       // timer cancelled itself
+
+        svc.externalTick(remaining: 0.1)         // late tick must not double-fire
+        XCTAssertEqual(stops, 1)
+    }
+
+    func testDurationTimerIgnoresExternalTick() {
+        let svc = SleepTimerService()
+        var stops = 0
+        svc.stopAllFn = { stops += 1 }
+        svc.startSleepTimer(minutes: 30)         // a fixed-duration timer
+        svc.externalTick(remaining: 0.1)         // playback-clock ticks must be ignored here
+        XCTAssertEqual(stops, 0)
+        svc.cancelTimer()
     }
 }

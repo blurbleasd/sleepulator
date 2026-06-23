@@ -2,11 +2,19 @@ import Foundation
 import UIKit
 import Combine
 import AVFoundation
+import os
 #if canImport(ActivityKit)
 import ActivityKit
 #endif
 
 final class SleepTimerService: ObservableObject {
+    /// What kind of timer is running. `.endOfEpisode` is driven by the podcast playback clock
+    /// (via `externalTick`) rather than the wall-clock GCD timer, so it tracks pauses/seeks/speed.
+    enum TimerKind { case none, duration, endOfEpisode }
+    @Published private(set) var kind: TimerKind = .none
+    /// True while the active timer follows the current episode rather than a fixed duration.
+    var isEndOfEpisode: Bool { kind == .endOfEpisode }
+
     @Published var timerRemaining: TimeInterval = 0
     /// The timer's original length — denominator for `nightProgress` so the moon knows
     /// how far through the night it should be. 0 when no timer is running.
@@ -36,17 +44,18 @@ final class SleepTimerService: ObservableObject {
     
     func startSleepTimer(minutes: Int) {
         cancelTimer()
+        kind = .duration
         let endDate = Date().addingTimeInterval(Double(minutes) * 60)
         sleepTimerEnd = endDate
         didFire = false
         self.timerRemaining = Double(minutes) * 60
         self.timerTotal = Double(minutes) * 60
         updateFadeMultFn?(1.0)
-        
 
-        
+
+
         startLiveActivity()
-        
+
         let t = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .userInitiated))
         t.schedule(deadline: .now() + 1.0, repeating: 1.0)
         t.setEventHandler { [weak self] in
@@ -55,13 +64,49 @@ final class SleepTimerService: ObservableObject {
         t.resume()
         sleepTimer = t
     }
-    
+
+    /// Start an "until this episode ends" timer. There's no GCD timer — `AudioEngine` feeds the
+    /// episode's remaining time through `externalTick(remaining:)` off the AVPlayer observer, so
+    /// it naturally tracks pauses, seeks, and playback speed. The fade + terminal stop reuse the
+    /// same machinery as the duration timer. `remaining` is the real-time seconds left.
+    func startEndOfEpisode(remaining: TimeInterval) {
+        cancelTimer()
+        kind = .endOfEpisode
+        didFire = false
+        sleepTimerEnd = Date().addingTimeInterval(remaining)   // approx, for the Live Activity countdown
+        self.timerRemaining = remaining
+        self.timerTotal = remaining
+        updateFadeMultFn?(1.0)
+        startLiveActivity()
+    }
+
+    /// Drive the end-of-episode timer from the podcast clock. Runs on the main queue (its caller
+    /// dispatches there). Fades over the final stretch and fires the terminal stop once.
+    func externalTick(remaining: TimeInterval) {
+        guard kind == .endOfEpisode, !didFire else { return }
+        if remaining <= 0.4 {
+            if self.timerRemaining != 0 { self.timerRemaining = 0 }
+            didFire = true
+            stopAllFn?()
+            cancelTimer(resetMoon: false)
+            return
+        }
+        if Int(remaining) != Int(self.timerRemaining) { self.timerRemaining = remaining }
+        // Carry the ambient bed gently down to silence as the episode ends. Fade only over the
+        // final 90 s (or the whole episode if it's shorter than that), full volume before then.
+        let fadeDur = min(90.0, max(1.0, self.timerTotal))
+        updateFadeMultFn?(Double(AudioMath.getFadeMultiplier(timerRemaining: remaining, fadeDuration: fadeDur)))
+    }
+
     func backgroundTick() {
         tick()
     }
     
     private func tick() {
-        guard let end = self.sleepTimerEnd else { return }
+        // Only the wall-clock duration timer ticks here. The end-of-episode timer is driven by
+        // externalTick() off the playback clock; backgroundTick() still calls this ~20×/sec, so
+        // without this guard the (approximate) wall-clock end would race the real episode end.
+        guard kind == .duration, let end = self.sleepTimerEnd else { return }
         let remaining = end.timeIntervalSince(Date())
 
         DispatchQueue.main.async {
@@ -91,6 +136,8 @@ final class SleepTimerService: ObservableObject {
     }
 
     func bumpTimer() {
+        // Only meaningful for the fixed-duration timer; you can't extend an episode.
+        guard kind == .duration else { return }
         if let currentEnd = sleepTimerEnd {
             let newEnd = currentEnd.addingTimeInterval(15 * 60)
             sleepTimerEnd = newEnd
@@ -110,6 +157,7 @@ final class SleepTimerService: ObservableObject {
         sleepTimer?.cancel()
         sleepTimer = nil
         sleepTimerEnd = nil
+        kind = .none
         timerRemaining = 0
         // On a natural finish, keep timerTotal so nightProgress stays 1 and the moon stays
         // set at the horizon instead of gliding back up the instant the night ends. A fresh
@@ -128,13 +176,13 @@ final class SleepTimerService: ObservableObject {
         guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
         
         let attributes = SleepTimerAttributes()
-        let contentState = SleepTimerAttributes.ContentState(timerRemaining: timerRemaining, endDate: sleepTimerEnd)
+        let contentState = SleepTimerAttributes.ContentState(timerRemaining: timerRemaining, endDate: sleepTimerEnd, isEndOfEpisode: kind == .endOfEpisode)
         let content = ActivityContent(state: contentState, staleDate: sleepTimerEnd)
         
         do {
             currentActivity = try Activity.request(attributes: attributes, content: content)
         } catch {
-            print("Failed to start activity: \(error)")
+            Log.audio.error("Failed to start Live Activity: \(error.localizedDescription, privacy: .public)")
         }
         #endif
     }
@@ -142,9 +190,9 @@ final class SleepTimerService: ObservableObject {
     private func updateLiveActivity() {
         #if canImport(ActivityKit)
         guard let activity = currentActivity else { return }
-        let contentState = SleepTimerAttributes.ContentState(timerRemaining: timerRemaining, endDate: sleepTimerEnd)
+        let contentState = SleepTimerAttributes.ContentState(timerRemaining: timerRemaining, endDate: sleepTimerEnd, isEndOfEpisode: kind == .endOfEpisode)
         let content = ActivityContent(state: contentState, staleDate: sleepTimerEnd)
-        
+
         Task {
             await activity.update(content)
         }

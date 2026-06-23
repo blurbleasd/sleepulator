@@ -1,10 +1,36 @@
 import SwiftUI
 import UniformTypeIdentifiers
+import os
 
 struct SettingsView: View {
     @ObservedObject var audio: AudioEngine
+    /// Observed directly so the Auto-Play / Shuffle toggles still refresh after Phase 3 dropped
+    /// the queueManager objectWillChange forward into AudioEngine.
+    @ObservedObject var queue: PodcastQueueManager
     @AppStorage("bedtimeMode") private var bedtimeMode = false
     @AppStorage("autoNightDim") private var autoNightDim = true
+
+    /// Scalar UserDefaults keys included in Backup/Restore. Single source of truth for both the
+    /// export and the restore whitelist: restore writes nothing outside this set plus the
+    /// file-backed collections below, so a malformed or hostile backup can't inject arbitrary
+    /// defaults. Keep new persisted settings in sync here.
+    private static let backupScalarKeys: [String] = [
+        "noiseVolume", "noiseType", "binVolume", "binauralPreset", "podVolume", "stereoWidth",
+        "masterVolume", "autoPlay", "shuffleQueue", "deleteOnCompletion", "hideFinishedEpisodes",
+        "feedProxyUrl", "nightLimiterEnabled", "sleepEQEnabled", "sleepEQIntensity", "limiterByMode",
+        "beatRouting", "skipInterval", "playbackSpeed", "focusMode", "sceneSleep", "sceneFocus",
+        "bedtimeMode", "autoNightDim", "timerMinutes", "pomoWork", "pomoRest", "pomoLongRest",
+        "pomoCycles"
+    ]
+
+    /// Backup keys that map to StorageManager files (not UserDefaults), with the Codable type each
+    /// must decode into before restore will write it.
+    private static let backupFileBacked: [String: String] = [
+        "savedPlaylists": "mixes.json",
+        "savedPodcasts": "library.json",
+        "upNextQueue": "queue.json",
+        "episodePositions": "positions.json"
+    ]
     
     var pal: Palette { Palette(bedtime: bedtimeMode) }
 
@@ -33,13 +59,35 @@ struct SettingsView: View {
                                 .font(.title3.bold())
                                 .foregroundColor(pal.text)
                             
-                            Toggle("Auto-Play Next Episode", isOn: $audio.autoPlay)
+                            Toggle("Auto-Play Next Episode", isOn: $queue.autoPlay)
                                 .toggleStyle(SwitchToggleStyle(tint: pal.accent))
                                 .foregroundColor(pal.dim)
-                                
-                            Toggle("Shuffle Queue", isOn: $audio.shuffleQueue)
+
+                            Toggle("Shuffle Queue", isOn: $queue.shuffleQueue)
                                 .toggleStyle(SwitchToggleStyle(tint: pal.accent))
                                 .foregroundColor(pal.dim)
+
+                            HStack {
+                                Text("Skip Interval")
+                                    .foregroundColor(pal.dim)
+                                Spacer()
+                                Menu {
+                                    ForEach([10, 15, 30, 45], id: \.self) { secs in
+                                        Button("\(secs) seconds") { audio.skipInterval = Double(secs) }
+                                    }
+                                } label: {
+                                    Text("\(Int(audio.skipInterval))s")
+                                        .font(.headline)
+                                        .foregroundColor(pal.accent)
+                                        .padding(.horizontal, 14)
+                                        .padding(.vertical, 8)
+                                        .frame(minHeight: 44)
+                                        .background(pal.text.opacity(0.1))
+                                        .clipShape(Capsule())
+                                }
+                                .accessibilityLabel("Skip interval")
+                                .accessibilityValue("\(Int(audio.skipInterval)) seconds")
+                            }
                         }
                         .glassPanel()
                         .padding(.horizontal)
@@ -279,30 +327,47 @@ struct SettingsView: View {
                 if selectedFile.startAccessingSecurityScopedResource() {
                     defer { selectedFile.stopAccessingSecurityScopedResource() }
                     let data = try Data(contentsOf: selectedFile)
-                    guard let dict = try JSONSerialization.jsonObject(with: data, options: []) as? [String: Any] else { return }
+                    guard let dict = try JSONSerialization.jsonObject(with: data, options: []) as? [String: Any] else {
+                        alertTitle = "Import Failed"
+                        alertMessage = "That file isn't a valid Sleepulator backup."
+                        showAlert = true
+                        return
+                    }
 
-                    // These collections are file-backed (StorageManager), not UserDefaults.
-                    let fileBacked = ["savedPlaylists": "mixes.json",
-                                      "savedPodcasts": "library.json",
-                                      "upNextQueue": "queue.json",
-                                      "episodePositions": "positions.json"]
+                    let allowedScalars = Set(Self.backupScalarKeys)
+                    var restored = 0
+                    var skipped = 0
 
                     for (key, value) in dict {
-                        if let file = fileBacked[key] {
-                            if let encoded = try? JSONSerialization.data(withJSONObject: value, options: []) {
-                                StorageManager.shared.writeRaw(encoded, to: file)
-                            }
+                        if let file = Self.backupFileBacked[key] {
+                            // Only write a collection that actually decodes into its expected
+                            // type — a malformed section is skipped, never written as garbage.
+                            if let validated = Self.validatedFileData(key: key, value: value) {
+                                StorageManager.shared.writeRaw(validated, to: file)
+                                restored += 1
+                            } else { skipped += 1 }
                         } else if key == "lastMix" {
-                            // Stored as encoded Data in UserDefaults.
-                            if let encoded = try? JSONSerialization.data(withJSONObject: value, options: []) {
+                            if let encoded = try? JSONSerialization.data(withJSONObject: value, options: []),
+                               (try? JSONDecoder().decode(SavedMix.self, from: encoded)) != nil {
                                 UserDefaults.standard.set(encoded, forKey: key)
-                            }
-                        } else {
+                                restored += 1
+                            } else { skipped += 1 }
+                        } else if allowedScalars.contains(key) {
                             UserDefaults.standard.set(value, forKey: key)
+                            restored += 1
+                        } else {
+                            // Unknown key — never blind-write it into UserDefaults.
+                            skipped += 1
                         }
                     }
+
+                    // Apply the restored data in-process — no relaunch needed.
+                    audio.reloadAfterRestore()
+
                     alertTitle = "Restore Complete"
-                    alertMessage = "Your data was imported. Restart Sleepulator to load your restored library and mixes."
+                    alertMessage = skipped > 0
+                        ? "Imported \(restored) item(s); skipped \(skipped) unrecognized."
+                        : "Your data was imported."
                     showAlert = true
                 }
             } catch {
@@ -314,7 +379,7 @@ struct SettingsView: View {
         .fileExporter(isPresented: $isExporting, document: exportDocument, contentType: .json, defaultFilename: "sleepulator-backup") { result in
             switch result {
             case .success(let url):
-                print("Exported to \(url)")
+                Log.storage.info("Exported backup to \(url.lastPathComponent, privacy: .public)")
             case .failure(let error):
                 alertTitle = "Export Failed"
                 alertMessage = error.localizedDescription
@@ -335,12 +400,33 @@ struct SettingsView: View {
     @State private var alertMessage = ""
     @State private var showAlert = false
     
+    /// Re-encode a backup section and confirm it decodes into the Codable type the target file
+    /// expects. Returns the JSON bytes to write, or nil if the section is malformed/unexpected.
+    private static func validatedFileData(key: String, value: Any) -> Data? {
+        guard let data = try? JSONSerialization.data(withJSONObject: value, options: []) else { return nil }
+        let decoder = JSONDecoder()
+        let valid: Bool
+        switch key {
+        case "savedPlaylists":   // current schema is [SoundPreset]; older backups are [SavedMix]
+            valid = (try? decoder.decode([SoundPreset].self, from: data)) != nil
+                 || (try? decoder.decode([SavedMix].self, from: data)) != nil
+        case "savedPodcasts":
+            valid = (try? decoder.decode([Podcast].self, from: data)) != nil
+        case "upNextQueue":
+            valid = (try? decoder.decode([Episode].self, from: data)) != nil
+        case "episodePositions":
+            valid = (try? decoder.decode([String: Double].self, from: data)) != nil
+        default:
+            valid = false
+        }
+        return valid ? data : nil
+    }
+
     func exportData() {
         var backupDict: [String: Any] = [:]
 
         // Scalar settings live in UserDefaults.
-        let scalarKeys = ["noiseVolume", "noiseType", "binVolume", "binauralPreset", "podVolume", "stereoWidth", "masterVolume", "autoPlay", "shuffleQueue", "deleteOnCompletion", "hideFinishedEpisodes", "feedProxyUrl", "nightLimiterEnabled", "sleepEQEnabled", "sleepEQIntensity", "limiterByMode", "beatRouting"]
-        for key in scalarKeys {
+        for key in Self.backupScalarKeys {
             if let val = UserDefaults.standard.object(forKey: key) {
                 backupDict[key] = val
             }
@@ -353,11 +439,7 @@ struct SettingsView: View {
 
         // Mixes, library, queue, and positions were migrated off UserDefaults into
         // StorageManager files — pull their raw JSON so the backup is actually complete.
-        let fileBacked = [("savedPlaylists", "mixes.json"),
-                          ("savedPodcasts", "library.json"),
-                          ("upNextQueue", "queue.json"),
-                          ("episodePositions", "positions.json")]
-        for (key, file) in fileBacked {
+        for (key, file) in Self.backupFileBacked {
             if let data = StorageManager.shared.rawData(for: file),
                let obj = try? JSONSerialization.jsonObject(with: data, options: .allowFragments) {
                 backupDict[key] = obj

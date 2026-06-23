@@ -15,6 +15,7 @@
 import ActivityKit
 import WidgetKit
 import SwiftUI
+import AppIntents
 
 @main
 struct SleepulatorWidgetBundle: WidgetBundle {
@@ -48,9 +49,13 @@ struct SleepTimerLiveActivity: Widget {
                         .frame(maxWidth: .infinity, alignment: .trailing)
                 }
                 DynamicIslandExpandedRegion(.bottom) {
-                    Text("Audio fades out, then stops")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                    if #available(iOS 17.0, *) {
+                        TimerControlButtons(isEndOfEpisode: context.state.isEndOfEpisode)
+                    } else {
+                        Text("Audio fades out, then stops")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             } compactLeading: {
                 Image(systemName: "moon.zzz.fill")
@@ -73,24 +78,56 @@ private struct SleepTimerLockScreenView: View {
     let state: SleepTimerAttributes.ContentState
 
     var body: some View {
-        HStack(spacing: 14) {
-            Image(systemName: "moon.zzz.fill")
-                .font(.title2)
-                .foregroundStyle(arferGold)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Sleep timer")
-                    .font(.headline)
+        VStack(spacing: 12) {
+            HStack(spacing: 14) {
+                Image(systemName: "moon.zzz.fill")
+                    .font(.title2)
+                    .foregroundStyle(arferGold)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Sleep timer")
+                        .font(.headline)
+                        .foregroundStyle(.white)
+                    Text(state.isEndOfEpisode ? "Stops when the episode ends" : "Audio fades out, then stops")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.7))
+                }
+                Spacer()
+                SleepCountdown(state: state)
+                    .font(.system(.title, design: .rounded).monospacedDigit().weight(.semibold))
                     .foregroundStyle(.white)
-                Text("Audio fades out, then stops")
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.7))
             }
-            Spacer()
-            SleepCountdown(state: state)
-                .font(.system(.title, design: .rounded).monospacedDigit().weight(.semibold))
-                .foregroundStyle(.white)
+            if #available(iOS 17.0, *) {
+                TimerControlButtons(isEndOfEpisode: state.isEndOfEpisode)
+            }
         }
         .padding()
+    }
+}
+
+/// "+15m" / "Stop" controls backed by LiveActivityIntents — they run in the app's process so the
+/// timer can be extended or stopped from the lock screen without opening the app.
+@available(iOS 17.0, *)
+private struct TimerControlButtons: View {
+    let isEndOfEpisode: Bool
+
+    var body: some View {
+        HStack(spacing: 10) {
+            if !isEndOfEpisode {
+                Button(intent: BumpSleepTimerIntent()) {
+                    Label("15 min", systemImage: "plus")
+                        .font(.caption.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                }
+                .tint(arferGold)
+            }
+            Button(intent: StopSleepTimerIntent()) {
+                Label("Stop", systemImage: "stop.fill")
+                    .font(.caption.weight(.semibold))
+                    .frame(maxWidth: .infinity)
+            }
+            .tint(.white.opacity(0.8))
+        }
+        .buttonStyle(.bordered)
     }
 }
 

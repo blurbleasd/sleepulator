@@ -4,6 +4,7 @@ import MediaPlayer
 import Combine
 import UIKit
 import MediaToolbox
+import os
 
 struct LimiterState {
     var gain: Float
@@ -51,9 +52,34 @@ final class PodcastPlayer: NSObject {
     private var currentItem: AVPlayerItem?
     private var currentTitle: String = "No episode loaded"
     private var playbackSpeed: Float = 1.0
+    /// Seconds for the skip-back / skip-forward controls and lock-screen commands.
+    var skipInterval: Double = 15 {
+        didSet { updateSkipPreferredIntervals() }
+    }
     private var currentVolume: Float = 1.0
     private var cachedPositions: [String: Double]?
     private var lastFlushTime = Date.distantPast
+
+    /// When playback was last paused/stopped — drives the adaptive rewind on the next resume.
+    private var pausedAt: Date?
+    /// Short fade-in envelope (0→1) applied on play/resume so audio eases in instead of
+    /// snapping to full volume — gentler at night. Multiplied into the effective volume; the
+    /// limiter tap reads the product via `applyVolumeToStates()`.
+    private var fadeInGain: Float = 1.0
+    private var fadeTimer: DispatchSourceTimer?
+
+    /// How far to rewind on resume given how long playback was paused. The longer the gap, the
+    /// further back — so a quick pause barely moves, but nodding off and coming back recovers
+    /// the thread. Pure + static so it's unit-testable without a player.
+    static func adaptiveRewind(forPause gap: TimeInterval) -> Double {
+        switch gap {
+        case ..<10:   return 0     // a blink — don't move
+        case ..<60:   return 3
+        case ..<600:  return 10    // up to 10 min away
+        case ..<3600: return 20    // up to an hour
+        default:      return 30    // fell asleep / next morning
+        }
+    }
     
     private var hasFiredNearEnd = false
     private var preloadedItem: AVPlayerItem?
@@ -104,6 +130,7 @@ final class PodcastPlayer: NSObject {
             player?.removeTimeObserver(observer)
         }
         currentItem?.removeObserver(self, forKeyPath: "status")
+        fadeTimer?.cancel()
         flushPositionsToDisk()
     }
     
@@ -127,6 +154,11 @@ final class PodcastPlayer: NSObject {
     /// freshly-migrated file and erase "resume where I fell asleep."
     func setPositions(_ positions: [String: Double]) {
         cachedPositions = positions
+    }
+
+    /// Re-read the resume-position map from disk — used by the in-process Restore.
+    func reloadPositions() {
+        cachedPositions = StorageManager.shared.load(from: "positions.json") ?? [:]
     }
 
     private func setupAudioSession() {
@@ -218,7 +250,8 @@ final class PodcastPlayer: NSObject {
                 await player?.seek(to: CMTime(seconds: savedTime - 2.0, preferredTimescale: 1000))
             }
             
-            player?.volume = currentVolume   // apply saved volume to the fresh item
+            pausedAt = nil                   // a fresh load isn't a "resume after pause"
+            startFadeIn()                    // ease in from silence (applies saved volume as the target)
             player?.play()
             player?.rate = playbackSpeed
             onPlaybackStateChanged?(true)
@@ -246,25 +279,73 @@ final class PodcastPlayer: NSObject {
         // generative branch may not have reactivated it (podcast-only mode), and a
         // lock-screen "play" would otherwise produce silence.
         try? AVAudioSession.sharedInstance().setActive(true)
+
+        // Adaptive rewind: nudge back proportionally to how long we were paused so you don't
+        // resume mid-sentence (and recover the thread if you nodded off). Seek before play.
+        if let pausedAt = pausedAt {
+            let rewind = Self.adaptiveRewind(forPause: Date().timeIntervalSince(pausedAt))
+            if rewind > 0 {
+                let target = max(0, CMTimeGetSeconds(player.currentTime()) - rewind)
+                player.seek(to: CMTime(seconds: target, preferredTimescale: 1000),
+                            toleranceBefore: .zero, toleranceAfter: .zero)
+            }
+        }
+        pausedAt = nil
+
+        startFadeIn()                    // ease back in instead of snapping to full volume
         player.play()
         player.rate = playbackSpeed
         onPlaybackStateChanged?(true)
         updateNowPlaying(isPlaying: true)
         return true
     }
-    
+
     func pause() {
+        pausedAt = Date()
         player?.pause()
         flushPositionsToDisk()
         onPlaybackStateChanged?(false)
         updateNowPlaying(isPlaying: false)
     }
-    
+
     func stop() {
+        pausedAt = Date()
         player?.pause()
         flushPositionsToDisk()
         onPlaybackStateChanged?(false)
         updateNowPlaying(isPlaying: false)
+    }
+
+    /// Apply the current target volume × fade-in envelope to the player and every active limiter
+    /// tap. The tap is PostEffects, which bypasses `AVPlayer.volume`, so volume must reach the
+    /// tap state; the `player.volume` set is the fallback for streams where the tap can't attach.
+    private func applyVolumeToStates() {
+        let v = currentVolume * fadeInGain
+        player?.volume = v
+        stateLock.lock()
+        for state in activeLimiterStates { state.pointee.volume = v }
+        stateLock.unlock()
+    }
+
+    /// Ramp `fadeInGain` 0→1 over ~0.5 s on the main queue. Cheap and self-cancelling; the
+    /// final state is always the correct full volume even if interrupted.
+    private func startFadeIn() {
+        fadeTimer?.cancel()
+        fadeInGain = 0.0
+        applyVolumeToStates()
+        let t = DispatchSource.makeTimerSource(queue: .main)
+        t.schedule(deadline: .now() + 0.02, repeating: 0.02)
+        t.setEventHandler { [weak self] in
+            guard let self = self else { return }
+            self.fadeInGain = min(1.0, self.fadeInGain + 0.04)   // ~25 steps × 20 ms ≈ 0.5 s
+            self.applyVolumeToStates()
+            if self.fadeInGain >= 1.0 {
+                self.fadeTimer?.cancel()
+                self.fadeTimer = nil
+            }
+        }
+        t.resume()
+        fadeTimer = t
     }
     
     func seek(seconds: TimeInterval) {
@@ -292,10 +373,7 @@ final class PodcastPlayer: NSObject {
     
     func setVolume(_ volume: Double) {
         currentVolume = Float(volume)
-        player?.volume = currentVolume   // fallback for streams where the tap can't attach
-        stateLock.lock()
-        for state in activeLimiterStates { state.pointee.volume = currentVolume }
-        stateLock.unlock()
+        applyVolumeToStates()            // honors any in-progress fade-in envelope
     }
     
     @objc private func itemDidFinishPlaying() {
@@ -311,7 +389,7 @@ final class PodcastPlayer: NSObject {
         if keyPath == "status", let item = object as? AVPlayerItem {
             if item.status == .failed {
                 let errorMsg = item.error?.localizedDescription ?? "Unknown error"
-                print("AVPlayerItem failed: \(errorMsg)")
+                Log.audio.error("AVPlayerItem failed: \(errorMsg, privacy: .public)")
                 onPlaybackFailed?(errorMsg)
                 onQueueAdvance?(currentId)
             }
@@ -336,16 +414,17 @@ final class PodcastPlayer: NSObject {
             return .success
         }
         center.skipForwardCommand.addTarget { [weak self] _ in
-            self?.seek(seconds: 15)
+            guard let self = self else { return .commandFailed }
+            self.seek(seconds: self.skipInterval)
             return .success
         }
-        center.skipForwardCommand.preferredIntervals = [15]
-        
+
         center.skipBackwardCommand.addTarget { [weak self] _ in
-            self?.seek(seconds: -15)
+            guard let self = self else { return .commandFailed }
+            self.seek(seconds: -self.skipInterval)
             return .success
         }
-        center.skipBackwardCommand.preferredIntervals = [15]
+        updateSkipPreferredIntervals()
         
         center.changePlaybackPositionCommand.addTarget { [weak self] event in
             guard let self = self, let positionEvent = event as? MPChangePlaybackPositionCommandEvent, let player = self.player else { return .commandFailed }
@@ -356,6 +435,13 @@ final class PodcastPlayer: NSObject {
         }
     }
     
+    /// Keep the lock-screen skip glyphs (e.g. "15", "30") in sync with the chosen interval.
+    private func updateSkipPreferredIntervals() {
+        let c = MPRemoteCommandCenter.shared()
+        c.skipForwardCommand.preferredIntervals = [NSNumber(value: skipInterval)]
+        c.skipBackwardCommand.preferredIntervals = [NSNumber(value: skipInterval)]
+    }
+
     private func updateNowPlaying(isPlaying: Bool) {
         var info: [String: Any] = [
             MPMediaItemPropertyTitle: currentTitle,
@@ -435,7 +521,9 @@ final class PodcastPlayer: NSObject {
                     state.pointee.enabled = p.nightLimiterEnabled ? 1.0 : 0.0
                     state.pointee.eqEnabled = p.sleepEQEnabled ? 1.0 : 0.0
                     state.pointee.eqIntensity = Float(p.sleepEQIntensity)
-                    state.pointee.volume = p.currentVolume
+                    // Respect an in-progress fade-in so a tap that attaches mid-fade (the async
+                    // track load) starts at the enveloped level, not full volume.
+                    state.pointee.volume = p.currentVolume * p.fadeInGain
                     p.stateLock.unlock()
                 }
             },

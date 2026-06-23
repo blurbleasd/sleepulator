@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 
 struct ContentView: View {
     @StateObject private var audio = AudioEngine()
@@ -7,6 +8,10 @@ struct ContentView: View {
     @AppStorage("autoNightDim") private var autoNightDim = true
     @State private var nightDimmed = false
     @State private var dimWorkItem: DispatchWorkItem?
+    /// Tracks the timer's active/idle state so the dim side-effect fires only on the transition,
+    /// not on every per-second `timerRemaining` publish (which would reschedule the 60 s dim work
+    /// item forever and it would never fire).
+    @State private var timerWasActive = false
 
     var pal: Palette { Palette(bedtime: bedtimeMode) }
 
@@ -48,7 +53,7 @@ struct ContentView: View {
     var body: some View {
         ZStack(alignment: .bottom) {
             TabView(selection: $selectedTab) {
-                HomeView(audio: audio)
+                HomeView(audio: audio, mixStore: audio.mixStore)
                     .tabItem {
                         // Reflect the active mode — a cyan "Sleep/moon" tab while focusing
                         // was disorienting (the tab contradicted the screen).
@@ -66,7 +71,7 @@ struct ContentView: View {
                     }
                     .tag(1)
                 
-                SettingsView(audio: audio)
+                SettingsView(audio: audio, queue: audio.queueManager)
                     .tabItem {
                         Label("Settings", systemImage: "gear")
                     }
@@ -77,7 +82,7 @@ struct ContentView: View {
             // Mini-player floats above the tab bar (a ZStack overlay, not a TabView safe-area
             // inset — that docks it ON the UIKit tab bar). Tabs reserve room for it themselves
             // (Home's bottom inset below, PodcastDetail's contentMargins).
-            MiniPlayerView(audio: audio, selectedTab: $selectedTab)
+            MiniPlayerView(audio: audio, progress: audio.playbackProgress, selectedTab: $selectedTab)
                 .opacity(homeScreensaver ? 0 : 1)
                 .allowsHitTesting(!homeScreensaver)
                 .animation(.easeInOut(duration: 0.9), value: homeScreensaver)
@@ -100,19 +105,25 @@ struct ContentView: View {
         }
         // Force dark mode for bedtime aesthetic
         .preferredColorScheme(.dark)
-        .onChange(of: timerActive) { active in
+        // Drive dim scheduling off the timer's published countdown, but only act on the
+        // active↔idle transition (sleepTimer is no longer forwarded through `audio`, so the body
+        // won't re-render each tick — and we must NOT reschedule the dim every second).
+        .onReceive(audio.sleepTimer.$timerRemaining) { remaining in
+            let active = remaining > 0
+            guard active != timerWasActive else { return }
+            timerWasActive = active
             if active { scheduleDim() } else { cancelDim() }
         }
-        .onChange(of: audio.focusMode) { focus in
+        .onChange(of: audio.focusMode) { _, focus in
             if focus { cancelDim(); withAnimation(.easeInOut(duration: 0.4)) { nightDimmed = false } }
         }
-        .onChange(of: selectedTab) { _ in
+        .onChange(of: selectedTab) { _, _ in
             // Navigating is interaction — reset the dim countdown and drop the screensaver
             // so it can never hide another tab's tab bar.
             if audio.ambientScreensaver { audio.ambientScreensaver = false }
             if nightDimmed { wake() } else { scheduleDim() }
         }
-        .onChange(of: nightDimmed) { dimmed in
+        .onChange(of: nightDimmed) { _, dimmed in
             // Freeze the backdrop scene only when the veil actually occludes the screen —
             // it keeps animating through the lighter controls-faded screensaver.
             audio.screenDimmed = dimmed

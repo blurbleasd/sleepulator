@@ -1,5 +1,7 @@
 import SwiftUI
 import UniformTypeIdentifiers
+import Combine
+import os
 
 struct LibraryView: View {
     @ObservedObject var audio: AudioEngine
@@ -61,13 +63,24 @@ struct LibraryView: View {
                                             .foregroundColor(pal.text)
                                             .lineLimit(2)
                                         
-                                        Text(podcast.episodes.isEmpty ? "Tap to load episodes" : "\(podcast.episodes.count) episodes")
+                                        Text(subtitle(for: podcast))
                                             .font(.system(.subheadline, design: .rounded))
                                             .foregroundColor(pal.dim)
                                     }
                                 }
                             }
                             .listRowBackground(pal.text.opacity(0.05))
+                            // Quick "play latest" without opening the show, when episodes are loaded.
+                            .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                                if let latest = podcast.episodes.first {
+                                    Button {
+                                        audio.queueManager.playEpisode(latest)
+                                    } label: {
+                                        Label("Play latest", systemImage: "play.fill")
+                                    }
+                                    .tint(.green)
+                                }
+                            }
                         }
                         .onDelete { indices in
                             let filtered = podcasts.filter { searchText.isEmpty || $0.name.localizedCaseInsensitiveContains(searchText) }
@@ -148,6 +161,10 @@ struct LibraryView: View {
                 if podcasts.isEmpty { feedUrlInput = defaultFeed }
                 loadPodcasts()
             }
+            // Re-read library.json after an in-process Backup restore (the engine posts this).
+            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("SleepulatorLibraryReload"))) { _ in
+                loadPodcasts()
+            }
         }
         .sheet(isPresented: $showAddSheet) {
             AddPodcastSheet(feedUrlInput: $feedUrlInput, isLoading: $isLoading, errorMessage: $errorMessage, pal: pal, onAdd: {
@@ -166,7 +183,7 @@ struct LibraryView: View {
                     self.showOPMLSelector = true
                 }
             } catch {
-                print("OPML import failed: \(error)")
+                Log.network.error("OPML import failed: \(error.localizedDescription, privacy: .public)")
             }
         }
         .sheet(isPresented: $showOPMLSelector) {
@@ -207,6 +224,15 @@ struct LibraryView: View {
     }
     }
     
+    /// Subscription-row subtitle: surface the unplayed count once episodes are loaded so the
+    /// list is scannable ("3 unplayed · 120"), falling back to a prompt or "All caught up".
+    private func subtitle(for podcast: Podcast) -> String {
+        let total = podcast.episodes.count
+        guard total > 0 else { return "Tap to load episodes" }
+        let unplayed = podcast.episodes.reduce(0) { $0 + (audio.finishedEpisodes.contains($1.id) ? 0 : 1) }
+        return unplayed == 0 ? "All caught up · \(total)" : "\(unplayed) unplayed · \(total)"
+    }
+
     // MARK: - Feed Loading
     func loadFeed() {
         guard let url = URL(string: feedUrlInput) else { return }
@@ -230,7 +256,7 @@ struct LibraryView: View {
                     self.showAddSheet = false
                 }
             } catch {
-                print("Feed parse error: \(error)")
+                Log.network.error("Feed parse error: \(error.localizedDescription, privacy: .public)")
                 DispatchQueue.main.async {
                     self.isLoading = false
                     self.errorMessage = error.localizedDescription
@@ -286,7 +312,7 @@ struct AddPodcastSheet: View {
                     .autocapitalization(.none)
                     .foregroundColor(pal.text)
                     .padding(.horizontal, 24)
-                    .onChange(of: searchQuery) { newValue in
+                    .onChange(of: searchQuery) { _, newValue in
                         // Cancel any in-flight search; a per-keystroke fan-out used to race,
                         // and a slow early request could overwrite a newer query's results.
                         searchTask?.cancel()
@@ -405,6 +431,9 @@ struct EpisodeRowView: View {
     // Whether this episode is already downloaded — precomputed once by the parent (was a
     // synchronous per-row disk stat + MD5 hash in onAppear while scrolling).
     var initiallyDownloaded: Bool = false
+    // Whether this episode is already marked played — precomputed by the parent from the
+    // engine's finishedEpisodes set, so the row needn't observe the engine (scroll-storm fix).
+    var initiallyPlayed: Bool = false
 
     @AppStorage("bedtimeMode") private var bedtimeMode = false
     var pal: Palette { Palette(bedtime: bedtimeMode) }
@@ -413,6 +442,7 @@ struct EpisodeRowView: View {
     @State private var downloadProgress: Double? = nil
     @State private var progress: Double = 0
     @State private var isExpanded = false
+    @State private var isPlayed = false
     private func formatDuration(_ duration: TimeInterval?) -> String? {
         guard let d = duration else { return nil }
         if d >= 3600 {
@@ -448,12 +478,19 @@ struct EpisodeRowView: View {
                 }
                 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(ep.title)
-                        .font(.system(.headline, design: .rounded))
-                        .foregroundColor(pal.text)
-                        .multilineTextAlignment(.leading)
-                        .lineLimit(2)
-                    
+                    HStack(spacing: 7) {
+                        // Unplayed dot (hidden once played) — the conventional podcast cue.
+                        if !isPlayed {
+                            Circle().fill(pal.accent).frame(width: 7, height: 7)
+                                .accessibilityHidden(true)
+                        }
+                        Text(ep.title)
+                            .font(.system(.headline, design: .rounded))
+                            .foregroundColor(pal.text.opacity(isPlayed ? 0.5 : 1.0))
+                            .multilineTextAlignment(.leading)
+                            .lineLimit(2)
+                    }
+
                     HStack(spacing: 8) {
                         if let pubDate = ep.pubDate {
                             Text(relativeDate(pubDate))
@@ -484,13 +521,14 @@ struct EpisodeRowView: View {
                 // .combine composes the label from the title + date + duration Texts.
                 // Don't set an explicit .accessibilityLabel here — it would override the
                 // merged label and drop the publish date and duration from the announcement.
+                // Tap = play (the conventional podcast pattern); show-notes are reached via the
+                // explicit chevron below, exposed to VoiceOver as a named action.
                 .accessibilityElement(children: .combine)
-                .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
                 .accessibilityAddTraits(.isButton)
-                .accessibilityHint(isExpanded ? "Double-tap to play" : "Double-tap to expand")
-                .accessibilityAction {
-                    if isExpanded { queueManager.playEpisode(ep) }
-                    else { isExpanded = true }
+                .accessibilityHint("Double-tap to play")
+                .accessibilityAction { queueManager.playEpisode(ep) }
+                .accessibilityAction(named: Text(isExpanded ? "Hide notes" : "Show notes")) {
+                    isExpanded.toggle()
                 }
                 Spacer()
 
@@ -506,8 +544,30 @@ struct EpisodeRowView: View {
                         .font(.caption)
                         .accessibilityLabel("Downloaded")
                 }
-                
+
+                // Visible disclosure for show-notes (only when there are any). Separate from the
+                // row's tap-to-play so reading the notes never starts playback by accident.
+                if ep.description != nil {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) { isExpanded.toggle() }
+                    } label: {
+                        Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                            .font(.caption.weight(.semibold))
+                            .foregroundColor(pal.dim)
+                            .frame(minWidth: 44, minHeight: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                    .accessibilityLabel(isExpanded ? "Hide notes" : "Show notes")
+                }
+
                 Menu {
+                    Button(action: {
+                        queueManager.playEpisode(ep)
+                    }) {
+                        Label("Play", systemImage: "play.fill")
+                    }
+
                     Button(action: {
                         if !queueManager.queue.isEmpty {
                             queueManager.queue.insert(ep, at: 1)
@@ -523,7 +583,20 @@ struct EpisodeRowView: View {
                     }) {
                         Label("Add to Queue", systemImage: "text.append")
                     }
-                    
+
+                    Button(action: {
+                        if isPlayed {
+                            queueManager.markUnfinished(ep.id)
+                            isPlayed = false
+                        } else {
+                            queueManager.markFinished(ep.id)
+                            isPlayed = true
+                        }
+                    }) {
+                        Label(isPlayed ? "Mark as Unplayed" : "Mark as Played",
+                              systemImage: isPlayed ? "circle" : "checkmark.circle")
+                    }
+
                     if isDownloaded {
                         Button(role: .destructive, action: {
                             if let url = URL(string: ep.audioUrl) {
@@ -563,26 +636,39 @@ struct EpisodeRowView: View {
                 .accessibilityLabel("Episode options")
             }
             .contentShape(Rectangle())
+            // A single tap plays immediately — no more "tap to expand, tap again to play."
             .onTapGesture {
-                if isExpanded {
-                    queueManager.playEpisode(ep)
-                } else {
-                    withAnimation { isExpanded = true }
-                }
+                queueManager.playEpisode(ep)
             }
-            
+
             if isExpanded, let desc = ep.description {
                 Text(desc)
                     .font(.system(.caption, design: .rounded))
                     .foregroundColor(pal.text.opacity(0.8))
                     .padding(.leading, 60)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
         .padding(.vertical, 4)
+        // Quick, discoverable controls without opening the overflow menu: swipe right to play,
+        // swipe left to queue.
+        .swipeActions(edge: .leading, allowsFullSwipe: true) {
+            Button { queueManager.playEpisode(ep) } label: {
+                Label("Play", systemImage: "play.fill")
+            }
+            .tint(.green)
+        }
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            Button { queueManager.addToQueue(ep) } label: {
+                Label("Queue", systemImage: "text.append")
+            }
+            .tint(pal.accent)
+        }
         .onAppear {
             // Seeded from the parent's precomputed set — no per-row disk I/O on scroll.
             isDownloaded = initiallyDownloaded
             progress = savedProgress
+            isPlayed = initiallyPlayed
         }
     }
 }

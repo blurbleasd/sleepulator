@@ -8,10 +8,10 @@ struct SleepulatorApp: App {
         WindowGroup {
             ContentView()
         }
-        .onChange(of: scenePhase) { phase in
+        .onChange(of: scenePhase) { _, phase in
             if phase == .background {
-                // Post notification to flush, or we can just access it.
-                // Wait, SleepulatorApp doesn't hold the engine. Let's post a notification.
+                // The engine lives in ContentView, not here, so signal it to flush playback
+                // positions to disk via a notification it observes (AudioSessionController).
                 NotificationCenter.default.post(name: Notification.Name("AppDidEnterBackground"), object: nil)
             }
         }

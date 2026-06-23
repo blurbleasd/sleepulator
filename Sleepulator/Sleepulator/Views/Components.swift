@@ -58,8 +58,10 @@ struct CachedAsyncImage: View {
         }
     }
 
-    /// Fetch (file or network) then downsample, both off the main actor.
-    private static func fetchAndDownsample(url: URL, maxPixels: CGFloat) async -> UIImage? {
+    /// Fetch (file or network) then downsample, both off the main actor. `nonisolated` so the
+    /// file/network read and decode don't run on the main actor (`View` is `@MainActor`, which
+    /// would otherwise pin these static helpers to it — blocking the main thread on IO/decode).
+    nonisolated private static func fetchAndDownsample(url: URL, maxPixels: CGFloat) async -> UIImage? {
         var data: Data?
         if url.isFileURL {
             data = try? Data(contentsOf: url)
@@ -72,7 +74,7 @@ struct CachedAsyncImage: View {
         }.value
     }
 
-    private static func downsample(data: Data, maxPixels: CGFloat) -> UIImage? {
+    nonisolated private static func downsample(data: Data, maxPixels: CGFloat) -> UIImage? {
         let srcOptions = [kCGImageSourceShouldCache: false] as CFDictionary
         guard let src = CGImageSourceCreateWithData(data as CFData, srcOptions) else { return nil }
         let options: [CFString: Any] = [

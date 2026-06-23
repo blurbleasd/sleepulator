@@ -31,4 +31,20 @@ class AudioMathTests: XCTestCase {
         let fadeZero = AudioMath.getFadeMultiplier(timerRemaining: 0)
         XCTAssertEqual(fadeZero, 0.0)
     }
+
+    func testFadeFloorWhileRunning() {
+        // While the timer is still running the multiplier never drops below 0.03 — the
+        // keep-alive floor that stops iOS curtailing background execution before the hard stop.
+        let nearEnd = AudioMath.getFadeMultiplier(timerRemaining: 1, fadeDuration: 600)
+        XCTAssertEqual(nearEnd, 0.03, accuracy: 0.0001)   // (1/600)^2 ≈ 2.8e-6, floored
+        // But exactly at/after zero it's a true silence (the hard stop fires there).
+        XCTAssertEqual(AudioMath.getFadeMultiplier(timerRemaining: 0, fadeDuration: 600), 0.0)
+        XCTAssertEqual(AudioMath.getFadeMultiplier(timerRemaining: -5, fadeDuration: 600), 0.0)
+    }
+
+    func testFadeCustomDuration() {
+        // The end-of-episode timer uses a short (90 s) fade window.
+        XCTAssertEqual(AudioMath.getFadeMultiplier(timerRemaining: 95, fadeDuration: 90), 1.0) // before window
+        XCTAssertEqual(AudioMath.getFadeMultiplier(timerRemaining: 45, fadeDuration: 90), 0.25, accuracy: 0.0001) // (45/90)^2
+    }
 }

@@ -13,6 +13,10 @@ final class AudioEngine: ObservableObject {
     let queueManager = PodcastQueueManager()
     let sleepTimer = SleepTimerService()
     let pomodoro = PomodoroService()
+    /// High-frequency podcast position (progress/elapsed/duration). Owned here but its
+    /// objectWillChange is deliberately NOT forwarded (see init) — only the now-playing views
+    /// observe it, so the ~1/sec time-observer updates don't re-render the whole tree.
+    let playbackProgress = PlaybackProgress()
     private var cancellables = Set<AnyCancellable>()
 
     /// True while the Sleep-mode ambient screensaver is showing (home controls faded).
@@ -50,6 +54,25 @@ final class AudioEngine: ObservableObject {
     }
     @Published var playbackSpeed: Double {
         didSet { UserDefaults.standard.set(playbackSpeed, forKey: "playbackSpeed"); podPlayer.setSpeed(playbackSpeed) }
+    }
+    /// Seconds the skip-back / skip-forward controls (in-app + lock screen) jump. One of
+    /// {10,15,30,45} so the matching SF Symbol (gobackward.N / goforward.N) always exists.
+    @Published var skipInterval: Double {
+        didSet {
+            UserDefaults.standard.set(skipInterval, forKey: "skipInterval")
+            podPlayer.skipInterval = skipInterval
+        }
+    }
+
+    /// SF Symbol names for the skip controls. `gobackward.N` / `goforward.N` only exist for a
+    /// fixed set of N; fall back to the number-less glyph for any other value (e.g. an odd
+    /// figure restored from a hand-edited backup) so the button never renders blank.
+    private static let skipGlyphSizes: Set<Int> = [5, 10, 15, 30, 45, 60, 75, 90]
+    var skipBackSymbol: String {
+        Self.skipGlyphSizes.contains(Int(skipInterval)) ? "gobackward.\(Int(skipInterval))" : "gobackward"
+    }
+    var skipForwardSymbol: String {
+        Self.skipGlyphSizes.contains(Int(skipInterval)) ? "goforward.\(Int(skipInterval))" : "goforward"
     }
     
     // Phase 6 Proxies
@@ -97,17 +120,23 @@ final class AudioEngine: ObservableObject {
     }
     
     // Persisted mixes (Last Night resume snapshot + saved sound presets) and their storage live
-    // in MixStore (Slice A2). Exposed here as read-only passthroughs; MixStore.objectWillChange
-    // is forwarded in init so views re-render when a preset is saved, renamed, or deleted.
-    private let mixStore: MixStore
+    // in MixStore (Slice A2). MixStore.objectWillChange is deliberately NOT forwarded (Phase 3):
+    // the only views that render mix state observe `mixStore` directly (HomeView reads lastMix,
+    // MixDrawer reads savedPresets). The passthroughs below stay for non-reactive internal reads
+    // (resumeMix, save flow) — reading them never subscribes a view to mix updates.
+    let mixStore: MixStore
     var lastMix: SavedMix? { mixStore.lastMix }
     var savedPresets: [SoundPreset] { mixStore.savedPresets }
     
     @Published var podTitle = "No episode loaded"
     var hasLoadedEpisode: Bool { podPlayer.hasPlayer }
-    @Published var podcastProgress: Double = 0.0
-    @Published var podcastElapsed: Double = 0.0
-    @Published var podcastDuration: Double = 1.0
+    // Read-only passthroughs to the playbackProgress slice. Plain computed (NOT @Published):
+    // reading them never subscribes a view to the 1 Hz progress stream — only PlaybackProgress
+    // observers (the now-playing views) do. Internal readers (seek, end-of-episode) and the
+    // HomeView visibility check keep compiling unchanged via these names.
+    var podcastProgress: Double { playbackProgress.progress }
+    var podcastElapsed: Double { playbackProgress.elapsed }
+    var podcastDuration: Double { playbackProgress.duration }
     
     @Published var isOnline = true
     @Published var playbackNote: String?
@@ -200,6 +229,7 @@ final class AudioEngine: ObservableObject {
         self.noiseType = NoiseType.migrate(UserDefaults.standard.string(forKey: "noiseType") ?? "brown")
         self.binauralPreset = UserDefaults.standard.string(forKey: "binauralPreset") ?? "delta"
         self.playbackSpeed = UserDefaults.standard.object(forKey: "playbackSpeed") as? Double ?? 1.0
+        self.skipInterval = UserDefaults.standard.object(forKey: "skipInterval") as? Double ?? 15
         self.masterVolume = UserDefaults.standard.object(forKey: "masterVolume") as? Double ?? 1.0
         self.stereoWidth = UserDefaults.standard.object(forKey: "stereoWidth") as? Double ?? 1.0
         self.focusMode = UserDefaults.standard.object(forKey: "focusMode") as? Bool ?? false
@@ -236,10 +266,16 @@ final class AudioEngine: ObservableObject {
         }
         
 
-        queueManager.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &cancellables)
-        sleepTimer.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &cancellables)
-        pomodoro.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &cancellables)
-        mixStore.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &cancellables)
+        // No child objectWillChange is forwarded into the engine (Phase 3 completes this).
+        // Forwarding makes ANY child publish invalidate every view holding `audio`. Each child's
+        // reactive consumers observe the child directly instead:
+        //   - sleepTimer / pomodoro (~1/sec): SessionButton, SleepStatusLine, BumpTimerButton in
+        //     HomeView; FocusHero / FocusSessionReadout / CycleDots; NightDarken in AmbientScene.
+        //     ContentView drives its night-dim off `sleepTimer.$timerRemaining` via onReceive.
+        //   - playbackProgress (~1/sec): MiniPlayerView + NowPlayingSheet (Phase 1).
+        //   - queueManager (user-action): NowPlayingSheet (queue list) + SettingsView (the
+        //     Auto-Play / Shuffle toggles) observe it directly.
+        //   - mixStore (user-action): HomeView (lastMix) + MixDrawer (savedPresets) observe it.
         pomodoro.chimeFn = { [weak self] in self?.chime.play() }
         
         queueManager.loadPodcastFn = { [weak self] url, id, title in
@@ -280,10 +316,17 @@ final class AudioEngine: ObservableObject {
         
         podPlayer.onTimeUpdate = { [weak self] elapsed, duration in
             DispatchQueue.main.async {
-                self?.podcastElapsed = elapsed
-                self?.podcastDuration = duration
+                guard let self = self else { return }
+                self.playbackProgress.elapsed = elapsed
+                self.playbackProgress.duration = duration
                 if duration > 0 {
-                    self?.podcastProgress = elapsed / duration
+                    self.playbackProgress.progress = elapsed / duration
+                }
+                // Drive an "end of episode" sleep timer off the real playback clock, scaled by
+                // playback speed so the countdown reflects wall-clock time to the episode's end.
+                if duration > 0, self.sleepTimer.isEndOfEpisode {
+                    let speed = max(0.1, self.playbackSpeed)
+                    self.sleepTimer.externalTick(remaining: max(0, (duration - elapsed) / speed))
                 }
             }
         }
@@ -303,10 +346,18 @@ final class AudioEngine: ObservableObject {
         
         podPlayer.onQueueAdvance = { [weak self] finishedEpId in
             DispatchQueue.main.async {
+                guard let self = self else { return }
                 if let id = finishedEpId {
-                    self?.queueManager.markFinished(id)
+                    self.queueManager.markFinished(id)
                 }
-                self?.queueManager.advanceQueue(finishedEpId: finishedEpId)
+                // End-of-episode sleep timer: stop everything when this episode ends rather than
+                // rolling into the next one. (externalTick normally fires the stop just before the
+                // natural end; this covers the exact boundary if the last tick missed it.)
+                if self.sleepTimer.isEndOfEpisode {
+                    self.stopAll()
+                    return
+                }
+                self.queueManager.advanceQueue(finishedEpId: finishedEpId)
             }
         }
         
@@ -350,10 +401,19 @@ final class AudioEngine: ObservableObject {
                 self?.sleepTimer.startSleepTimer(minutes: mins)
             }
         })
+
+        // Interactive Live Activity buttons (LiveActivityIntent posts these from the lock screen).
+        notificationTokens.append(NotificationCenter.default.addObserver(forName: Notification.Name("BumpSleepulatorTimer"), object: nil, queue: .main) { [weak self] _ in
+            self?.sleepTimer.bumpTimer()
+        })
+        notificationTokens.append(NotificationCenter.default.addObserver(forName: Notification.Name("StopSleepulatorTimer"), object: nil, queue: .main) { [weak self] _ in
+            self?.stopAll()
+        })
         
         if let first = queueManager.queue.first { podTitle = first.title }
         
         podPlayer.setSpeed(playbackSpeed)
+        podPlayer.skipInterval = skipInterval
         podPlayer.nightLimiterEnabled = nightLimiter
         podPlayer.sleepEQEnabled = sleepEQ
         podPlayer.sleepEQIntensity = sleepEQIntensity
@@ -553,6 +613,43 @@ final class AudioEngine: ObservableObject {
         sleepTimer.cancelTimer()
     }
 
+    /// Reload all persisted state after a Backup restore so the new data takes effect WITHOUT an
+    /// app relaunch. Flushes pending writes first (the import writes are async) so reads can't
+    /// race them, re-seeds the persisted @Published settings from UserDefaults, reloads the
+    /// file-backed stores, and tells the library view to refresh.
+    func reloadAfterRestore() {
+        StorageManager.shared.flush()
+        let d = UserDefaults.standard
+
+        noiseVolume = d.object(forKey: "noiseVolume") as? Double ?? 0.4
+        binVolume = d.object(forKey: "binVolume") as? Double ?? 0.3
+        podVolume = d.object(forKey: "podVolume") as? Double ?? 0.7
+        noiseType = NoiseType.migrate(d.string(forKey: "noiseType") ?? "brown")
+        binauralPreset = d.string(forKey: "binauralPreset") ?? "delta"
+        playbackSpeed = d.object(forKey: "playbackSpeed") as? Double ?? 1.0
+        skipInterval = d.object(forKey: "skipInterval") as? Double ?? 15
+        masterVolume = d.object(forKey: "masterVolume") as? Double ?? 1.0
+        stereoWidth = d.object(forKey: "stereoWidth") as? Double ?? 1.0
+        beatRouting = d.string(forKey: "beatRouting") ?? "auto"
+        nightLimiter = d.object(forKey: "nightLimiterEnabled") as? Bool ?? AppConfig.nightLimiterEnabled
+        limiterByMode = d.object(forKey: "limiterByMode") as? Bool ?? false
+        sleepEQ = d.object(forKey: "sleepEQEnabled") as? Bool ?? false
+        sleepEQIntensity = d.object(forKey: "sleepEQIntensity") as? Double ?? 1.0
+        let savedFeed = d.string(forKey: "feedProxyUrl")
+        feedProxyUrl = (savedFeed?.isEmpty == false) ? savedFeed! : AppConfig.feedProxyUrl
+        focusMode = d.object(forKey: "focusMode") as? Bool ?? false   // didSet reconciles palette
+
+        mixStore.reloadFromDisk()
+        queueManager.reloadFromDisk()
+        podPlayer.reloadPositions()
+
+        reconcileSoundsToMode()
+        applyLimiterForMode()
+
+        // The library is owned by LibraryView's @State; nudge it to re-read library.json.
+        NotificationCenter.default.post(name: Notification.Name("SleepulatorLibraryReload"), object: nil)
+    }
+
     // MARK: Podcast playback
     private func resolveAudioUrl(_ urlStr: String) -> String {
         if let origUrl = URL(string: urlStr), let cached = AudioDownloader.shared.getCachedUrl(for: origUrl) {
@@ -565,6 +662,16 @@ final class AudioEngine: ObservableObject {
         playbackNote = nil
         let finalUrlStr = resolveAudioUrl(urlStr)
         podPlayer.play(url: finalUrlStr, id: id, title: podTitle)
+    }
+
+    /// Start a sleep timer that ends when the current episode finishes (fading the ambient bed
+    /// down over the last stretch). No-op without a loaded episode of known, finite length, so we
+    /// never start a timer that would instantly fire on an unknown-duration live stream.
+    func startEndOfEpisodeTimer() {
+        guard podPlayer.hasPlayer, podcastDuration.isFinite, podcastDuration > 5 else { return }
+        let speed = max(0.1, playbackSpeed)
+        let remaining = max(1, (podcastDuration - podcastElapsed) / speed)
+        sleepTimer.startEndOfEpisode(remaining: remaining)
     }
 
     func seekPodcast(seconds: TimeInterval) {

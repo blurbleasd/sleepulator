@@ -1,6 +1,7 @@
 import Foundation
 import AVFoundation
 import AudioToolbox
+import os
 
 @inline(__always)
 func softClip(_ x: Float) -> Float {
@@ -491,7 +492,7 @@ final class GenerativeAudioEngine {
                 try engine.start()
                 return true
             } catch {
-                print("GenerativeAudioEngine.start failed [\(context)]: \(error)")
+                Log.audio.error("GenerativeAudioEngine.start failed [\(context, privacy: .public)]: \(error.localizedDescription, privacy: .public)")
                 onEngineError?("Sound engine couldn't start — tap play to retry")
                 return false
             }

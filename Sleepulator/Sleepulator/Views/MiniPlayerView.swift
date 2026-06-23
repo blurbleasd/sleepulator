@@ -2,6 +2,9 @@ import SwiftUI
 
 struct MiniPlayerView: View {
     @ObservedObject var audio: AudioEngine
+    /// The high-frequency playback position, observed directly so the 1 Hz progress updates
+    /// re-render only this view, not the whole tree.
+    @ObservedObject var progress: PlaybackProgress
     @Binding var selectedTab: Int
     @AppStorage("bedtimeMode") private var bedtimeMode = false
     @State private var showNowPlaying = false
@@ -13,20 +16,20 @@ struct MiniPlayerView: View {
         if audio.hasLoadedEpisode {
             VStack(spacing: 0) {
                 // Thin progress bar
-                ProgressView(value: max(0, min(1, audio.podcastProgress)))
+                ProgressView(value: max(0, min(1, progress.progress)))
                     .progressViewStyle(LinearProgressViewStyle(tint: pal.accent))
                     .frame(height: 2)
                     .accessibilityLabel("Episode progress")
-                    .accessibilityValue("\(Int(audio.podcastProgress * 100)) percent")
+                    .accessibilityValue("\(Int(progress.progress * 100)) percent")
 
                 HStack(spacing: 6) {
-                    Button(action: { audio.seekPodcast(seconds: -15) }) {
-                        Image(systemName: "gobackward.15")
+                    Button(action: { audio.seekPodcast(seconds: -audio.skipInterval) }) {
+                        Image(systemName: audio.skipBackSymbol)
                             .font(.title3)
                             .foregroundColor(pal.accent)
                     }
                     .frame(minWidth: 40, minHeight: 44)
-                    .accessibilityLabel("Skip back 15 seconds")
+                    .accessibilityLabel("Skip back \(Int(audio.skipInterval)) seconds")
 
                     // Play/Pause — its own button, NOT nested inside the open-player button.
                     Button(action: { audio.togglePodcast() }) {
@@ -37,13 +40,13 @@ struct MiniPlayerView: View {
                     .frame(minWidth: 44, minHeight: 44)
                     .accessibilityLabel(audio.isPodPlaying ? "Pause podcast" : "Play podcast")
 
-                    Button(action: { audio.seekPodcast(seconds: 15) }) {
-                        Image(systemName: "goforward.15")
+                    Button(action: { audio.seekPodcast(seconds: audio.skipInterval) }) {
+                        Image(systemName: audio.skipForwardSymbol)
                             .font(.title3)
                             .foregroundColor(pal.accent)
                     }
                     .frame(minWidth: 40, minHeight: 44)
-                    .accessibilityLabel("Skip forward 15 seconds")
+                    .accessibilityLabel("Skip forward \(Int(audio.skipInterval)) seconds")
 
                     // Title region — a separate sibling button that opens Now Playing.
                     Button(action: { showNowPlaying = true }) {
@@ -90,7 +93,7 @@ struct MiniPlayerView: View {
             .padding(.horizontal)
             .padding(.bottom, 80) // float above the tab bar
             .sheet(isPresented: $showNowPlaying) {
-                NowPlayingSheet(audio: audio, isPresented: $showNowPlaying, pal: pal)
+                NowPlayingSheet(audio: audio, queue: audio.queueManager, progress: progress, isPresented: $showNowPlaying, pal: pal)
             }
         }
     }

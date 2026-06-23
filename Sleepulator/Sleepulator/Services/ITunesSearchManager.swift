@@ -23,9 +23,15 @@ class ITunesSearchManager {
             return []
         }
         
-        let (data, response) = try await URLSession.shared.data(from: url)
-        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
-            throw URLError(.badServerResponse)
+        let data = try await Net.retry {
+            let (data, response) = try await Net.feed.data(from: url)
+            guard let httpResponse = response as? HTTPURLResponse else {
+                throw URLError(.badServerResponse)
+            }
+            guard (200...299).contains(httpResponse.statusCode) else {
+                throw HTTPStatusError(statusCode: httpResponse.statusCode)
+            }
+            return data
         }
         let decoded = try JSONDecoder().decode(ITunesSearchResponse.self, from: data)
         return decoded.results.filter { $0.feedUrl != nil }

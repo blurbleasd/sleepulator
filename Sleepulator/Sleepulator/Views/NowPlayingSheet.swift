@@ -3,6 +3,11 @@ import MediaPlayer
 
 struct NowPlayingSheet: View {
     @ObservedObject var audio: AudioEngine
+    /// Observed directly so the Up Next queue list refreshes after Phase 3 dropped the
+    /// queueManager objectWillChange forward into AudioEngine.
+    @ObservedObject var queue: PodcastQueueManager
+    /// High-frequency playback position, observed directly (see PlaybackProgress).
+    @ObservedObject var progress: PlaybackProgress
     @Binding var isPresented: Bool
     let pal: Palette
     
@@ -28,20 +33,20 @@ struct NowPlayingSheet: View {
 
         let controls = HStack(spacing: 8) {
             if !isFirst {
-                Button(action: { audio.queueManager.moveUp(episode: ep) }) {
+                Button(action: { queue.moveUp(episode: ep) }) {
                     Image(systemName: "chevron.up.circle.fill").foregroundColor(pal.dim).font(.title3)
                 }
                 .frame(minWidth: 44, minHeight: 44)
                 .accessibilityLabel("Move \(ep.title) up")
             }
             if !isLast {
-                Button(action: { audio.queueManager.moveDown(episode: ep) }) {
+                Button(action: { queue.moveDown(episode: ep) }) {
                     Image(systemName: "chevron.down.circle.fill").foregroundColor(pal.dim).font(.title3)
                 }
                 .frame(minWidth: 44, minHeight: 44)
                 .accessibilityLabel("Move \(ep.title) down")
             }
-            Button(action: { audio.queueManager.queue.removeAll(where: { $0.id == ep.id }) }) {
+            Button(action: { queue.queue.removeAll(where: { $0.id == ep.id }) }) {
                 Image(systemName: "xmark.circle.fill").foregroundColor(pal.accent).font(.title3)
             }
             .frame(minWidth: 44, minHeight: 44)
@@ -80,7 +85,7 @@ struct NowPlayingSheet: View {
                     .padding(.top, 10)
                 
                 // Cover Art
-                if let first = audio.queueManager.queue.first, let urlStr = first.artworkUrl, let url = URL(string: urlStr) {
+                if let first = queue.queue.first, let urlStr = first.artworkUrl, let url = URL(string: urlStr) {
                     AsyncImage(url: url) { phase in
                         if let image = phase.image {
                             image.resizable().aspectRatio(contentMode: .fill)
@@ -122,7 +127,7 @@ struct NowPlayingSheet: View {
                 // Scrubber
                 VStack(spacing: 4) {
                     Slider(value: Binding(
-                        get: { isDraggingScrubber ? scrubProgress : audio.podcastProgress },
+                        get: { isDraggingScrubber ? scrubProgress : progress.progress },
                         set: { newVal in
                             scrubProgress = newVal
                             isDraggingScrubber = true
@@ -135,13 +140,13 @@ struct NowPlayingSheet: View {
                     }
                     .tint(pal.accent)
                     .accessibilityLabel("Playback position")
-                    .accessibilityValue("\(formatTime(audio.podcastElapsed)) of \(formatTime(audio.podcastDuration))")
+                    .accessibilityValue("\(formatTime(progress.elapsed)) of \(formatTime(progress.duration))")
 
                     HStack {
-                        Text(formatTime(isDraggingScrubber ? scrubProgress * audio.podcastDuration : audio.podcastElapsed))
+                        Text(formatTime(isDraggingScrubber ? scrubProgress * progress.duration : progress.elapsed))
                             .font(.caption2).foregroundColor(pal.dim).monospacedDigit().lineLimit(1).minimumScaleFactor(0.7)
                         Spacer()
-                        Text("-" + formatTime(audio.podcastDuration - (isDraggingScrubber ? scrubProgress * audio.podcastDuration : audio.podcastElapsed)))
+                        Text("-" + formatTime(progress.duration - (isDraggingScrubber ? scrubProgress * progress.duration : progress.elapsed)))
                             .font(.caption2).foregroundColor(pal.dim).monospacedDigit().lineLimit(1).minimumScaleFactor(0.7)
                     }
                     .accessibilityHidden(true)
@@ -150,13 +155,13 @@ struct NowPlayingSheet: View {
                 
                 // Transports
                 HStack(spacing: 20) {
-                    Button(action: { audio.seekPodcast(seconds: -15) }) {
-                        Image(systemName: "gobackward.15")
+                    Button(action: { audio.seekPodcast(seconds: -audio.skipInterval) }) {
+                        Image(systemName: audio.skipBackSymbol)
                             .font(.title2)
                             .foregroundColor(pal.accent)
                     }
                     .frame(minWidth: 44, minHeight: 44)
-                    .accessibilityLabel("Skip back 15 seconds")
+                    .accessibilityLabel("Skip back \(Int(audio.skipInterval)) seconds")
 
                     Button(action: { audio.togglePodcast() }) {
                         Image(systemName: audio.isPodPlaying ? "pause.circle.fill" : "play.circle.fill")
@@ -166,15 +171,15 @@ struct NowPlayingSheet: View {
                     .frame(minWidth: 64, minHeight: 64)
                     .accessibilityLabel(audio.isPodPlaying ? "Pause" : "Play")
 
-                    Button(action: { audio.seekPodcast(seconds: 15) }) {
-                        Image(systemName: "goforward.15")
+                    Button(action: { audio.seekPodcast(seconds: audio.skipInterval) }) {
+                        Image(systemName: audio.skipForwardSymbol)
                             .font(.title2)
                             .foregroundColor(pal.accent)
                     }
                     .frame(minWidth: 44, minHeight: 44)
-                    .accessibilityLabel("Skip forward 15 seconds")
+                    .accessibilityLabel("Skip forward \(Int(audio.skipInterval)) seconds")
 
-                    Button(action: { audio.queueManager.advanceQueue() }) {
+                    Button(action: { queue.advanceQueue() }) {
                         Image(systemName: "forward.end.fill")
                             .font(.title2)
                             .foregroundColor(pal.accent)
@@ -210,7 +215,7 @@ struct NowPlayingSheet: View {
                 }
                 
                 // Up Next Queue Section
-                if audio.queueManager.queue.count > 1 { // More than just the currently playing item
+                if queue.queue.count > 1 { // More than just the currently playing item
                     VStack(alignment: .leading, spacing: 16) {
                         HStack {
                             Image(systemName: "list.dash")
@@ -220,7 +225,7 @@ struct NowPlayingSheet: View {
                                 .font(.system(.title3, design: .rounded).bold())
                                 .foregroundColor(pal.text)
                             Spacer()
-                            Button(action: { audio.queueManager.shuffleRemainingQueue() }) {
+                            Button(action: { queue.shuffleRemainingQueue() }) {
                                 Image(systemName: "shuffle")
                                     .foregroundColor(pal.accent)
                                     .padding(8)
@@ -232,7 +237,7 @@ struct NowPlayingSheet: View {
                         }
                         .padding(.horizontal, 30)
 
-                        let remainingQueue = Array(audio.queueManager.queue.dropFirst())
+                        let remainingQueue = Array(queue.queue.dropFirst())
                         ForEach(remainingQueue.indices, id: \.self) { i in
                             queueRow(ep: remainingQueue[i], isFirst: i == 0, isLast: i == remainingQueue.count - 1)
                         }

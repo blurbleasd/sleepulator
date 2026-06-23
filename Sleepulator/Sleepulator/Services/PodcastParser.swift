@@ -25,15 +25,20 @@ class PodcastParser: NSObject, XMLParserDelegate {
     private var tempImageUrl = ""
     
     func parseFeed(url: URL) async throws -> ParsedFeed {
-        let (tempFileUrl, response) = try await URLSession.shared.download(from: url)
-        defer { try? FileManager.default.removeItem(at: tempFileUrl) }
-        
-        guard let httpResponse = response as? HTTPURLResponse, (200...299).contains(httpResponse.statusCode) else {
-            let status = (response as? HTTPURLResponse)?.statusCode ?? -1
-            throw NSError(domain: "PodcastParser", code: status, userInfo: [NSLocalizedDescriptionKey: "HTTP Error \(status)"])
+        // Configured session + retry-with-backoff: a single flaky-Wi-Fi blip no longer reads as
+        // "feed broken." Only transient errors (timeout / connection-lost / 5xx) are retried; a
+        // 4xx throws straight through (see Net.isRetryable).
+        let data = try await Net.retry {
+            let (tempFileUrl, response) = try await Net.feed.download(from: url)
+            defer { try? FileManager.default.removeItem(at: tempFileUrl) }
+            guard let httpResponse = response as? HTTPURLResponse else {
+                throw URLError(.badServerResponse)
+            }
+            guard (200...299).contains(httpResponse.statusCode) else {
+                throw HTTPStatusError(statusCode: httpResponse.statusCode)
+            }
+            return try Data(contentsOf: tempFileUrl)
         }
-
-        let data = try Data(contentsOf: tempFileUrl)
         return try parse(data: data)
     }
 
@@ -106,22 +111,35 @@ class PodcastParser: NSObject, XMLParserDelegate {
         }
     }
 
+    // Caps on accumulated text per field. A malformed feed with a giant CDATA block could
+    // otherwise grow a buffer without bound and OOM. Show-notes get a generous ceiling; the
+    // short fields (title/date/duration/guid) are tightly bounded.
+    private static let maxDescriptionChars = 200_000
+    private static let maxShortFieldChars  = 4_000
+
+    /// Append `string` to `buffer` only while it stays under `cap`; silently drop the overflow.
+    private func appendCapped(_ string: String, to buffer: inout String, cap: Int) {
+        guard buffer.count < cap else { return }
+        buffer += string
+        if buffer.count > cap { buffer = String(buffer.prefix(cap)) }
+    }
+
     /// Append text (plain or CDATA) to the buffer the current element maps to.
     private func accumulate(_ string: String) {
         if inItem {
             switch currentElement {
-            case "title":                       currentTitle += string
-            case "guid":                        currentGuid += string
-            case "description", "content:encoded": currentDescription += string
-            case "pubDate":                     currentPubDate += string
-            case "itunes:duration":             currentDuration += string
-            default:                            break
+            case "title":                          appendCapped(string, to: &currentTitle, cap: Self.maxShortFieldChars)
+            case "guid":                           appendCapped(string, to: &currentGuid, cap: Self.maxShortFieldChars)
+            case "description", "content:encoded": appendCapped(string, to: &currentDescription, cap: Self.maxDescriptionChars)
+            case "pubDate":                        appendCapped(string, to: &currentPubDate, cap: Self.maxShortFieldChars)
+            case "itunes:duration":                appendCapped(string, to: &currentDuration, cap: Self.maxShortFieldChars)
+            default:                               break
             }
         } else {
             if currentElement == "title" && !inImage {
-                channelTitle += string
+                appendCapped(string, to: &channelTitle, cap: Self.maxShortFieldChars)
             } else if inImage && currentElement == "url" {
-                tempImageUrl += string
+                appendCapped(string, to: &tempImageUrl, cap: Self.maxShortFieldChars)
             }
         }
     }

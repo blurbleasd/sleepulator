@@ -15,6 +15,8 @@ struct SceneContext {
     let paused: Bool
     /// The sleep timer, for time-reactive sleep scenes (e.g. the setting moon).
     let sleepTimer: SleepTimerService
+    /// The Pomodoro, for time-reactive Focus scenes (work/break phase + progress).
+    let pomodoro: PomodoroService
 }
 
 /// A self-contained ambient backdrop for the home screen. The point of the protocol is that
@@ -45,13 +47,25 @@ struct NightSkyScene: AmbientScene {
                     .ignoresSafeArea()
                 ShootingStarView()
                     .ignoresSafeArea()
-                Color.black
-                    .opacity(ctx.sleepTimer.nightProgress * 0.35)
-                    .ignoresSafeArea()
-                    .allowsHitTesting(false)
+                // Darkening must observe the timer itself: nightProgress is computed (not
+                // @Published) and the timer is no longer forwarded through `audio`, so HomeView
+                // stops re-rendering each second — without this leaf the sky would freeze.
+                NightDarken(timer: ctx.sleepTimer)
             }
             .ignoresSafeArea()
         )
+    }
+}
+
+/// The sleep sky-darkening overlay, isolated so it re-renders on each timer tick (it observes the
+/// timer directly) rather than relying on its parent's per-second re-render.
+private struct NightDarken: View {
+    @ObservedObject var timer: SleepTimerService
+    var body: some View {
+        Color.black
+            .opacity(timer.nightProgress * 0.35)
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
     }
 }
 
@@ -63,6 +77,42 @@ struct EnergyScene: AmbientScene {
 
     func makeBackdrop(_ ctx: SceneContext) -> AnyView {
         AnyView(FocusBackdrop(accent: ctx.palette.accent, reduceMotion: ctx.reduceMotion))
+    }
+}
+
+/// "Current" (Focus): cool streams that quicken/brighten through a work interval and ease on a
+/// break — momentum without flicker.
+struct CurrentScene: AmbientScene {
+    let id = "current"
+    let title = "Current"
+    let mood = SceneMood.focus
+
+    func makeBackdrop(_ ctx: SceneContext) -> AnyView {
+        AnyView(CurrentView(paused: ctx.paused, pomodoro: ctx.pomodoro))
+    }
+}
+
+/// "Tide" (Focus): a calm cool level that rises across a work interval and recedes on a break —
+/// an ambient, glanceable progress cue.
+struct TideScene: AmbientScene {
+    let id = "tide"
+    let title = "Tide"
+    let mood = SceneMood.focus
+
+    func makeBackdrop(_ ctx: SceneContext) -> AnyView {
+        AnyView(TideView(paused: ctx.paused, pomodoro: ctx.pomodoro))
+    }
+}
+
+/// "Deep work" (Focus): a near-minimal cool field, crispest mid-session and softer at the
+/// boundaries — the calmest, lowest-distraction backdrop.
+struct DeepWorkScene: AmbientScene {
+    let id = "deep-work"
+    let title = "Deep work"
+    let mood = SceneMood.focus
+
+    func makeBackdrop(_ ctx: SceneContext) -> AnyView {
+        AnyView(DeepWorkView(paused: ctx.paused, pomodoro: ctx.pomodoro))
     }
 }
 
@@ -106,6 +156,42 @@ struct BreathingBloomScene: AmbientScene {
     }
 }
 
+/// "Aurora": slow curtains of dim color sway and breathe over near-black, blended additively so
+/// overlaps glow. Wandering, focal-point-free — the eye drifts and settles.
+struct AuroraScene: AmbientScene {
+    let id = "aurora"
+    let title = "Aurora"
+    let mood = SceneMood.sleep
+
+    func makeBackdrop(_ ctx: SceneContext) -> AnyView {
+        AnyView(AuroraView(paused: ctx.paused))
+    }
+}
+
+/// "Embers": warm motes drift up from a faint hearth glow and fade — the cozy, candle-lit
+/// counterpart to the cool starfield.
+struct EmbersScene: AmbientScene {
+    let id = "embers"
+    let title = "Embers"
+    let mood = SceneMood.sleep
+
+    func makeBackdrop(_ ctx: SceneContext) -> AnyView {
+        AnyView(EmbersView(paused: ctx.paused))
+    }
+}
+
+/// "Still water": faint concentric ripples spread and fade on a dark moonlit pond — predictable
+/// and rhythmic, meditative rather than attention-grabbing. Pairs with the rain / ocean sound.
+struct StillWaterScene: AmbientScene {
+    let id = "still-water"
+    let title = "Still water"
+    let mood = SceneMood.sleep
+
+    func makeBackdrop(_ ctx: SceneContext) -> AnyView {
+        AnyView(StillWaterView(paused: ctx.paused))
+    }
+}
+
 // MARK: - Registry
 
 /// Lists every scene and resolves a persisted selection id to a scene. Selection itself lives
@@ -117,7 +203,10 @@ enum SceneRegistry {
         #if DEBUG
         scenes.append(RainOnGlassDepthScene())   // A/B sibling, DEBUG builds only
         #endif
-        scenes.append(contentsOf: [BreathingBloomScene(), EnergyScene()] as [any AmbientScene])
+        scenes.append(contentsOf: [
+            BreathingBloomScene(), AuroraScene(), EmbersScene(), StillWaterScene(),
+            EnergyScene(), CurrentScene(), TideScene(), DeepWorkScene()
+        ] as [any AmbientScene])
         return scenes
     }()
 

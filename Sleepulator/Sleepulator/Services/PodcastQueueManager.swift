@@ -62,6 +62,26 @@ final class PodcastQueueManager: ObservableObject {
 
     }
     
+    /// Reload all persisted queue state from disk/UserDefaults — used by the in-process Restore
+    /// so the queue reflects the imported backup without an app relaunch.
+    func reloadFromDisk() {
+        autoPlay = UserDefaults.standard.object(forKey: "autoPlay") as? Bool ?? true
+        shuffleQueue = UserDefaults.standard.object(forKey: "shuffleQueue") as? Bool ?? false
+        deleteOnCompletion = UserDefaults.standard.object(forKey: "deleteOnCompletion") as? Bool ?? false
+        hideFinishedEpisodes = UserDefaults.standard.object(forKey: "hideFinishedEpisodes") as? Bool ?? false
+
+        if let arr = UserDefaults.standard.array(forKey: "finishedEpisodes") as? [String] {
+            let capped = arr.count > finishedCap ? Array(arr.suffix(finishedCap)) : arr
+            finishedOrder = capped
+            finishedEpisodes = Set(capped)
+        } else {
+            finishedOrder = []
+            finishedEpisodes = []
+        }
+
+        queue = StorageManager.shared.load(from: "queue.json") ?? []
+    }
+
     /// Mark an episode finished, keeping the set bounded by recency. Replaces a raw
     /// `finishedEpisodes.insert`, which had no upper limit.
     func markFinished(_ id: String) {
@@ -70,6 +90,13 @@ final class PodcastQueueManager: ObservableObject {
         if finishedOrder.count > finishedCap {
             finishedOrder.removeFirst(finishedOrder.count - finishedCap)
         }
+        finishedEpisodes = Set(finishedOrder)   // triggers the persist in didSet
+    }
+
+    /// Manually un-mark an episode as played (the inverse of `markFinished`).
+    func markUnfinished(_ id: String) {
+        guard finishedOrder.contains(id) || finishedEpisodes.contains(id) else { return }
+        finishedOrder.removeAll { $0 == id }
         finishedEpisodes = Set(finishedOrder)   // triggers the persist in didSet
     }
 

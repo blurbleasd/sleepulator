@@ -65,4 +65,29 @@ final class MixStore: ObservableObject {
         let presets = savedPresets
         storageQueue.async { StorageManager.shared.save(presets, to: "mixes.json") }
     }
+
+    /// Reload the last-mix snapshot and saved presets from disk — used by the in-process Restore.
+    /// Accepts the current `[SoundPreset]` schema or a legacy `[SavedMix]` mixes.json (converting
+    /// it the same way `PersistenceMigrator` does), so a restore never shows an empty preset list.
+    func reloadFromDisk() {
+        if let data = UserDefaults.standard.data(forKey: "lastMix"),
+           let mix = try? JSONDecoder().decode(SavedMix.self, from: data) {
+            lastMix = mix
+        } else {
+            lastMix = nil
+        }
+
+        if let presets: [SoundPreset] = StorageManager.shared.load(from: "mixes.json") {
+            savedPresets = presets.map { var p = $0; p.noiseType = NoiseType.migrate(p.noiseType); return p }
+        } else if let old: [SavedMix] = StorageManager.shared.load(from: "mixes.json") {
+            savedPresets = old.map {
+                SoundPreset(name: $0.name, mode: "sleep",
+                            noiseOn: $0.noiseOn, noiseType: NoiseType.migrate($0.noiseType), noiseVolume: $0.noiseVolume,
+                            binauralOn: $0.binauralOn, binauralPreset: $0.binauralPreset, binVolume: $0.binVolume,
+                            sceneId: nil)
+            }
+        } else {
+            savedPresets = []
+        }
+    }
 }

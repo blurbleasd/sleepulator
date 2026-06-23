@@ -2,6 +2,9 @@ import SwiftUI
 
 struct HomeView: View {
     @ObservedObject var audio: AudioEngine
+    /// Observed directly so the "Resume · …" status (lastMix) refreshes after Phase 3 dropped the
+    /// mixStore objectWillChange forward into AudioEngine.
+    @ObservedObject var mixStore: MixStore
     @State private var showTimerActionSheet = false
     @State private var isPlayPressed = false
     @State private var showBreathing = false
@@ -53,30 +56,8 @@ struct HomeView: View {
         return p
     }
 
-    // Bottom session control — mode-aware: Sleep timer vs Focus Pomodoro.
-    @ViewBuilder private var sessionButton: some View {
-        Button(action: {
-            if audio.focusMode {
-                if audio.pomodoro.isRunning { audio.pomodoro.stop() } else { audio.pomodoro.start() }
-            } else {
-                showTimerActionSheet = true
-            }
-        }) {
-            HStack(spacing: 6) {
-                if audio.focusMode {
-                    Image(systemName: audio.pomodoro.isRunning ? "stop.fill" : "bolt.fill")
-                    Text(audio.pomodoro.isRunning ? "\(Int(audio.pomodoro.remaining / 60))m" : "Focus session")
-                } else {
-                    Image(systemName: "moon.zzz")
-                    Text(audio.sleepTimer.timerRemaining > 0 ? "\(Int(audio.sleepTimer.timerRemaining / 60))m left" : "Sleep timer")
-                }
-            }
-            .font(.subheadline.weight(.medium))
-            .foregroundColor(pal.dim)
-            .padding(.horizontal, 16).padding(.vertical, 13)
-        }
-        .frame(minHeight: 44)
-    }
+    // The mode-aware bottom session control is now the `SessionButton` leaf (below), which
+    // observes the timers directly so its countdown stays live without re-rendering HomeView.
 
     private func statusText() -> String {
         var parts: [String] = []
@@ -87,12 +68,11 @@ struct HomeView: View {
         let layers = parts.isEmpty ? "All paused" : parts.joined(separator: " + ")
         
         if audio.isAnythingPlaying {
-            if audio.sleepTimer.timerRemaining > 0 {
-                return "\(layers) · \(Int(audio.sleepTimer.timerRemaining / 60))m"
-            }
+            // The live "· Nm" countdown is appended by SleepStatusLine (which observes the timer),
+            // so statusText stays timer-free and doesn't re-render HomeView each second.
             return layers
         } else {
-            if let mix = audio.lastMix, (mix.noiseOn || mix.binauralOn || mix.podcastUrl != nil) {
+            if let mix = mixStore.lastMix, (mix.noiseOn || mix.binauralOn || mix.podcastUrl != nil) {
                 var p: [String] = []
                 if mix.noiseOn { p.append(mix.noiseType.capitalized) }
                 if mix.binauralOn { p.append(mix.binauralPreset.capitalized) }
@@ -106,7 +86,7 @@ struct HomeView: View {
     private func heroTap() {
         if audio.isAnythingPlaying {
             audio.toggleMasterTransport()
-        } else if let mix = audio.lastMix,
+        } else if let mix = mixStore.lastMix,
                   (mix.noiseOn || mix.binauralOn || mix.podcastUrl != nil) {
             audio.resumeMix(mix)
         } else {
@@ -132,7 +112,8 @@ struct HomeView: View {
                 palette: pal,
                 reduceMotion: reduceMotion,
                 paused: audio.screenDimmed,
-                sleepTimer: audio.sleepTimer
+                sleepTimer: audio.sleepTimer,
+                pomodoro: audio.pomodoro
             ))
             
             // Ambient-minimal foreground: the night sky is the screen. A mode toggle up top,
@@ -173,35 +154,20 @@ struct HomeView: View {
                     } else {
                         OrbButton(audio: audio, pal: pal, tap: heroTap)
 
-                        Text(statusText())
-                            .font(.system(.callout, design: .rounded).weight(.medium))
-                            .foregroundColor(pal.dim)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal, 30)
+                        SleepStatusLine(base: statusText(),
+                                        showMinute: audio.isAnythingPlaying,
+                                        sleepTimer: audio.sleepTimer,
+                                        pal: pal)
 
                         if !activeLayers.isEmpty {
                             LayerPills(layers: activeLayers, pal: pal)
                         }
 
                         // Rescued from the old HeroTransport: as the fade is about to cut the
-                        // night off, offer a half-asleep one-tap "+15m" instead of forcing a
-                        // reopen of the timer sheet (which would start a brand-new timer).
-                        if audio.sleepTimer.timerRemaining > 0, audio.sleepTimer.timerRemaining <= 120 {
-                            Button(action: {
-                                audio.sleepTimer.bumpTimer()
-                                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                            }) {
-                                HStack(spacing: 6) {
-                                    Image(systemName: "plus.circle.fill")
-                                    Text("Still awake? +15m").font(.subheadline.weight(.semibold))
-                                }
-                                .foregroundColor(pal.bg)
-                                .padding(.horizontal, 18).padding(.vertical, 11)
-                                .background(Capsule().fill(pal.accent))
-                            }
-                            .frame(minHeight: 44)
-                            .accessibilityLabel("Still awake, add 15 minutes to the sleep timer")
-                        }
+                        // night off, offer a half-asleep one-tap "+15m". Now a leaf observing the
+                        // timer directly so its show/hide threshold tracks the live countdown
+                        // without re-rendering HomeView each second.
+                        BumpTimerButton(sleepTimer: audio.sleepTimer, pal: pal)
                     }
                 }
 
@@ -221,7 +187,11 @@ struct HomeView: View {
                         }
                         .frame(minHeight: 44)
 
-                        sessionButton
+                        SessionButton(sleepTimer: audio.sleepTimer,
+                                      pomodoro: audio.pomodoro,
+                                      focusMode: audio.focusMode,
+                                      pal: pal,
+                                      onSleepTap: { showTimerActionSheet = true })
                     }
 
                     // Breathing is a quiet Sleep-mode extra (re-homed from the old hero).
@@ -268,10 +238,10 @@ struct HomeView: View {
         // Leaving Home (tab switch, sheet, etc.): kill the pending idle-fade so the screensaver
         // can't engage while another tab is showing and hide its tab bar (the "stuck off Home" bug).
         .onDisappear { idleFade?.cancel() }
-        .onChange(of: audio.isAnythingPlaying) { playing in
+        .onChange(of: audio.isAnythingPlaying) { _, playing in
             if playing { scheduleIdleFade() } else { wakeChrome() }
         }
-        .onChange(of: audio.focusMode) { focus in
+        .onChange(of: audio.focusMode) { _, focus in
             // Never screensaver while focusing — the session readout must stay visible.
             if focus { idleFade?.cancel(); withAnimation { audio.ambientScreensaver = false } }
             else { scheduleIdleFade() }
@@ -284,7 +254,7 @@ struct HomeView: View {
                 .presentationDetents([.fraction(0.5)])
         }
         .sheet(isPresented: $showMix) {
-            MixDrawer(audio: audio, pal: pal)
+            MixDrawer(audio: audio, mixStore: mixStore, pal: pal)
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
         }
@@ -435,6 +405,89 @@ struct CycleDots: View {
     }
 }
 
+// MARK: - Timer-observing leaves
+// These observe the timer services directly (not via `audio`), so their ~1/sec ticks re-render
+// only the small leaf — not the whole HomeView. The services are no longer forwarded through
+// AudioEngine (see AudioEngine.init), so reading them inline in HomeView.body would otherwise
+// show frozen values.
+
+/// The mode-aware bottom session control: a Sleep-timer countdown, or the Pomodoro toggle.
+struct SessionButton: View {
+    @ObservedObject var sleepTimer: SleepTimerService
+    @ObservedObject var pomodoro: PomodoroService
+    let focusMode: Bool
+    let pal: Palette
+    let onSleepTap: () -> Void
+
+    var body: some View {
+        Button(action: {
+            if focusMode {
+                if pomodoro.isRunning { pomodoro.stop() } else { pomodoro.start() }
+            } else {
+                onSleepTap()
+            }
+        }) {
+            HStack(spacing: 6) {
+                if focusMode {
+                    Image(systemName: pomodoro.isRunning ? "stop.fill" : "bolt.fill")
+                    Text(pomodoro.isRunning ? "\(Int(pomodoro.remaining / 60))m" : "Focus session")
+                } else {
+                    Image(systemName: "moon.zzz")
+                    Text(sleepTimer.timerRemaining > 0 ? "\(Int(sleepTimer.timerRemaining / 60))m left" : "Sleep timer")
+                }
+            }
+            .font(.subheadline.weight(.medium))
+            .foregroundColor(pal.dim)
+            .padding(.horizontal, 16).padding(.vertical, 13)
+        }
+        .frame(minHeight: 44)
+    }
+}
+
+/// The Sleep-mode status line. `base` (the layer/resume/"tap to begin" text) is computed by
+/// HomeView and passed in; the live "· Nm" countdown is appended here from the observed timer.
+struct SleepStatusLine: View {
+    let base: String
+    let showMinute: Bool
+    @ObservedObject var sleepTimer: SleepTimerService
+    let pal: Palette
+
+    var body: some View {
+        Text(showMinute && sleepTimer.timerRemaining > 0
+             ? "\(base) · \(Int(sleepTimer.timerRemaining / 60))m"
+             : base)
+            .font(.system(.callout, design: .rounded).weight(.medium))
+            .foregroundColor(pal.dim)
+            .multilineTextAlignment(.center)
+            .padding(.horizontal, 30)
+    }
+}
+
+/// The half-asleep "+15m" bump, shown only in the last 2 minutes of a fixed-duration timer.
+struct BumpTimerButton: View {
+    @ObservedObject var sleepTimer: SleepTimerService
+    let pal: Palette
+
+    var body: some View {
+        if sleepTimer.timerRemaining > 0, sleepTimer.timerRemaining <= 120, !sleepTimer.isEndOfEpisode {
+            Button(action: {
+                sleepTimer.bumpTimer()
+                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            }) {
+                HStack(spacing: 6) {
+                    Image(systemName: "plus.circle.fill")
+                    Text("Still awake? +15m").font(.subheadline.weight(.semibold))
+                }
+                .foregroundColor(pal.bg)
+                .padding(.horizontal, 18).padding(.vertical, 11)
+                .background(Capsule().fill(pal.accent))
+            }
+            .frame(minHeight: 44)
+            .accessibilityLabel("Still awake, add 15 minutes to the sleep timer")
+        }
+    }
+}
+
 // The active-sound pills shown under the hero — shared by Sleep and idle Focus.
 struct LayerPills: View {
     let layers: [String]
@@ -457,6 +510,9 @@ struct LayerPills: View {
 // mixes) live here so the main screen stays calm and art-first.
 struct MixDrawer: View {
     @ObservedObject var audio: AudioEngine
+    /// Observed directly so the saved-mixes row refreshes when a preset is saved / renamed /
+    /// deleted, after Phase 3 dropped the mixStore objectWillChange forward into AudioEngine.
+    @ObservedObject var mixStore: MixStore
     let pal: Palette
     @AppStorage("sceneSleep") private var sleepSceneId = "night-sky"
     @AppStorage("sceneFocus") private var focusSceneId = "energy"
@@ -464,7 +520,7 @@ struct MixDrawer: View {
     @State private var draftName = ""
 
     private var currentMode: String { audio.focusMode ? "focus" : "sleep" }
-    private var modePresets: [SoundPreset] { audio.savedPresets.filter { $0.mode == currentMode } }
+    private var modePresets: [SoundPreset] { mixStore.savedPresets.filter { $0.mode == currentMode } }
     private var canSaveMix: Bool { audio.noiseOn || audio.binauralOn }
 
     var body: some View {
@@ -536,27 +592,33 @@ struct SceneSelector: View {
             Text("Backdrop")
                 .font(.system(.subheadline, design: .rounded).weight(.semibold))
                 .foregroundColor(pal.text)
+                .padding(.horizontal, 20)
 
-            HStack(spacing: 8) {
-                ForEach(SceneRegistry.scenes(for: mood), id: \.id) { scene in
-                    let on = scene.id == selectedId
-                    Button {
-                        selectedId = scene.id
-                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                    } label: {
-                        Text(scene.title)
-                            .font(.caption.weight(.semibold))
-                            .padding(.horizontal, 14).padding(.vertical, 8)
-                            .background(Capsule().fill(on ? pal.accent.opacity(0.18) : pal.text.opacity(0.06)))
-                            .overlay(Capsule().stroke(on ? pal.accent.opacity(0.55) : .clear, lineWidth: 1))
-                            .foregroundColor(on ? pal.accent : pal.dim)
+            // Horizontally scrollable so the row holds any number of backdrops without
+            // overflowing on a phone. Edge padding lives on the inner HStack so it bleeds
+            // to the screen edges as it scrolls.
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(SceneRegistry.scenes(for: mood), id: \.id) { scene in
+                        let on = scene.id == selectedId
+                        Button {
+                            selectedId = scene.id
+                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        } label: {
+                            Text(scene.title)
+                                .font(.caption.weight(.semibold))
+                                .padding(.horizontal, 14).padding(.vertical, 8)
+                                .background(Capsule().fill(on ? pal.accent.opacity(0.18) : pal.text.opacity(0.06)))
+                                .overlay(Capsule().stroke(on ? pal.accent.opacity(0.55) : .clear, lineWidth: 1))
+                                .foregroundColor(on ? pal.accent : pal.dim)
+                        }
+                        .accessibilityLabel("\(scene.title) backdrop\(on ? ", selected" : "")")
                     }
-                    .accessibilityLabel("\(scene.title) backdrop\(on ? ", selected" : "")")
                 }
+                .padding(.horizontal, 20)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 20)
     }
 }
 
@@ -1083,6 +1145,24 @@ struct TimerSelectionSheet: View {
                             .cornerRadius(10)
                     }
                     .frame(minWidth: 44, minHeight: 44)
+                }
+            }
+
+            // "End of episode" — only when a podcast with a known, finite length is loaded (so
+            // the button can't silently no-op before the duration is known, or on a live stream).
+            // Stops when the current episode finishes, fading the ambient bed down with it.
+            if audio.hasLoadedEpisode, audio.podcastDuration.isFinite, audio.podcastDuration > 5 {
+                Button(action: {
+                    audio.startEndOfEpisodeTimer()
+                    isPresented = false
+                }) {
+                    Label("End of episode", systemImage: "text.append")
+                        .font(.headline)
+                        .foregroundColor(pal.accent)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 12)
+                        .frame(minHeight: 44)
+                        .overlay(RoundedRectangle(cornerRadius: 12).stroke(pal.accent.opacity(0.6), lineWidth: 1))
                 }
             }
             

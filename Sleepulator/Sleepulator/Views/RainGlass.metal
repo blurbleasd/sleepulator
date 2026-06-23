@@ -113,10 +113,17 @@ inline float staticDrops(float2 uv, float t) {
 }
 
 // Combined drop "height" at a uv — running drops + mist. Also returns the trail.
+//
+// Two drop layers at different scales/speeds, with the second grid offset by a non-integer so
+// its columns never line up with the first. A single grid read as "geometric" (evenly spaced
+// columns marching down); interleaving a denser, faster, smaller-drop layer breaks that
+// regularity into something that scans as real rain, and the scale gap reads as near/far depth.
 inline float dropMask(float2 uv, float t, float density, thread float &trailOut) {
-    float2 c = dropLayer(uv, t);
-    trailOut = c.y;
-    return c.x + staticDrops(uv, t) * STATIC_AMT * density;
+    float2 c1 = dropLayer(uv, t);                                   // near: larger, slower drops
+    float2 c2 = dropLayer(uv * 1.85 + float2(4.3, 1.7), t * 1.27);  // far: smaller, faster, offset
+    trailOut = max(c1.y, c2.y);
+    float drops = c1.x + c2.x * 0.8;
+    return drops + staticDrops(uv, t) * STATIC_AMT * density;
 }
 
 } // namespace rg

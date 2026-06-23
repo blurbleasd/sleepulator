@@ -17,6 +17,11 @@ class AudioDownloader {
     /// after a download pushes the total over this.
     private let maxCacheBytes: UInt64 = 2 * 1024 * 1024 * 1024 // 2 GB
 
+    /// Refuse to start a download when the volume has less than this free. A pre-flight check so
+    /// the cache can't push a near-full disk to the wall mid-write (and so a doomed download fails
+    /// fast with a clear error instead of an opaque `moveItem` failure).
+    private let minFreeSpaceBytes: Int64 = 500 * 1024 * 1024 // 500 MB headroom
+
     private lazy var cacheDir: URL = {
         let base = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         let dir = base.appendingPathComponent("Sleepulator/episodes", isDirectory: true)
@@ -67,11 +72,17 @@ class AudioDownloader {
         }
 
         if fm.fileExists(atPath: localUrl.path) {
+            touchAccess(localUrl)
             return localUrl
         }
 
+        if let free = availableCapacity(), free < minFreeSpaceBytes {
+            throw NSError(domain: "AudioDownloader", code: 3,
+                          userInfo: [NSLocalizedDescriptionKey: "Not enough free space to download this episode."])
+        }
+
         return try await withCheckedThrowingContinuation { continuation in
-            let task = URLSession.shared.downloadTask(with: url) { [weak self] tempURL, response, error in
+            let task = Net.download.downloadTask(with: url) { [weak self] tempURL, response, error in
                 if let error = error {
                     continuation.resume(throwing: error)
                     return
@@ -108,7 +119,28 @@ class AudioDownloader {
     func getCachedUrl(for url: URL) -> URL? {
         migrateLegacyIfNeeded(url)
         guard let localUrl = getLocalUrl(for: url) else { return nil }
-        return fm.fileExists(atPath: localUrl.path) ? localUrl : nil
+        guard fm.fileExists(atPath: localUrl.path) else { return nil }
+        // Mark the file as recently used so LRU eviction protects episodes you actually replay.
+        // Streaming a cached file doesn't reliably bump the access date on its own.
+        touchAccess(localUrl)
+        return localUrl
+    }
+
+    /// Free space available for "important" usage on the cache's volume, or nil if unknown.
+    private func availableCapacity() -> Int64? {
+        guard let vals = try? cacheDir.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]) else {
+            return nil
+        }
+        return vals.volumeAvailableCapacityForImportantUsage
+    }
+
+    /// Bump a cached file's modification date to now, so `enforceCacheLimit` ranks it as recently
+    /// used. (Modification date is reliably writable; access date is not.)
+    private func touchAccess(_ url: URL) {
+        var u = url
+        var vals = URLResourceValues()
+        vals.contentModificationDate = Date()
+        try? u.setResourceValues(vals)
     }
 
     /// Which of these remote URL strings have a cached download (new App Support store or an
@@ -142,27 +174,46 @@ class AudioDownloader {
         }
     }
 
-    /// Evict least-recently-accessed files until the cache is back under `maxCacheBytes`.
-    /// The just-downloaded file has the newest access time, so it's never the first to go.
+    /// A cache entry as seen by the (pure, testable) eviction planner.
+    struct CacheFile: Equatable {
+        let url: URL
+        let size: UInt64
+        let recency: Date   // most-recent of access/modification date
+    }
+
+    /// Which files to evict to bring `files` back under `maxBytes`, least-recently-used first.
+    /// Pure + static so the eviction policy is unit-tested without touching the filesystem.
+    static func evictionPlan(files: [CacheFile], maxBytes: UInt64) -> [URL] {
+        let total = files.reduce(UInt64(0)) { $0 + $1.size }
+        guard total > maxBytes else { return [] }
+        var running = total
+        var toRemove: [URL] = []
+        for f in files.sorted(by: { $0.recency < $1.recency }) {
+            if running <= maxBytes { break }
+            toRemove.append(f.url)
+            running = running >= f.size ? running - f.size : 0
+        }
+        return toRemove
+    }
+
+    /// Evict least-recently-used files until the cache is back under `maxCacheBytes`. Recency is
+    /// the more recent of access/modification date, so an episode you re-play (which `touchAccess`
+    /// bumps) is protected even though it was downloaded long ago.
     private func enforceCacheLimit() {
-        let keys: Set<URLResourceKey> = [.fileSizeKey, .contentAccessDateKey, .isRegularFileKey]
+        let keys: Set<URLResourceKey> = [.fileSizeKey, .contentAccessDateKey, .contentModificationDateKey, .isRegularFileKey]
         guard let items = try? fm.contentsOfDirectory(at: cacheDir, includingPropertiesForKeys: Array(keys)) else { return }
 
-        var files: [(url: URL, size: UInt64, accessed: Date)] = []
-        var total: UInt64 = 0
+        var files: [CacheFile] = []
         for u in items {
             guard let vals = try? u.resourceValues(forKeys: keys), vals.isRegularFile == true else { continue }
             let size = UInt64(vals.fileSize ?? 0)
             let accessed = vals.contentAccessDate ?? .distantPast
-            files.append((u, size, accessed))
-            total += size
+            let modified = vals.contentModificationDate ?? .distantPast
+            files.append(CacheFile(url: u, size: size, recency: max(accessed, modified)))
         }
 
-        guard total > maxCacheBytes else { return }
-        for f in files.sorted(by: { $0.accessed < $1.accessed }) {
-            if total <= maxCacheBytes { break }
-            try? fm.removeItem(at: f.url)
-            total = total >= f.size ? total - f.size : 0
+        for url in Self.evictionPlan(files: files, maxBytes: maxCacheBytes) {
+            try? fm.removeItem(at: url)
         }
     }
 }

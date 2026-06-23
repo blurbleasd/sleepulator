@@ -52,41 +52,44 @@ struct PodcastDetailView: View {
             } else if podcast.episodes.isEmpty {
                 stateMessage("No episodes found.", color: pal.dim)
             } else {
-                // List (not ScrollView + LazyVStack) so rows recycle: a long feed no longer
-                // keeps every scrolled-past row realized — that retention, hit by the audio
-                // re-render storm, was the scroll overload + slow recovery.
-                List {
-                    Section {
-                        headerContent
-                            .listRowBackground(Color.clear)
-                            .listRowSeparator(.hidden)
-                            .listRowInsets(EdgeInsets(top: 24, leading: 16, bottom: 8, trailing: 16))
-                    }
+                // Header is PINNED above the List (not the first scrolling row). When it lived
+                // inside the List, an inline title + always-on search drawer + the async feed
+                // load left the List anchored partway down — the detail view "opened from the
+                // middle." A fixed header guarantees the episode list always starts at its top.
+                VStack(spacing: 0) {
+                    compactHeader
 
-                    Section {
-                        if visibleEpisodes.isEmpty {
-                            Text(episodeSearch.isEmpty ? "All episodes played!" : "No episodes match \u{201C}\(episodeSearch)\u{201D}")
-                                .foregroundColor(pal.dim)
-                                .frame(maxWidth: .infinity, alignment: .center)
-                                .padding()
-                                .listRowBackground(Color.clear)
-                                .listRowSeparator(.hidden)
-                        } else {
-                            ForEach(visibleEpisodes) { ep in
-                                EpisodeRowView(ep: ep,
-                                               queueManager: audio.queueManager,
-                                               podcast: podcast,
-                                               savedProgress: progress(for: ep),
-                                               initiallyDownloaded: downloadedUrls.contains(ep.audioUrl))
-                                    .listRowBackground(pal.text.opacity(0.05))
-                                    .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+                    // List (not ScrollView + LazyVStack) so rows recycle: a long feed no longer
+                    // keeps every scrolled-past row realized — that retention, hit by the audio
+                    // re-render storm, was the scroll overload + slow recovery.
+                    List {
+                        Section {
+                            if visibleEpisodes.isEmpty {
+                                Text(episodeSearch.isEmpty ? "All episodes played!" : "No episodes match \u{201C}\(episodeSearch)\u{201D}")
+                                    .foregroundColor(pal.dim)
+                                    .frame(maxWidth: .infinity, alignment: .center)
+                                    .padding()
+                                    .listRowBackground(Color.clear)
+                                    .listRowSeparator(.hidden)
+                            } else {
+                                ForEach(visibleEpisodes) { ep in
+                                    EpisodeRowView(ep: ep,
+                                                   queueManager: audio.queueManager,
+                                                   podcast: podcast,
+                                                   savedProgress: progress(for: ep),
+                                                   initiallyDownloaded: downloadedUrls.contains(ep.audioUrl),
+                                                   initiallyPlayed: audio.finishedEpisodes.contains(ep.id))
+                                        .listRowBackground(pal.text.opacity(0.05))
+                                        .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+                                        .listRowSeparator(.hidden)
+                                }
                             }
                         }
                     }
+                    .listStyle(.plain)
+                    .scrollContentBackground(.hidden)
+                    .contentMargins(.bottom, 80, for: .scrollContent)   // clear the floating mini-player
                 }
-                .listStyle(.insetGrouped)
-                .scrollContentBackground(.hidden)
-                .contentMargins(.bottom, 80, for: .scrollContent)   // clear the floating mini-player
             }
         }
         .navigationTitle(podcast.name)
@@ -106,9 +109,12 @@ struct PodcastDetailView: View {
             .padding()
     }
 
-    @ViewBuilder private var headerContent: some View {
-        VStack(spacing: 16) {
-            VStack(spacing: 16) {
+    // Compact, fixed header (artwork + name + Play All / Shuffle). Kept deliberately short so a
+    // pinned header doesn't eat the episode list, and laid out horizontally so it reads at a
+    // glance. The artwork frame is reserved (88×88) so an async image load can't shift layout.
+    @ViewBuilder private var compactHeader: some View {
+        VStack(spacing: 14) {
+            HStack(spacing: 14) {
                 if let artStr = podcast.artworkUrl, let url = URL(string: artStr) {
                     AsyncImage(url: url) { phase in
                         if let image = phase.image {
@@ -117,48 +123,67 @@ struct PodcastDetailView: View {
                             Color.gray.opacity(0.3)
                         }
                     }
-                    .frame(width: 160, height: 160)
-                    .cornerRadius(16)
-                    .shadow(color: .black.opacity(0.15), radius: 8, y: 4)
+                    .frame(width: 88, height: 88)
+                    .cornerRadius(14)
+                    .shadow(color: .black.opacity(0.15), radius: 6, y: 3)
+                } else {
+                    Image(systemName: "dot.radiowaves.left.and.right")
+                        .font(.system(size: 34))
+                        .foregroundColor(pal.accent)
+                        .frame(width: 88, height: 88)
+                        .background(pal.text.opacity(0.08))
+                        .cornerRadius(14)
                 }
 
-                Text(podcast.name)
-                    .font(.system(.title2, design: .rounded).weight(.bold))
-                    .multilineTextAlignment(.center)
-                    .foregroundColor(pal.text)
-                    .padding(.horizontal)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(podcast.name)
+                        .font(.system(.title3, design: .rounded).weight(.bold))
+                        .foregroundColor(pal.text)
+                        .lineLimit(3)
+                        .multilineTextAlignment(.leading)
+                    if !podcast.episodes.isEmpty {
+                        Text("\(podcast.episodes.count) episodes")
+                            .font(.system(.caption, design: .rounded))
+                            .foregroundColor(pal.dim)
+                    }
+                }
+                Spacer(minLength: 0)
             }
-            .frame(maxWidth: .infinity)
 
             // Action buttons
             HStack(spacing: 12) {
                 Button(action: {
                     audio.playAll(podcast.episodes)
                 }) {
-                    Text("Play All")
-                        .font(.headline)
+                    Label("Play All", systemImage: "play.fill")
+                        .font(.subheadline.weight(.semibold))
                         .foregroundColor(pal.bg)   // on pal.accent = 8.85:1 (white was 2.18:1, fails AA)
-                        .padding(.horizontal, 24)
-                        .padding(.vertical, 12)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 10)
                         .background(pal.accent)
-                        .cornerRadius(24)
+                        .cornerRadius(22)
                 }
+                .disabled(podcast.episodes.isEmpty)
 
                 Button(action: {
                     audio.playAll(podcast.episodes.shuffled())
                 }) {
-                    Text("Shuffle All")
-                        .font(.headline)
+                    Label("Shuffle", systemImage: "shuffle")
+                        .font(.subheadline.weight(.semibold))
                         .foregroundColor(pal.accent)
-                        .padding(.horizontal, 24)
-                        .padding(.vertical, 12)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 10)
                         .background(pal.bg)
-                        .cornerRadius(24)
-                        .overlay(RoundedRectangle(cornerRadius: 24).stroke(pal.accent, lineWidth: 1))
+                        .cornerRadius(22)
+                        .overlay(RoundedRectangle(cornerRadius: 22).stroke(pal.accent, lineWidth: 1))
                 }
-                Spacer()
+                .disabled(podcast.episodes.isEmpty)
+                Spacer(minLength: 0)
             }
         }
+        .padding(.horizontal, 16)
+        .padding(.top, 12)
+        .padding(.bottom, 10)
     }
     
     func loadFeed() {
