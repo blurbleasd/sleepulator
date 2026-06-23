@@ -21,3 +21,10 @@ ios-spike.html
 xcuserdata/
 *.xcuserstate
 test_math
+
+# Archived React/Vite PWA — kept on disk for reference, out of version control
+# (also contains proxy/.wrangler/cache/wrangler-account.json, a Cloudflare credential)
+archive_webapp/
+
+# Icon design scratch (candidate app-icon exports)
+icon options/
