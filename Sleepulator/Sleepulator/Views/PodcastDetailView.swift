@@ -3,6 +3,7 @@ import SwiftUI
 struct PodcastDetailView: View {
     @State var podcast: Podcast
     @ObservedObject var audio: AudioEngine
+    @ObservedObject var connectivity: Connectivity
     @Binding var libraryPodcasts: [Podcast]
     
     @State private var opmlExporting = false
@@ -42,7 +43,7 @@ struct PodcastDetailView: View {
         ZStack {
             pal.bg.ignoresSafeArea()
 
-            if !audio.isOnline && podcast.episodes.isEmpty {
+            if !connectivity.isOnline && podcast.episodes.isEmpty {
                 stateMessage("You're offline — connect to load feeds.", color: .red)
             } else if isLoading && podcast.episodes.isEmpty {
                 ProgressView()

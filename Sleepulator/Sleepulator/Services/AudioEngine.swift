@@ -8,8 +8,16 @@ enum AppConfig {
     static let nightLimiterEnabled = true
 }
 
+/// Network reachability as its own tiny observable, so views that only care about online/offline
+/// (the podcast library) observe just this instead of the whole AudioEngine — keeping unrelated
+/// engine publishes (podTitle, transport, settings) from re-rendering the podcast list.
+final class Connectivity: ObservableObject {
+    @Published var isOnline = true
+}
+
 final class AudioEngine: ObservableObject {
     let queueManager = PodcastQueueManager()
+    let connectivity = Connectivity()
     let sleepTimer = SleepTimerService()
     let pomodoro = PomodoroService()
     /// High-frequency podcast position (progress/elapsed/duration). Owned here but its
@@ -148,7 +156,9 @@ final class AudioEngine: ObservableObject {
     var podcastElapsed: Double { playbackProgress.elapsed }
     var podcastDuration: Double { playbackProgress.duration }
     
-    @Published var isOnline = true
+    /// Passthrough so existing `audio.isOnline` readers keep compiling; the reactive source is the
+    /// `connectivity` child, which the library views observe directly.
+    var isOnline: Bool { connectivity.isOnline }
     @Published var playbackNote: String?
     /// Audio-session plumbing (activation, interruption/route/background observers, network
     /// monitor) lives in AudioSessionController (Slice A3); AudioEngine keeps the policy.
@@ -413,7 +423,7 @@ final class AudioEngine: ObservableObject {
         sessionController.onInterruption = { [weak self] note in self?.handleInterruption(note: note) }
         sessionController.onRouteChange = { [weak self] note in self?.handleRouteChange(note: note) }
         sessionController.onAppBackground = { [weak self] in self?.handleAppBackground() }
-        sessionController.onOnlineChanged = { [weak self] online in self?.isOnline = online }
+        sessionController.onOnlineChanged = { [weak self] online in self?.connectivity.isOnline = online }
         sessionController.start()
         
         notificationTokens.append(NotificationCenter.default.addObserver(forName: Notification.Name("StartSleepulatorMix"), object: nil, queue: .main) { [weak self] _ in

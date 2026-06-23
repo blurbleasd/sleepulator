@@ -66,7 +66,7 @@ struct ContentView: View {
                     // but ONLY while Home is the active tab (see homeScreensaver).
                     .toolbar(homeScreensaver ? .hidden : .visible, for: .tabBar)
                 
-                LibraryView(audio: audio)
+                LibraryView(audio: audio, queue: audio.queueManager, connectivity: audio.connectivity)
                     .tabItem {
                         Label("Podcasts", systemImage: "music.note.list")
                     }

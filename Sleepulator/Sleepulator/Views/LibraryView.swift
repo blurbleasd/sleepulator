@@ -4,7 +4,12 @@ import Combine
 import os
 
 struct LibraryView: View {
-    @ObservedObject var audio: AudioEngine
+    /// Held unobserved (a plain `let`): passed to the pushed detail/add views and used for queue
+    /// actions, but NOT observed — so unrelated engine publishes (podTitle, transport, settings)
+    /// don't re-render the podcast list. Reactive needs come from `queue` + `connectivity`.
+    let audio: AudioEngine
+    @ObservedObject var queue: PodcastQueueManager
+    @ObservedObject var connectivity: Connectivity
     @State private var feedUrlInput = ""
     @State private var podcasts: [Podcast] = []
     @State private var isLoading = false
@@ -32,7 +37,7 @@ struct LibraryView: View {
                 pal.bg.ignoresSafeArea()
                 
                 VStack(spacing: 0) {
-                    if !audio.isOnline {
+                    if !connectivity.isOnline {
                         Text("No Internet Connection")
                             .font(.caption.bold())
                             .foregroundColor(.black)   // black on orange = 9.4:1 (white was 2.23:1, fails AA)
@@ -74,7 +79,7 @@ struct LibraryView: View {
                             .swipeActions(edge: .leading, allowsFullSwipe: true) {
                                 if let latest = podcast.episodes.first {
                                     Button {
-                                        audio.queueManager.playEpisode(latest)
+                                        queue.playEpisode(latest)
                                     } label: {
                                         Label("Play latest", systemImage: "play.fill")
                                     }
@@ -97,7 +102,7 @@ struct LibraryView: View {
                 .scrollContentBackground(.hidden)
                 .searchable(text: $searchText, prompt: "Search subscriptions")
                 .refreshable {
-                    if !audio.isOnline { return }
+                    if !connectivity.isOnline { return }
                     await withTaskGroup(of: Void.self) { group in
                         for podcast in podcasts {
                             group.addTask {
@@ -151,7 +156,7 @@ struct LibraryView: View {
             }
             .navigationDestination(for: String.self) { podcastId in
                 if let podcast = podcasts.first(where: { $0.id == podcastId }) {
-                    PodcastDetailView(podcast: podcast, audio: audio, libraryPodcasts: $podcasts)
+                    PodcastDetailView(podcast: podcast, audio: audio, connectivity: connectivity, libraryPodcasts: $podcasts)
                 } else {
                     Text("Podcast not found")
                         .foregroundColor(pal.dim)
@@ -169,7 +174,7 @@ struct LibraryView: View {
         .sheet(isPresented: $showAddSheet) {
             AddPodcastSheet(feedUrlInput: $feedUrlInput, isLoading: $isLoading, errorMessage: $errorMessage, pal: pal, onAdd: {
                 loadFeed()
-            }, audio: audio)
+            }, connectivity: connectivity)
             .presentationDetents([.fraction(0.8), .large])
         }
         .fileImporter(isPresented: $opmlImporting, allowedContentTypes: [.xml, .plainText, .data], allowsMultipleSelection: false) { result in
@@ -242,7 +247,7 @@ struct LibraryView: View {
     private func subtitle(for podcast: Podcast) -> String {
         let total = podcast.episodes.count
         guard total > 0 else { return "Tap to load episodes" }
-        let unplayed = podcast.episodes.reduce(0) { $0 + (audio.finishedEpisodes.contains($1.id) ? 0 : 1) }
+        let unplayed = podcast.episodes.reduce(0) { $0 + (queue.finishedEpisodes.contains($1.id) ? 0 : 1) }
         return unplayed == 0 ? "All caught up · \(total)" : "\(unplayed) unplayed · \(total)"
     }
 
@@ -294,8 +299,8 @@ struct AddPodcastSheet: View {
     @Binding var errorMessage: String?
     let pal: Palette
     let onAdd: () -> Void
-    @ObservedObject var audio: AudioEngine
-    
+    @ObservedObject var connectivity: Connectivity
+
     @State private var searchResults: [ITunesPodcast] = []
     @State private var isSearching = false
     @State private var searchQuery = ""
@@ -310,7 +315,7 @@ struct AddPodcastSheet: View {
                     .foregroundColor(pal.text)
                     .padding(.horizontal, 24)
                 
-                if !audio.isOnline {
+                if !connectivity.isOnline {
                     Text("Offline: Search is unavailable.")
                         .font(.subheadline)
                         .foregroundColor(.orange)
@@ -336,7 +341,7 @@ struct AddPodcastSheet: View {
                             isSearching = false
                             return
                         }
-                        guard newValue.count > 2, audio.isOnline else {
+                        guard newValue.count > 2, connectivity.isOnline else {
                             searchResults = []
                             isSearching = false
                             return
@@ -381,7 +386,7 @@ struct AddPodcastSheet: View {
                                 .cornerRadius(12)
                         }
                     }
-                    .disabled(!audio.isOnline || isLoading)
+                    .disabled(!connectivity.isOnline || isLoading)
                     .padding(.horizontal, 24)
                 } else {
                     if isSearching {
