@@ -7,6 +7,9 @@ struct BreathingView: View {
     @State private var scale: CGFloat = 1.0
     @State private var opacity: Double = 0.5
     @State private var timer: Timer?
+    /// Pending phase changes (Hold/Exhale), held so a mode switch or dismiss can cancel them —
+    /// otherwise a previous pattern's queued closures fire over the new one (out-of-order phases).
+    @State private var pending: [DispatchWorkItem] = []
     @State private var mode: String = "478"
     @State private var instruction: String = "Inhale"
     @State private var instructionColor: Color = Color(red: 0.9, green: 0.7, blue: 0.4)
@@ -32,6 +35,7 @@ struct BreathingView: View {
                     Spacer()
                     Button(action: {
                         timer?.invalidate()
+                        cancelPending()
                         isPresented = false
                     }) {
                         Image(systemName: "xmark")
@@ -96,11 +100,13 @@ struct BreathingView: View {
         }
         .onDisappear {
             timer?.invalidate()
+            cancelPending()
         }
     }
-    
+
     func startBreathing() {
         timer?.invalidate()
+        cancelPending()
         if mode == "478" {
             run478()
             timer = Timer.scheduledTimer(withTimeInterval: 19.0, repeats: true) { _ in run478() }
@@ -111,19 +117,20 @@ struct BreathingView: View {
     }
     
     func run478() {
+        cancelPending()
         // Inhale (4s)
         instruction = "Inhale"
         instructionColor = Color(red: 0.9, green: 0.7, blue: 0.4)
         withAnimation(.easeInOut(duration: 4.0)) { scale = 1.3; opacity = 0.8 }
 
         // Hold (7s)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) {
+        schedule(after: 4.0) {
             instruction = "Hold"
             instructionColor = .white
         }
 
         // Exhale (8s)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 11.0) {
+        schedule(after: 11.0) {
             instruction = "Exhale"
             instructionColor = Color(red: 0.4, green: 0.6, blue: 0.9)
             withAnimation(.easeInOut(duration: 8.0)) { scale = 1.0; opacity = 0.3 }
@@ -131,28 +138,42 @@ struct BreathingView: View {
     }
 
     func runBox() {
+        cancelPending()
         // Inhale (4s)
         instruction = "Inhale"
         instructionColor = Color(red: 0.9, green: 0.7, blue: 0.4)
         withAnimation(.easeInOut(duration: 4.0)) { scale = 1.3; opacity = 0.8 }
 
         // Hold (4s)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) {
+        schedule(after: 4.0) {
             instruction = "Hold"
             instructionColor = .white
         }
 
         // Exhale (4s)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 8.0) {
+        schedule(after: 8.0) {
             instruction = "Exhale"
             instructionColor = Color(red: 0.4, green: 0.6, blue: 0.9)
             withAnimation(.easeInOut(duration: 4.0)) { scale = 1.0; opacity = 0.3 }
         }
 
         // Hold (4s)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 12.0) {
+        schedule(after: 12.0) {
             instruction = "Hold"
             instructionColor = .white
         }
+    }
+
+    /// Schedule a phase change that can be cancelled (mode switch / dismiss), so a previous
+    /// pattern's queued Hold/Exhale can't fire over the new one.
+    private func schedule(after delay: Double, _ block: @escaping () -> Void) {
+        let work = DispatchWorkItem(block: block)
+        pending.append(work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    private func cancelPending() {
+        pending.forEach { $0.cancel() }
+        pending.removeAll()
     }
 }

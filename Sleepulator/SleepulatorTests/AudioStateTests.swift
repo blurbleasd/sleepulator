@@ -236,6 +236,51 @@ final class PodcastParserTests: XCTestCase {
         XCTAssertLessThanOrEqual(desc.count, 200_000, "description must be bounded")
         XCTAssertGreaterThan(desc.count, 0)
     }
+
+    // Named-timezone RFC-822 (e.g. "GMT") and ISO-8601 pubDates must parse, not fall back to
+    // distantPast (which would sink real episodes to the bottom of the sorted feed).
+    func testNamedTimezoneAndISO8601Dates() throws {
+        let xml = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <rss><channel><title>Dates</title>
+          <item><title>Named TZ</title><guid>d-1</guid>
+            <enclosure url="https://example.com/1.mp3" type="audio/mpeg"/>
+            <pubDate>Mon, 02 Jun 2025 08:00:00 GMT</pubDate>
+          </item>
+          <item><title>ISO</title><guid>d-2</guid>
+            <enclosure url="https://example.com/2.mp3" type="audio/mpeg"/>
+            <pubDate>2025-06-03T09:30:00Z</pubDate>
+          </item>
+        </channel></rss>
+        """
+        let feed = try parse(xml)
+        XCTAssertEqual(feed.episodes.count, 2)
+        for ep in feed.episodes {
+            XCTAssertNotNil(ep.pubDate, "\(ep.title) date should parse")
+        }
+    }
+
+    // An audio enclosure must win over a transcript/chapters enclosure regardless of order, so a
+    // non-audio enclosure can't overwrite the playable URL (it used to be last-wins).
+    func testPrefersAudioEnclosureOverNonAudio() throws {
+        let xml = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <rss><channel><title>Enc</title>
+          <item><title>Transcript first</title><guid>e-1</guid>
+            <enclosure url="https://example.com/transcript.pdf" type="application/pdf"/>
+            <enclosure url="https://example.com/audio.mp3" type="audio/mpeg"/>
+          </item>
+          <item><title>Transcript last</title><guid>e-2</guid>
+            <enclosure url="https://example.com/audio2.mp3" type="audio/mpeg"/>
+            <enclosure url="https://example.com/notes.html" type="text/html"/>
+          </item>
+        </channel></rss>
+        """
+        let feed = try parse(xml)
+        let byId = Dictionary(uniqueKeysWithValues: feed.episodes.map { ($0.id, $0) })
+        XCTAssertEqual(byId["e-1"]?.audioUrl, "https://example.com/audio.mp3")
+        XCTAssertEqual(byId["e-2"]?.audioUrl, "https://example.com/audio2.mp3")
+    }
 }
 
 // Durable persistence: missing files are benign, and a corrupt primary is recovered from the
@@ -685,5 +730,62 @@ final class FirstRunDefaultMixTests: XCTestCase {
         XCTAssertTrue(engine.noiseOn, "first-run default must include a noise bed")
         XCTAssertTrue(engine.binauralOn, "first-run default must layer in binaural")
         XCTAssertTrue(engine.isAnythingPlaying)
+    }
+}
+
+// Episode/Podcast identity is the id only. A custom == with a synthesized hash(into:) over all
+// fields would break the Hashable contract (equal values, unequal hashes) — corrupting Set/dict use.
+final class ModelIdentityTests: XCTestCase {
+    func testEpisodeEqualityAndHashUseIdOnly() {
+        let a = Episode(id: "x", title: "A", audioUrl: "u1", duration: 1, pubDate: nil, description: nil)
+        let b = Episode(id: "x", title: "B-different", audioUrl: "u2", duration: 99, pubDate: Date(), description: "notes")
+        let c = Episode(id: "y", title: "A", audioUrl: "u1", duration: 1, pubDate: nil, description: nil)
+
+        XCTAssertEqual(a, b, "same id must be equal regardless of other fields")
+        XCTAssertEqual(a.hashValue, b.hashValue, "equal values must share a hash")
+        XCTAssertNotEqual(a, c)
+
+        var set: Set<Episode> = [a]
+        XCTAssertTrue(set.contains(b), "Set membership must follow ==/hash (broke with synthesized hash)")
+        set.insert(b)
+        XCTAssertEqual(set.count, 1, "inserting an equal value must not grow the set")
+    }
+
+    func testPodcastEqualityAndHashUseIdOnly() {
+        let e1 = Episode(id: "1", title: "t", audioUrl: "u", duration: nil, pubDate: nil, description: nil)
+        let p1 = Podcast(id: "p", name: "N", url: "feed", episodes: [e1])
+        let p2 = Podcast(id: "p", name: "N2-diff", url: "feed2", episodes: [])
+
+        XCTAssertEqual(p1, p2, "same id must be equal regardless of episodes")
+        XCTAssertEqual(p1.hashValue, p2.hashValue)
+    }
+}
+
+// OPML import hardening: only http(s) feeds, deduped, with a stable url-based id.
+final class OPMLParserTests: XCTestCase {
+    private func parse(_ opml: String) throws -> [OPMLFeed] {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).opml")
+        try Data(opml.utf8).write(to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+        return OPMLParser().parse(url: url)
+    }
+
+    func testValidatesSchemeDedupesAndUsesStableId() throws {
+        let opml = """
+        <?xml version="1.0"?>
+        <opml version="1.0"><body>
+          <outline text="Show A" type="rss" xmlUrl="https://a.example/feed"/>
+          <outline text="Show A dup" type="rss" xmlUrl="https://a.example/feed"/>
+          <outline text="Bad scheme" type="rss" xmlUrl="javascript:alert(1)"/>
+          <outline text="Local file" type="rss" xmlUrl="file:///etc/passwd"/>
+          <outline text="Show B" type="rss" xmlUrl="http://b.example/feed"/>
+          <outline text="Folder only"/>
+        </body></opml>
+        """
+        let feeds = try parse(opml)
+        XCTAssertEqual(feeds.map(\.url), ["https://a.example/feed", "http://b.example/feed"],
+                       "http(s) only, deduped, order preserved")
+        XCTAssertEqual(feeds.first?.id, "https://a.example/feed", "id must be the stable feed url")
+        XCTAssertEqual(feeds.first?.name, "Show A")
     }
 }

@@ -116,16 +116,8 @@ struct PodcastDetailView: View {
         VStack(spacing: 14) {
             HStack(spacing: 14) {
                 if let artStr = podcast.artworkUrl, let url = URL(string: artStr) {
-                    AsyncImage(url: url) { phase in
-                        if let image = phase.image {
-                            image.resizable().aspectRatio(contentMode: .fill)
-                        } else {
-                            Color.gray.opacity(0.3)
-                        }
-                    }
-                    .frame(width: 88, height: 88)
-                    .cornerRadius(14)
-                    .shadow(color: .black.opacity(0.15), radius: 6, y: 3)
+                    CachedAsyncImage(url: url, size: 88, cornerRadius: 14)
+                        .shadow(color: .black.opacity(0.15), radius: 6, y: 3)
                 } else {
                     Image(systemName: "dot.radiowaves.left.and.right")
                         .font(.system(size: 34))

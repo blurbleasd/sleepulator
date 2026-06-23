@@ -398,15 +398,7 @@ struct AddPodcastSheet: View {
                             }) {
                                 HStack {
                                     if let urlString = result.artworkUrl600, let url = URL(string: urlString) {
-                                        AsyncImage(url: url) { phase in
-                                            if let image = phase.image {
-                                                image.resizable().aspectRatio(contentMode: .fill)
-                                            } else {
-                                                Color.gray.opacity(0.3)
-                                            }
-                                        }
-                                        .frame(width: 44, height: 44)
-                                        .cornerRadius(8)
+                                        CachedAsyncImage(url: url, size: 44)
                                     }
                                     VStack(alignment: .leading) {
                                         Text(result.collectionName ?? "Unknown")
