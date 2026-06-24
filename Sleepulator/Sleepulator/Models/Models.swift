@@ -8,9 +8,11 @@ struct Podcast: Identifiable, Codable, Hashable {
     var artworkUrl: String? = nil
 
     // Identity is the id. Without these, synthesized Hashable would compare/hash the whole episode
-    // array — expensive, and the hash churns on every feed refresh.
-    static func == (lhs: Podcast, rhs: Podcast) -> Bool { lhs.id == rhs.id }
-    func hash(into hasher: inout Hasher) { hasher.combine(id) }
+    // array — expensive, and the hash churns on every feed refresh. `nonisolated` because the module
+    // defaults to @MainActor isolation, which would otherwise make the conformance main-actor-bound
+    // and unusable from nonisolated contexts (Set<Podcast>, etc.) — an error under Swift 6 mode.
+    nonisolated static func == (lhs: Podcast, rhs: Podcast) -> Bool { lhs.id == rhs.id }
+    nonisolated func hash(into hasher: inout Hasher) { hasher.combine(id) }
 }
 
 struct Episode: Identifiable, Codable, Equatable, Hashable {
@@ -24,8 +26,10 @@ struct Episode: Identifiable, Codable, Equatable, Hashable {
     
     // Identity is the id. A custom == alone would leave a synthesized hash(into:) over all fields,
     // breaking the Hashable contract (equal values, unequal hashes); hash on id to match.
-    static func == (lhs: Episode, rhs: Episode) -> Bool { lhs.id == rhs.id }
-    func hash(into hasher: inout Hasher) { hasher.combine(id) }
+    // `nonisolated` so the conformance isn't main-actor-bound (the module defaults to @MainActor),
+    // which would make Set<Episode> unusable from nonisolated contexts — an error under Swift 6 mode.
+    nonisolated static func == (lhs: Episode, rhs: Episode) -> Bool { lhs.id == rhs.id }
+    nonisolated func hash(into hasher: inout Hasher) { hasher.combine(id) }
 }
 
 /// An additional simultaneous noise generator stacked on top of the primary noise (rain + brown,

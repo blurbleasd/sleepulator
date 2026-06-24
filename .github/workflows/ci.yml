@@ -59,7 +59,12 @@ jobs:
           xcrun simctl boot "${{ steps.sim.outputs.udid }}" || true
           xcrun simctl bootstatus "${{ steps.sim.outputs.udid }}" -b || true
 
-      - name: Build & test
+      # `test` still BUILDS the whole app + widget + all test classes (the real compile gate, incl.
+      # Metal shaders), but only RUNS the deterministic, non-CoreAudio classes. Tests that construct
+      # a live AudioEngine / AVAudioSession (AudioEngineBehaviorTests, NoiseLayeringTests,
+      # FirstRunDefaultMixTests, AudioStateTests, the SleepTimer* classes) crash on a headless CI
+      # simulator and are covered by the real-device gate (CLAUDE.md). Add new pure classes here.
+      - name: Build & test (pure/logic suites)
         run: |
           set -o pipefail
           xcodebuild test \
@@ -67,6 +72,15 @@ jobs:
             -scheme Sleepulator \
             -destination "id=${{ steps.sim.outputs.udid }}" \
             -resultBundlePath TestResults.xcresult \
+            -only-testing:SleepulatorTests/AudioMathTests \
+            -only-testing:SleepulatorTests/AdaptiveRewindTests \
+            -only-testing:SleepulatorTests/NoiseMigrationTests \
+            -only-testing:SleepulatorTests/PodcastParserTests \
+            -only-testing:SleepulatorTests/StorageManagerTests \
+            -only-testing:SleepulatorTests/NetRetryTests \
+            -only-testing:SleepulatorTests/CacheEvictionTests \
+            -only-testing:SleepulatorTests/ModelIdentityTests \
+            -only-testing:SleepulatorTests/OPMLParserTests \
             CODE_SIGNING_ALLOWED=NO
 
       - name: Upload test results
