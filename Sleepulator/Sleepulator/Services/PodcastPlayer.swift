@@ -89,6 +89,12 @@ final class PodcastPlayer: NSObject {
     
     private var hasFiredNearEnd = false
     private var preloadedItem: AVPlayerItem?
+    /// Fire-and-forget tasks that attach the limiter tap (which awaits `loadTracks`, a
+    /// cancellable asset/network load). Held so we can cancel an in-flight load when it's
+    /// superseded by a new track and, critically, in `deinit` — otherwise a player torn
+    /// down mid-load leaves a zombie `loadTracks` running against a dead instance.
+    private var preloadTapTask: Task<Void, Never>?
+    private var playbackTask: Task<Void, Never>?
     
     var nightLimiterEnabled: Bool = true {
         didSet {
@@ -137,6 +143,9 @@ final class PodcastPlayer: NSObject {
         }
         currentItem?.removeObserver(self, forKeyPath: "status")
         fadeTimer?.cancel()
+        // Cancel any in-flight tap/track loads so they don't outlive this instance.
+        preloadTapTask?.cancel()
+        playbackTask?.cancel()
         flushPositionsToDisk()
     }
     
@@ -176,8 +185,9 @@ final class PodcastPlayer: NSObject {
         let item = AVPlayerItem(url: nsurl)
         preloadedItem = item
         
-        Task { @MainActor in
-            await attachLimiterTap(to: item)
+        preloadTapTask?.cancel()
+        preloadTapTask = Task { @MainActor [weak self] in
+            _ = await self?.attachLimiterTap(to: item)
         }
     }
     
@@ -215,7 +225,9 @@ final class PodcastPlayer: NSObject {
         
         playerItem.addObserver(self, forKeyPath: "status", options: [.new, .old], context: nil)
         
-        Task { @MainActor in
+        playbackTask?.cancel()
+        playbackTask = Task { @MainActor [weak self] in
+            guard let self else { return }
             if playerItem.audioMix == nil {
                 let success = await attachLimiterTap(to: playerItem)
                 if !success {
@@ -266,11 +278,18 @@ final class PodcastPlayer: NSObject {
             // Resume position, in priority order: an explicit startAt (Resume Last Night) > the
             // saved map when resuming > nothing (fresh start at 0, e.g. the next queued track).
             if let startAt = startAt {
+                Log.audio.debug("play() seek: startAt=\(startAt, privacy: .public) id=\(id, privacy: .public)")
                 await player?.seek(to: CMTime(seconds: max(0, startAt), preferredTimescale: 1000))
             } else if resume,
                       let positions = cachedPositions,
                       let savedTime = positions[id], savedTime > 5.0 {
+                Log.audio.debug("play() seek: resume=\(savedTime, privacy: .public) id=\(id, privacy: .public)")
                 await player?.seek(to: CMTime(seconds: savedTime - 2.0, preferredTimescale: 1000))
+            } else {
+                // No seek — the new item plays from its natural start (0). If a track ever begins
+                // partway in despite landing here, the cause is below the app (AVPlayer item state),
+                // not the resume logic — this log distinguishes the two on a device run.
+                Log.audio.debug("play() seek: fresh start 0 (resume=\(resume, privacy: .public)) id=\(id, privacy: .public)")
             }
             // Swap + seek are done; let the observer record positions for the new item again.
             self.isLoadingItem = false
@@ -375,16 +394,21 @@ final class PodcastPlayer: NSObject {
     
     func seek(seconds: TimeInterval) {
         guard let player = player else { return }
-        let currentTime = player.currentTime()
-        let newTime = CMTimeAdd(currentTime, CMTime(seconds: seconds, preferredTimescale: 1000))
-        player.seek(to: newTime, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] _ in
+        // An explicit seek is the user's chosen position. Clear pausedAt so the next resume()
+        // doesn't apply adaptiveRewind and pull them away from where they just seeked (the
+        // "I skipped/scrubbed but playback resumed somewhere else" bug).
+        pausedAt = nil
+        // Clamp so skip-back near the start reliably lands at 0:00 instead of a negative time.
+        let target = max(0, CMTimeGetSeconds(player.currentTime()) + seconds)
+        player.seek(to: CMTime(seconds: target, preferredTimescale: 1000), toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] _ in
             self?.updateNowPlaying(isPlaying: player.timeControlStatus == .playing)
         }
     }
-    
+
     func seekTo(seconds: TimeInterval) {
         guard let player = player else { return }
-        player.seek(to: CMTime(seconds: seconds, preferredTimescale: 1000), toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] _ in
+        pausedAt = nil   // explicit seek wins; don't let the next resume() rewind away from it
+        player.seek(to: CMTime(seconds: max(0, seconds), preferredTimescale: 1000), toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] _ in
             self?.updateNowPlaying(isPlaying: player.timeControlStatus == .playing)
         }
     }
@@ -453,7 +477,8 @@ final class PodcastPlayer: NSObject {
         
         center.changePlaybackPositionCommand.addTarget { [weak self] event in
             guard let self = self, let positionEvent = event as? MPChangePlaybackPositionCommandEvent, let player = self.player else { return .commandFailed }
-            player.seek(to: CMTime(seconds: positionEvent.positionTime, preferredTimescale: 1000)) { _ in
+            self.pausedAt = nil   // lock-screen scrub is explicit; don't rewind away from it on resume
+            player.seek(to: CMTime(seconds: max(0, positionEvent.positionTime), preferredTimescale: 1000)) { _ in
                 self.updateNowPlaying(isPlaying: player.timeControlStatus == .playing)
             }
             return .success

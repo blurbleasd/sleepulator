@@ -8,6 +8,13 @@ import SwiftUI
 struct EmbersView: View {
     /// True only when the screen is occluded by the deep night-dim veil — freeze for battery.
     var paused: Bool = false
+    /// The sleep timer, read *live* (not observed) inside the redraw so the fire dies down as
+    /// the night progresses. Plain property on purpose — observing it here would re-render the
+    /// whole scene every tick (the `rmsPower`/`@Published` storm CLAUDE.md warns about).
+    var sleepTimer: SleepTimerService? = nil
+    /// Smoothed audio level (~0…1), sampled live in the redraw so the embers flare gently with
+    /// the generative bed (e.g. the Fire noise crackle). Closure, not observed — same discipline.
+    var audioLevel: (() -> Double)? = nil
 
     private struct Ember {
         let x: Double
@@ -77,12 +84,20 @@ struct EmbersView: View {
     var body: some View {
         ZStack {
             Color(red: 0.035, green: 0.025, blue: 0.02).ignoresSafeArea()   // warm near-black
-            hearthGlow
+            // The hearth fades to a faint coal as the night settles (isolated 1 Hz leaf).
+            if let timer = sleepTimer {
+                NightFade(timer: timer, maxDim: 0.8) { hearthGlow }
+            } else {
+                hearthGlow
+            }
             if paused {
-                Canvas { ctx, size in Self.draw(ctx, size, t: 0) }
+                Canvas { ctx, size in Self.draw(ctx, size, t: 0, night: sleepTimer?.nightProgress ?? 0, audio: audioLevel?() ?? 0) }
             } else {
                 TimelineView(.animation(minimumInterval: 1.0 / 20.0)) { tl in
-                    Canvas { ctx, size in Self.draw(ctx, size, t: tl.date.timeIntervalSinceReferenceDate) }
+                    // Sample nightProgress + audio level fresh each tick — live reads, no observation.
+                    let night = sleepTimer?.nightProgress ?? 0
+                    let level = audioLevel?() ?? 0
+                    Canvas { ctx, size in Self.draw(ctx, size, t: tl.date.timeIntervalSinceReferenceDate, night: night, audio: level) }
                 }
             }
             vignette
@@ -114,9 +129,17 @@ struct EmbersView: View {
         }
     }
 
-    private static func draw(_ ctx: GraphicsContext, _ size: CGSize, t: Double) {
-        // Slow ~10s breath swells the whole field — gentle entrainment.
-        let breath = 0.85 + 0.15 * (0.5 - 0.5 * cos(t * 2 * .pi / 10.0))
+    /// - Parameter night: `nightProgress` (0 at the start of a sleep timer, →1 as it expires;
+    ///   0 when idle). As it rises the fire dies down — the field thins (high-offset motes
+    ///   retire first), what remains dims, and the breath swell calms.
+    /// - Parameter audio: smoothed audio level (~0…1). The embers flare gently brighter as the
+    ///   generative bed gets louder — a slow breath, not a meter.
+    private static func draw(_ ctx: GraphicsContext, _ size: CGSize, t: Double, night: Double = 0, audio: Double = 0) {
+        let p = min(1, max(0, night))
+        let flare = 1.0 + 0.6 * min(1, max(0, audio))     // brighten with the bed
+        // Slow ~10s breath swells the whole field — gentle entrainment; calmer as night settles.
+        let breath = 0.85 + 0.15 * (1.0 - 0.4 * p) * (0.5 - 0.5 * cos(t * 2 * .pi / 10.0))
+        let smokeDim = 1.0 - 0.6 * p
 
         // Drifting smoke wisps (soft warm radial gradients; softness from the gradient, no blur).
         var sctx = ctx
@@ -127,7 +150,7 @@ struct EmbersView: View {
             let y = (1.05 - prog * 1.1) * size.height
             let x = (s.x + sin(t * s.swaySpeed + s.swayPhase) * s.sway) * size.width
             let env = sin(prog * .pi)
-            let op = s.op * env * breath
+            let op = s.op * env * breath * smokeDim
             if op <= 0.002 { continue }
             let rad = s.r * size.width
             sctx.fill(Path(ellipseIn: CGRect(x: x - rad, y: y - rad, width: rad * 2, height: rad * 2)),
@@ -141,9 +164,12 @@ struct EmbersView: View {
             let y = (1.0 - prog) * size.height
             let x = (e.x + sin(t * e.driftSpeed + e.driftPhase) * e.drift) * size.width
             let envelope = sin(prog * .pi)
-            let op = e.baseOpacity * envelope * breath
+            // Thin the field as the night settles: motes with a larger stable `offset` retire
+            // first, so the fire fades unevenly to a few faint coals rather than dimming flat.
+            let thin = max(0.0, 1.0 - p * (0.45 + 0.55 * e.offset))
+            let op = e.baseOpacity * envelope * breath * thin * flare
             if op <= 0.001 { continue }
-            let g = e.r * 3.0
+            let g = e.r * 3.0 * flare                       // glow widens slightly on a flare
             ctx.fill(Path(ellipseIn: CGRect(x: x - g, y: y - g, width: g * 2, height: g * 2)),
                      with: .radialGradient(Gradient(colors: [e.warm.opacity(op * 0.5), .clear]),
                                            center: CGPoint(x: x, y: y), startRadius: 0, endRadius: g))

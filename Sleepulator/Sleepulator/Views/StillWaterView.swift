@@ -9,6 +9,13 @@ import SwiftUI
 struct StillWaterView: View {
     /// True only when the screen is occluded by the deep night-dim veil — freeze for battery.
     var paused: Bool = false
+    /// The sleep timer, read *live* (not observed) inside the redraw so the pond stills as the
+    /// night progresses. Plain property on purpose — observing it here would re-render the whole
+    /// scene every tick (the `rmsPower`/`@Published` storm CLAUDE.md warns about).
+    var sleepTimer: SleepTimerService? = nil
+    /// Smoothed audio level (~0…1), sampled live so the ripples swell with the generative bed
+    /// (e.g. the Ocean swell). Closure, not observed — same discipline.
+    var audioLevel: (() -> Double)? = nil
 
     private struct Source {
         let cx: Double
@@ -41,12 +48,20 @@ struct StillWaterView: View {
                 .init(color: Color(red: 0.01, green: 0.012, blue: 0.03), location: 1.0)
             ], startPoint: .top, endPoint: .bottom)
                 .ignoresSafeArea()
-            moon
+            // The moon dims toward a faint presence as the night settles (isolated 1 Hz leaf).
+            if let timer = sleepTimer {
+                NightFade(timer: timer, maxDim: 0.6) { moon }
+            } else {
+                moon
+            }
             if paused {
-                Canvas { ctx, size in Self.draw(ctx, size, t: 0) }
+                Canvas { ctx, size in Self.draw(ctx, size, t: 0, night: sleepTimer?.nightProgress ?? 0, audio: audioLevel?() ?? 0) }
             } else {
                 TimelineView(.animation(minimumInterval: 1.0 / 20.0)) { tl in
-                    Canvas { ctx, size in Self.draw(ctx, size, t: tl.date.timeIntervalSinceReferenceDate) }
+                    // Sample nightProgress + audio level fresh each tick — live reads, no observation.
+                    let night = sleepTimer?.nightProgress ?? 0
+                    let level = audioLevel?() ?? 0
+                    Canvas { ctx, size in Self.draw(ctx, size, t: tl.date.timeIntervalSinceReferenceDate, night: night, audio: level) }
                 }
             }
             vignette
@@ -83,10 +98,20 @@ struct StillWaterView: View {
         }
     }
 
-    private static func draw(_ ctx: GraphicsContext, _ size: CGSize, t: Double) {
+    /// - Parameter night: `nightProgress` (0 at the start of a sleep timer, →1 as it expires;
+    ///   0 when idle). As it rises the pond stills — ripples dim and thin (far sources retire
+    ///   first), the reflected column fades, and the breath swell calms. Amplitude/opacity only,
+    ///   never the wave *rate* (scaling absolute `t` would jump the ripple phase).
+    /// - Parameter audio: smoothed audio level (~0…1). The ripples reach a little wider and
+    ///   brighter as the generative bed swells — a slow breath, not a meter.
+    private static func draw(_ ctx: GraphicsContext, _ size: CGSize, t: Double, night: Double = 0, audio: Double = 0) {
         let minDim = min(size.width, size.height)
-        // Slow ~12s breath on the ripple brightness.
-        let breath = 0.8 + 0.2 * (0.5 - 0.5 * cos(t * 2 * .pi / 12.0))
+        let p = min(1, max(0, night))
+        let a = min(1, max(0, audio))
+        let swell = 1.0 + 0.35 * a                        // ripples reach wider on a swell
+        let calm = 1.0 - 0.5 * p                          // overall stilling
+        // Slow ~12s breath on the ripple brightness; its swell shrinks as the night settles.
+        let breath = 0.8 + 0.2 * (1.0 - 0.4 * p) * (0.5 - 0.5 * cos(t * 2 * .pi / 12.0))
 
         // Moon's reflected column: a soft vertical smear under the moon that wavers with the water.
         var rctx = ctx
@@ -100,7 +125,7 @@ struct StillWaterView: View {
             // The column widens and wavers toward the foreground; brightness falls off downward.
             let wob = sin(y * 0.05 + t * 0.9) + 0.5 * sin(y * 0.11 - t * 0.6)
             let halfW = (4.0 + fy * 26.0) + wob * 4.0
-            let op = (1.0 - fy) * 0.10 * breath
+            let op = (1.0 - fy) * 0.10 * breath * calm
             if op <= 0.002 { continue }
             let rect = CGRect(x: mx - halfW, y: y, width: halfW * 2, height: (size.height - reflTop) / Double(band) + 2)
             rctx.fill(Path(ellipseIn: rect),
@@ -110,7 +135,10 @@ struct StillWaterView: View {
         // Concentric ripples — flatter (elliptical) so they read as lying on a receding surface.
         for s in sources {
             let center = CGPoint(x: s.cx * size.width, y: s.cy * size.height)
-            let maxR = s.maxR * minDim
+            let maxR = s.maxR * minDim * swell
+            // Thin the sources as the night settles: the far (low-depth) ones still first, so the
+            // pond quiets unevenly toward a near-flat surface rather than dimming uniformly.
+            let thin = max(0.0, 1.0 - p * (0.45 + 0.55 * (1.0 - s.depth)))
             for k in 0..<ringsPerSource {
                 var prog = (t / s.period + s.phase + Double(k) / Double(ringsPerSource))
                     .truncatingRemainder(dividingBy: 1.0)
@@ -118,7 +146,7 @@ struct StillWaterView: View {
                 let radius = prog * maxR
                 if radius < 1 { continue }
                 let fadeIn = min(1.0, prog / 0.12)
-                let op = (1.0 - prog) * fadeIn * (0.12 + s.depth * 0.26) * breath
+                let op = (1.0 - prog) * fadeIn * (0.12 + s.depth * 0.26) * breath * calm * thin * (1.0 + 0.25 * a)
                 if op <= 0.002 { continue }
                 let ry = radius * 0.5   // perspective squash → ellipse on the water plane
                 let rect = CGRect(x: center.x - radius, y: center.y - ry,

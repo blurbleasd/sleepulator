@@ -81,8 +81,12 @@ class PodcastParser: NSObject, XMLParserDelegate {
             tempImageUrl = ""
         }
         
-        if inItem && elementName == "enclosure" {
-            if let urlString = attributeDict["url"] {
+        if inItem && elementName == "enclosure", let urlString = attributeDict["url"] {
+            // Prefer an audio enclosure. Some feeds add transcript/chapters enclosures that would
+            // otherwise overwrite the audio URL (last-wins); accept a typeless one only if we have
+            // nothing yet.
+            let type = (attributeDict["type"] ?? "").lowercased()
+            if type.hasPrefix("audio/") || (currentAudioUrl.isEmpty && type.isEmpty) {
                 currentAudioUrl = urlString
             }
         }
@@ -106,7 +110,11 @@ class PodcastParser: NSObject, XMLParserDelegate {
     // CDATA, which XMLParser delivers here — NOT via foundCharacters. Without this,
     // episode show-notes came back empty for the majority of podcasts.
     func parser(_ parser: XMLParser, foundCDATABlock CDATABlock: Data) {
-        if let string = String(data: CDATABlock, encoding: .utf8) {
+        // Most feeds are UTF-8, but some are Latin-1 / Windows-1252; fall back so those don't
+        // silently lose show-notes (String(data:encoding:.utf8) returns nil on invalid UTF-8).
+        if let string = String(data: CDATABlock, encoding: .utf8)
+            ?? String(data: CDATABlock, encoding: .isoLatin1)
+            ?? String(data: CDATABlock, encoding: .windowsCP1252) {
             accumulate(string)
         }
     }
@@ -180,15 +188,24 @@ class PodcastParser: NSObject, XMLParserDelegate {
         
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss Z"
-        if let d = formatter.date(from: cleanStr) { return d }
-        
-        formatter.dateFormat = "EEE, d MMM yyyy HH:mm:ss Z"
-        if let d = formatter.date(from: cleanStr) { return d }
-        
-        formatter.dateFormat = "EEE, dd MMM yyyy HH:mm Z"
-        if let d = formatter.date(from: cleanStr) { return d }
-        
+        // RFC-822 variants: numeric offset (Z) and named zone (zzz, e.g. GMT/EST), with and without
+        // seconds / a leading-zero day. Many real feeds use named zones, which the Z formats miss.
+        let formats = [
+            "EEE, dd MMM yyyy HH:mm:ss Z",
+            "EEE, d MMM yyyy HH:mm:ss Z",
+            "EEE, dd MMM yyyy HH:mm:ss zzz",
+            "EEE, d MMM yyyy HH:mm:ss zzz",
+            "EEE, dd MMM yyyy HH:mm Z",
+            "EEE, dd MMM yyyy HH:mm zzz"
+        ]
+        for fmt in formats {
+            formatter.dateFormat = fmt
+            if let d = formatter.date(from: cleanStr) { return d }
+        }
+
+        // Atom / ISO-8601 (e.g. 2026-06-23T09:00:00Z).
+        if let d = ISO8601DateFormatter().date(from: cleanStr) { return d }
+
         return nil
     }
     

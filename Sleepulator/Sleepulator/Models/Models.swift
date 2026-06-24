@@ -6,6 +6,11 @@ struct Podcast: Identifiable, Codable, Hashable {
     var url: String
     var episodes: [Episode]
     var artworkUrl: String? = nil
+
+    // Identity is the id. Without these, synthesized Hashable would compare/hash the whole episode
+    // array — expensive, and the hash churns on every feed refresh.
+    static func == (lhs: Podcast, rhs: Podcast) -> Bool { lhs.id == rhs.id }
+    func hash(into hasher: inout Hasher) { hasher.combine(id) }
 }
 
 struct Episode: Identifiable, Codable, Equatable, Hashable {
@@ -17,10 +22,19 @@ struct Episode: Identifiable, Codable, Equatable, Hashable {
     var description: String?
     var artworkUrl: String? = nil
     
-    // Equatable for the queue
-    static func == (lhs: Episode, rhs: Episode) -> Bool {
-        return lhs.id == rhs.id
-    }
+    // Identity is the id. A custom == alone would leave a synthesized hash(into:) over all fields,
+    // breaking the Hashable contract (equal values, unequal hashes); hash on id to match.
+    static func == (lhs: Episode, rhs: Episode) -> Bool { lhs.id == rhs.id }
+    func hash(into hasher: inout Hasher) { hasher.combine(id) }
+}
+
+/// An additional simultaneous noise generator stacked on top of the primary noise (rain + brown,
+/// fan + pink, etc). The primary noise stays modeled by the `noiseType` / `noiseVolume` fields;
+/// these are the *extra* layers, capped at `AudioEngine.maxExtraLayers`.
+struct ExtraNoiseLayer: Codable, Identifiable, Equatable {
+    var id: String = UUID().uuidString
+    var type: String
+    var volume: Double
 }
 
 /// The "Last Night" resume snapshot: what was playing when you stopped, INCLUDING the
@@ -42,6 +56,9 @@ struct SavedMix: Codable, Identifiable {
     /// here directly instead of depending on positions.json. Optional → old snapshots decode as nil
     /// and fall back to the saved-position map.
     var podcastPosition: Double? = nil
+    /// Extra stacked noise layers active at capture. Optional → snapshots from before layering
+    /// decode as nil (no extra layers).
+    var extraLayers: [ExtraNoiseLayer]? = nil
 }
 
 /// A reusable saved sound recipe — the user's named soundscapes ("Brown + Delta"). Pure
@@ -60,6 +77,9 @@ struct SoundPreset: Codable, Identifiable {
     var binauralPreset: String
     var binVolume: Double
     var sceneId: String?        // optional backdrop captured with the recipe
+    /// Extra stacked noise layers captured with the recipe. Optional → presets saved before
+    /// layering decode as nil (just the primary noise).
+    var extraLayers: [ExtraNoiseLayer]? = nil
 }
 
 enum NoiseType {

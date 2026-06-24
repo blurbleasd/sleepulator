@@ -60,12 +60,15 @@ enum Net {
         var lastError: Error?
         let total = max(1, attempts)
         for attempt in 0..<total {
+            try Task.checkCancellation()   // don't start a new attempt after the caller went away
             do {
                 return try await op()
             } catch {
                 lastError = error
                 if attempt == total - 1 || !isRetryable(error) { throw error }
-                let delay = baseDelay * pow(2.0, Double(attempt))
+                // Exponential backoff with ±20% jitter, so many feeds refreshing at once don't
+                // retry in lockstep and hammer one host (thundering herd).
+                let delay = baseDelay * pow(2.0, Double(attempt)) * Double.random(in: 0.8...1.2)
                 try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
             }
         }

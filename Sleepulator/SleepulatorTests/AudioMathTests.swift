@@ -47,4 +47,27 @@ class AudioMathTests: XCTestCase {
         XCTAssertEqual(AudioMath.getFadeMultiplier(timerRemaining: 95, fadeDuration: 90), 1.0) // before window
         XCTAssertEqual(AudioMath.getFadeMultiplier(timerRemaining: 45, fadeDuration: 90), 0.25, accuracy: 0.0001) // (45/90)^2
     }
+
+    // Scrubber → seek-time mapping: snaps near-start to exactly 0:00, clamps the 0…1 range, and
+    // refuses a non-finite duration (the "scrub to the start doesn't reach the start" class of bug).
+    func testScrubTargetSnapsToStart() {
+        // Far left of the slider on a 1-hour episode: maps to 0 (exact start), not a few seconds in.
+        XCTAssertEqual(AudioMath.scrubTargetSeconds(progress: 0.0, duration: 3600), 0)
+        // Just inside the snap window (1.5 s < 2 s default) also lands at the true start.
+        XCTAssertEqual(AudioMath.scrubTargetSeconds(progress: 1.5 / 3600, duration: 3600), 0)
+    }
+
+    func testScrubTargetNormalAndClamp() {
+        XCTAssertEqual(AudioMath.scrubTargetSeconds(progress: 0.5, duration: 3600), 1800)
+        // Out-of-range progress is clamped, not extrapolated past the track.
+        XCTAssertEqual(AudioMath.scrubTargetSeconds(progress: 1.4, duration: 3600), 3600)
+        XCTAssertEqual(AudioMath.scrubTargetSeconds(progress: -0.2, duration: 3600), 0)
+    }
+
+    func testScrubTargetRejectsUnknownDuration() {
+        // progress * NaN = NaN; seeking to a NaN CMTime is silently ignored by AVPlayer, so the
+        // mapper returns nil instead and the caller skips the seek.
+        XCTAssertNil(AudioMath.scrubTargetSeconds(progress: 0.0, duration: .nan))
+        XCTAssertNil(AudioMath.scrubTargetSeconds(progress: 0.5, duration: 0))
+    }
 }

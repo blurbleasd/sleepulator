@@ -5,6 +5,11 @@ struct HomeView: View {
     /// Observed directly so the "Resume · …" status (lastMix) refreshes after Phase 3 dropped the
     /// mixStore objectWillChange forward into AudioEngine.
     @ObservedObject var mixStore: MixStore
+    /// Drives the Podcasts-tab deep link when the user taps the (empty) podcast layer.
+    @Binding var selectedTab: Int
+    /// One-time first-run coachmark: points at "Build mix" so a new user discovers that the app
+    /// layers noise + binaural + podcasts. Set once the user dismisses it (or builds a mix).
+    @AppStorage("hasCompletedFirstRun") private var hasCompletedFirstRun = false
     @State private var showTimerActionSheet = false
     @State private var isPlayPressed = false
     @State private var showBreathing = false
@@ -14,6 +19,30 @@ struct HomeView: View {
     // `audio` so ContentView's tab bar + mini-player can fade with the home chrome.
     @State private var idleFade: DispatchWorkItem?
     @Environment(\.accessibilityReduceMotion) var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.isLuminanceReduced) private var isLuminanceReduced
+
+    /// Shared gyro source for parallax scenes. Plain held instance (not observed); started only
+    /// while a motion-using scene is on screen and not dimmed (see `reconcileMotion`).
+    @State private var tiltSource = TiltSource()
+
+    /// CoreMotion runs only when the visible scene actually reads tilt and the screen isn't
+    /// occluded — honors the "costs nothing on the all-night dimmed screen" invariant. Reduce
+    /// Motion disables parallax entirely.
+    private func reconcileMotion() {
+        // Stop the gyro whenever the scene is frozen for any reason (dimmed, backgrounded, or
+        // low-luminance/Always-On), not just the night-dim veil.
+        tiltSource.setActive(currentScene.usesMotion && !scenesFrozen && !reduceMotion)
+    }
+
+    /// Scenes (and CoreMotion) settle to a static frame whenever the screen is occluded by the
+    /// night-dim veil, the app isn't active (backgrounded / app-switcher), or the display is in a
+    /// low-luminance / Always-On state. Previously freezing was gated on the sleep-timer veil alone,
+    /// so a no-timer session animated at full rate all night. This is purely additive — it only
+    /// adds reasons to freeze, never removes the veil case.
+    private var scenesFrozen: Bool {
+        audio.screenDimmed || scenePhase != .active || isLuminanceReduced
+    }
 
     // Selected backdrop scene per mode (persisted). Changing it re-renders the home; the
     // Build-mix drawer writes these via SceneSelector.
@@ -25,15 +54,47 @@ struct HomeView: View {
         return SceneRegistry.scene(id: audio.focusMode ? focusSceneId : sleepSceneId, mood: mood)
     }
 
+    // Swipe-to-change-backdrop: a left/right swipe anywhere on the home cycles the scene for the
+    // current mood and briefly flashes its name. Far cheaper to reach than the buried Backdrop
+    // chips in the Build-mix drawer (you can even swipe through scenes from the screensaver).
+    @State private var sceneTitleVisible = false
+    @State private var sceneTitleHide: DispatchWorkItem?
+
+    private func cycleScene(_ dir: Int) {
+        let mood: SceneMood = audio.focusMode ? .focus : .sleep
+        let list = SceneRegistry.scenes(for: mood)
+        guard list.count > 1 else { return }
+        let curId = audio.focusMode ? focusSceneId : sleepSceneId
+        let idx = list.firstIndex { $0.id == curId } ?? 0
+        let next = list[((idx + dir) % list.count + list.count) % list.count]
+        if audio.focusMode { focusSceneId = next.id } else { sleepSceneId = next.id }
+        UISelectionFeedbackGenerator().selectionChanged()
+        flashSceneTitle()
+    }
+
+    private func flashSceneTitle() {
+        sceneTitleHide?.cancel()
+        withAnimation(.easeOut(duration: 0.25)) { sceneTitleVisible = true }
+        let work = DispatchWorkItem {
+            withAnimation(.easeIn(duration: 0.6)) { sceneTitleVisible = false }
+        }
+        sceneTitleHide = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.6, execute: work)
+    }
+
     private func scheduleIdleFade() {
         idleFade?.cancel()
-        guard !audio.focusMode, audio.isAnythingPlaying else { return }
+        // Sleep mode only — and now regardless of whether audio is playing, so the screen settles
+        // to the bare backdrop on its own (Focus keeps its controls + session readout visible).
+        guard !audio.focusMode else { return }
         let work = DispatchWorkItem {
-            guard !self.audio.focusMode, self.audio.isAnythingPlaying else { return }
+            guard !self.audio.focusMode else { return }
             withAnimation(.easeInOut(duration: 0.9)) { self.audio.ambientScreensaver = true }
         }
         idleFade = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 12, execute: work)
+        // Fades quickly after a spell of no interaction; any touch reschedules it (see the
+        // simultaneousGesture in body), so it only runs once you've stopped touching the screen.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 8, execute: work)
     }
 
     private func wakeChrome() {
@@ -89,6 +150,10 @@ struct HomeView: View {
         } else if let mix = mixStore.lastMix,
                   (mix.noiseOn || mix.binauralOn || mix.podcastUrl != nil) {
             audio.resumeMix(mix)
+        } else if !hasCompletedFirstRun {
+            // First-ever play with nothing to resume: start a layered bed (noise + binaural)
+            // instead of a single bare noise, so the first tap shows what the app actually does.
+            audio.startDefaultMix()
         } else {
             audio.toggleMasterTransport()
         }
@@ -111,10 +176,18 @@ struct HomeView: View {
             currentScene.makeBackdrop(SceneContext(
                 palette: pal,
                 reduceMotion: reduceMotion,
-                paused: audio.screenDimmed,
+                paused: scenesFrozen,
                 sleepTimer: audio.sleepTimer,
-                pomodoro: audio.pomodoro
+                pomodoro: audio.pomodoro,
+                audioLevel: { [weak audio] in audio?.audioLevel ?? 0 },
+                tilt: { tiltSource.tilt }
             ))
+            .onAppear { reconcileMotion() }
+            .onDisappear { tiltSource.stop() }
+            .onChange(of: audio.screenDimmed) { _, _ in reconcileMotion() }
+            .onChange(of: scenePhase) { _, _ in reconcileMotion() }
+            .onChange(of: isLuminanceReduced) { _, _ in reconcileMotion() }
+            .onChange(of: currentScene.id) { _, _ in reconcileMotion() }
             
             // Ambient-minimal foreground: the night sky is the screen. A mode toggle up top,
             // a single central orb (play/pause) with the active sounds as pills, and one
@@ -175,7 +248,10 @@ struct HomeView: View {
 
                 VStack(spacing: 6) {
                     HStack(spacing: 10) {
-                        Button(action: { showMix = true }) {
+                        Button(action: {
+                            if !hasCompletedFirstRun { hasCompletedFirstRun = true }
+                            showMix = true
+                        }) {
                             HStack(spacing: 7) {
                                 Image(systemName: "slider.horizontal.3")
                                 Text("Build mix").font(.subheadline.weight(.semibold))
@@ -233,7 +309,59 @@ struct HomeView: View {
                     .accessibilityLabel("Show controls")
                     .accessibilityAddTraits(.isButton)
             }
+
+            // First-run coachmark: a single dismissible card pointing down at "Build mix" so a
+            // new user discovers the layering. Never shown once dismissed, or while the screen
+            // has faded to the ambient screensaver.
+            if !hasCompletedFirstRun && !audio.focusMode && !audio.ambientScreensaver {
+                VStack {
+                    Spacer()
+                    FirstRunCoachmark(pal: pal) {
+                        withAnimation(.easeInOut(duration: 0.3)) { hasCompletedFirstRun = true }
+                    }
+                    .padding(.horizontal, 28)
+                    // Sit just above the Build mix / timer row.
+                    .padding(.bottom, audio.hasLoadedEpisode ? 188 : 96)
+                }
+                .transition(.opacity)
+            }
+
+            // Transient backdrop name, shown for ~1.6s after a swipe changes the scene.
+            if sceneTitleVisible {
+                VStack {
+                    Text(currentScene.title)
+                        .font(.system(.subheadline, design: .rounded).weight(.semibold))
+                        .tracking(1.0)
+                        .foregroundColor(pal.text)
+                        .padding(.horizontal, 16).padding(.vertical, 8)
+                        .background(Capsule().fill(pal.text.opacity(0.10)))
+                        .overlay(Capsule().stroke(pal.accent.opacity(0.25), lineWidth: 0.5))
+                        .padding(.top, 70)
+                    Spacer()
+                }
+                .allowsHitTesting(false)
+                .transition(.opacity)
+            }
         }
+        // A small home-screen gesture vocabulary, simultaneous so it coexists with the orb press
+        // and the idle-fade tap:
+        //   • swipe left/right  → cycle the backdrop for the current mood,
+        //   • swipe up          → open the Build-mix sheet (the full mixer, one gesture away).
+        // Both count as interaction (wake chrome / reset the idle countdown).
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 24)
+                .onEnded { v in
+                    let dx = v.translation.width, dy = v.translation.height
+                    if abs(dx) > abs(dy) * 1.3 && abs(dx) > 48 {
+                        if audio.ambientScreensaver { wakeChrome() } else { scheduleIdleFade() }
+                        cycleScene(dx < 0 ? 1 : -1)               // swipe left → next scene
+                    } else if dy < -60 && abs(dy) > abs(dx) * 1.3 {
+                        if audio.ambientScreensaver { wakeChrome() }
+                        if !hasCompletedFirstRun { hasCompletedFirstRun = true }
+                        showMix = true                            // swipe up → open the mixer
+                    }
+                }
+        )
         .onAppear { scheduleIdleFade() }
         // Leaving Home (tab switch, sheet, etc.): kill the pending idle-fade so the screensaver
         // can't engage while another tab is showing and hide its tab bar (the "stuck off Home" bug).
@@ -251,10 +379,14 @@ struct HomeView: View {
         }
         .sheet(isPresented: $showTimerActionSheet) {
             TimerSelectionSheet(audio: audio, isPresented: $showTimerActionSheet, pal: pal)
-                .presentationDetents([.fraction(0.5)])
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $showMix) {
-            MixDrawer(audio: audio, mixStore: mixStore, pal: pal)
+            MixDrawer(audio: audio, mixStore: mixStore, pal: pal, onPickEpisode: {
+                showMix = false
+                selectedTab = 1   // jump to the Podcasts tab to choose an episode
+            })
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
         }
@@ -506,6 +638,58 @@ struct LayerPills: View {
     }
 }
 
+// One-time first-run nudge: a soft card that tells a new user what makes the app different
+// (layering) and points down at the "Build mix" control. Dismissed forever on "Got it" or once
+// the user opens the mixer themselves.
+struct FirstRunCoachmark: View {
+    let pal: Palette
+    let dismiss: () -> Void
+
+    var body: some View {
+        VStack(spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "square.stack.3d.up.fill")
+                    .foregroundColor(pal.accent)
+                Text("Layer your own soundscape")
+                    .font(.system(.subheadline, design: .rounded).weight(.semibold))
+                    .foregroundColor(pal.text)
+                Spacer(minLength: 0)
+            }
+            Text("Tap the orb to start, then open Build mix to stack noise, binaural beats, and your own podcasts — with a sleep timer that fades it all out.")
+                .font(.caption)
+                .foregroundColor(pal.dim)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            HStack {
+                Spacer()
+                Button(action: dismiss) {
+                    Text("Got it")
+                        .font(.caption.weight(.bold))
+                        .foregroundColor(pal.bg)
+                        .padding(.horizontal, 16).padding(.vertical, 7)
+                        .background(Capsule().fill(pal.accent))
+                }
+                .frame(minHeight: 36)
+            }
+
+            // A small pointer toward the Build mix control below.
+            Image(systemName: "chevron.compact.down")
+                .font(.title3)
+                .foregroundColor(pal.accent.opacity(0.6))
+        }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(pal.bg.opacity(0.92))
+                .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(pal.accent.opacity(0.3), lineWidth: 0.5))
+                .shadow(color: .black.opacity(0.4), radius: 16, y: 6)
+        )
+        .accessibilityElement(children: .combine)
+    }
+}
+
 // The "Build mix" drawer — all the detailed controls (mixer, master volume, save / saved
 // mixes) live here so the main screen stays calm and art-first.
 struct MixDrawer: View {
@@ -514,6 +698,9 @@ struct MixDrawer: View {
     /// deleted, after Phase 3 dropped the mixStore objectWillChange forward into AudioEngine.
     @ObservedObject var mixStore: MixStore
     let pal: Palette
+    /// Called when the user taps the podcast layer with no episode loaded — closes the drawer
+    /// and routes to the Podcasts tab.
+    var onPickEpisode: () -> Void = {}
     @AppStorage("sceneSleep") private var sleepSceneId = "night-sky"
     @AppStorage("sceneFocus") private var focusSceneId = "energy"
     @State private var showNameDialog = false
@@ -532,7 +719,7 @@ struct MixDrawer: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 20)
 
-                MixPanel(audio: audio, pal: pal)
+                MixPanel(audio: audio, pal: pal, onPickEpisode: onPickEpisode)
 
                 HomeBottomBar(audio: audio, pal: pal)
                     .padding(.top, 4)
@@ -883,6 +1070,12 @@ struct ModeSwitcher: View {
 struct MixPanel: View {
     @ObservedObject var audio: AudioEngine
     let pal: Palette
+    var onPickEpisode: () -> Void = {}
+
+    /// The noise sounds available in the current mode (Sleep vs Focus palettes share no sounds).
+    private var noisePalette: [String] {
+        audio.focusMode ? ["pink", "fan", "white", "gray"] : ["brown", "rain", "ocean", "pink", "green", "forest"]
+    }
 
     var body: some View {
         VStack(spacing: 10) {
@@ -892,11 +1085,49 @@ struct MixPanel: View {
                 isOn: $audio.noiseOn,
                 volume: $audio.noiseVolume,
                 pal: pal,
-                options: audio.focusMode ? ["pink", "fan", "white", "gray"] : ["brown", "rain", "ocean", "pink", "green", "forest"],
+                options: noisePalette,
                 selection: $audio.noiseType
             )
             .glassPanel()
-            
+
+            // Stacked extra noise layers (rain + brown, …). Only shown while the noise bed is on,
+            // since the layers play *with* it; toggling a layer's switch off removes it.
+            if audio.noiseOn {
+                ForEach(audio.extraLayers) { layer in
+                    WarmMixerRow(
+                        icon: "plus.circle",
+                        title: layer.type.capitalized,
+                        isOn: .constant(true),
+                        volume: Binding(
+                            get: { layer.volume },
+                            set: { audio.setExtraLayerVolume(layer.id, $0) }
+                        ),
+                        pal: pal,
+                        onToggle: { audio.removeExtraLayer(layer.id) },
+                        options: noisePalette,
+                        selection: Binding(
+                            get: { layer.type },
+                            set: { audio.setExtraLayerType(layer.id, $0) }
+                        )
+                    )
+                    .glassPanel()
+                }
+
+                if audio.extraLayers.count < AudioEngine.maxExtraLayers {
+                    Button(action: {
+                        audio.addExtraLayer()
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    }) {
+                        Label("Add sound", systemImage: "plus.circle")
+                            .font(.system(.subheadline, design: .rounded).weight(.semibold))
+                            .foregroundColor(pal.accent)
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Add another sound layer")
+                }
+            }
+
             WarmMixerRow(
                 icon: "headphones",
                 title: "Binaural (\(audio.binauralPreset.capitalized))",
@@ -910,16 +1141,47 @@ struct MixPanel: View {
             .glassPanel()
             
             // Podcast is on/off + volume like the other layers — episode picking lives in the
-            // Library tab and the mini-player, not an impractical inline dropdown.
-            WarmMixerRow(
-                icon: "mic.fill",
-                title: audio.isPodPlaying ? audio.podTitle : "Podcast",
-                isOn: $audio.isPodPlaying,
-                volume: $audio.podVolume,
-                pal: pal,
-                onToggle: { audio.togglePodcast() }
-            )
-            .glassPanel()
+            // Library tab and the mini-player, not an impractical inline dropdown. With no episode
+            // loaded the toggle has nothing to play, so the row becomes a clear call-to-action that
+            // routes to the Podcasts tab instead of a switch that silently does nothing.
+            if audio.hasLoadedEpisode {
+                WarmMixerRow(
+                    icon: "mic.fill",
+                    title: audio.isPodPlaying ? audio.podTitle : "Podcast",
+                    isOn: $audio.isPodPlaying,
+                    volume: $audio.podVolume,
+                    pal: pal,
+                    onToggle: { audio.togglePodcast() }
+                )
+                .glassPanel()
+            } else {
+                Button(action: onPickEpisode) {
+                    HStack(spacing: 12) {
+                        Image(systemName: "mic.fill")
+                            .frame(minWidth: 30)
+                            .foregroundColor(pal.dim)
+                            .font(.title3)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Podcast")
+                                .font(.system(.headline, design: .rounded))
+                                .foregroundColor(pal.dim)
+                            Text("Choose an episode")
+                                .font(.caption)
+                                .foregroundColor(pal.dim.opacity(0.7))
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundColor(pal.dim.opacity(0.7))
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .frame(minHeight: 44)
+                .glassPanel()
+                .accessibilityLabel("Podcast, no episode loaded")
+                .accessibilityHint("Opens the Podcasts tab to choose an episode")
+            }
         }
         .padding(.horizontal, 20)
     }
@@ -937,7 +1199,9 @@ struct HomeBottomBar: View {
             Button(action: { audio.toggleMute() }) {
                 Image(systemName: audio.isMuted ? "speaker.slash.fill" : "speaker.wave.3.fill")
                     .imageScale(.large)
-                    .foregroundColor(audio.isMuted ? .red : pal.accent)
+                    // Muted reads through the struck-speaker glyph; a dimmed tone keeps the night
+                    // UI calm (red carried a false "error/danger" charge for a benign state).
+                    .foregroundColor(audio.isMuted ? pal.dim : pal.accent)
                     .frame(width: 44, height: 44)
             }
             .accessibilityLabel(audio.isMuted ? "Unmute" : "Mute")
@@ -1120,68 +1384,59 @@ struct TimerSelectionSheet: View {
     let pal: Palette
     @AppStorage("timerMinutes") private var timerMinutes = 30.0
 
+    private var timerActive: Bool { audio.sleepTimer.timerRemaining > 0 }
+
     var body: some View {
-        VStack(spacing: 24) {
+        VStack(spacing: 22) {
             Text("Sleep Timer")
                 .font(.title2.bold())
                 .foregroundColor(pal.text)
-            
-            Text("Fade out smoothly over...")
+
+            Text("Fade out smoothly over…")
                 .foregroundColor(pal.dim)
-            
+
+            // Presets now *select* a duration (they no longer fire-and-dismiss), so tapping one
+            // and then nudging the slider is a single coherent flow ending in one Start button.
             HStack(spacing: 12) {
                 ForEach([15, 30, 45, 60], id: \.self) { mins in
+                    let selected = Int(timerMinutes) == mins
                     Button(action: {
                         timerMinutes = Double(mins)
-                        audio.sleepTimer.startSleepTimer(minutes: mins)
-                        isPresented = false
+                        UISelectionFeedbackGenerator().selectionChanged()
                     }) {
                         Text("\(mins)m")
                             .font(.headline)
                             .padding(.horizontal, 16)
                             .padding(.vertical, 10)
-                            .background(Color(white: 0.15))
-                            .foregroundColor(pal.text)
+                            .background(selected ? pal.accent.opacity(0.25) : Color(white: 0.15))
+                            .foregroundColor(selected ? pal.accent : pal.text)
                             .cornerRadius(10)
+                            .overlay(RoundedRectangle(cornerRadius: 10)
+                                .stroke(selected ? pal.accent.opacity(0.7) : .clear, lineWidth: 1))
                     }
                     .frame(minWidth: 44, minHeight: 44)
+                    .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
                 }
             }
 
-            // "End of episode" — only when a podcast with a known, finite length is loaded (so
-            // the button can't silently no-op before the duration is known, or on a live stream).
-            // Stops when the current episode finishes, fading the ambient bed down with it.
-            if audio.hasLoadedEpisode, audio.podcastDuration.isFinite, audio.podcastDuration > 5 {
-                Button(action: {
-                    audio.startEndOfEpisodeTimer()
-                    isPresented = false
-                }) {
-                    Label("End of episode", systemImage: "text.append")
-                        .font(.headline)
-                        .foregroundColor(pal.accent)
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 12)
-                        .frame(minHeight: 44)
-                        .overlay(RoundedRectangle(cornerRadius: 12).stroke(pal.accent.opacity(0.6), lineWidth: 1))
-                }
-            }
-            
             VStack(spacing: 8) {
-                Text("Custom: \(Int(timerMinutes)) Minutes")
+                Text("\(Int(timerMinutes)) minutes")
                     .font(.headline)
                     .foregroundColor(pal.text)
-                
+                    .monospacedDigit()
+
                 Slider(value: $timerMinutes, in: 5...120, step: 5)
                     .tint(pal.accent)
             }
             .padding(.horizontal, 40)
-            .padding(.top, 20)
-            
+
+            // Single commit for the duration timer.
             Button(action: {
                 audio.sleepTimer.startSleepTimer(minutes: Int(timerMinutes))
+                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                 isPresented = false
             }) {
-                Text("Start Timer")
+                Text(timerActive ? "Restart Timer" : "Start Timer")
                     .font(.headline.bold())
                     .foregroundColor(pal.bg)
                     .frame(maxWidth: .infinity, minHeight: 44)
@@ -1190,8 +1445,40 @@ struct TimerSelectionSheet: View {
                     .cornerRadius(12)
             }
             .padding(.horizontal, 40)
-            .padding(.top, 20)
-            
+
+            // "End of episode" — only when a podcast with a known, finite length is loaded (so
+            // the button can't silently no-op before the duration is known, or on a live stream).
+            // A genuinely different timer kind, so it stays its own one-tap action.
+            if audio.hasLoadedEpisode, audio.podcastDuration.isFinite, audio.podcastDuration > 5 {
+                Button(action: {
+                    audio.startEndOfEpisodeTimer()
+                    isPresented = false
+                }) {
+                    Label("Stop at end of episode", systemImage: "text.append")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundColor(pal.accent)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 12)
+                        .frame(minHeight: 44)
+                        .overlay(RoundedRectangle(cornerRadius: 12).stroke(pal.accent.opacity(0.6), lineWidth: 1))
+                }
+            }
+
+            // Cancel an already-running timer — previously there was no way out except starting a
+            // new one. Only shown when a timer is actually counting down.
+            if timerActive {
+                Button(action: {
+                    audio.sleepTimer.cancelTimer()
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    isPresented = false
+                }) {
+                    Label("Turn off timer", systemImage: "moon.zzz")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundColor(pal.dim)
+                        .frame(minHeight: 44)
+                }
+            }
+
             Spacer()
         }
         .padding(.top, 30)

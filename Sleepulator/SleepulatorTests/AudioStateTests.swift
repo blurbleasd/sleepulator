@@ -236,6 +236,51 @@ final class PodcastParserTests: XCTestCase {
         XCTAssertLessThanOrEqual(desc.count, 200_000, "description must be bounded")
         XCTAssertGreaterThan(desc.count, 0)
     }
+
+    // Named-timezone RFC-822 (e.g. "GMT") and ISO-8601 pubDates must parse, not fall back to
+    // distantPast (which would sink real episodes to the bottom of the sorted feed).
+    func testNamedTimezoneAndISO8601Dates() throws {
+        let xml = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <rss><channel><title>Dates</title>
+          <item><title>Named TZ</title><guid>d-1</guid>
+            <enclosure url="https://example.com/1.mp3" type="audio/mpeg"/>
+            <pubDate>Mon, 02 Jun 2025 08:00:00 GMT</pubDate>
+          </item>
+          <item><title>ISO</title><guid>d-2</guid>
+            <enclosure url="https://example.com/2.mp3" type="audio/mpeg"/>
+            <pubDate>2025-06-03T09:30:00Z</pubDate>
+          </item>
+        </channel></rss>
+        """
+        let feed = try parse(xml)
+        XCTAssertEqual(feed.episodes.count, 2)
+        for ep in feed.episodes {
+            XCTAssertNotNil(ep.pubDate, "\(ep.title) date should parse")
+        }
+    }
+
+    // An audio enclosure must win over a transcript/chapters enclosure regardless of order, so a
+    // non-audio enclosure can't overwrite the playable URL (it used to be last-wins).
+    func testPrefersAudioEnclosureOverNonAudio() throws {
+        let xml = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <rss><channel><title>Enc</title>
+          <item><title>Transcript first</title><guid>e-1</guid>
+            <enclosure url="https://example.com/transcript.pdf" type="application/pdf"/>
+            <enclosure url="https://example.com/audio.mp3" type="audio/mpeg"/>
+          </item>
+          <item><title>Transcript last</title><guid>e-2</guid>
+            <enclosure url="https://example.com/audio2.mp3" type="audio/mpeg"/>
+            <enclosure url="https://example.com/notes.html" type="text/html"/>
+          </item>
+        </channel></rss>
+        """
+        let feed = try parse(xml)
+        let byId = Dictionary(uniqueKeysWithValues: feed.episodes.map { ($0.id, $0) })
+        XCTAssertEqual(byId["e-1"]?.audioUrl, "https://example.com/audio.mp3")
+        XCTAssertEqual(byId["e-2"]?.audioUrl, "https://example.com/audio2.mp3")
+    }
 }
 
 // Durable persistence: missing files are benign, and a corrupt primary is recovered from the
@@ -426,6 +471,83 @@ final class AudioEngineBehaviorTests: XCTestCase {
     }
 }
 
+// Multi-layer noise — stacking, persistence round-trips, back-compat decode, and mode reconcile.
+// Deterministic AudioEngine state (no podcast in any mix → resumeMix never hits the network).
+@MainActor
+final class NoiseLayeringTests: XCTestCase {
+
+    func testAddExtraLayerRespectsCap() {
+        let engine = AudioEngine()
+        engine.extraLayers = []
+        for _ in 0..<(AudioEngine.maxExtraLayers + 2) { engine.addExtraLayer() }
+        XCTAssertEqual(engine.extraLayers.count, AudioEngine.maxExtraLayers)
+    }
+
+    func testAddExtraLayerPicksUnusedPaletteSound() {
+        let engine = AudioEngine()
+        engine.focusMode = false
+        engine.noiseType = "brown"
+        engine.extraLayers = []
+        engine.addExtraLayer()
+        XCTAssertNotEqual(engine.extraLayers.first?.type, "brown")  // not a duplicate of primary
+        XCTAssertTrue(AudioEngine.sleepNoises.contains(engine.extraLayers.first?.type ?? ""))
+    }
+
+    func testApplyPresetRestoresExtraLayers() {
+        let engine = AudioEngine()
+        engine.focusMode = false
+        let preset = SoundPreset(name: "Stack", mode: "sleep",
+                                 noiseOn: true, noiseType: "brown", noiseVolume: 0.5,
+                                 binauralOn: false, binauralPreset: "delta", binVolume: 0.3,
+                                 sceneId: nil,
+                                 extraLayers: [ExtraNoiseLayer(type: "rain", volume: 0.4)])
+        engine.applyPreset(preset)
+        XCTAssertEqual(engine.extraLayers.count, 1)
+        XCTAssertEqual(engine.extraLayers.first?.type, "rain")
+        XCTAssertEqual(engine.extraLayers.first?.volume ?? 0, 0.4, accuracy: 0.0001)
+    }
+
+    // A preset persisted before layering existed has no `extraLayers` key — it must decode to nil
+    // and apply as "no extra layers", never crash.
+    func testOldPresetWithoutLayersDecodesToNil() throws {
+        let json = """
+        {"id":"x","name":"Old","mode":"sleep","noiseOn":true,"noiseType":"brown",
+        "noiseVolume":0.5,"binauralOn":false,"binauralPreset":"delta","binVolume":0.3}
+        """
+        let preset = try JSONDecoder().decode(SoundPreset.self, from: Data(json.utf8))
+        XCTAssertNil(preset.extraLayers)
+        let engine = AudioEngine()
+        engine.applyPreset(preset)
+        XCTAssertTrue(engine.extraLayers.isEmpty)
+    }
+
+    func testSaveAndResumeLastMixRoundTripsLayers() {
+        let engine = AudioEngine()
+        engine.focusMode = false
+        engine.noiseType = "brown"; engine.noiseVolume = 0.5; engine.noiseOn = true
+        engine.extraLayers = [ExtraNoiseLayer(type: "rain", volume: 0.35)]
+        engine.saveLastMix()
+        let mix = engine.lastMix
+        XCTAssertEqual(mix?.extraLayers?.count, 1)
+
+        engine.extraLayers = []
+        engine.resumeMix(mix!)
+        XCTAssertEqual(engine.extraLayers.first?.type, "rain")
+        XCTAssertEqual(engine.extraLayers.first?.volume ?? 0, 0.35, accuracy: 0.0001)
+    }
+
+    // Modes share no sounds (pink excepted): switching to Focus must drop a Sleep-only extra layer.
+    func testModeSwitchDropsCrossModeLayers() {
+        let engine = AudioEngine()
+        engine.focusMode = false
+        engine.noiseType = "brown"
+        engine.extraLayers = [ExtraNoiseLayer(type: "rain", volume: 0.3)]   // sleep-only sound
+        engine.focusMode = true                                            // → reconcileSoundsToMode
+        XCTAssertFalse(engine.extraLayers.contains { $0.type == "rain" })
+        XCTAssertTrue(engine.extraLayers.allSatisfy { AudioEngine.focusNoises.contains($0.type) })
+    }
+}
+
 // End-of-episode sleep timer — driven by the playback clock via externalTick. Deterministic and
 // synchronous (no GCD timer / audio session); Live Activity is a no-op when unauthorized in tests.
 @MainActor
@@ -460,5 +582,210 @@ final class EndOfEpisodeTimerTests: XCTestCase {
         svc.externalTick(remaining: 0.1)         // playback-clock ticks must be ignored here
         XCTAssertEqual(stops, 0)
         svc.cancelTimer()
+    }
+}
+
+// Fail-safe backstop: the out-of-process net is scheduled on start, moved on bump, and torn down
+// on cancel/fire; and a foreground reconcile fires the terminal stop if the app was suspended
+// through a duration deadline. Spy scheduler keeps these deterministic (no UNUserNotificationCenter).
+@MainActor
+final class SleepTimerBackstopTests: XCTestCase {
+    private final class SpyBackstop: SleepTimerBackstopScheduling {
+        var scheduledAfter: [TimeInterval] = []
+        var cancelCount = 0
+        func schedule(after seconds: TimeInterval) { scheduledAfter.append(seconds) }
+        func cancel() { cancelCount += 1 }
+    }
+
+    func testBackstopScheduledOnStart() {
+        let svc = SleepTimerService()
+        let spy = SpyBackstop()
+        svc.backstop = spy
+        svc.startSleepTimer(minutes: 30)
+        XCTAssertEqual(spy.scheduledAfter.last, 1800)   // 30 min in seconds
+        svc.cancelTimer()
+    }
+
+    func testBackstopCancelledOnCancel() {
+        let svc = SleepTimerService()
+        let spy = SpyBackstop()
+        svc.backstop = spy
+        svc.startSleepTimer(minutes: 30)
+        let before = spy.cancelCount
+        svc.cancelTimer()
+        XCTAssertGreaterThan(spy.cancelCount, before)
+    }
+
+    func testBumpMovesBackstopLater() {
+        let svc = SleepTimerService()
+        let spy = SpyBackstop()
+        svc.backstop = spy
+        svc.startSleepTimer(minutes: 30)
+        spy.scheduledAfter.removeAll()
+        svc.bumpTimer()                                  // +15 min
+        XCTAssertEqual(spy.scheduledAfter.count, 1)
+        XCTAssertEqual(spy.scheduledAfter.first ?? 0, 2700, accuracy: 2)  // 1800 + 900
+        svc.cancelTimer()
+    }
+
+    func testReconcileFiresOnceWhenExpired() {
+        let svc = SleepTimerService()
+        var stops = 0
+        svc.stopAllFn = { stops += 1 }
+        svc.backstop = SpyBackstop()
+        svc.startSleepTimer(minutes: 0)                  // deadline == now
+        Thread.sleep(forTimeInterval: 0.01)              // ensure now >= end
+        svc.reconcileIfExpired()
+        XCTAssertEqual(stops, 1)
+        svc.reconcileIfExpired()                         // idempotent — must not double-fire
+        XCTAssertEqual(stops, 1)
+    }
+
+    func testReconcileNoOpWhileRunning() {
+        let svc = SleepTimerService()
+        var stops = 0
+        svc.stopAllFn = { stops += 1 }
+        svc.backstop = SpyBackstop()
+        svc.startSleepTimer(minutes: 30)
+        svc.reconcileIfExpired()
+        XCTAssertEqual(stops, 0)
+        svc.cancelTimer()
+    }
+
+    func testReconcileIgnoresEndOfEpisodeTimer() {
+        let svc = SleepTimerService()
+        var stops = 0
+        svc.stopAllFn = { stops += 1 }
+        svc.backstop = SpyBackstop()
+        svc.startEndOfEpisode(remaining: 0.001)          // episode timer, not a duration timer
+        Thread.sleep(forTimeInterval: 0.01)
+        svc.reconcileIfExpired()                         // reconcile only covers duration timers
+        XCTAssertEqual(stops, 0)
+        svc.cancelTimer()
+    }
+}
+
+// The "Turn off timer" control added to the timer sheet relies on cancelTimer() clearing a
+// running duration timer *without* firing the terminal stop (cancelling ≠ the fade finishing).
+// The sheet's show/hide condition is `timerRemaining > 0`, so that's the value pinned here.
+// NoopBackstop keeps it off the real UNUserNotificationCenter.
+@MainActor
+final class SleepTimerCancelTests: XCTestCase {
+    private final class NoopBackstop: SleepTimerBackstopScheduling {
+        func schedule(after seconds: TimeInterval) {}
+        func cancel() {}
+    }
+
+    func testCancelClearsRunningTimer() {
+        let svc = SleepTimerService()
+        svc.backstop = NoopBackstop()
+
+        svc.startSleepTimer(minutes: 30)
+        XCTAssertGreaterThan(svc.timerRemaining, 0)   // "Turn off timer" button is visible
+
+        svc.cancelTimer()
+        XCTAssertEqual(svc.timerRemaining, 0)         // condition flips false → button hides
+        XCTAssertFalse(svc.isEndOfEpisode)
+    }
+
+    func testCancelDoesNotFireTerminalStop() {
+        let svc = SleepTimerService()
+        var stops = 0
+        svc.stopAllFn = { stops += 1 }
+        svc.backstop = NoopBackstop()
+
+        svc.startSleepTimer(minutes: 30)
+        svc.cancelTimer()
+        XCTAssertEqual(stops, 0, "cancelling must not run the stop-all that the fade end does")
+    }
+
+    func testCancelTearsDownBackstop() {
+        final class SpyBackstop: SleepTimerBackstopScheduling {
+            var cancelCount = 0
+            func schedule(after seconds: TimeInterval) {}
+            func cancel() { cancelCount += 1 }
+        }
+        let svc = SleepTimerService()
+        let spy = SpyBackstop()
+        svc.backstop = spy
+
+        svc.startSleepTimer(minutes: 30)
+        let before = spy.cancelCount
+        svc.cancelTimer()
+        XCTAssertGreaterThan(spy.cancelCount, before)  // out-of-process net removed on cancel
+    }
+}
+
+// First-run "show me the magic" start: the very first tap should bring up a *layered* bed
+// (noise + binaural) rather than a single bare noise, so the layering concept is audible.
+@MainActor
+final class FirstRunDefaultMixTests: XCTestCase {
+    func testStartDefaultMixBringsUpLayeredBed() {
+        let engine = AudioEngine()
+        engine.noiseOn = false
+        engine.binauralOn = false
+        engine.isPodPlaying = false
+
+        engine.startDefaultMix()
+        XCTAssertTrue(engine.noiseOn, "first-run default must include a noise bed")
+        XCTAssertTrue(engine.binauralOn, "first-run default must layer in binaural")
+        XCTAssertTrue(engine.isAnythingPlaying)
+    }
+}
+
+// Episode/Podcast identity is the id only. A custom == with a synthesized hash(into:) over all
+// fields would break the Hashable contract (equal values, unequal hashes) — corrupting Set/dict use.
+final class ModelIdentityTests: XCTestCase {
+    func testEpisodeEqualityAndHashUseIdOnly() {
+        let a = Episode(id: "x", title: "A", audioUrl: "u1", duration: 1, pubDate: nil, description: nil)
+        let b = Episode(id: "x", title: "B-different", audioUrl: "u2", duration: 99, pubDate: Date(), description: "notes")
+        let c = Episode(id: "y", title: "A", audioUrl: "u1", duration: 1, pubDate: nil, description: nil)
+
+        XCTAssertEqual(a, b, "same id must be equal regardless of other fields")
+        XCTAssertEqual(a.hashValue, b.hashValue, "equal values must share a hash")
+        XCTAssertNotEqual(a, c)
+
+        var set: Set<Episode> = [a]
+        XCTAssertTrue(set.contains(b), "Set membership must follow ==/hash (broke with synthesized hash)")
+        set.insert(b)
+        XCTAssertEqual(set.count, 1, "inserting an equal value must not grow the set")
+    }
+
+    func testPodcastEqualityAndHashUseIdOnly() {
+        let e1 = Episode(id: "1", title: "t", audioUrl: "u", duration: nil, pubDate: nil, description: nil)
+        let p1 = Podcast(id: "p", name: "N", url: "feed", episodes: [e1])
+        let p2 = Podcast(id: "p", name: "N2-diff", url: "feed2", episodes: [])
+
+        XCTAssertEqual(p1, p2, "same id must be equal regardless of episodes")
+        XCTAssertEqual(p1.hashValue, p2.hashValue)
+    }
+}
+
+// OPML import hardening: only http(s) feeds, deduped, with a stable url-based id.
+final class OPMLParserTests: XCTestCase {
+    private func parse(_ opml: String) throws -> [OPMLFeed] {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).opml")
+        try Data(opml.utf8).write(to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+        return OPMLParser().parse(url: url)
+    }
+
+    func testValidatesSchemeDedupesAndUsesStableId() throws {
+        let opml = """
+        <?xml version="1.0"?>
+        <opml version="1.0"><body>
+          <outline text="Show A" type="rss" xmlUrl="https://a.example/feed"/>
+          <outline text="Show A dup" type="rss" xmlUrl="https://a.example/feed"/>
+          <outline text="Bad scheme" type="rss" xmlUrl="javascript:alert(1)"/>
+          <outline text="Local file" type="rss" xmlUrl="file:///etc/passwd"/>
+          <outline text="Show B" type="rss" xmlUrl="http://b.example/feed"/>
+          <outline text="Folder only"/>
+        </body></opml>
+        """
+        let feeds = try parse(opml)
+        XCTAssertEqual(feeds.map(\.url), ["https://a.example/feed", "http://b.example/feed"],
+                       "http(s) only, deduped, order preserved")
+        XCTAssertEqual(feeds.first?.id, "https://a.example/feed", "id must be the stable feed url")
+        XCTAssertEqual(feeds.first?.name, "Show A")
     }
 }

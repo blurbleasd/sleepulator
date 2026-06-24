@@ -64,11 +64,17 @@ struct PersistenceMigrator {
         }
         defaults.removeObject(forKey: "savedPodcasts")
 
-        // episodePositions: legacy UserDefaults dict → positions.json.
-        if let data = defaults.dictionary(forKey: "episodePositions") as? [String: Double] {
-            StorageManager.shared.save(data, to: "positions.json")
+        // episodePositions: legacy UserDefaults dict → positions.json. Coerce per-value: a single
+        // non-Double entry (e.g. an Int from an older encoder) must not fail the whole-map cast and
+        // wipe every saved position.
+        if let raw = defaults.dictionary(forKey: "episodePositions"), !raw.isEmpty {
+            var positions: [String: Double] = [:]
+            for (key, value) in raw {
+                if let d = (value as? NSNumber)?.doubleValue { positions[key] = d }
+            }
+            StorageManager.shared.save(positions, to: "positions.json")
             defaults.removeObject(forKey: "episodePositions")
-            result.migratedPositions = data
+            result.migratedPositions = positions
         }
 
         return result
