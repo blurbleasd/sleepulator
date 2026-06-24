@@ -3,10 +3,15 @@ import UniformTypeIdentifiers
 import os
 
 struct SettingsView: View {
-    @ObservedObject var audio: AudioEngine
+    /// Held unobserved (a plain `let`): used only for the Backup restore call. All reactive state is
+    /// observed via the narrow children below, so unrelated engine publishes (podTitle, transport,
+    /// chrome) no longer re-render SettingsView.
+    let audio: AudioEngine
     /// Observed directly so the Auto-Play / Shuffle toggles still refresh after Phase 3 dropped
     /// the queueManager objectWillChange forward into AudioEngine.
     @ObservedObject var queue: PodcastQueueManager
+    /// Comfort/playback settings (skip interval, stereo width, limiter, EQ, beat routing).
+    @ObservedObject var settings: PlaybackSettings
     @AppStorage("bedtimeMode") private var bedtimeMode = false
     @AppStorage("autoNightDim") private var autoNightDim = true
 
@@ -35,7 +40,7 @@ struct SettingsView: View {
     var pal: Palette { Palette(bedtime: bedtimeMode) }
 
     private var eqAmountLabel: String {
-        switch audio.sleepEQIntensity {
+        switch settings.sleepEQIntensity {
         case ..<0.05: return "Off"
         case ..<0.8:  return "Light"
         case ..<1.3:  return "Medium"
@@ -73,10 +78,10 @@ struct SettingsView: View {
                                 Spacer()
                                 Menu {
                                     ForEach([10, 15, 30, 45], id: \.self) { secs in
-                                        Button("\(secs) seconds") { audio.skipInterval = Double(secs) }
+                                        Button("\(secs) seconds") { settings.skipInterval = Double(secs) }
                                     }
                                 } label: {
-                                    Text("\(Int(audio.skipInterval))s")
+                                    Text("\(Int(settings.skipInterval))s")
                                         .font(.headline)
                                         .foregroundColor(pal.accent)
                                         .padding(.horizontal, 14)
@@ -86,7 +91,7 @@ struct SettingsView: View {
                                         .clipShape(Capsule())
                                 }
                                 .accessibilityLabel("Skip interval")
-                                .accessibilityValue("\(Int(audio.skipInterval)) seconds")
+                                .accessibilityValue("\(Int(settings.skipInterval)) seconds")
                             }
                         }
                         .glassPanel()
@@ -99,7 +104,7 @@ struct SettingsView: View {
                                 .foregroundColor(pal.text)
                                 .padding(.bottom, 4)
                             
-                            Toggle("Delete Played Episodes", isOn: $audio.deleteOnCompletion)
+                            Toggle("Delete Played Episodes", isOn: $queue.deleteOnCompletion)
                                 .toggleStyle(SwitchToggleStyle(tint: pal.accent))
                                 .foregroundColor(pal.dim)
                             Text("Automatically delete the downloaded file when an episode finishes playing.")
@@ -107,7 +112,7 @@ struct SettingsView: View {
                                 .foregroundColor(pal.dim)
                                 .padding(.bottom, 8)
                             
-                            Toggle("Hide Finished Episodes", isOn: $audio.hideFinishedEpisodes)
+                            Toggle("Hide Finished Episodes", isOn: $queue.hideFinishedEpisodes)
                                 .toggleStyle(SwitchToggleStyle(tint: pal.accent))
                                 .foregroundColor(pal.dim)
                         }
@@ -123,14 +128,14 @@ struct SettingsView: View {
                                     .lineLimit(1)
                                     .minimumScaleFactor(0.7)
                                 Spacer()
-                                Text(audio.stereoWidth < 0.05 ? "Mono" : "\(Int((audio.stereoWidth / 1.5) * 100))%")
+                                Text(settings.stereoWidth < 0.05 ? "Mono" : "\(Int((settings.stereoWidth / 1.5) * 100))%")
                                     .font(.caption.monospacedDigit())
                                     .foregroundColor(pal.dim)
                                     .fixedSize()
                             }
-                            VolumeBar(value: $audio.stereoWidth, accent: pal.accent, range: 0...1.5)
+                            VolumeBar(value: $settings.stereoWidth, accent: pal.accent, range: 0...1.5)
                                 .accessibilityLabel("Stereo width")
-                                .accessibilityValue(audio.stereoWidth < 0.05 ? "Mono" : "\(Int((audio.stereoWidth / 1.5) * 100)) percent")
+                                .accessibilityValue(settings.stereoWidth < 0.05 ? "Mono" : "\(Int((settings.stereoWidth / 1.5) * 100)) percent")
                             Text("Lower keeps the bass centered on phone and laptop speakers; higher opens the noise up in headphones.")
                                 .font(.caption)
                                 .foregroundColor(pal.dim)
@@ -146,30 +151,30 @@ struct SettingsView: View {
                                 
                             // Trailing-closure label so the long text wraps at large Dynamic Type
                             // sizes instead of truncating against the fixed-width switch.
-                            Toggle(isOn: $audio.nightLimiter) {
-                                Text(audio.limiterByMode ? "Night Limiter — following mode" : "Night Limiter — soften loud spikes")
+                            Toggle(isOn: $settings.nightLimiter) {
+                                Text(settings.limiterByMode ? "Night Limiter — following mode" : "Night Limiter — soften loud spikes")
                                     .fixedSize(horizontal: false, vertical: true)
                             }
                             .toggleStyle(SwitchToggleStyle(tint: pal.accent))
                             .foregroundColor(pal.dim)
-                            .disabled(audio.limiterByMode)
-                            .opacity(audio.limiterByMode ? 0.45 : 1)
+                            .disabled(settings.limiterByMode)
+                            .opacity(settings.limiterByMode ? 0.45 : 1)
 
-                            Toggle(isOn: $audio.limiterByMode) {
+                            Toggle(isOn: $settings.limiterByMode) {
                                 Text("Limiter follows mode — on while sleeping, off while focusing")
                                     .fixedSize(horizontal: false, vertical: true)
                             }
                             .toggleStyle(SwitchToggleStyle(tint: pal.accent))
                             .foregroundColor(pal.dim)
 
-                            Toggle(isOn: $audio.sleepEQ) {
+                            Toggle(isOn: $settings.sleepEQ) {
                                 Text("Sleep EQ — soften harsh highs & boomy lows")
                                     .fixedSize(horizontal: false, vertical: true)
                             }
                             .toggleStyle(SwitchToggleStyle(tint: pal.accent))
                             .foregroundColor(pal.dim)
 
-                            if audio.sleepEQ {
+                            if settings.sleepEQ {
                                 VStack(alignment: .leading, spacing: 8) {
                                     HStack {
                                         Text("Softening amount")
@@ -183,7 +188,7 @@ struct SettingsView: View {
                                             .foregroundColor(pal.dim)
                                             .fixedSize()
                                     }
-                                    VolumeBar(value: $audio.sleepEQIntensity, accent: pal.accent, range: 0...2)
+                                    VolumeBar(value: $settings.sleepEQIntensity, accent: pal.accent, range: 0...2)
                                         .accessibilityLabel("Sleep EQ softening amount")
                                         .accessibilityValue(eqAmountLabel)
                                 }
@@ -202,14 +207,14 @@ struct SettingsView: View {
                             VStack(alignment: .leading, spacing: 6) {
                                 Text("Beats output")
                                     .font(.subheadline).foregroundColor(pal.text)
-                                Picker("Beats output", selection: $audio.beatRouting) {
+                                Picker("Beats output", selection: $settings.beatRouting) {
                                     Text("Auto").tag("auto")
                                     Text("Headphones").tag("headphones")
                                     Text("Speaker").tag("speaker")
                                 }
                                 .pickerStyle(.segmented)
-                                Text(audio.beatRouting == "headphones" ? "Always true binaural (assumes headphones)."
-                                   : audio.beatRouting == "speaker" ? "Always isochronic — a speaker-safe pulsed tone."
+                                Text(settings.beatRouting == "headphones" ? "Always true binaural (assumes headphones)."
+                                   : settings.beatRouting == "speaker" ? "Always isochronic — a speaker-safe pulsed tone."
                                    : "Binaural with headphones, isochronic on the speaker.")
                                     .font(.caption).foregroundColor(pal.dim)
                             }

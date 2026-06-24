@@ -72,7 +72,7 @@ struct ContentView: View {
                     }
                     .tag(1)
                 
-                SettingsView(audio: audio, queue: audio.queueManager)
+                SettingsView(audio: audio, queue: audio.queueManager, settings: audio.settings)
                     .tabItem {
                         Label("Settings", systemImage: "gear")
                     }

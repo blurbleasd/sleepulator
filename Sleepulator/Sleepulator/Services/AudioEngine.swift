@@ -15,9 +15,74 @@ final class Connectivity: ObservableObject {
     @Published var isOnline = true
 }
 
+/// Comfort/playback settings bound by SettingsView. Split out of AudioEngine so the settings screen
+/// observes just this — unrelated engine publishes (podTitle, transport, chrome) no longer re-render
+/// SettingsView. Each setter persists to UserDefaults and notifies AudioEngine (via the `on*`
+/// callbacks) to apply the side-effect to the live audio path. AudioEngine keeps computed
+/// passthroughs (`audio.skipInterval`, …) so every other reader stays unchanged. Property observers
+/// don't fire during `init`, so loading from UserDefaults here is side-effect-free.
+final class PlaybackSettings: ObservableObject {
+    // Side-effect appliers, wired by AudioEngine in its init.
+    var onSkipInterval: ((Double) -> Void)?
+    var onStereoWidth: ((Double) -> Void)?
+    var onNightLimiter: ((Bool) -> Void)?
+    var onLimiterByMode: (() -> Void)?
+    var onSleepEQ: ((Bool) -> Void)?
+    var onSleepEQIntensity: ((Double) -> Void)?
+    var onBeatRouting: (() -> Void)?
+
+    @Published var skipInterval: Double {
+        didSet { UserDefaults.standard.set(skipInterval, forKey: "skipInterval"); onSkipInterval?(skipInterval) }
+    }
+    @Published var stereoWidth: Double {
+        didSet { UserDefaults.standard.set(stereoWidth, forKey: "stereoWidth"); onStereoWidth?(stereoWidth) }
+    }
+    @Published var nightLimiter: Bool {
+        didSet { UserDefaults.standard.set(nightLimiter, forKey: "nightLimiterEnabled"); onNightLimiter?(nightLimiter) }
+    }
+    @Published var limiterByMode: Bool {
+        didSet { UserDefaults.standard.set(limiterByMode, forKey: "limiterByMode"); onLimiterByMode?() }
+    }
+    @Published var sleepEQ: Bool {
+        didSet { UserDefaults.standard.set(sleepEQ, forKey: "sleepEQEnabled"); onSleepEQ?(sleepEQ) }
+    }
+    @Published var sleepEQIntensity: Double {
+        didSet { UserDefaults.standard.set(sleepEQIntensity, forKey: "sleepEQIntensity"); onSleepEQIntensity?(sleepEQIntensity) }
+    }
+    @Published var beatRouting: String {
+        didSet { UserDefaults.standard.set(beatRouting, forKey: "beatRouting"); onBeatRouting?() }
+    }
+
+    init() {
+        let d = UserDefaults.standard
+        skipInterval = d.object(forKey: "skipInterval") as? Double ?? 15
+        stereoWidth = d.object(forKey: "stereoWidth") as? Double ?? 1.0
+        nightLimiter = d.object(forKey: "nightLimiterEnabled") as? Bool ?? AppConfig.nightLimiterEnabled
+        limiterByMode = d.object(forKey: "limiterByMode") as? Bool ?? false
+        sleepEQ = d.object(forKey: "sleepEQEnabled") as? Bool ?? false
+        sleepEQIntensity = d.object(forKey: "sleepEQIntensity") as? Double ?? 1.0
+        beatRouting = d.string(forKey: "beatRouting") ?? "auto"
+    }
+
+    /// Re-read from UserDefaults after a Backup restore. Reassigning fires didSet, re-persisting
+    /// (harmless) and re-applying each side-effect — exactly what restore needs.
+    func reload() {
+        let d = UserDefaults.standard
+        skipInterval = d.object(forKey: "skipInterval") as? Double ?? 15
+        stereoWidth = d.object(forKey: "stereoWidth") as? Double ?? 1.0
+        nightLimiter = d.object(forKey: "nightLimiterEnabled") as? Bool ?? AppConfig.nightLimiterEnabled
+        limiterByMode = d.object(forKey: "limiterByMode") as? Bool ?? false
+        sleepEQ = d.object(forKey: "sleepEQEnabled") as? Bool ?? false
+        sleepEQIntensity = d.object(forKey: "sleepEQIntensity") as? Double ?? 1.0
+        beatRouting = d.string(forKey: "beatRouting") ?? "auto"
+    }
+}
+
 final class AudioEngine: ObservableObject {
     let queueManager = PodcastQueueManager()
     let connectivity = Connectivity()
+    /// Comfort/playback settings bound by SettingsView (observed there directly, not via the engine).
+    let settings = PlaybackSettings()
     let sleepTimer = SleepTimerService()
     let pomodoro = PomodoroService()
     /// High-frequency podcast position (progress/elapsed/duration). Owned here but its
@@ -79,11 +144,12 @@ final class AudioEngine: ObservableObject {
     }
     /// Seconds the skip-back / skip-forward controls (in-app + lock screen) jump. One of
     /// {10,15,30,45} so the matching SF Symbol (gobackward.N / goforward.N) always exists.
-    @Published var skipInterval: Double {
-        didSet {
-            UserDefaults.standard.set(skipInterval, forKey: "skipInterval")
-            podPlayer.skipInterval = skipInterval
-        }
+    // The comfort/playback settings below are owned by the `settings` child (PlaybackSettings) so
+    // SettingsView observes just that, not the whole engine. These computed passthroughs keep every
+    // other reader (NowPlayingSheet, MiniPlayer, lock-screen glyphs, internal logic) unchanged; the
+    // setters route to `settings`, whose didSet persists + applies the side-effect via callbacks.
+    var skipInterval: Double {
+        get { settings.skipInterval } set { settings.skipInterval = newValue }
     }
 
     /// SF Symbol names for the skip controls. `gobackward.N` / `goforward.N` only exist for a
@@ -96,45 +162,30 @@ final class AudioEngine: ObservableObject {
     var skipForwardSymbol: String {
         Self.skipGlyphSizes.contains(Int(skipInterval)) ? "goforward.\(Int(skipInterval))" : "goforward"
     }
-    
-    @Published var nightLimiter: Bool {
-        didSet {
-            UserDefaults.standard.set(nightLimiter, forKey: "nightLimiterEnabled")
-            podPlayer.nightLimiterEnabled = nightLimiter
-        }
+
+    var nightLimiter: Bool {
+        get { settings.nightLimiter } set { settings.nightLimiter = newValue }
     }
     /// When on, the Night Limiter follows the mode: ON while sleeping (soften loud spikes so
     /// they don't jolt you awake), OFF while focusing (keep full dynamics).
-    @Published var limiterByMode: Bool {
-        didSet {
-            UserDefaults.standard.set(limiterByMode, forKey: "limiterByMode")
-            applyLimiterForMode()
-        }
+    var limiterByMode: Bool {
+        get { settings.limiterByMode } set { settings.limiterByMode = newValue }
     }
 
     private func applyLimiterForMode() {
         if limiterByMode { nightLimiter = !focusMode }
     }
-    @Published var sleepEQ: Bool {
-        didSet {
-            UserDefaults.standard.set(sleepEQ, forKey: "sleepEQEnabled")
-            podPlayer.sleepEQEnabled = sleepEQ
-        }
+    var sleepEQ: Bool {
+        get { settings.sleepEQ } set { settings.sleepEQ = newValue }
     }
-    @Published var sleepEQIntensity: Double {
-        didSet {
-            UserDefaults.standard.set(sleepEQIntensity, forKey: "sleepEQIntensity")
-            podPlayer.sleepEQIntensity = sleepEQIntensity
-        }
+    var sleepEQIntensity: Double {
+        get { settings.sleepEQIntensity } set { settings.sleepEQIntensity = newValue }
     }
     /// Which output the entrainment beats should assume: "auto" (follow the route), "headphones"
     /// (always true binaural), or "speaker" (always isochronic). A true binaural beat collapses
     /// on a speaker, so this picks the speaker-safe isochronic path when there are no headphones.
-    @Published var beatRouting: String {
-        didSet {
-            UserDefaults.standard.set(beatRouting, forKey: "beatRouting")
-            syncBeatMode()
-        }
+    var beatRouting: String {
+        get { settings.beatRouting } set { settings.beatRouting = newValue }
     }
     
     // Persisted mixes (Last Night resume snapshot + saved sound presets) and their storage live
@@ -195,11 +246,8 @@ final class AudioEngine: ObservableObject {
             syncAllVolumes()
         }
     }
-    @Published var stereoWidth: Double {
-        didSet {
-            UserDefaults.standard.set(stereoWidth, forKey: "stereoWidth")
-            genEngine.setWidth(stereoWidth)
-        }
+    var stereoWidth: Double {
+        get { settings.stereoWidth } set { settings.stereoWidth = newValue }
     }
     // Curated sound palettes per mode — Sleep and Focus deliberately share no sounds.
     // Mode-scoped palettes. Pink is the one deliberate cross-mode sound: it has the strongest
@@ -268,10 +316,11 @@ final class AudioEngine: ObservableObject {
         }
         self.binauralPreset = UserDefaults.standard.string(forKey: "binauralPreset") ?? "delta"
         self.playbackSpeed = UserDefaults.standard.object(forKey: "playbackSpeed") as? Double ?? 1.0
-        self.skipInterval = UserDefaults.standard.object(forKey: "skipInterval") as? Double ?? 15
         self.masterVolume = UserDefaults.standard.object(forKey: "masterVolume") as? Double ?? 1.0
-        self.stereoWidth = UserDefaults.standard.object(forKey: "stereoWidth") as? Double ?? 1.0
         self.focusMode = UserDefaults.standard.object(forKey: "focusMode") as? Bool ?? false
+        // skipInterval / stereoWidth / nightLimiter / limiterByMode / sleepEQ / sleepEQIntensity /
+        // beatRouting are loaded by the `settings` child (PlaybackSettings.init) and reached via
+        // computed passthroughs; their side-effect callbacks are wired below.
 
         // Migration: if old sleepSafeAudio exists, remove old proxy settings
         if UserDefaults.standard.object(forKey: "sleepSafeAudio") != nil {
@@ -279,11 +328,6 @@ final class AudioEngine: ObservableObject {
             UserDefaults.standard.removeObject(forKey: "audioProxyUrl")
         }
         
-        self.nightLimiter = UserDefaults.standard.object(forKey: "nightLimiterEnabled") as? Bool ?? AppConfig.nightLimiterEnabled
-        self.limiterByMode = UserDefaults.standard.object(forKey: "limiterByMode") as? Bool ?? false
-        self.sleepEQ = UserDefaults.standard.object(forKey: "sleepEQEnabled") as? Bool ?? false
-        self.sleepEQIntensity = UserDefaults.standard.object(forKey: "sleepEQIntensity") as? Double ?? 1.0
-        self.beatRouting = UserDefaults.standard.string(forKey: "beatRouting") ?? "auto"
         // podPlayer.nightLimiterEnabled / .sleepEQEnabled are pushed below, after all
         // stored properties are initialized (reading a @Published mid-init is disallowed).
         
@@ -313,7 +357,17 @@ final class AudioEngine: ObservableObject {
         //     Auto-Play / Shuffle toggles) observe it directly.
         //   - mixStore (user-action): HomeView (lastMix) + MixDrawer (savedPresets) observe it.
         pomodoro.chimeFn = { [weak self] in self?.chime.play() }
-        
+
+        // PlaybackSettings holds the values + persistence; these callbacks apply each change to the
+        // live audio path (the side-effects that used to live in the engine's @Published didSets).
+        settings.onSkipInterval = { [weak self] v in self?.podPlayer.skipInterval = v }
+        settings.onStereoWidth = { [weak self] v in self?.genEngine.setWidth(v) }
+        settings.onNightLimiter = { [weak self] v in self?.podPlayer.nightLimiterEnabled = v }
+        settings.onLimiterByMode = { [weak self] in self?.applyLimiterForMode() }
+        settings.onSleepEQ = { [weak self] v in self?.podPlayer.sleepEQEnabled = v }
+        settings.onSleepEQIntensity = { [weak self] v in self?.podPlayer.sleepEQIntensity = v }
+        settings.onBeatRouting = { [weak self] in self?.syncBeatMode() }
+
         queueManager.loadPodcastFn = { [weak self] url, id, title, resume in
             self?.podTitle = title
             self?.loadPodcast(url, id: id, resume: resume)
@@ -740,14 +794,10 @@ final class AudioEngine: ObservableObject {
         }
         binauralPreset = d.string(forKey: "binauralPreset") ?? "delta"
         playbackSpeed = d.object(forKey: "playbackSpeed") as? Double ?? 1.0
-        skipInterval = d.object(forKey: "skipInterval") as? Double ?? 15
         masterVolume = d.object(forKey: "masterVolume") as? Double ?? 1.0
-        stereoWidth = d.object(forKey: "stereoWidth") as? Double ?? 1.0
-        beatRouting = d.string(forKey: "beatRouting") ?? "auto"
-        nightLimiter = d.object(forKey: "nightLimiterEnabled") as? Bool ?? AppConfig.nightLimiterEnabled
-        limiterByMode = d.object(forKey: "limiterByMode") as? Bool ?? false
-        sleepEQ = d.object(forKey: "sleepEQEnabled") as? Bool ?? false
-        sleepEQIntensity = d.object(forKey: "sleepEQIntensity") as? Double ?? 1.0
+        // skipInterval / stereoWidth / beatRouting / nightLimiter / limiterByMode / sleepEQ /
+        // sleepEQIntensity live on the settings child; reload re-reads + re-applies them.
+        settings.reload()
         focusMode = d.object(forKey: "focusMode") as? Bool ?? false   // didSet reconciles palette
 
         mixStore.reloadFromDisk()
