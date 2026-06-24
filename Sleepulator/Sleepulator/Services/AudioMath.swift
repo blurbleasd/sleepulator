@@ -19,6 +19,17 @@ public struct AudioMath {
         return (dL, dR)
     }
     
+    /// Maps a scrubber position (0…1) to a seek time, clamped to the track and snapped to the exact
+    /// start when within `snapWithin` seconds. On a long episode, one pixel of slider travel is tens
+    /// of seconds, so dragging "back to the start" can't land on 0:00 — the snap makes it reliable.
+    /// Returns nil for an unknown / non-finite duration (seeking to a NaN time is silently ignored
+    /// by AVPlayer, which reads as "the seek did nothing"). Pure + static so it's unit-testable.
+    public static func scrubTargetSeconds(progress: Double, duration: Double, snapWithin: Double = 2.0) -> Double? {
+        guard duration.isFinite, duration > 0 else { return nil }
+        let seconds = min(max(progress, 0), 1) * duration
+        return seconds < snapWithin ? 0 : seconds
+    }
+
     public static func getFadeMultiplier(timerRemaining: Double, fadeDuration: Double = 600.0) -> Float {
         if timerRemaining <= 0 {
             return 0.0   // hard stop fires here; fully silent

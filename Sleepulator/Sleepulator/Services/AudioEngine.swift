@@ -840,7 +840,8 @@ final class AudioEngine: ObservableObject {
     }
     
     func seekPodcast(to progress: Double) {
-        let seconds = progress * podcastDuration
+        // Snaps near-start scrubs to exactly 0:00 and guards a non-finite duration (see AudioMath).
+        guard let seconds = AudioMath.scrubTargetSeconds(progress: progress, duration: podcastDuration) else { return }
         podPlayer.seekTo(seconds: seconds)
     }
 
