@@ -3,6 +3,7 @@ import Combine
 import AVFoundation
 import Network
 import SwiftUI
+import MusicKit
 
 enum AppConfig {
     static let nightLimiterEnabled = true
@@ -103,6 +104,10 @@ final class AudioEngine: ObservableObject {
 
     private let genEngine = GenerativeAudioEngine()
     private let podPlayer = PodcastPlayer()
+    /// Apple Music as a parallel, Focus-only source. DRM means it can't go through the generative
+    /// mixer or the limiter tap — it plays alongside via MusicKit's system player with the session
+    /// in `.mixWithOthers`. See APPLE-MUSIC-FOCUS-SPEC.md.
+    private let appleMusic = AppleMusicPlayer()
     private let chime = ChimePlayer()
     private let storageQueue = DispatchQueue(label: "app.sleepulator.storage", qos: .utility)
     
@@ -119,7 +124,9 @@ final class AudioEngine: ObservableObject {
     }
     
     @Published var noiseType: String {
-        didSet { UserDefaults.standard.set(noiseType, forKey: "noiseType"); syncGenEngine() }
+        // Persist off the main thread (matches the volume setters); the audio-affecting
+        // syncGenEngine() stays synchronous so the sound changes immediately.
+        didSet { let v = noiseType; storageQueue.async { UserDefaults.standard.set(v, forKey: "noiseType") }; syncGenEngine() }
     }
     /// Cap on *extra* stacked noise layers (the primary `noiseType` is always layer 0).
     static let maxExtraLayers = kMaxNoiseLayers - 1
@@ -137,7 +144,9 @@ final class AudioEngine: ObservableObject {
         }
     }
     @Published var binauralPreset: String {
-        didSet { UserDefaults.standard.set(binauralPreset, forKey: "binauralPreset"); syncGenEngine() }
+        // Persist off the main thread (matches the volume setters); syncGenEngine() stays
+        // synchronous so the beat changes immediately.
+        didSet { let v = binauralPreset; storageQueue.async { UserDefaults.standard.set(v, forKey: "binauralPreset") }; syncGenEngine() }
     }
     @Published var playbackSpeed: Double {
         didSet { UserDefaults.standard.set(playbackSpeed, forKey: "playbackSpeed"); podPlayer.setSpeed(playbackSpeed) }
@@ -225,6 +234,22 @@ final class AudioEngine: ObservableObject {
     @Published var binauralOn = false { didSet { syncGenEngine(); if !isMasterPauseTransition { lastActiveSnapshot.bin = binauralOn } } }
     @Published var isPodPlaying = false { didSet { syncGenEngine(); if !isMasterPauseTransition { lastActiveSnapshot.pod = isPodPlaying } } }
     var isAnythingPlaying: Bool { isPodPlaying || noiseOn || binauralOn }
+
+    // MARK: Apple Music (Focus-only parallel source)
+    // Low-frequency toggles, safe to @Published (a track change fires at most once per song, not
+    // the 1 Hz churn the coarse-ObservableObject rule warns about). Deliberately NOT part of
+    // `isAnythingPlaying` / the master-transport snapshot in v1 — it's a separate, system-owned
+    // player, kept out of the resume-snapshot machinery to avoid scope creep.
+    @Published var appleMusicOn = false { didSet { syncAllVolumes() } }
+    @Published var appleMusicTitle = ""
+    /// True once the user has chosen something to play this session (picker CTA vs. on/off toggle).
+    var hasAppleMusicSelection: Bool { appleMusic.hasSelection }
+
+    /// How far the generative bed (noise + binaural) ducks while Apple Music plays — option (b) of
+    /// the balance model: Apple Music plays at device volume and can't be level-shaped (DRM), so we
+    /// pull the *bed* down underneath it instead. 0.45 ≈ −7 dB; tuned by ear, adjust on device.
+    static let musicDuckLevel: Double = 0.45
+    private var appleMusicDuck: Double { appleMusicOn ? Self.musicDuckLevel : 1.0 }
     
     // Not @Published: no view renders this, and the RMS tap fires ~20×/sec. Publishing it
     // invalidated HomeView + every child holding `audio` 20 times a second all night for a
@@ -256,7 +281,11 @@ final class AudioEngine: ObservableObject {
     static let sleepNoises = ["brown", "rain", "ocean", "pink", "green", "forest"]
     static let focusNoises = ["pink", "fan", "white", "gray"]
     static let sleepBinaurals = ["delta", "theta"]
-    static let focusBinaurals = ["alpha", "smr", "beta", "gamma"]
+    // Focus binaurals: alpha → beta → gamma, a clean low/mid/high progression. SMR (13 Hz) was
+    // retired — it's a neurofeedback construct with little binaural-beat-specific evidence and sat
+    // as a near-duplicate between alpha and beta. A persisted/saved "smr" is snapped to alpha by
+    // reconcileSoundsToMode (and aliased to alpha in AudioMath.getCarrierAndBeat as a backstop).
+    static let focusBinaurals = ["alpha", "beta", "gamma"]
 
     @Published var focusMode: Bool {
         didSet {
@@ -267,6 +296,9 @@ final class AudioEngine: ObservableObject {
             reconcileSoundsToMode()
             // If the limiter follows the mode, update it (Sleep = on, Focus = off).
             applyLimiterForMode()
+            // Apple Music is Focus-only: leaving Focus stops it and reverts the session to
+            // exclusive playback so Sleep's all-night behavior (and the limiter) is unaffected.
+            if !focusMode { stopAppleMusic() }
         }
     }
 
@@ -296,8 +328,11 @@ final class AudioEngine: ObservableObject {
     private func syncAllVolumes() {
         let masterMult = isMuted ? 0.0 : masterVolume
         // Master is a fast, per-sample-smoothed multiplier; the timer fade is the slow
-        // ramp. Keep them separate so the master slider responds immediately.
-        genEngine.setMaster(masterMult)
+        // ramp. Keep them separate so the master slider responds immediately. The bed (noise +
+        // binaural) is additionally ducked under Apple Music — `appleMusicDuck` rides through the
+        // master multiplier, so it gets the same per-sample smoothing (a gentle dip/rise, not a
+        // jump, when music starts/stops). The podcast isn't ducked: it's paused while music plays.
+        genEngine.setMaster(masterMult * appleMusicDuck)
         genEngine.setFade(multiplier: fadeMultiplier)
         podPlayer.setVolume(podVolume * masterMult * fadeMultiplier)
     }
@@ -469,7 +504,24 @@ final class AudioEngine: ObservableObject {
         podPlayer.backgroundTick = { [weak self] in
             self?.sleepTimer.backgroundTick()
         }
-        
+
+        // Apple Music (Focus-only). Republish the system player's coarse state and yield the
+        // lock-screen now-playing info to MusicKit while it's playing (one transport owner).
+        appleMusic.onPlaybackStateChanged = { [weak self] playing in
+            guard let self else { return }
+            self.appleMusicOn = playing
+            self.podPlayer.suppressNowPlaying = playing
+            // When the music stops on its own (track list ended, user paused from the lock screen),
+            // drop `.mixWithOthers` so the app returns to exclusive playback.
+            if !playing { self.setAppleMusicMixing(false) }
+        }
+        appleMusic.onNowPlayingChanged = { [weak self] title, _ in
+            self?.appleMusicTitle = title
+        }
+        appleMusic.onNote = { [weak self] note in
+            DispatchQueue.main.async { self?.playbackNote = note }
+        }
+
         // Audio-session plumbing is owned by AudioSessionController (Slice A3). It forwards
         // each event here via closures, hopping to the main queue first (AVAudioSession delivers
         // these on an arbitrary system thread) so the handlers can safely touch @Published state
@@ -620,6 +672,63 @@ final class AudioEngine: ObservableObject {
     func togglePodcast() {
         if isPodPlaying { podPlayer.pause() } else { resumePodcast() }
     }
+
+    // MARK: Apple Music (Focus-only parallel source)
+
+    /// Ask for Apple Music authorization (prompts on first use); for the picker's gating.
+    func ensureAppleMusicAuthorized() async -> Bool {
+        await appleMusic.ensureAuthorized()
+    }
+
+    /// Catalog search for the picker UI.
+    func searchAppleMusic(_ term: String) async -> MusicCatalogSearchResponse? {
+        await appleMusic.search(term)
+    }
+
+    /// Begin (or replace) the Apple Music queue with a chosen item and play it. Authorizes first,
+    /// pauses any podcast (one spoken/music transport at a time), and layers `.mixWithOthers` onto
+    /// the session so our activation doesn't stop MusicKit's player.
+    func startAppleMusic<Item: PlayableMusicItem>(_ item: Item) {
+        Task { @MainActor in
+            guard await appleMusic.ensureAuthorized() else { return }
+            if isPodPlaying { podPlayer.pause() }
+            setAppleMusicMixing(true)
+            await appleMusic.play(item)
+        }
+    }
+
+    /// Toggle the existing Apple Music selection (no-op if nothing chosen yet).
+    func toggleAppleMusic() {
+        Task { @MainActor in
+            if appleMusic.isPlaying {
+                appleMusic.pause()
+            } else {
+                guard appleMusic.hasSelection else { return }
+                if isPodPlaying { podPlayer.pause() }
+                setAppleMusicMixing(true)
+                await appleMusic.resume()
+            }
+        }
+    }
+
+    /// Stop Apple Music and revert the session to exclusive playback. Safe to call when idle.
+    private func stopAppleMusic() {
+        appleMusic.stop()
+        appleMusicOn = false
+        podPlayer.suppressNowPlaying = false
+        setAppleMusicMixing(false)
+    }
+
+    /// Add/remove `.mixWithOthers` and re-assert the category + activation. `.mixWithOthers` is on
+    /// ONLY while Apple Music is the active Focus source; the rest of the time the app keeps
+    /// exclusive `.playback` (the all-night Sleep default).
+    private func setAppleMusicMixing(_ on: Bool) {
+        let desired: AVAudioSession.CategoryOptions = on ? [.mixWithOthers] : []
+        guard AudioSessionConfig.options != desired else { return }
+        AudioSessionConfig.options = desired
+        AudioSessionConfig.applyCategory()
+        Log.activateAudioSession("apple music mixing=\(on)")
+    }
     
     /// First-run "show me the magic" start: bring up a layered noise + binaural bed (using the
     /// stored defaults — brown + delta for Sleep) so the very first tap demonstrates that the app
@@ -652,6 +761,7 @@ final class AudioEngine: ObservableObject {
         noiseOn = false
         binauralOn = false
         if isPodPlaying { podPlayer.pause() }
+        if appleMusic.isPlaying { appleMusic.pause() }
         isMasterPauseTransition = false
     }
     
@@ -713,6 +823,18 @@ final class AudioEngine: ObservableObject {
         return parts.isEmpty ? "My Mix" : parts.joined(separator: " + ")
     }
 
+    /// True if saving under `name` would overwrite an existing preset in the current mode —
+    /// using the same trim + empty→`defaultPresetName()` fallback and case-insensitive match that
+    /// `savePreset` uses, so the UI's "replace existing?" check agrees with what save actually does.
+    func presetWouldOverwrite(named name: String) -> Bool {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let finalName = trimmed.isEmpty ? defaultPresetName() : trimmed
+        let mode = focusMode ? "focus" : "sleep"
+        return mixStore.savedPresets.contains {
+            $0.mode == mode && $0.name.caseInsensitiveCompare(finalName) == .orderedSame
+        }
+    }
+
     /// Save the current ambient recipe as a named preset for this mode. A same-name preset in
     /// the same mode is overwritten, not duplicated. Captures the current backdrop too.
     func savePreset(named name: String) {
@@ -769,6 +891,7 @@ final class AudioEngine: ObservableObject {
         noiseOn = false
         binauralOn = false
         podPlayer.stop()
+        stopAppleMusic()
         sleepTimer.cancelTimer()
     }
 
@@ -893,7 +1016,7 @@ final class AudioEngine: ObservableObject {
 
             // Reactivate the session before resuming whichever source was active. Previously
             // only the generative branch did this, so a podcast-only user got silence.
-            try? AVAudioSession.sharedInstance().setActive(true)
+            Log.activateAudioSession("post-interruption")
 
             if noiseOn || binauralOn {
                 genEngine.handleInterruption(shouldResume: true)

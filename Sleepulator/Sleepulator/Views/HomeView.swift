@@ -2,9 +2,15 @@ import SwiftUI
 
 struct HomeView: View {
     @ObservedObject var audio: AudioEngine
-    /// Observed directly so the "Resume · …" status (lastMix) refreshes after Phase 3 dropped the
-    /// mixStore objectWillChange forward into AudioEngine.
-    @ObservedObject var mixStore: MixStore
+    /// Held UNobserved (plain `let`), passed down to `MixDrawer` which observes it. HomeView's only
+    /// reactive use of mix state is the "Resume · …" status (`lastMix`), and `lastMix` is written
+    /// only in `saveLastMix()` (pauseAll/stopAll) — which always flips `audio` state HomeView
+    /// already observes, so the status still refreshes via that re-render. Observing `mixStore`
+    /// here would mean saving a *preset* (a `savedPresets` change) re-renders this whole body,
+    /// including the live Metal backdrop — a main-thread/GPU burst that can starve the real-time
+    /// audio render thread and make the bed stutter mid-save. The preset list re-renders inside
+    /// `MixDrawer`, which is where it belongs.
+    let mixStore: MixStore
     /// Drives the Podcasts-tab deep link when the user taps the (empty) podcast layer.
     @Binding var selectedTab: Int
     /// One-time first-run coachmark: points at "Build mix" so a new user discovers that the app
@@ -14,6 +20,11 @@ struct HomeView: View {
     @State private var isPlayPressed = false
     @State private var showBreathing = false
     @State private var showMix = false
+    /// Opt-in ~1-minute breathing wind-down before a Sleep session starts.
+    @AppStorage("breathingOnRamp") private var breathingOnRamp = false
+    @State private var showOnRamp = false
+    /// The deferred "begin playback" action, run after the on-ramp completes (or is skipped over).
+    @State private var pendingStart: (() -> Void)?
     // Ambient screensaver: while playing in Sleep mode, the controls fade after a spell of
     // no interaction, leaving just the sky + moon. A tap brings them back. The flag lives on
     // `audio` so ContentView's tab bar + mini-player can fade with the home chrome.
@@ -109,7 +120,7 @@ struct HomeView: View {
 
     // The currently-playing layers, shown as pills under the orb.
     private var activeLayers: [String] {
-        let binLabels = ["delta": "Deep", "theta": "Drift", "alpha": "Relax", "smr": "Calm", "beta": "Concentrate", "gamma": "Focus"]
+        let binLabels = ["delta": "Deep", "theta": "Drift", "alpha": "Relax", "beta": "Concentrate", "gamma": "Focus"]
         var p: [String] = []
         if audio.noiseOn { p.append(audio.noiseType.capitalized) }
         if audio.binauralOn { p.append(binLabels[audio.binauralPreset] ?? audio.binauralPreset.capitalized) }
@@ -145,17 +156,31 @@ struct HomeView: View {
     }
 
     private func heroTap() {
+        // Already playing → just toggle (pause). The on-ramp is only for *beginning* a session.
         if audio.isAnythingPlaying {
             audio.toggleMasterTransport()
-        } else if let mix = mixStore.lastMix,
-                  (mix.noiseOn || mix.binauralOn || mix.podcastUrl != nil) {
-            audio.resumeMix(mix)
+            return
+        }
+
+        // Resolve how this tap would begin playback.
+        let begin: () -> Void
+        if let mix = mixStore.lastMix,
+           (mix.noiseOn || mix.binauralOn || mix.podcastUrl != nil) {
+            begin = { audio.resumeMix(mix) }
         } else if !hasCompletedFirstRun {
             // First-ever play with nothing to resume: start a layered bed (noise + binaural)
             // instead of a single bare noise, so the first tap shows what the app actually does.
-            audio.startDefaultMix()
+            begin = { audio.startDefaultMix() }
         } else {
-            audio.toggleMasterTransport()
+            begin = { audio.toggleMasterTransport() }
+        }
+
+        // Optional breathing wind-down before Sleep playback (never in Focus — Pomodoro starts now).
+        if breathingOnRamp && !audio.focusMode {
+            pendingStart = begin
+            showOnRamp = true
+        } else {
+            begin()
         }
     }
 
@@ -376,6 +401,20 @@ struct HomeView: View {
         }
         .fullScreenCover(isPresented: $showBreathing) {
             BreathingView(isPresented: $showBreathing)
+        }
+        .fullScreenCover(isPresented: $showOnRamp) {
+            BreathingOnRampView(
+                onBegin: {
+                    showOnRamp = false
+                    let start = pendingStart
+                    pendingStart = nil
+                    start?()
+                },
+                onCancel: {
+                    showOnRamp = false
+                    pendingStart = nil
+                }
+            )
         }
         .sheet(isPresented: $showTimerActionSheet) {
             TimerSelectionSheet(audio: audio, isPresented: $showTimerActionSheet, pal: pal)
@@ -705,6 +744,8 @@ struct MixDrawer: View {
     @AppStorage("sceneFocus") private var focusSceneId = "energy"
     @State private var showNameDialog = false
     @State private var draftName = ""
+    @State private var showOverwriteConfirm = false
+    @State private var pendingPresetName = ""
 
     private var currentMode: String { audio.focusMode ? "focus" : "sleep" }
     private var modePresets: [SoundPreset] { mixStore.savedPresets.filter { $0.mode == currentMode } }
@@ -755,12 +796,30 @@ struct MixDrawer: View {
         .alert("Name your mix", isPresented: $showNameDialog) {
             TextField("Mix name", text: $draftName)
             Button("Save") {
-                audio.savePreset(named: draftName)
-                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                let trimmed = draftName.trimmingCharacters(in: .whitespacesAndNewlines)
+                let resolved = trimmed.isEmpty ? audio.defaultPresetName() : trimmed
+                if audio.presetWouldOverwrite(named: resolved) {
+                    // Don't clobber a same-name preset silently — confirm first. Defer to the next
+                    // runloop so this alert fully dismisses before the confirm alert presents.
+                    pendingPresetName = resolved
+                    DispatchQueue.main.async { showOverwriteConfirm = true }
+                } else {
+                    audio.savePreset(named: resolved)
+                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                }
             }
             Button("Cancel", role: .cancel) { }
         } message: {
             Text("Save this soundscape to reuse it anytime.")
+        }
+        .alert("Replace this mix?", isPresented: $showOverwriteConfirm) {
+            Button("Replace", role: .destructive) {
+                audio.savePreset(named: pendingPresetName)
+                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("“\(pendingPresetName)” already exists in this mode. Replacing it overwrites the saved sounds.")
         }
     }
 }
@@ -1071,6 +1130,7 @@ struct MixPanel: View {
     @ObservedObject var audio: AudioEngine
     let pal: Palette
     var onPickEpisode: () -> Void = {}
+    @State private var showingMusicPicker = false
 
     /// The noise sounds available in the current mode (Sleep vs Focus palettes share no sounds).
     private var noisePalette: [String] {
@@ -1134,8 +1194,8 @@ struct MixPanel: View {
                 isOn: $audio.binauralOn,
                 volume: $audio.binVolume,
                 pal: pal,
-                options: audio.focusMode ? ["alpha", "smr", "beta", "gamma"] : ["delta", "theta"],
-                optionLabels: ["delta":"Deep","theta":"Drift","alpha":"Relax","smr":"Calm","beta":"Concentrate","gamma":"Focus"],
+                options: audio.focusMode ? ["alpha", "beta", "gamma"] : ["delta", "theta"],
+                optionLabels: ["delta":"Deep","theta":"Drift","alpha":"Relax","beta":"Concentrate","gamma":"Focus"],
                 selection: $audio.binauralPreset
             )
             .glassPanel()
@@ -1182,8 +1242,91 @@ struct MixPanel: View {
                 .accessibilityLabel("Podcast, no episode loaded")
                 .accessibilityHint("Opens the Podcasts tab to choose an episode")
             }
+
+            // Apple Music — Focus only. DRM means it can't be a true mixer channel (no volume
+            // slider / limiter); it plays alongside via the system player. See APPLE-MUSIC-FOCUS-SPEC.
+            if audio.focusMode {
+                AppleMusicMixRow(audio: audio, pal: pal) { showingMusicPicker = true }
+                    .glassPanel()
+            }
         }
         .padding(.horizontal, 20)
+        .sheet(isPresented: $showingMusicPicker) {
+            AppleMusicPickerView(audio: audio)
+        }
+    }
+}
+
+/// The Focus-mode Apple Music row: a "choose music" call-to-action until something is selected,
+/// then an on/off toggle. No volume slider on purpose — Apple Music plays at the device's system
+/// music volume (the DRM stream can't be level-shaped in-app); the caption says so.
+struct AppleMusicMixRow: View {
+    @ObservedObject var audio: AudioEngine
+    let pal: Palette
+    var onPick: () -> Void
+
+    var body: some View {
+        if audio.hasAppleMusicSelection {
+            HStack(spacing: 12) {
+                Image(systemName: "music.note")
+                    .frame(minWidth: 30)
+                    .foregroundColor(audio.appleMusicOn ? pal.accent : pal.dim)
+                    .font(.title3)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(audio.appleMusicOn && !audio.appleMusicTitle.isEmpty ? audio.appleMusicTitle : "Apple Music")
+                        .font(.system(.headline, design: .rounded))
+                        .foregroundColor(pal.text)
+                        .lineLimit(1)
+                    Text("Plays over your sounds · device volume")
+                        .font(.caption)
+                        .foregroundColor(pal.dim.opacity(0.8))
+                }
+                Spacer()
+                Button(action: onPick) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundColor(pal.accent)
+                        .frame(width: 36, height: 36)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Change Apple Music selection")
+                Toggle("", isOn: Binding(
+                    get: { audio.appleMusicOn },
+                    set: { _ in audio.toggleAppleMusic() }
+                ))
+                .labelsHidden()
+                .tint(pal.accent)
+            }
+            .frame(minHeight: 44)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Apple Music")
+        } else {
+            Button(action: onPick) {
+                HStack(spacing: 12) {
+                    Image(systemName: "music.note")
+                        .frame(minWidth: 30)
+                        .foregroundColor(pal.dim)
+                        .font(.title3)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Apple Music")
+                            .font(.system(.headline, design: .rounded))
+                            .foregroundColor(pal.dim)
+                        Text("Choose music")
+                            .font(.caption)
+                            .foregroundColor(pal.dim.opacity(0.7))
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundColor(pal.dim.opacity(0.7))
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .frame(minHeight: 44)
+            .accessibilityLabel("Apple Music, nothing selected")
+            .accessibilityHint("Opens Apple Music search to choose something to play")
+        }
     }
 }
 

@@ -2,6 +2,24 @@ import Foundation
 import AVFoundation
 import Network
 
+/// Single source of truth for the shared playback session's category options. The app is
+/// exclusive-`.playback` by default (the all-night Sleep case must not let other audio bleed in),
+/// but while Apple Music is an active *parallel* Focus source we layer in `.mixWithOthers` so our
+/// session activation doesn't duck or stop MusicKit's system player. Centralized here because the
+/// category is set from two places (this controller's `activateSession` and
+/// `GenerativeAudioEngine.setupEngine`); both must read the same desired options or a generative
+/// (re)start would silently clobber the mix option mid-session. See APPLE-MUSIC-FOCUS-SPEC.md.
+enum AudioSessionConfig {
+    /// Extra options layered onto the base `.playback` category. Empty = exclusive playback.
+    static var options: AVAudioSession.CategoryOptions = []
+
+    /// Re-assert the `.playback` category with the current `options`. Does NOT activate the
+    /// session — callers that need it active follow with `Log.activateAudioSession(_:)`.
+    static func applyCategory() {
+        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: options)
+    }
+}
+
 /// Owns the audio-session plumbing AudioEngine used to carry inline (Slice A3 of
 /// ARCHITECTURE-REFACTOR-PLAN.md): session activation, the interruption / route-change /
 /// app-background observers, and the NWPathMonitor. It owns only the *plumbing* —
@@ -23,9 +41,8 @@ final class AudioSessionController {
     /// Activate the shared playback session. (AudioEngine's interruption-resume path
     /// re-activates the session directly; this is the initial activation at startup.)
     func activateSession() {
-        let s = AVAudioSession.sharedInstance()
-        try? s.setCategory(.playback, mode: .default, options: [])
-        try? s.setActive(true)
+        AudioSessionConfig.applyCategory()
+        try? AVAudioSession.sharedInstance().setActive(true)
     }
 
     func start() {

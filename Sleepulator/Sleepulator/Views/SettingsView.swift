@@ -14,23 +14,27 @@ struct SettingsView: View {
     @ObservedObject var settings: PlaybackSettings
     @AppStorage("bedtimeMode") private var bedtimeMode = false
     @AppStorage("autoNightDim") private var autoNightDim = true
+    @AppStorage("breathingOnRamp") private var breathingOnRamp = false
 
     /// Scalar UserDefaults keys included in Backup/Restore. Single source of truth for both the
     /// export and the restore whitelist: restore writes nothing outside this set plus the
     /// file-backed collections below, so a malformed or hostile backup can't inject arbitrary
     /// defaults. Keep new persisted settings in sync here.
-    private static let backupScalarKeys: [String] = [
+    // `nonisolated` so the off-main backup export/import (Task.detached) can read these without a
+    // cross-actor hop — the View is @MainActor by default (SWIFT_DEFAULT_ACTOR_ISOLATION), which
+    // would otherwise make this access an error under Swift 6 mode. Plain Sendable data.
+    private nonisolated static let backupScalarKeys: [String] = [
         "noiseVolume", "noiseType", "binVolume", "binauralPreset", "podVolume", "stereoWidth",
         "masterVolume", "autoPlay", "shuffleQueue", "deleteOnCompletion", "hideFinishedEpisodes",
         "nightLimiterEnabled", "sleepEQEnabled", "sleepEQIntensity", "limiterByMode",
         "beatRouting", "skipInterval", "playbackSpeed", "focusMode", "sceneSleep", "sceneFocus",
-        "bedtimeMode", "autoNightDim", "timerMinutes", "pomoWork", "pomoRest", "pomoLongRest",
-        "pomoCycles"
+        "bedtimeMode", "autoNightDim", "breathingOnRamp", "timerMinutes", "pomoWork", "pomoRest",
+        "pomoLongRest", "pomoCycles"
     ]
 
     /// Backup keys that map to StorageManager files (not UserDefaults), with the Codable type each
     /// must decode into before restore will write it.
-    private static let backupFileBacked: [String: String] = [
+    private nonisolated static let backupFileBacked: [String: String] = [
         "savedPlaylists": "mixes.json",
         "savedPodcasts": "library.json",
         "upNextQueue": "queue.json",
@@ -223,6 +227,26 @@ struct SettingsView: View {
                         .glassPanel()
                         .padding(.horizontal)
                         
+                        // Wind-down
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Wind-down")
+                                .font(.title3.bold())
+                                .foregroundColor(pal.text)
+
+                            Toggle(isOn: $breathingOnRamp) {
+                                Text("Start with a minute of breathing")
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            .toggleStyle(SwitchToggleStyle(tint: pal.accent))
+                            .foregroundColor(pal.dim)
+
+                            Text("When you begin a Sleep session, a calm breathing glow leads for about a minute, then your mix starts automatically. Tap “Start now” to skip ahead.")
+                                .font(.caption)
+                                .foregroundColor(pal.dim)
+                        }
+                        .glassPanel()
+                        .padding(.horizontal)
+
                         // Display
                         VStack(alignment: .leading, spacing: 12) {
                             Text("Display")
@@ -343,7 +367,7 @@ struct SettingsView: View {
     
     /// Re-encode a backup section and confirm it decodes into the Codable type the target file
     /// expects. Returns the JSON bytes to write, or nil if the section is malformed/unexpected.
-    private static func validatedFileData(key: String, value: Any) -> Data? {
+    private nonisolated static func validatedFileData(key: String, value: Any) -> Data? {
         guard let data = try? JSONSerialization.data(withJSONObject: value, options: []) else { return nil }
         let decoder = JSONDecoder()
         let valid: Bool

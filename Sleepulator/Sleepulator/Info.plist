@@ -8,6 +8,11 @@
 	</array>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
+	<!-- MusicKit: shown when the app first requests Apple Music access (Focus-mode mixing).
+	     MusicKit itself is enabled server-side on the App ID's App Services (Developer portal) —
+	     it is NOT a code-signed entitlement, so there is no .entitlements key to add. -->
+	<key>NSAppleMusicUsageDescription</key>
+	<string>Sleepulator uses Apple Music so you can layer your own music with focus sounds in Focus mode.</string>
 	<!-- ATS justification (for App Review): users add arbitrary podcast RSS feeds, and a
 	     large share of episode enclosures are still served over cleartext http://. This is
 	     scoped to MEDIA only (AVPlayer audio) — NOT NSAllowsArbitraryLoads — so app API/web

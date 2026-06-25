@@ -129,6 +129,17 @@ final class PodcastPlayer: NSObject {
     fileprivate let stateLock = NSLock()
     
     var hasPlayer: Bool { player?.currentItem != nil }
+
+    /// When true, `updateNowPlaying` is a no-op so MusicKit's `ApplicationMusicPlayer` can own the
+    /// lock-screen transport + now-playing info while Apple Music is the active Focus source (one
+    /// transport owner at a time — two writers fight over `MPNowPlayingInfoCenter`). Flipped by
+    /// AudioEngine; clearing it re-publishes the podcast's info so the lock screen recovers.
+    var suppressNowPlaying = false {
+        didSet {
+            guard !suppressNowPlaying, oldValue else { return }
+            updateNowPlaying(isPlaying: player?.timeControlStatus == .playing)
+        }
+    }
     
     override init() {
         super.init()
@@ -149,14 +160,25 @@ final class PodcastPlayer: NSObject {
         flushPositionsToDisk()
     }
     
+    /// Cap the resume-position map at `cap` entries, always keeping `currentId` (the episode in
+    /// play) so we never evict the position you're about to need. Pure → the prune rule is
+    /// unit-testable with no disk I/O or singleton. Eviction order among the non-current keys is
+    /// unspecified (dictionary order); only the cap and current-kept invariants are guaranteed.
+    static func prunedPositions(_ positions: [String: Double],
+                                keeping currentId: String?,
+                                cap: Int = 100) -> [String: Double] {
+        guard positions.count > cap else { return positions }
+        var result = positions
+        let toRemove = result.keys.filter { $0 != currentId }.prefix(result.count - cap)
+        for key in toRemove { result.removeValue(forKey: key) }
+        return result
+    }
+
     func flushPositionsToDisk() {
-        if var positions = cachedPositions {
-            if positions.count > 100 {
-                let toRemove = positions.keys.filter { $0 != currentId }.prefix(positions.count - 100)
-                for key in toRemove { positions.removeValue(forKey: key) }
-                cachedPositions = positions
-            }
-            let toSave = positions
+        if let positions = cachedPositions {
+            let pruned = Self.prunedPositions(positions, keeping: currentId)
+            cachedPositions = pruned
+            let toSave = pruned
             storageQueue.async {
                 StorageManager.shared.save(toSave, to: "positions.json")
             }
@@ -322,7 +344,7 @@ final class PodcastPlayer: NSObject {
         // Ensure the session is active before playing. After an interruption ended, the
         // generative branch may not have reactivated it (podcast-only mode), and a
         // lock-screen "play" would otherwise produce silence.
-        try? AVAudioSession.sharedInstance().setActive(true)
+        Log.activateAudioSession("podcast resume")
 
         // Adaptive rewind: nudge back proportionally to how long we were paused so you don't
         // resume mid-sentence (and recover the thread if you nodded off). Seek before play.
@@ -493,6 +515,10 @@ final class PodcastPlayer: NSObject {
     }
 
     private func updateNowPlaying(isPlaying: Bool) {
+        // Yield the now-playing info center to MusicKit while Apple Music is the active Focus
+        // source (see `suppressNowPlaying`). The podcast shouldn't normally be playing then, but a
+        // trailing time-observer tick could otherwise overwrite the music's lock-screen entry.
+        guard !suppressNowPlaying else { return }
         var info: [String: Any] = [
             MPMediaItemPropertyTitle: currentTitle,
             MPMediaItemPropertyArtist: "Sleepulator",

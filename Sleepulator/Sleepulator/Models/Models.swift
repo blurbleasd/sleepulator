@@ -1,6 +1,10 @@
 import Foundation
 
-struct Podcast: Identifiable, Codable, Hashable {
+/// `nonisolated` so this plain data model opts out of the module's default @MainActor isolation
+/// (SWIFT_DEFAULT_ACTOR_ISOLATION): it must be usable — and Codable-decodable — from nonisolated
+/// contexts (Set<Podcast>, the off-main backup import in SettingsView), which is otherwise an error
+/// under Swift 6 mode. With the whole type nonisolated, the members below no longer each need it.
+nonisolated struct Podcast: Identifiable, Codable, Hashable {
     let id: String
     var name: String
     var url: String
@@ -8,14 +12,14 @@ struct Podcast: Identifiable, Codable, Hashable {
     var artworkUrl: String? = nil
 
     // Identity is the id. Without these, synthesized Hashable would compare/hash the whole episode
-    // array — expensive, and the hash churns on every feed refresh. `nonisolated` because the module
-    // defaults to @MainActor isolation, which would otherwise make the conformance main-actor-bound
-    // and unusable from nonisolated contexts (Set<Podcast>, etc.) — an error under Swift 6 mode.
-    nonisolated static func == (lhs: Podcast, rhs: Podcast) -> Bool { lhs.id == rhs.id }
-    nonisolated func hash(into hasher: inout Hasher) { hasher.combine(id) }
+    // array — expensive, and the hash churns on every feed refresh.
+    static func == (lhs: Podcast, rhs: Podcast) -> Bool { lhs.id == rhs.id }
+    func hash(into hasher: inout Hasher) { hasher.combine(id) }
 }
 
-struct Episode: Identifiable, Codable, Equatable, Hashable {
+/// `nonisolated` for the same reason as `Podcast` — a plain data model that must decode and be
+/// hashed off the main actor (Set<Episode>, the backup import). See `Podcast`.
+nonisolated struct Episode: Identifiable, Codable, Equatable, Hashable {
     let id: String
     var title: String
     var audioUrl: String
@@ -23,19 +27,17 @@ struct Episode: Identifiable, Codable, Equatable, Hashable {
     var pubDate: Date?
     var description: String?
     var artworkUrl: String? = nil
-    
+
     // Identity is the id. A custom == alone would leave a synthesized hash(into:) over all fields,
     // breaking the Hashable contract (equal values, unequal hashes); hash on id to match.
-    // `nonisolated` so the conformance isn't main-actor-bound (the module defaults to @MainActor),
-    // which would make Set<Episode> unusable from nonisolated contexts — an error under Swift 6 mode.
-    nonisolated static func == (lhs: Episode, rhs: Episode) -> Bool { lhs.id == rhs.id }
-    nonisolated func hash(into hasher: inout Hasher) { hasher.combine(id) }
+    static func == (lhs: Episode, rhs: Episode) -> Bool { lhs.id == rhs.id }
+    func hash(into hasher: inout Hasher) { hasher.combine(id) }
 }
 
 /// An additional simultaneous noise generator stacked on top of the primary noise (rain + brown,
 /// fan + pink, etc). The primary noise stays modeled by the `noiseType` / `noiseVolume` fields;
 /// these are the *extra* layers, capped at `AudioEngine.maxExtraLayers`.
-struct ExtraNoiseLayer: Codable, Identifiable, Equatable {
+nonisolated struct ExtraNoiseLayer: Codable, Identifiable, Equatable {
     var id: String = UUID().uuidString
     var type: String
     var volume: Double
@@ -44,7 +46,7 @@ struct ExtraNoiseLayer: Codable, Identifiable, Equatable {
 /// The "Last Night" resume snapshot: what was playing when you stopped, INCLUDING the
 /// transient podcast episode, so a tap brings the whole thing back. Distinct from a
 /// `SoundPreset` — this is "resume where I left off," not a reusable recipe.
-struct SavedMix: Codable, Identifiable {
+nonisolated struct SavedMix: Codable, Identifiable {
     var id: String = UUID().uuidString
     var name: String
     var noiseOn: Bool
@@ -70,7 +72,7 @@ struct SavedMix: Codable, Identifiable {
 /// optional backdrop. Deliberately NO podcast — a podcast is transient content, not part of
 /// a recipe you'd want to re-apply weeks later. Loading a preset swaps the soundscape and
 /// leaves any playing podcast alone. (Replaces the old podcast-coupled "saved playlist".)
-struct SoundPreset: Codable, Identifiable {
+nonisolated struct SoundPreset: Codable, Identifiable {
     var id: String = UUID().uuidString
     var name: String
     var mode: String            // "sleep" | "focus" — presets are mode-scoped, like the sounds
@@ -86,7 +88,7 @@ struct SoundPreset: Codable, Identifiable {
     var extraLayers: [ExtraNoiseLayer]? = nil
 }
 
-enum NoiseType {
+nonisolated enum NoiseType {
     // Every real generator string. green/forest/gray/white are now first-class sounds with
     // their own render cases — they used to be folded away in migrate() (and white collapsed to
     // pink), which is the inconsistency the audio-palette review flagged.

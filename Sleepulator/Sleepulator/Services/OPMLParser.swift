@@ -1,13 +1,17 @@
 import Foundation
 
-struct OPMLFeed: Identifiable {
+nonisolated struct OPMLFeed: Identifiable {
     /// Stable across re-parses (was a fresh UUID() each parse, which broke SwiftUI diffing).
     var id: String { url }
     let name: String
     let url: String
 }
 
-class OPMLParser: NSObject, XMLParserDelegate {
+/// `nonisolated` so the parser can run inside `Task.detached` off the main thread (a large OPML
+/// file would otherwise freeze the importer callback). The module defaults to @MainActor isolation,
+/// which made `OPMLParser().parse(...)` a cross-actor (async) call from the detached context — an
+/// error under Swift 6 mode. It's a self-contained, single-shot XML parser with no UI state.
+nonisolated class OPMLParser: NSObject, XMLParserDelegate {
     private var feeds: [OPMLFeed] = []
     private var seen = Set<String>()
 
