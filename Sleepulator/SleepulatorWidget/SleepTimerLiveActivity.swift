@@ -21,6 +21,7 @@ import AppIntents
 struct SleepulatorWidgetBundle: WidgetBundle {
     var body: some Widget {
         SleepTimerLiveActivity()
+        ResumeMixWidget()
     }
 }
 

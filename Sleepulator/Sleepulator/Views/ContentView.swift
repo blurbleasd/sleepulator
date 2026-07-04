@@ -135,5 +135,15 @@ struct ContentView: View {
             // playing past the timer. No-op when nothing expired.
             if phase == .active { audio.sleepTimer.reconcileIfExpired() }
         }
+        // "Start my sleep mix" (Siri / Shortcuts) — the intent opens the app and posts this.
+        .onReceive(NotificationCenter.default.publisher(for: .sleepulatorResumeRequest)) { _ in
+            audio.resumeFromShortcut()
+        }
+        // The resume widget's deep link (sleepulator://resume).
+        .onOpenURL { url in
+            if url.scheme == "sleepulator" && url.host == "resume" {
+                audio.resumeFromShortcut()
+            }
+        }
     }
 }

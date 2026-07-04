@@ -3,7 +3,13 @@ import SwiftUI
 @main
 struct SleepulatorApp: App {
     @Environment(\.scenePhase) private var scenePhase
-    
+
+    init() {
+        // MetricKit only accumulates while a subscriber is registered — register at launch,
+        // exactly once. Payloads land ~daily; see MetricsCollector for storage + Settings UI.
+        MetricsCollector.shared.start()
+    }
+
     var body: some Scene {
         WindowGroup {
             ContentView()

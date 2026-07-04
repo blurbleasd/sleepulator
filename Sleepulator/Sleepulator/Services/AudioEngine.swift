@@ -130,9 +130,38 @@ final class AudioEngine: ObservableObject {
     }
     
     @Published var noiseType: String {
-        // Persist off the main thread (matches the volume setters); the audio-affecting
-        // syncGenEngine() stays synchronous so the sound changes immediately.
-        didSet { let v = noiseType; storageQueue.async { UserDefaults.standard.set(v, forKey: "noiseType") }; syncGenEngine() }
+        // Persist off the main thread (matches the volume setters). The audio-side apply goes
+        // through softSwapPrimaryNoise: while the bed is audibly playing, a hard mid-render
+        // generator swap is a timbre jump-cut (noticeable at 3 a.m.), so we dip layer 0 to
+        // silence first — the render thread's per-sample declick ramp (~70 ms) makes both
+        // edges click-free — then switch at the bottom and ramp back. Off/quiet paths apply
+        // immediately, exactly as before.
+        didSet {
+            let v = noiseType
+            storageQueue.async { UserDefaults.standard.set(v, forKey: "noiseType") }
+            softSwapPrimaryNoise(from: oldValue)
+        }
+    }
+
+    /// Monotonic token so rapid re-picks (or any newer engine sync) cancel an in-flight dip.
+    private var noiseSwapToken = 0
+
+    /// See `noiseType.didSet`. Timing: gain reaches silence in ~70 ms (declick coefficient
+    /// 0.0015/sample @44.1k), so the swap lands at 140 ms with the old sound fully out; the
+    /// ramp back up is masked the same way. If the user changes anything else mid-dip, the
+    /// resulting syncGenEngine() applies the new type at once — a rare, acceptable race.
+    private func softSwapPrimaryNoise(from oldType: String) {
+        guard noiseOn, oldType != noiseType else { syncGenEngine(); return }
+        noiseSwapToken += 1
+        let token = noiseSwapToken
+        // Dip: hand the engine the OLD generator at volume 0; declick fades it out.
+        var layers = buildNoiseLayers()
+        layers[0] = (oldType, 0.0)
+        genEngine.setNoiseLayers(layers, on: true)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.14) { [weak self] in
+            guard let self, self.noiseSwapToken == token else { return }
+            self.syncGenEngine()   // new type, real volume — declick ramps it back in
+        }
     }
     /// Cap on *extra* stacked noise layers (the primary `noiseType` is always layer 0).
     static let maxExtraLayers = kMaxNoiseLayers - 1
@@ -796,6 +825,18 @@ final class AudioEngine: ObservableObject {
         mixStore.saveLast(mix)
     }
     
+    /// Entry point for the "Start Sleep Mix" App Intent and the resume widget's deep link:
+    /// resume the last mix if there is one, otherwise start the default layered bed. Mirrors
+    /// the Home orb's begin path (minus the breathing on-ramp — a Siri/widget start is
+    /// hands-off by definition).
+    func resumeFromShortcut() {
+        if let mix = mixStore.lastMix, (mix.noiseOn || mix.binauralOn || mix.podcastUrl != nil) {
+            resumeMix(mix)
+        } else {
+            startDefaultMix()
+        }
+    }
+
     func resumeMix(_ mix: SavedMix) {
         self.noiseType = NoiseType.migrate(mix.noiseType)
         self.noiseVolume = mix.noiseVolume

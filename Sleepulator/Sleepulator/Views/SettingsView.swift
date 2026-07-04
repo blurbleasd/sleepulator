@@ -300,6 +300,34 @@ struct SettingsView: View {
                                         .frame(minWidth: 44, minHeight: 44)
                                     }
                                 }
+
+                                // Diagnostics (MetricKit) — battery / hang / crash payloads
+                                // collected by iOS, stored locally, shareable for analysis.
+                                VStack(alignment: .leading, spacing: 16) {
+                                    Text("Diagnostics")
+                                        .font(.headline)
+                                        .foregroundColor(pal.text)
+
+                                    Text("iOS delivers battery, hang, and crash reports about once a day while the app is in use. Stored on this device only.")
+                                        .font(.caption)
+                                        .foregroundColor(pal.dim)
+
+                                    NavigationLink {
+                                        DiagnosticsListView(pal: pal)
+                                    } label: {
+                                        HStack {
+                                            Text("View reports")
+                                                .foregroundColor(pal.accent)
+                                            Spacer()
+                                            Image(systemName: "chevron.right")
+                                                .font(.footnote.weight(.semibold))
+                                                .foregroundColor(pal.dim)
+                                        }
+                                        .frame(minHeight: 44)
+                                        .contentShape(Rectangle())
+                                    }
+                                    .buttonStyle(.plain)
+                                }
                             }
                             .padding(.top, 16)
                         }
@@ -518,5 +546,65 @@ struct JSONDocument: FileDocument {
     }
     func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
         return FileWrapper(regularFileWithContents: data)
+    }
+}
+
+/// Settings ▸ Advanced ▸ Diagnostics: the MetricKit payloads MetricsCollector has stored,
+/// newest first, each shareable (AirDrop the JSON to a Mac for analysis). Payloads arrive
+/// on iOS's schedule (~daily), so an empty list on a fresh install is expected.
+struct DiagnosticsListView: View {
+    let pal: Palette
+    @State private var files: [URL] = []
+
+    var body: some View {
+        ZStack {
+            pal.bg.ignoresSafeArea()
+            if files.isEmpty {
+                VStack(spacing: 8) {
+                    Image(systemName: "waveform.path.ecg.rectangle")
+                        .font(.largeTitle)
+                        .foregroundColor(pal.dim)
+                    Text("No reports yet")
+                        .font(.headline)
+                        .foregroundColor(pal.text)
+                    Text("iOS delivers battery and stability reports about once a day. Check back after a night's use.")
+                        .font(.caption)
+                        .foregroundColor(pal.dim)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 40)
+                }
+            } else {
+                ScrollView {
+                    VStack(spacing: 10) {
+                        ForEach(files, id: \.self) { url in
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(url.lastPathComponent.hasPrefix("diagnostic") ? "Crash / hang report" : "Daily metrics")
+                                        .font(.system(.subheadline, design: .rounded).weight(.semibold))
+                                        .foregroundColor(pal.text)
+                                    Text(url.lastPathComponent)
+                                        .font(.caption2)
+                                        .foregroundColor(pal.dim)
+                                        .lineLimit(1)
+                                }
+                                Spacer()
+                                ShareLink(item: url) {
+                                    Image(systemName: "square.and.arrow.up")
+                                        .foregroundColor(pal.accent)
+                                        .frame(width: 44, height: 44)
+                                }
+                                .accessibilityLabel("Share report")
+                            }
+                            .glassPanel()
+                        }
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.top, 12)
+                }
+            }
+        }
+        .navigationTitle("Diagnostics")
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear { files = MetricsCollector.shared.payloadFiles() }
     }
 }

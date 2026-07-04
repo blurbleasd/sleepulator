@@ -8,6 +8,18 @@
 	</array>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
+	<!-- Deep link used by the home-screen "Resume sleep mix" widget (sleepulator://resume). -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>app.sleepulator.deeplink</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>sleepulator</string>
+			</array>
+		</dict>
+	</array>
 	<!-- MusicKit: shown when the app first requests Apple Music access (Focus-mode mixing).
 	     MusicKit itself is enabled server-side on the App ID's App Services (Developer portal) —
 	     it is NOT a code-signed entitlement, so there is no .entitlements key to add. -->
