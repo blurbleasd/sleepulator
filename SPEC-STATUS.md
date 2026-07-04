@@ -17,7 +17,7 @@ RECOMMENDATIONS-*, IMPLEMENTATION-NOTES-*) are audit trail only — their findin
 | AUDIO-PALETTE-SPEC | 🔶 P1 partial | **P0 isochronic beats unstarted** (speaker-route entrainment — highest-value open feature); gray-noise generator |
 | IMPLEMENTATION-PLAN-2026-06-24 | 🔶 ~60% of "Now" scope | Idle-based scene freeze; shader multi-hour OLED A/B |
 | SESSION-HANDOFF-2026-06-24 | 📜 checkpoint | §5 HomeView decompose: **done** (Views/Home/, committed 2026-07-04); §3A PersistenceTests target membership: **done** (pbxproj) |
-| RAIN-ON-GLASS-DEPTH-SPEC | ❌ approved, unstarted | Implementation steps 1–6 |
+| RAIN-ON-GLASS-DEPTH-SPEC | 🔶 v2 shader in code (2026-07-04) | Was a CC BY-NC-SA "Heartfelt" port; rewritten as an original lens (inverted-image drops + fog blur DoF). Needs device A/B vs shipping rain scene |
 
 ## Open work, ranked
 
@@ -26,4 +26,4 @@ RECOMMENDATIONS-*, IMPLEMENTATION-NOTES-*) are audit trail only — their findin
 3. Focus R5: phase-end local notifications when backgrounded.
 4. ~~Focus resume-label cross-mode copy bug (FOCUS-MODE-SPEC R2)~~ — fixed 2026-07-04 (HomeView statusText mirrors the palette snap).
 5. Idle-based scene freeze without a running timer.
-6. Rain-on-glass depth prototype.
+6. Scene A/B on device: retuned Metal aurora (star twinkle decorrelated, motion up, lateral travel) and the v2 rain-depth lens shader — both tuned blind, expect a knob-turning round.

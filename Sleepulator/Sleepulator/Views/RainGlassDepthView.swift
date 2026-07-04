@@ -60,7 +60,9 @@ struct RainGlassDepthView: View {
     }
 
     /// The far world with the droplet-as-lens shader attached. `maxSampleOffset` must cover the
-    /// farthest the lens reaches from a pixel (rim bend + magnify across the bead + gyro shift).
+    /// farthest the lens reaches from a pixel: the v2 shader's inverted-lens interior samples up
+    /// to `LENS_VIEW` (0.20 × layer height ≈ 175 pt on a 6.7") away, plus rim bend + gyro shift —
+    /// 220 covers it with margin. (Was 64 for the old slope-smear shader.)
     @ViewBuilder
     private func lensed(size: CGSize, t: Double) -> some View {
         let g = motion.tilt
@@ -73,7 +75,7 @@ struct RainGlassDepthView: View {
                     .float(refraction),
                     .float(density)
                 ),
-                maxSampleOffset: CGSize(width: 64, height: 64)
+                maxSampleOffset: CGSize(width: 220, height: 220)
             )
     }
 

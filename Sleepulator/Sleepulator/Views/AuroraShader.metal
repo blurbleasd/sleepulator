@@ -15,8 +15,8 @@ using namespace metal;
 // construction (a public-domain *technique*, not copied code — cf. Morgan
 // McGuire's hash and the value-noise lerp every shader text teaches). No
 // third-party shader source is reproduced, so this is clean to ship; credit the
-// technique, not any one author. Unlike RainGlass.metal (a CC BY-NC-SA port),
-// this carries no licensing baggage.
+// technique, not any one author. (RainGlass.metal, once a CC BY-NC-SA port, was
+// rewritten 2026-07 as an original implementation on this same kit.)
 //
 // Driven from SwiftUI `.colorEffect`: each pixel returns its own colour, so it
 // attaches to a plain full-screen Rectangle. Swift owns the live values — time,
@@ -28,9 +28,10 @@ namespace aur {
 
 // ---- tunables (edit + rebuild) ---------------------------------------------------
 constant int   OCTAVES   = 4;     // FBM detail. THE battery knob — 3 is cheaper, 5 richer.
-constant float FLOW       = 0.060; // base time scale (smaller = slower, calmer)
-constant float WARP_AMT   = 0.35;  // domain-warp strength → how much the curtains fold
-constant float BREATH_SEC = 11.0;  // collective brightness breath period
+constant float FLOW       = 0.115; // base time scale (was 0.060 — read as static at arm's length)
+constant float WARP_AMT   = 0.55;  // domain-warp strength → how much the curtains fold (was 0.35)
+constant float TRAVEL     = 0.011; // lateral sky drift, uv/s — real aurora marches across the sky
+constant float BREATH_SEC = 11.0;  // per-layer brightness breath period (phase-offset per layer)
 constant int   LAYERS     = 3;     // depth layers of curtains accumulated additively
 
 // Curtain palette (linear-ish): green/teal base rising to violet tips.
@@ -97,9 +98,13 @@ half4 auroraField(float2 pos, half4 color,
         float baseY  = 0.34 + fl * 0.06 + baseShift;  // far layers sit higher in the sky
         float bright = 1.0 - 0.22 * fl;
 
+        // Lateral march: the whole field travels across the sky, nearer layers faster —
+        // the strongest "it's alive" cue at nightstand distance. Slows as the night settles.
+        float xl = x + time * TRAVEL * (0.6 + 0.4 * fl) * motion;
+
         // Domain warp the horizontal coordinate → folds that move and never repeat.
-        float w  = fbm(float2(x * 1.6 + t * speed, fl * 3.1 + t * 0.30));
-        float xx = x * scale + (w - 0.5) * WARP_AMT * motion;
+        float w  = fbm(float2(xl * 1.6 + t * speed, fl * 3.1 + t * 0.30));
+        float xx = xl * scale + (w - 0.5) * WARP_AMT * motion;
 
         // Where light lives across x, and the moving vertical striations within it.
         float dens = smoothstep(0.45, 0.95, fbm(float2(xx * 2.0, fl * 5.0 + t * speed * 0.7)));
@@ -109,7 +114,13 @@ half4 auroraField(float2 pos, half4 color,
         float up   = vY - baseY;
         float band = smoothstep(-0.05, 0.10, up) * smoothstep(0.55, 0.0, up);
 
-        float intensity = pow(dens * ray * band * bright, 1.3);
+        // Per-layer breath, phase-offset — with one collective breath the sky's most
+        // visible motion was everything dimming in lockstep, which read as a pulse,
+        // not weather. Offsetting per layer keeps total brightness roughly steady
+        // while individual curtains swell and fade against each other.
+        float breath = 0.82 + 0.18 * (1.0 - 0.4 * p)
+                     * (0.5 - 0.5 * cos(time * 6.28318530718 / BREATH_SEC + fl * 2.4));
+        float intensity = pow(dens * ray * band * bright, 1.3) * breath;
 
         // Colour by height within the curtain: green/teal base → violet tips. The warm
         // base fades faster than the violet as night deepens, so the end state is a dim
@@ -120,9 +131,7 @@ half4 auroraField(float2 pos, half4 color,
         col += cc * intensity;
     }
 
-    // Collective ~11s breath; its swell shrinks as the night settles.
-    float breath = 0.82 + 0.18 * (1.0 - 0.4 * p) * (0.5 - 0.5 * cos(time * 6.28318530718 / BREATH_SEC));
-    col *= breath;
+    // (The ~11s breath now lives per-layer inside the loop, phase-offset — see above.)
 
     // Night dim + a gentle audio swell.
     col *= (1.0 - 0.45 * p) * (1.0 + 0.4 * a);
@@ -135,11 +144,18 @@ half4 auroraField(float2 pos, half4 color,
     col += mix(float3(0.012, 0.015, 0.030), float3(0.004, 0.005, 0.013), vY);
 
     // Faint stars, weighted toward the upper sky and dimmed wherever a curtain is bright.
+    // Twinkle phase/rate come from hashes INDEPENDENT of the existence gate: `sh` survives
+    // `step(0.992, …)` so it's compressed into [0.992, 1] — deriving the phase from it gave
+    // every star the same frequency and near-identical phase (the whole sky blinked in
+    // unison). A third of the stars hold steady; the rest twinkle at their own rate.
     float lum = dot(col, float3(0.299, 0.587, 0.114));
     float2 sg = floor(pos / 3.0);
     float sh  = hash21(sg);
     float star = step(0.992, sh) * smoothstep(0.05, 0.65, vY);
-    float tw   = 0.55 + 0.45 * sin(time * 1.7 + sh * 100.0);
+    float ph     = hash21(sg + 19.7) * 6.28318530718;    // full 0..2π phase spread
+    float fr     = 0.5 + 1.6 * hash21(sg + 47.3);        // per-star rate, 0.5..2.1 rad/s
+    float steady = step(hash21(sg + 71.1), 0.35);        // ~35% don't twinkle at all
+    float tw     = mix(0.55 + 0.45 * sin(time * fr + ph), 0.9, steady);
     col += float3(0.85, 0.90, 1.0) * star * tw * 0.6 * (1.0 - clamp(lum * 3.0, 0.0, 1.0));
 
     // Gentle Reinhard-ish roll-off keeps highlights from clipping harshly (filmic, OLED-kind).

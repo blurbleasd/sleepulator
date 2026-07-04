@@ -203,23 +203,8 @@ struct AuroraScene: AmbientScene {
     }
 }
 
-#if DEBUG
-/// DEBUG-only A/B sibling: the original CPU `AuroraView` (Canvas striations). Registered next to
-/// the shipping Metal aurora so the two can be compared on a real device over a full timer run
-/// (the CLAUDE.md device gate). Retire `AuroraView.swift` once the shader clearly wins on look +
-/// power.
-struct AuroraCanvasScene: AmbientScene {
-    let id = "aurora-canvas"
-    let title = "Aurora (canvas)"
-    let mood = SceneMood.sleep
-    var usesMotion: Bool { true }
-
-    func makeBackdrop(_ ctx: SceneContext) -> AnyView {
-        AnyView(AuroraView(paused: ctx.paused, sleepTimer: ctx.sleepTimer,
-                           audioLevel: ctx.audioLevel, tilt: ctx.tilt))
-    }
-}
-#endif
+// (The CPU `AuroraView` A/B sibling was retired 2026-07-04 — the Metal aurora won the
+// on-device comparison; the canvas version read as dim and near-static.)
 
 /// "Embers": smoldering coals — a dark field of deep reds slowly churning on a gentle swirl.
 /// A Metal fragment shader (`EmbersShader.metal`), dark + hypnotic with slow motion (the first
@@ -312,7 +297,6 @@ enum SceneRegistry {
         var scenes: [any AmbientScene] = [NightSkyScene(), RainOnGlassScene()]
         #if DEBUG
         scenes.append(RainOnGlassDepthScene())     // A/B sibling, DEBUG builds only
-        scenes.append(AuroraCanvasScene())         // A/B vs the Metal aurora, DEBUG builds only
         scenes.append(StillWaterCanvasScene())     // A/B vs the Metal still water, DEBUG builds only
         scenes.append(EmbersCanvasScene())         // A/B vs the dark Metal embers, DEBUG builds only
         #endif
