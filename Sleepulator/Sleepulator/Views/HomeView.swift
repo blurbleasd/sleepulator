@@ -146,13 +146,25 @@ struct HomeView: View {
         } else {
             if let mix = mixStore.lastMix, (mix.noiseOn || mix.binauralOn || mix.podcastUrl != nil) {
                 var p: [String] = []
-                if mix.noiseOn { p.append(mix.noiseType.capitalized) }
-                if mix.binauralOn { p.append(mix.binauralPreset.capitalized) }
+                if mix.noiseOn { p.append(resumeDisplayName(noise: mix.noiseType)) }
+                if mix.binauralOn { p.append(resumeDisplayName(binaural: mix.binauralPreset)) }
                 if mix.podcastUrl != nil { p.append("Podcast") }
                 return "Resume · \(p.joined(separator: " + "))"
             }
             return "Tap to begin"
         }
+    }
+
+    // R2 (FOCUS-MODE-SPEC): the label must show what tapping will *actually* resume.
+    // `resumeMix` snaps cross-mode sounds into the current palette (reconcileSoundsToMode),
+    // so mirror that snap here instead of echoing a stale Sleep mix's sound names in Focus.
+    private func resumeDisplayName(noise: String) -> String {
+        let palette = audio.focusMode ? AudioEngine.focusNoises : AudioEngine.sleepNoises
+        return (palette.contains(noise) ? noise : (palette.first ?? noise)).capitalized
+    }
+    private func resumeDisplayName(binaural: String) -> String {
+        let palette = audio.focusMode ? AudioEngine.focusBinaurals : AudioEngine.sleepBinaurals
+        return (palette.contains(binaural) ? binaural : (palette.first ?? binaural)).capitalized
     }
 
     private func heroTap() {
