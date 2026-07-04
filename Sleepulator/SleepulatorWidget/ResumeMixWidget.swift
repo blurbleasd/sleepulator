@@ -2,10 +2,10 @@ import WidgetKit
 import SwiftUI
 
 // Home-screen / lock-screen widget: one tap to resume last night's mix. Static content —
-// the tap deep-links into the app (sleepulator://resume), because the audio engine lives
-// in the app process and needs an activated audio session; ContentView's onOpenURL calls
-// `AudioEngine.resumeFromShortcut()`. Colors mirror the app's gold accent (widget
-// extensions don't link the app's Palette — same convention as SleepTimerLiveActivity).
+// the tap deep-links into the app (sleepulator://resume); ContentView's onOpenURL posts the
+// same "StartSleepulatorMix" notification the Siri intent uses, and AudioEngine resumes.
+// Colors mirror the app's gold accent (widget extensions don't link the app's Palette —
+// same convention as SleepTimerLiveActivity).
 
 struct ResumeMixEntry: TimelineEntry {
     let date: Date

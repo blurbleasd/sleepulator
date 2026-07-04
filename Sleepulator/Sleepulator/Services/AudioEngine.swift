@@ -825,18 +825,6 @@ final class AudioEngine: ObservableObject {
         mixStore.saveLast(mix)
     }
     
-    /// Entry point for the "Start Sleep Mix" App Intent and the resume widget's deep link:
-    /// resume the last mix if there is one, otherwise start the default layered bed. Mirrors
-    /// the Home orb's begin path (minus the breathing on-ramp — a Siri/widget start is
-    /// hands-off by definition).
-    func resumeFromShortcut() {
-        if let mix = mixStore.lastMix, (mix.noiseOn || mix.binauralOn || mix.podcastUrl != nil) {
-            resumeMix(mix)
-        } else {
-            startDefaultMix()
-        }
-    }
-
     func resumeMix(_ mix: SavedMix) {
         self.noiseType = NoiseType.migrate(mix.noiseType)
         self.noiseVolume = mix.noiseVolume

@@ -135,14 +135,12 @@ struct ContentView: View {
             // playing past the timer. No-op when nothing expired.
             if phase == .active { audio.sleepTimer.reconcileIfExpired() }
         }
-        // "Start my sleep mix" (Siri / Shortcuts) — the intent opens the app and posts this.
-        .onReceive(NotificationCenter.default.publisher(for: .sleepulatorResumeRequest)) { _ in
-            audio.resumeFromShortcut()
-        }
-        // The resume widget's deep link (sleepulator://resume).
+        // The resume widget's deep link (sleepulator://resume). Routed through the same
+        // notification the "Start Sleepulator Mix" Siri intent posts (SleepulatorIntents.swift),
+        // which AudioEngine already observes — one code path for every hands-off start.
         .onOpenURL { url in
             if url.scheme == "sleepulator" && url.host == "resume" {
-                audio.resumeFromShortcut()
+                NotificationCenter.default.post(name: Notification.Name("StartSleepulatorMix"), object: nil)
             }
         }
     }
