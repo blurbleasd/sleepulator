@@ -56,6 +56,16 @@ final class NotificationBackstopScheduler: SleepTimerBackstopScheduling {
     }
 }
 
+/// Terminal-stop guarantee, layered (know the boundary before "fixing" any one layer):
+/// 1. GCD wall-clock timer (1 Hz) — primary, but iOS may curtail it when backgrounded.
+/// 2. `backgroundTick()` — driven ~20×/s off the limiter RMS tap / AVPlayer observer; as long
+///    as audio is actually playing the app isn't suspended, so this is what really carries the
+///    fade + stop through a locked night.
+/// 3. `reconcileIfExpired()` on foreground — catches a deadline that passed while suspended.
+/// 4. `NotificationBackstopScheduler` — out-of-process, quiet notification; last resort.
+/// The unguarded case: iOS suspends the app *with audio somehow still owed a stop* and the user
+/// never foregrounds it. That requires the audio path to already be dead (no tap ticks), so
+/// there is nothing left to stop — accepted. Verify on device per TESTING.md §3C.
 final class SleepTimerService: ObservableObject {
     /// What kind of timer is running. `.endOfEpisode` is driven by the podcast playback clock
     /// (via `externalTick`) rather than the wall-clock GCD timer, so it tracks pauses/seeks/speed.

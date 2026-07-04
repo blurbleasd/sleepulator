@@ -6,7 +6,13 @@ import SwiftUI
 import MusicKit
 
 enum AppConfig {
-    static let nightLimiterEnabled = true
+    /// Default for fresh installs only (a user's explicit Settings toggle, persisted in
+    /// UserDefaults, always wins). Per the CLAUDE.md verification gate and
+    /// AUDIO-LIMITER-SPEC.md acceptance criteria, the limiter's MTAudioProcessingTap runs on a
+    /// real-time thread and must be verified on a real iPhone (installed, screen locked, full
+    /// timer run, known loud spot) before shipping enabled by default. Flip to `true` once that
+    /// device pass is done and recorded in TESTING.md.
+    static let nightLimiterEnabled = false
 }
 
 /// Network reachability as its own tiny observable, so views that only care about online/offline
@@ -308,8 +314,10 @@ final class AudioEngine: ObservableObject {
     func reconcileSoundsToMode() {
         let noises = focusMode ? Self.focusNoises : Self.sleepNoises
         let binaurals = focusMode ? Self.focusBinaurals : Self.sleepBinaurals
-        if !noises.contains(noiseType) { noiseType = noises.first! }
-        if !binaurals.contains(binauralPreset) { binauralPreset = binaurals.first! }
+        // Palettes are static and non-empty today, but never crash the all-night path over it:
+        // fall back to known-good defaults if a palette is ever accidentally emptied.
+        if !noises.contains(noiseType) { noiseType = noises.first ?? "brown" }
+        if !binaurals.contains(binauralPreset) { binauralPreset = binaurals.first ?? "delta" }
         // Drop any extra layer whose sound isn't in the new mode's palette, so a cross-mode layer
         // can't leak across (same rule the primary noise follows above).
         let filtered = extraLayers.filter { noises.contains($0.type) }

@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// Owns the one-time, launch-only migration of legacy persisted state into the
 /// `StorageManager` file store. Pulled out of `AudioEngine.init` (Slice A1 of
@@ -9,6 +10,16 @@ import Foundation
 /// performs the file writes, clears the consumed legacy keys, and returns the values
 /// `AudioEngine` seeds its `@Published` state from. It holds no reference to `AudioEngine`.
 struct PersistenceMigrator {
+    /// Injected so unit tests can run the migration against a temp-dir store + a throwaway
+    /// UserDefaults suite. Production constructs `PersistenceMigrator()` → the real singletons.
+    let storage: StorageManager
+    let defaults: UserDefaults
+
+    init(storage: StorageManager = .shared, defaults: UserDefaults = .standard) {
+        self.storage = storage
+        self.defaults = defaults
+    }
+
     struct Result {
         var lastMix: SavedMix?
         var savedPresets: [SoundPreset]
@@ -28,7 +39,6 @@ struct PersistenceMigrator {
 
     func run() -> Result {
         var result = Result(lastMix: nil, savedPresets: [], migratedPositions: nil)
-        let defaults = UserDefaults.standard
 
         // lastMix lived in UserDefaults as JSON; migrate any retired noise type forward.
         if let data = defaults.data(forKey: "lastMix"),
@@ -43,24 +53,30 @@ struct PersistenceMigrator {
         if let data = defaults.data(forKey: "savedPlaylists"),
            let mixes = try? JSONDecoder().decode([SavedMix].self, from: data) {
             let presets = mixes.map(toPreset)
-            StorageManager.shared.save(presets, to: "mixes.json")
+            storage.save(presets, to: "mixes.json")
             defaults.removeObject(forKey: "savedPlaylists")
             result.savedPresets = presets
-        } else if let presets: [SoundPreset] = StorageManager.shared.load(from: "mixes.json") {
+        } else if let presets: [SoundPreset] = storage.load(from: "mixes.json") {
             result.savedPresets = presets.map { var p = $0; p.noiseType = NoiseType.migrate(p.noiseType); return p }
-        } else if let oldMixes: [SavedMix] = StorageManager.shared.load(from: "mixes.json") {
+        } else if let oldMixes: [SavedMix] = storage.load(from: "mixes.json") {
             let presets = oldMixes.map(toPreset)
-            StorageManager.shared.save(presets, to: "mixes.json")   // rewrite in the new schema
+            storage.save(presets, to: "mixes.json")   // rewrite in the new schema
             result.savedPresets = presets
+        } else if storage.rawData(for: "mixes.json") != nil {
+            // The file exists but decodes as neither schema. Without this branch that's silent
+            // preset loss (StorageManager logs "corrupt", but the real cause is usually a schema
+            // change — see the evolution rule on SoundPreset in Models.swift). Don't overwrite:
+            // the raw file (+ .bak) is left in place for recovery by a fixed build.
+            Log.storage.error("mixes.json exists but decodes as neither [SoundPreset] nor [SavedMix] — presets not loaded; file left untouched. Likely a schema change without optional/defaulted fields.")
         }
 
         // One-time library.json seed from the legacy savedPodcasts key. Only seed if the
         // canonical file doesn't exist yet; always clear the legacy key so a stray legacy
         // write can never clobber a newer library on a later launch.
-        if StorageManager.shared.rawData(for: "library.json") == nil,
+        if storage.rawData(for: "library.json") == nil,
            let data = defaults.data(forKey: "savedPodcasts"),
            let podcasts = try? JSONDecoder().decode([Podcast].self, from: data) {
-            StorageManager.shared.save(podcasts, to: "library.json")
+            storage.save(podcasts, to: "library.json")
         }
         defaults.removeObject(forKey: "savedPodcasts")
 
@@ -72,7 +88,7 @@ struct PersistenceMigrator {
             for (key, value) in raw {
                 if let d = (value as? NSNumber)?.doubleValue { positions[key] = d }
             }
-            StorageManager.shared.save(positions, to: "positions.json")
+            storage.save(positions, to: "positions.json")
             defaults.removeObject(forKey: "episodePositions")
             result.migratedPositions = positions
         }

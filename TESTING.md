@@ -1,107 +1,110 @@
-# Testing Sleepulator
+# Testing Sleepulator (native iOS)
 
-Two layers: automated unit tests for the pure logic, and a manual device pass for
-the things only a real phone can exercise (background audio, lock screen,
-interruptions, offline). The device pass is the one that actually protects the
-core "fall asleep with audio playing" use case — run it before every release.
+> The previous version of this file described the archived React/Vite PWA (now in
+> `archive_webapp/`). This version covers the native SwiftUI app.
+
+Two layers: automated unit tests for the pure logic, and a **manual device pass** for the
+things only a real phone can exercise. XCTest has no real render thread or audio session, so
+interruptions, route changes, background keep-alive, looping, the Night Limiter, and the
+sleep-timer fade + terminal stop can only be verified on a **real iPhone, installed, screen
+locked, over a full timer run** (CLAUDE.md § Verification gate). Run the device pass before
+every release, and record the result in § Device-pass log below.
 
 ---
 
 ## 1. Automated unit tests
 
+Open `Sleepulator/Sleepulator.xcodeproj` in Xcode → Product → Test (⌘U), or:
+
 ```bash
-npm install        # first time, or after pulling new deps
-npm test           # run once
-npm run test:watch # re-run on change while developing
+xcodebuild test -project Sleepulator/Sleepulator.xcodeproj \
+  -scheme Sleepulator -destination 'platform=iOS Simulator,name=iPhone 16'
 ```
 
-Covers the pure helpers in `src/utils/core.js`: duration/time formatting, feed-name
-derivation, episode de-duplication, URL redaction, Sleep Safe URL building, and a
-sanity check that every noise generator produces finite, audible, non-clipping
-samples. These catch feed-parsing and formatting regressions cheaply; they do **not**
-exercise audio playback or iOS behavior.
+Suites in `SleepulatorTests/` (three files, many suites):
+
+- `AudioMathTests.swift` — fade curve, carrier/beat math, scrub targets.
+- `AudioStateTests.swift` — engine state/policy plus `PodcastParserTests` (CDATA, durations,
+  dates, caps, enclosures), `OPMLParserTests` (scheme validation, dedupe, corrupt files),
+  `StorageManagerTests` (backup recovery), `NetRetryTests`, `CacheEvictionTests`, the
+  sleep-timer suites (backstop, cancel, end-of-episode), layering, and mode reconciliation.
+- `PersistenceTests.swift` — legacy `SavedMix` → `SoundPreset` migration, library seeding,
+  position-map coercion, `MixStore` reloads.
+
+These catch parsing/logic regressions cheaply; they do **not** exercise audio or iOS behavior.
 
 ---
 
-## 2. Desktop smoke test (fast gate, do first)
+## 2. Simulator smoke test (fast gate, do first)
 
-In Chrome on the deployed URL, open DevTools:
-
-1. **Application → Service Workers** — confirm the new worker is *activated* and
-   *running*; old `sleepulator-*` caches are gone except `sleepulator-episodes`.
-2. **Console** — no errors on load.
-3. Play a soundscape; toggle ambient + binaural; confirm audio.
-4. Set a **1-minute timer** and listen — volume should ramp down smoothly over the
-   final stretch rather than cutting out abruptly.
-5. Toggle EQ / Compressor / Pan on a playing podcast — no dropouts or errors.
+1. Build and run. No warnings-as-errors, no console errors at launch.
+2. Play a noise; add an extra layer; toggle binaural. Audio in both modes (Sleep / Focus).
+3. Switch modes — active sounds snap into the new mode's palette (no cross-mode leftovers).
+4. Load a podcast episode; play/pause; volume slider works alongside noise.
+5. Set a **1-minute sleep timer** — volume ramps down smoothly, then everything stops.
+6. Save a mix; relaunch; the mix and last state restore.
 
 If anything here fails, fix it before touching the phone.
 
 ---
 
-## 3. Device pass — iPhone, installed as a PWA (highest value)
+## 3. Device pass — real iPhone, installed (highest value)
 
-Install first: open the deployed URL in **Safari → Share → Add to Home Screen**, then
-launch from the home-screen icon (must run standalone, not in the Safari tab).
+Install via Xcode onto the device (not the simulator). Then:
 
 ### A. Background audio + lock screen
-1. Tap Play on a soundscape (the first tap satisfies iOS's interaction requirement).
-2. Lock the screen. ✅ Audio keeps playing.
-3. Wake the lock screen. ✅ Now-Playing controls show; play/pause works; skip works
-   for podcasts.
+1. Start a mix (noise + binaural), lock the screen. ✅ Audio keeps playing.
+2. Wake the lock screen. ✅ Now Playing controls show; play/pause and skip work for podcasts.
+3. Leave it locked for 30+ minutes. ✅ No dropout (AudioSessionController keep-alive).
 
-### B. Interruption recovery (the critical one — TODOS P0)
-1. Start audio, lock the screen.
-2. Call the phone from another device (or trigger Siri), then end the call.
-3. ✅ Audio resumes on its own within a couple of seconds.
-   - This exercises `MixBus.onstatechange → reconnectAllSources`, which only
-     recovers a *suspend → resume*. Watch the console for the state transition.
-   - If audio stays dead, distinguish the two failure modes (see TODOS.md):
-     - Context went `suspended`/`interrupted` → `running` but stayed silent →
-       the elements weren't `.play()`d / `resume()`d (auto-resume gap).
-     - Context went to `closed` → the engine rebuilds (new context + fresh
-       elements); audio recovers on the **next Play / lock-screen control**, not
-       on its own (iOS requires a user gesture to resume). That tap-to-recover
-       is a *pass*, not a fail.
-4. Repeat with a *long* interruption (let it ring a while, or play audio in
-   another app for ~30s before returning) — this is what tends to push iOS to
-   `closed` rather than `suspended`.
+### B. Interruptions + route changes
+1. Playing and locked: call the phone from another device, end the call.
+   ✅ Audio resumes within a couple of seconds.
+2. Trigger Siri mid-playback. ✅ Ducks/pauses, then recovers.
+3. Plug/unplug headphones (and connect/disconnect Bluetooth). ✅ Correct pause-on-unplug
+   behavior, no crash, binaural routing (`beatRouting`) still correct.
 
-**Repeatable simulation (no phone call needed).** Tap **Feed Debug** to open the
-debug panel, then **Force teardown + rebuild** under "Audio Engine (dev)". This
-closes the AudioContext exactly like an iOS interruption and triggers the
-rebuild. The status line shows `state / dead / rebuilding / sources`; after the
-rebuild it should read `state: running, dead: false` with the active layers
-listed. Then tap Play (or the lock-screen control) and confirm audio returns.
+### C. Sleep timer — fade + terminal stop (full run)
+1. Set a realistic timer (≥ 30 min), lock the phone, let it run to the end **unattended**.
+   ✅ Volume fades over the final stretch and playback fully stops — no zombie audio, no
+   abrupt cut.
+2. Repeat once with a podcast in the mix. ✅ Podcast and generative audio stop together.
+3. Extend the timer mid-fade. ✅ Volume restores, timer extends.
 
-### C. Sleep timer
-1. Set a short timer, start audio. ✅ Volume fades over the final minutes, then stops.
-2. Before it expires, tap **Still Awake? (+15 min)**. ✅ Timer extends, volume restores.
+### D. Night Limiter (acceptance for enabling by default)
+`AppConfig.nightLimiterEnabled` ships `false` until this passes and is logged below.
+1. Enable the limiter in Settings. Play a podcast episode with a known loud spot
+   (dynamic ad read, intro sting), phone locked, at a low comfortable volume.
+   ✅ The spike is audibly tamed; speech stays intelligible; no pumping/distortion.
+2. Let it run ≥ 1 hour locked. ✅ No glitches, dropouts, or battery anomalies
+   (the tap must never block the real-time thread).
+3. Toggle "limiter follows mode": ✅ on in Sleep, off in Focus, mid-playback switch is clean.
 
-### D. Offline (validates the service-worker shell fix)
-1. With the app installed and opened once, enable **Airplane Mode**.
-2. Force-quit and relaunch from the home-screen icon.
-3. ✅ The app shell loads (not a blank/offline page). Soundscapes still play —
-   they're synthesized locally, no network needed.
+### E. All-night soak
+1. Full night (or ≥ 4 h): mix + timer, screen locked. ✅ Still behaving at the end —
+   timer fired, audio stopped, no crash log in Settings → Privacy → Analytics.
 
-### E. Upgrade path (run on a device that had the OLD version installed)
-1. On a phone with the previous (pre-Vite) version on its home screen, open the app.
-2. ✅ Within a reload or two it shows the new Vite build, not the stale monolith.
-   - This is the riskiest part of the cutover (cache-first → network-first SW). If it
-     stays stale, remove and re-add the home-screen icon as the worst-case reset.
+### F. Loop + generator quality
+1. Each noise type for several minutes. ✅ No click, gap, or pop; no drift in stereo width.
 
-### F. Soundscape loop quality
-1. Let a soundscape (e.g. Ocean, Rain) run for several minutes with the screen on.
-2. ✅ No audible click, gap, or pop at the loop seam.
+### G. Offline + storage
+1. Download an episode, enable Airplane Mode, relaunch. ✅ Downloaded episode plays.
+2. Confirm downloads live in Application Support and are excluded from iCloud backup.
 
 ---
 
 ## Quick release checklist
 
-- [ ] `npm test` passes
-- [ ] Desktop smoke test clean (§2)
+- [ ] ⌘U unit tests pass
+- [ ] Simulator smoke test clean (§2)
 - [ ] Background audio + lock screen (§3A)
-- [ ] Interruption recovery (§3B)
-- [ ] Timer fade + extend (§3C)
-- [ ] Offline relaunch (§3D)
-- [ ] Upgrade from old version (§3E)
+- [ ] Interruptions + route changes (§3B)
+- [ ] Timer fade + terminal stop, full run (§3C)
+- [ ] Night Limiter acceptance, if enabling by default (§3D)
+- [ ] All-night soak (§3E)
+
+## Device-pass log
+
+| Date | Device / iOS | Sections run | Result / notes |
+|------|--------------|--------------|----------------|
+| —    | —            | —            | No native device pass recorded yet. |

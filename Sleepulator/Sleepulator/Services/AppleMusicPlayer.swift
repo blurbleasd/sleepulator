@@ -95,7 +95,16 @@ final class AppleMusicPlayer {
         guard isAuthorized, !trimmed.isEmpty else { return nil }
         var request = MusicCatalogSearchRequest(term: trimmed, types: [Song.self, Album.self, Playlist.self])
         request.limit = 20
-        return try? await request.response()
+        do {
+            return try await request.response()
+        } catch is CancellationError {
+            return nil  // superseded search-as-you-type request; not an error
+        } catch {
+            // A failed search (offline, lapsed subscription, server error) must not look
+            // identical to "no results" — tell the picker why it's empty.
+            onNote?("Apple Music search failed: \(error.localizedDescription)")
+            return nil
+        }
     }
 
     /// Set the queue to a playable item (Song / Album / Playlist) and start playback.

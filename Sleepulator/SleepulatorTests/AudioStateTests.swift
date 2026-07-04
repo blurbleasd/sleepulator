@@ -92,21 +92,30 @@ class AudioStateTests: XCTestCase {
         XCTAssertTrue(engine.binauralOn)
     }
 
+    // Hermetic + instant: the prune rule is now a pure function, so this no longer writes to the
+    // shared StorageManager singleton or waits on a 1-second wall-clock flush (the old version did
+    // both — slow and order-dependent).
     func testPositionPruneCapsAt100() {
-        var mockPositions: [String: Double] = [:]
-        for i in 0..<105 { mockPositions["\(i)"] = Double(i) }
-        StorageManager.shared.save(mockPositions, to: "positions.json")
+        var positions: [String: Double] = [:]
+        for i in 0..<105 { positions["\(i)"] = Double(i) }
 
-        let player = PodcastPlayer()               // loads the 105 saved positions
-        player.flushPositionsToDisk()              // should trim to <= 100
+        let pruned = PodcastPlayer.prunedPositions(positions, keeping: "42")
+        XCTAssertEqual(pruned.count, 100)
+        XCTAssertNotNil(pruned["42"], "the currently-playing id must always be kept")
+    }
 
-        let exp = expectation(description: "flush to disk")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { exp.fulfill() }
-        wait(for: [exp], timeout: 2.0)
+    func testPositionPruneNoOpUnderCap() {
+        let positions = ["a": 1.0, "b": 2.0, "c": 3.0]
+        let pruned = PodcastPlayer.prunedPositions(positions, keeping: "a", cap: 100)
+        XCTAssertEqual(pruned, positions, "a map already under the cap is returned unchanged")
+    }
 
-        let saved: [String: Double]? = StorageManager.shared.load(from: "positions.json")
-        XCTAssertNotNil(saved)
-        XCTAssertLessThanOrEqual(saved!.count, 100)
+    func testPositionPruneKeepsCurrentEvenAtBoundary() {
+        var positions: [String: Double] = [:]
+        for i in 0..<101 { positions["ep\(i)"] = Double(i) }
+        let pruned = PodcastPlayer.prunedPositions(positions, keeping: "ep100", cap: 100)
+        XCTAssertEqual(pruned.count, 100)
+        XCTAssertNotNil(pruned["ep100"], "current id survives even when exactly one over the cap")
     }
 }
 
@@ -787,5 +796,25 @@ final class OPMLParserTests: XCTestCase {
                        "http(s) only, deduped, order preserved")
         XCTAssertEqual(feeds.first?.id, "https://a.example/feed", "id must be the stable feed url")
         XCTAssertEqual(feeds.first?.name, "Show A")
+    }
+
+    // A truncated/corrupt OPML must not crash or hang — feeds parsed before the malformed
+    // point are still returned (XMLParser stops there; the parse failure is logged).
+    func testCorruptOPMLKeepsFeedsParsedBeforeError() throws {
+        let opml = """
+        <?xml version="1.0"?>
+        <opml version="1.0"><body>
+          <outline text="Show A" type="rss" xmlUrl="https://a.example/feed"/>
+          <outline text="Broken
+        """
+        let feeds = try parse(opml)
+        XCTAssertEqual(feeds.map(\.url), ["https://a.example/feed"],
+                       "feeds before the malformed point survive a corrupt OPML")
+    }
+
+    func testMissingFileReturnsEmpty() {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(UUID().uuidString)-nonexistent.opml")
+        XCTAssertEqual(OPMLParser().parse(url: url).count, 0)
     }
 }

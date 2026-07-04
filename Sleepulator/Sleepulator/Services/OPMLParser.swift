@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 nonisolated struct OPMLFeed: Identifiable {
     /// Stable across re-parses (was a fresh UUID() each parse, which broke SwiftUI diffing).
@@ -12,16 +13,27 @@ nonisolated struct OPMLFeed: Identifiable {
 /// which made `OPMLParser().parse(...)` a cross-actor (async) call from the detached context — an
 /// error under Swift 6 mode. It's a self-contained, single-shot XML parser with no UI state.
 nonisolated class OPMLParser: NSObject, XMLParserDelegate {
+    /// Own logger rather than `Log.storage`: this class is `nonisolated` (it runs inside
+    /// `Task.detached`), and `Log`'s statics are main-actor-isolated by the module default.
+    private static let log = Logger(subsystem: "app.sleepulator", category: "storage")
+
     private var feeds: [OPMLFeed] = []
     private var seen = Set<String>()
 
     func parse(url: URL) -> [OPMLFeed] {
         feeds = []
         seen = []
-        guard let data = try? Data(contentsOf: url) else { return [] }
+        guard let data = try? Data(contentsOf: url) else {
+            Self.log.error("OPML import: could not read file at \(url.lastPathComponent, privacy: .public)")
+            return []
+        }
         let parser = XMLParser(data: data)
         parser.delegate = self
-        parser.parse()
+        // A corrupt OPML otherwise looks identical to an empty one — leave a breadcrumb.
+        // (Feeds found before the malformed point are still returned; XMLParser stops there.)
+        if !parser.parse() {
+            Self.log.error("OPML import: parse failed (\(parser.parserError?.localizedDescription ?? "unknown", privacy: .public)); returning \(self.feeds.count) feed(s) parsed before the error")
+        }
         return feeds
     }
 

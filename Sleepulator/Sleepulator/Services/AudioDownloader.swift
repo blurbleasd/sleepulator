@@ -23,7 +23,10 @@ class AudioDownloader {
     private let minFreeSpaceBytes: Int64 = 500 * 1024 * 1024 // 500 MB headroom
 
     private lazy var cacheDir: URL = {
-        let base = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        // `urls(for:)` is documented to return Application Support, but a force-unwrap here is a
+        // first-launch crash on a misconfigured system — fall back to the temp dir instead.
+        let base = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
         let dir = base.appendingPathComponent("Sleepulator/episodes", isDirectory: true)
         if !fm.fileExists(atPath: dir.path) {
             try? fm.createDirectory(at: dir, withIntermediateDirectories: true)

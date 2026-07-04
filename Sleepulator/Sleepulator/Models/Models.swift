@@ -72,6 +72,13 @@ nonisolated struct SavedMix: Codable, Identifiable {
 /// optional backdrop. Deliberately NO podcast — a podcast is transient content, not part of
 /// a recipe you'd want to re-apply weeks later. Loading a preset swaps the soundscape and
 /// leaves any playing podcast alone. (Replaces the old podcast-coupled "saved playlist".)
+///
+/// SCHEMA EVOLUTION RULE (applies to every Codable type persisted via StorageManager —
+/// SoundPreset, SavedMix, Episode, Podcast…): new stored properties MUST be optional or have
+/// a default value. A new *required* field makes every existing on-disk file fail to decode,
+/// which surfaces as silent data loss (`load` returns nil). `extraLayers`/`podcastPosition`
+/// are the pattern to copy. PersistenceMigrator logs when mixes.json stops decoding, but
+/// prevention lives here.
 nonisolated struct SoundPreset: Codable, Identifiable {
     var id: String = UUID().uuidString
     var name: String
