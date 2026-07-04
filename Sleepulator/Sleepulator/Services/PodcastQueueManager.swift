@@ -121,6 +121,18 @@ final class PodcastQueueManager: ObservableObject {
     func addToQueue(_ episode: Episode) {
         if !queue.contains(where: { $0.id == episode.id }) { queue.append(episode) }
     }
+
+    /// Append several episodes to the end of the queue at once, skipping any already queued.
+    /// One mutation → one persist + one publish (vs. N appends). Returns the number actually added
+    /// so the caller can confirm to the user. Used by the detail view's "add filtered" bulk action.
+    @discardableResult
+    func addAllToQueue(_ episodes: [Episode]) -> Int {
+        let existing = Set(queue.map { $0.id })
+        let toAdd = episodes.filter { !existing.contains($0.id) }
+        guard !toAdd.isEmpty else { return 0 }
+        queue.append(contentsOf: toAdd)
+        return toAdd.count
+    }
     
     func moveQueue(fromOffsets source: IndexSet, toOffset destination: Int) {
         queue.move(fromOffsets: source, toOffset: destination)

@@ -422,7 +422,7 @@ struct SettingsView: View {
                         // Only write a collection that actually decodes into its expected
                         // type — a malformed section is skipped, never written as garbage.
                         if let validated = Self.validatedFileData(key: key, value: value) {
-                            StorageManager.shared.writeRaw(validated, to: file)
+                            await StorageManager.shared.writeRaw(validated, to: file)
                             restored += 1
                         } else { skipped += 1 }
                     } else if key == "lastMix" {
@@ -488,7 +488,7 @@ struct SettingsView: View {
             // Mixes, library, queue, and positions were migrated off UserDefaults into
             // StorageManager files — pull their raw JSON so the backup is actually complete.
             for (key, file) in Self.backupFileBacked {
-                if let data = StorageManager.shared.rawData(for: file),
+                if let data = await StorageManager.shared.rawData(for: file),
                    let obj = try? JSONSerialization.jsonObject(with: data, options: .allowFragments) {
                     backupDict[key] = obj
                 }

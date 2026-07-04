@@ -83,7 +83,7 @@ struct ContentView: View {
             // Mini-player floats above the tab bar (a ZStack overlay, not a TabView safe-area
             // inset — that docks it ON the UIKit tab bar). Tabs reserve room for it themselves
             // (Home's bottom inset below, PodcastDetail's contentMargins).
-            MiniPlayerView(audio: audio, progress: audio.playbackProgress, selectedTab: $selectedTab)
+            MiniPlayerView(audio: audio, progress: audio.playbackProgress, queue: audio.queueManager, selectedTab: $selectedTab)
                 .opacity(homeScreensaver ? 0 : 1)
                 .allowsHitTesting(!homeScreensaver)
                 .animation(.easeInOut(duration: 0.9), value: homeScreensaver)

@@ -137,8 +137,11 @@ half4 nebulaField(float2 pos, half4 color,
         col += float3(0.85, 0.92, 1.0) * (tail * 0.6 + core) * win * dim;
     }
 
-    // Filmic roll-off + hash dither (kills OLED banding).
+    // Filmic roll-off + hash dither (kills OLED banding). Wrap `time` small before the hash: hours
+    // into a session `time` reaches tens of thousands and the hash's internal fract() overflows
+    // float precision, freezing the dither and letting banding return. 64 s period, invisible
+    // because the dither is pure noise. (See AuroraShader.metal for the full rationale.)
     col = col / (col + 0.9);
-    col += (hash21(pos + time) - 0.5) / 255.0;
+    col += (hash21(pos + fmod(time, 64.0)) - 0.5) / 255.0;
     return half4(half3(saturate(col)), 1.0h);
 }

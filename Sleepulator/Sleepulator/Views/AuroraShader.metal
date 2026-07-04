@@ -146,7 +146,14 @@ half4 auroraField(float2 pos, half4 color,
     col = col / (col + 0.85);
 
     // Ordered-ish hash dither: breaks the gradient banding that plagues flat OLED sleep scenes.
-    float dither = (hash21(pos + time) - 0.5) / 255.0;
+    // Wrap `time` to a small magnitude before the hash. Hours into a session `time` reaches tens
+    // of thousands; `hash21`'s internal `fract(p * 123.34)` then overflows float precision and
+    // returns a near-constant, so the dither freezes and the banding it exists to hide creeps
+    // back. Wrapping keeps the hash input in the precise range it had at t≈0. The 64 s period is
+    // arbitrary — the dither is pure noise, so the wrap boundary is invisible (unlike the smooth
+    // motion above, which must keep the unwrapped `time` and tolerates the slow precision drift).
+    float ditherT = fmod(time, 64.0);
+    float dither = (hash21(pos + ditherT) - 0.5) / 255.0;
     col += dither;
 
     return half4(half3(saturate(col)), 1.0h);
