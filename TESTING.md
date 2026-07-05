@@ -188,6 +188,24 @@ the brightness you actually use at night, in **both** Sleep and Focus.
    (with the resume decision), route changes, limiter-attach outcome — not a wall of `<private>`
    (verify on a release build) and not slow to generate.
 
+### K. Confirmed 2am bug fixes (added 2026-07-05, unverified)
+1. **Breathing on-ramp survives lock (the load-bearing one).** Settings → enable "start with a
+   minute of breathing". Start a Sleep session so the wind-down appears, then **lock the phone
+   mid-countdown**. ✅ The mix actually starts and plays all night — backgrounding fires
+   `begin()` before suspension and the audio session activates in time. (This is a timing race
+   only a device settles — the whole point of the fix.) Also confirm a notification banner /
+   Control Center pull-down mid-countdown does NOT prematurely start the mix.
+2. **Podcast stall doesn't buffer in silence forever.** On a throttled/flaky connection, play a
+   streamed episode until it underruns. ✅ A "Buffering…" note shows; a stream that recovers
+   within ~30–60s resumes with no skip (ride out a real network dip); a genuinely dead stream is
+   dropped after the bounded wait with an honest note, and the generative bed keeps playing. A
+   404 / failed episode advances too — and is NOT recorded as "played" (doesn't vanish under
+   "hide finished episodes"). During a sleep timer with hold-queue on, a lost stream just leaves
+   the bed running (no jarring next episode at 2am).
+3. **Queue removes the right episode.** With delete-on-completion on, reorder the queue (or play a
+   non-head episode) and let it finish. ✅ The episode that finished is the one removed/deleted —
+   never an innocent head.
+
 ---
 
 ## Quick release checklist

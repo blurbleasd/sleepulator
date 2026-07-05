@@ -23,6 +23,27 @@ class AudioStateTests: XCTestCase {
         XCTAssertEqual(qm.queue.count, 0)
     }
 
+    // Regression: advanceQueue must remove the episode that ACTUALLY finished (by id), not blindly
+    // the head — otherwise a reordered queue drops (and, with delete-on-completion, deletes) the
+    // wrong one.
+    func testAdvanceRemovesFinishedByIdNotHead() {
+        let qm = PodcastQueueManager()
+        qm.autoPlay = false
+        qm.queue = [makeEpisode("A"), makeEpisode("B"), makeEpisode("C")]
+
+        qm.advanceQueue(finishedEpId: "B")          // B finished, but it's NOT the head
+        XCTAssertFalse(qm.queue.contains { $0.id == "B" }, "the finished episode is removed")
+        XCTAssertEqual(qm.queue.map(\.id), ["A", "C"], "the head (A) is untouched")
+    }
+
+    func testAdvanceWithUnknownIdRemovesNothing() {
+        let qm = PodcastQueueManager()
+        qm.autoPlay = false
+        qm.queue = [makeEpisode("A"), makeEpisode("B")]
+        qm.advanceQueue(finishedEpId: "gone")       // already removed elsewhere
+        XCTAssertEqual(qm.queue.map(\.id), ["A", "B"], "no id match → drop nothing (don't delete an innocent one)")
+    }
+
     func testShuffleKeepsCurrentFirst() {
         let qm = PodcastQueueManager()
         qm.queue = [makeEpisode("1"), makeEpisode("2"), makeEpisode("3")]

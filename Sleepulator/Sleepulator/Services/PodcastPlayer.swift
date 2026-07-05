@@ -39,7 +39,10 @@ final class PodcastPlayer: NSObject {
     private let storageQueue = DispatchQueue(label: "app.sleepulator.podstorage", qos: .utility)
     
     var onPlaybackStateChanged: ((Bool) -> Void)?
-    var onQueueAdvance: ((String?) -> Void)?
+    /// Advance past the current episode. `didFinish` is true only for a natural end-of-episode
+    /// (the owner marks it played); false for a failed/stalled/lost stream, which must advance the
+    /// queue WITHOUT recording the episode as heard.
+    var onQueueAdvance: ((_ finishedId: String?, _ didFinish: Bool) -> Void)?
     var onNearEnd: (() -> Void)?
     var onTitleUpdate: ((String) -> Void)?
     var onPlaybackFailed: ((String) -> Void)?
@@ -49,6 +52,9 @@ final class PodcastPlayer: NSObject {
     
     private var currentUrl: String?
     private var currentId: String?
+    /// Fires ~30s after a stall if playback hasn't recovered — then the stream is treated as lost
+    /// (advance without marking finished). Cancelled on recovery, pause, or a new load.
+    private var stallWatchdog: DispatchWorkItem?
     /// True from the moment a new item starts loading until its resume-seek completes. While set,
     /// the periodic time observer skips writing positions / progress — otherwise a trailing tick on
     /// the OLD item lands under the NEW episode's id and the resume-seek jumps the next track partway
@@ -154,6 +160,7 @@ final class PodcastPlayer: NSObject {
         }
         currentItem?.removeObserver(self, forKeyPath: "status")
         fadeTimer?.cancel()
+        stallWatchdog?.cancel()
         // Cancel any in-flight tap/track loads so they don't outlive this instance.
         preloadTapTask?.cancel()
         playbackTask?.cancel()
@@ -237,14 +244,18 @@ final class PodcastPlayer: NSObject {
         currentId = id
         currentTitle = title
         hasFiredNearEnd = false
+        cancelStallWatchdog()            // a fresh item — any pending stall belongs to the old one
+        onPlaybackNote?(nil)             // clear a stale "stream lost"/"buffering" note on load
         isLoadingItem = true             // block position writes until the swap + resume-seek finish
 
         currentItem?.removeObserver(self, forKeyPath: "status")
         self.currentItem = playerItem
-        
+
         NotificationCenter.default.removeObserver(self, name: .AVPlayerItemDidPlayToEndTime, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(itemDidFinishPlaying), name: .AVPlayerItemDidPlayToEndTime, object: playerItem)
-        
+        NotificationCenter.default.removeObserver(self, name: .AVPlayerItemPlaybackStalled, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(itemStalled), name: .AVPlayerItemPlaybackStalled, object: playerItem)
+
         playerItem.addObserver(self, forKeyPath: "status", options: [.new, .old], context: nil)
         
         playbackTask?.cancel()
@@ -268,6 +279,10 @@ final class PodcastPlayer: NSObject {
                 let interval = CMTime(seconds: 1.0, preferredTimescale: 1000)
                 timeObserver = player?.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
                     guard let self = self else { return }
+                    // Progressing again → a stall (if any) recovered; drop the watchdog + note.
+                    if self.stallWatchdog != nil, self.player?.timeControlStatus == .playing {
+                        self.cancelStallWatchdog()
+                    }
                     // Skip position/progress work while a new item is loading: a trailing tick on the
                     // old item would otherwise record under the new episode's id and poison its
                     // resume-seek. backgroundTick stays outside this guard (sleep-timer keep-alive).
@@ -367,6 +382,7 @@ final class PodcastPlayer: NSObject {
     }
 
     func pause() {
+        cancelStallWatchdog()            // a paused stream must not be auto-skipped by the watchdog
         pausedAt = Date()
         player?.pause()
         flushPositionsToDisk()
@@ -375,6 +391,7 @@ final class PodcastPlayer: NSObject {
     }
 
     func stop() {
+        cancelStallWatchdog()
         pausedAt = Date()
         player?.pause()
         flushPositionsToDisk()
@@ -448,21 +465,80 @@ final class PodcastPlayer: NSObject {
     }
     
     @objc private func itemDidFinishPlaying() {
+        cancelStallWatchdog()
         let finishedId = currentId
         if let id = finishedId {
             cachedPositions?.removeValue(forKey: id)
             flushPositionsToDisk()
         }
-        onQueueAdvance?(finishedId)
+        onQueueAdvance?(finishedId, true)   // natural end — the owner may mark it played
     }
-    
+
+    /// A buffer underrun. AVPlayer keeps retrying, but a *dead* stream buffers in silence forever
+    /// while the lock screen still says "playing". Surface an honest note and arm a watchdog that
+    /// only gives up once the stream is genuinely dead — not merely slow. `.AVPlayerItemPlaybackStalled`
+    /// is posted on an arbitrary thread, so hop to main before touching any watchdog state (all of
+    /// it is main-confined).
+    @objc private func itemStalled() {
+        DispatchQueue.main.async { [weak self] in self?.beginStallWatch() }
+    }
+
+    private func beginStallWatch() {
+        guard stallWatchdog == nil else { return }   // one watch per stall episode
+        Log.audio.notice("podcast stream stalled — buffering")
+        onPlaybackNote?("Buffering…")
+        armStallWatchdog(for: currentId, attempt: 0)
+    }
+
+    /// Fires ~30s later. Only advances when the stream is genuinely stuck: a slow-but-alive stream
+    /// sits at `.waitingToPlayAtSpecifiedRate` (NOT `.paused`) while AVPlayer refills its buffer, so
+    /// bailing only on `.paused` would falsely skip it. Extend while it still expects to keep up (or
+    /// within a short grace window), then give up — a bounded wait (~30s grace, up to ~3 min if it
+    /// keeps claiming it can recover) so a network dip is ridden out but a dead stream is dropped.
+    private func armStallWatchdog(for lostId: String?, attempt: Int) {
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.stallWatchdog = nil
+            let status = self.player?.timeControlStatus
+            if status == .playing || status == .paused {
+                self.onPlaybackNote?(nil)   // recovered, or the user paused — no skip
+                return
+            }
+            let stillTrying = (self.currentItem?.isPlaybackLikelyToKeepUp == true && attempt < 6) || attempt < 1
+            if stillTrying {
+                self.armStallWatchdog(for: lostId, attempt: attempt + 1)   // ride out the dip
+                return
+            }
+            Log.audio.error("podcast stream lost (stalled ~\((attempt + 1) * 30, privacy: .public)s) — advancing")
+            self.onPlaybackNote?("Podcast stream lost — the ambient sounds continue")
+            self.onQueueAdvance?(lostId, false)   // advance, but do NOT mark it played
+        }
+        stallWatchdog = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 30, execute: work)
+    }
+
+    /// Drop a pending stall watchdog (recovery / pause / new load) and clear the buffering note.
+    /// Watchdog state is main-confined; `itemDidFinishPlaying` / `observeValue` can call this from a
+    /// notification/KVO thread, so hop to main first.
+    private func cancelStallWatchdog() {
+        if !Thread.isMainThread {
+            DispatchQueue.main.async { [weak self] in self?.cancelStallWatchdog() }
+            return
+        }
+        guard stallWatchdog != nil else { return }
+        stallWatchdog?.cancel()
+        stallWatchdog = nil
+        onPlaybackNote?(nil)
+    }
+
     override func observeValue(forKeyPath keyPath: String?, of object: Any?, change: [NSKeyValueChangeKey : Any]?, context: UnsafeMutableRawPointer?) {
         if keyPath == "status", let item = object as? AVPlayerItem {
             if item.status == .failed {
+                cancelStallWatchdog()
                 let errorMsg = item.error?.localizedDescription ?? "Unknown error"
                 Log.audio.error("AVPlayerItem failed: \(errorMsg, privacy: .public)")
                 onPlaybackFailed?(errorMsg)
-                onQueueAdvance?(currentId)
+                onQueueAdvance?(currentId, false)   // failed — advance but do NOT mark it played
             }
         }
     }

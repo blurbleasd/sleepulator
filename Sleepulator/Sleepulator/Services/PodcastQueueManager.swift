@@ -26,7 +26,11 @@ final class PodcastQueueManager: ObservableObject {
     }
     @Published var finishedEpisodes: Set<String> = [] {
         didSet {
-            let arr = Array(finishedEpisodes)
+            // Persist the RECENCY order (`finishedOrder`), not `Array(finishedEpisodes)`: a Set has
+            // no order, so saving it lost the recency the cap depends on — after relaunch the
+            // trim-oldest cap would drop arbitrary entries. Every writer updates `finishedOrder`
+            // before assigning `finishedEpisodes = Set(finishedOrder)`, so this is current here.
+            let arr = finishedOrder
             storageQueue.async { UserDefaults.standard.set(arr, forKey: "finishedEpisodes") }
         }
     }
@@ -159,11 +163,25 @@ final class PodcastQueueManager: ObservableObject {
     /// delete-on-completion) but do NOT start the next episode — used by the sleep-aware
     /// hold, so the morning queue is clean while the night stays ambient-only.
     func advanceQueue(finishedEpId: String? = nil, suppressAutoPlay: Bool = false) {
-        if !self.queue.isEmpty {
-            let finishedEp = self.queue.removeFirst()
-            if deleteOnCompletion, let url = URL(string: finishedEp.audioUrl) {
-                AudioDownloader.shared.deleteCachedEpisode(for: url)
+        // Remove the episode that ACTUALLY finished, identified by id — not just the head. The
+        // head is normally the playing episode, but if the queue was reordered (or the head
+        // removed) while it played, `removeFirst()` would drop the wrong episode and, with
+        // delete-on-completion, DELETE the wrong cached download. Fall back to the head only when
+        // no id is given (legacy callers); if the id is already gone, remove nothing.
+        let finishedEp: Episode?
+        if let id = finishedEpId {
+            if let idx = queue.firstIndex(where: { $0.id == id }) {
+                finishedEp = queue.remove(at: idx)
+            } else {
+                finishedEp = nil   // already removed elsewhere — don't drop/delete an innocent one
             }
+        } else if !queue.isEmpty {
+            finishedEp = queue.removeFirst()
+        } else {
+            finishedEp = nil
+        }
+        if deleteOnCompletion, let ep = finishedEp, let url = URL(string: ep.audioUrl) {
+            AudioDownloader.shared.deleteCachedEpisode(for: url)
         }
 
         if !self.autoPlay || suppressAutoPlay || self.queue.isEmpty {

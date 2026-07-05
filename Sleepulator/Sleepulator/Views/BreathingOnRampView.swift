@@ -17,12 +17,28 @@ struct BreathingOnRampView: View {
     let onCancel: () -> Void
 
     @State private var remaining: Int
+    /// Guards the one-shot outcome: whichever of begin/cancel/background happens first wins, the
+    /// rest are no-ops (the parent also nils `pendingStart`, but keep it honest here too).
+    @State private var settled = false
+    @Environment(\.scenePhase) private var scenePhase
 
     init(seconds: Int = 60, onBegin: @escaping () -> Void, onCancel: @escaping () -> Void) {
         self.seconds = seconds
         self.onBegin = onBegin
         self.onCancel = onCancel
         _remaining = State(initialValue: seconds)
+    }
+
+    private func begin() {
+        guard !settled else { return }
+        settled = true
+        onBegin()
+    }
+
+    private func cancel() {
+        guard !settled else { return }
+        settled = true
+        onCancel()
     }
 
     var body: some View {
@@ -32,7 +48,7 @@ struct BreathingOnRampView: View {
             VStack {
                 HStack {
                     Spacer()
-                    Button(action: onCancel) {
+                    Button(action: cancel) {
                         Image(systemName: "xmark")
                             .font(.system(size: 17, weight: .semibold))
                             .foregroundColor(.white.opacity(0.7))
@@ -66,7 +82,7 @@ struct BreathingOnRampView: View {
                         .monospacedDigit()
                         .accessibilityLabel("Your mix starts in \(remaining) seconds")
 
-                    Button(action: onBegin) {
+                    Button(action: begin) {
                         Text("Start now")
                             .font(.system(.headline, design: .rounded))
                             .foregroundColor(.black)
@@ -80,6 +96,14 @@ struct BreathingOnRampView: View {
             }
         }
         .preferredColorScheme(.dark)
+        // Locking the phone mid-wind-down would suspend the countdown Task below with no audio
+        // session alive, so the mix would never start — silence all night, the exact failure the
+        // app exists to prevent. Treat backgrounding as "start now": the mix begins (and its audio
+        // keeps the app alive) before we suspend. A false positive (an app-switch instead of a
+        // lock) merely starts the mix a beat early — cheap next to never starting at all.
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .background { begin() }
+        }
         .task {
             var r = seconds
             while r > 0 {
@@ -88,7 +112,7 @@ struct BreathingOnRampView: View {
                 if Task.isCancelled { return }   // dismissed (started or skipped) — don't fire again
                 r -= 1
             }
-            onBegin()
+            begin()
         }
     }
 }

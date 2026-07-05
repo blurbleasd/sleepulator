@@ -544,10 +544,12 @@ final class AudioEngine: ObservableObject {
             DispatchQueue.main.async { self?.playbackNote = note }
         }
         
-        podPlayer.onQueueAdvance = { [weak self] finishedEpId in
+        podPlayer.onQueueAdvance = { [weak self] finishedEpId, didFinish in
             DispatchQueue.main.async {
                 guard let self = self else { return }
-                if let id = finishedEpId {
+                // Only a natural end marks the episode played. A failed / stalled-lost stream
+                // must NOT be recorded as heard (it would vanish under "hide finished episodes").
+                if didFinish, let id = finishedEpId {
                     self.queueManager.markFinished(id)
                 }
                 // End-of-episode sleep timer: stop everything when this episode ends rather than
