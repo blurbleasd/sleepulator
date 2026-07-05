@@ -19,6 +19,7 @@ current plan.
 | IMPLEMENTATION-PLAN-2026-06-24 | 🔶 ~60% of "Now" scope | Idle-based scene freeze; shader multi-hour OLED A/B |
 | SESSION-HANDOFF-2026-06-24 | 📜 checkpoint | §5 HomeView decompose: **done** (Views/Home/, committed 2026-07-04); §3A PersistenceTests target membership: **done** (pbxproj) |
 | RAIN-ON-GLASS-DEPTH-SPEC | 🔶 v2 shader in code (2026-07-04) | Was a CC BY-NC-SA "Heartfelt" port; rewritten as an original lens (inverted-image drops + fog blur DoF). Needs device A/B vs shipping rain scene |
+| docs/designs/VISUAL-MOAT-REACTIVE-SCENES | 🆕 CEO plan promoted 2026-07-05 (SCOPE EXPANSION; survived 2 adversarial rounds 5→8/10) | Umbrella plan: reactive depth-real scenes as the product moat, device-verification as the gate. Accepted P1 verify-gate, P2 DoF/fog reactive seam, P3 rain-lens A/B, P4 StillWater→ocean depth, P5 idle-freeze verify, P6a motion toggle + findings F1–F4. Next: /plan-eng-review |
 
 ## Open work, ranked
 
