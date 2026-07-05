@@ -85,6 +85,25 @@ final class MixStore: ObservableObject {
         storageQueue.asyncAfter(deadline: .now() + 0.5, execute: work)
     }
 
+    /// Run any deferred `mixes.json` write immediately and durably (called on app-background).
+    /// `persistPresets` coalesces its write behind a 0.5 s timer; without this, a preset saved in
+    /// that window is lost if the app is jettisoned overnight. The write must actually land before
+    /// we return: `save` re-dispatches onto StorageManager's io queue, so we enqueue it then block
+    /// on `flush()` (an `ioQueue.sync {}` barrier) until it's on disk. Bounded to one small JSON
+    /// write on the storage queue — only on app-background, never a hot path. No-op unless a
+    /// preset was actually saved this session (`persistWork` stays nil otherwise).
+    func flushPendingWrites() {
+        guard persistWork != nil else { return }
+        persistWork?.cancel()
+        persistWork = nil
+        let presets = savedPresets
+        let storage = self.storage
+        storageQueue.sync {
+            storage.save(presets, to: "mixes.json")
+            storage.flush()   // ioQueue barrier — return only once the bytes are written
+        }
+    }
+
     /// Reload the last-mix snapshot and saved presets from disk — used by the in-process Restore.
     /// Accepts the current `[SoundPreset]` schema or a legacy `[SavedMix]` mixes.json (converting
     /// it the same way `PersistenceMigrator` does), so a restore never shows an empty preset list.

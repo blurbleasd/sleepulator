@@ -176,6 +176,18 @@ the brightness you actually use at night, in **both** Sleep and Focus.
    time with no jump-back. Idle (no session): the faint track ring is still perceptible at low
    brightness.
 
+### J. Resume integrity + diagnosability (added 2026-07-05, unverified)
+1. **Muted layer survives resume.** Build a mix with an extra layer, mute that layer, stop.
+   Reopen and "Resume Last Night". ✅ The layer comes back still muted (it used to un-mute).
+2. **Save-on-background durability.** Save a mix, then immediately background the app (within a
+   second). Force-quit from the app switcher. Relaunch. ✅ The saved mix is still there (the
+   deferred write is flushed synchronously on background). Repeat with audio NOT playing.
+3. **Overnight log export.** After a night (or any session with a timer + a call/route change),
+   Settings ▸ Advanced ▸ Diagnostics ▸ "Export last night's log". ✅ The share sheet produces a
+   readable text timeline — sleep-timer start/bump/tail/terminal-stop, interruption began/ended
+   (with the resume decision), route changes, limiter-attach outcome — not a wall of `<private>`
+   (verify on a release build) and not slow to generate.
+
 ---
 
 ## Quick release checklist

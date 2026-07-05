@@ -345,6 +345,29 @@ struct SettingsView: View {
                                         .contentShape(Rectangle())
                                     }
                                     .buttonStyle(.plain)
+
+                                    // Export the overnight log trail (timer, interruption, route,
+                                    // limiter breadcrumbs) — the bedside way to see why the bed
+                                    // behaved as it did without tethering to Console.app.
+                                    Button {
+                                        Task {
+                                            let text = await LogExport.collect()
+                                            logDocument = TextDocument(text: text)
+                                            isExportingLog = true
+                                        }
+                                    } label: {
+                                        HStack {
+                                            Text("Export last night's log")
+                                                .foregroundColor(pal.accent)
+                                            Spacer()
+                                            Image(systemName: "square.and.arrow.up")
+                                                .font(.footnote.weight(.semibold))
+                                                .foregroundColor(pal.dim)
+                                        }
+                                        .frame(minHeight: 44)
+                                        .contentShape(Rectangle())
+                                    }
+                                    .buttonStyle(.plain)
                                 }
                             }
                             .padding(.top, 16)
@@ -397,6 +420,13 @@ struct SettingsView: View {
                 showAlert = true
             }
         }
+        .fileExporter(isPresented: $isExportingLog, document: logDocument, contentType: .plainText, defaultFilename: "sleepulator-log") { result in
+            if case .failure(let error) = result {
+                alertTitle = "Log Export Failed"
+                alertMessage = error.localizedDescription
+                showAlert = true
+            }
+        }
         .alert(alertTitle, isPresented: $showAlert) {
             Button("OK", role: .cancel) {}
         } message: {
@@ -407,6 +437,8 @@ struct SettingsView: View {
     @State private var isImporting = false
     @State private var isExporting = false
     @State private var exportDocument: JSONDocument?
+    @State private var isExportingLog = false
+    @State private var logDocument: TextDocument?
     @State private var alertTitle = ""
     @State private var alertMessage = ""
     @State private var showAlert = false
@@ -553,7 +585,7 @@ struct SettingsView: View {
 struct JSONDocument: FileDocument {
     static var readableContentTypes: [UTType] { [.json] }
     var data: Data
-    
+
     init(data: Data) { self.data = data }
     init(configuration: ReadConfiguration) throws {
         if let data = configuration.file.regularFileContents {
@@ -564,6 +596,24 @@ struct JSONDocument: FileDocument {
     }
     func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
         return FileWrapper(regularFileWithContents: data)
+    }
+}
+
+/// Plain-text wrapper for the "Export logs" share sheet (the overnight LogExport trail).
+struct TextDocument: FileDocument {
+    static var readableContentTypes: [UTType] { [.plainText] }
+    var text: String
+
+    init(text: String) { self.text = text }
+    init(configuration: ReadConfiguration) throws {
+        if let data = configuration.file.regularFileContents {
+            self.text = String(decoding: data, as: UTF8.self)
+        } else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+    }
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        return FileWrapper(regularFileWithContents: Data(text.utf8))
     }
 }
 

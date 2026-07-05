@@ -1,6 +1,7 @@
 import Foundation
 import AVFoundation
 import Network
+import os
 
 /// Single source of truth for the shared playback session's category options. The app is
 /// exclusive-`.playback` by default (the all-night Sleep case must not let other audio bleed in),
@@ -14,9 +15,15 @@ enum AudioSessionConfig {
     static var options: AVAudioSession.CategoryOptions = []
 
     /// Re-assert the `.playback` category with the current `options`. Does NOT activate the
-    /// session — callers that need it active follow with `Log.activateAudioSession(_:)`.
+    /// session — callers that need it active follow with `Log.activateAudioSession(_:)`. Logs
+    /// (rather than swallows) a failure: a category that didn't take is another way the bed can
+    /// misbehave overnight, and it belongs in the exported log trail.
     static func applyCategory() {
-        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: options)
+        do {
+            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: options)
+        } catch {
+            Log.audio.error("setCategory(.playback) failed: \(error.localizedDescription, privacy: .public)")
+        }
     }
 }
 
@@ -42,7 +49,9 @@ final class AudioSessionController {
     /// re-activates the session directly; this is the initial activation at startup.)
     func activateSession() {
         AudioSessionConfig.applyCategory()
-        try? AVAudioSession.sharedInstance().setActive(true)
+        // Route the initial activation through the logged helper too — a failed startup
+        // activation is exactly the kind of silent breadcrumb the log export is for.
+        Log.activateAudioSession("startup")
     }
 
     func start() {

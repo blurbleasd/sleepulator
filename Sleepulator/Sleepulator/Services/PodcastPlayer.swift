@@ -567,9 +567,14 @@ final class PodcastPlayer: NSObject {
                     item.audioMix = mix
                     return true
                 }
+                Log.audio.error("night limiter off: MTAudioProcessingTap creation failed for this stream")
+            } else {
+                Log.audio.notice("night limiter off: no audio track loaded for this stream")
             }
+        } catch is CancellationError {
+            Log.audio.notice("night limiter off: track load timed out (1.5s) for this stream")
         } catch {
-            // Timeout or track load failure
+            Log.audio.error("night limiter off: track load failed — \(error.localizedDescription, privacy: .public)")
         }
         return false
     }

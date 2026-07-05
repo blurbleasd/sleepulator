@@ -4,6 +4,7 @@ import AVFoundation
 import Network
 import SwiftUI
 import MusicKit
+import os
 
 enum AppConfig {
     /// Default for fresh installs only (a user's explicit Settings toggle, persisted in
@@ -383,7 +384,7 @@ final class AudioEngine: ObservableObject {
         if let data = UserDefaults.standard.data(forKey: "extraLayers"),
            let layers = try? JSONDecoder().decode([ExtraNoiseLayer].self, from: data) {
             self.extraLayers = layers.prefix(Self.maxExtraLayers).map {
-                ExtraNoiseLayer(id: $0.id, type: NoiseType.migrate($0.type), volume: $0.volume)
+                ExtraNoiseLayer(id: $0.id, type: NoiseType.migrate($0.type), volume: $0.volume, muted: $0.muted)
             }
         }
         self.binauralPreset = UserDefaults.standard.string(forKey: "binauralPreset") ?? "delta"
@@ -882,7 +883,7 @@ final class AudioEngine: ObservableObject {
         self.noiseType = NoiseType.migrate(mix.noiseType)
         self.noiseVolume = mix.noiseVolume
         self.extraLayers = (mix.extraLayers ?? []).prefix(Self.maxExtraLayers).map {
-            ExtraNoiseLayer(id: $0.id, type: NoiseType.migrate($0.type), volume: $0.volume)
+            ExtraNoiseLayer(id: $0.id, type: NoiseType.migrate($0.type), volume: $0.volume, muted: $0.muted)
         }
         self.noiseOn = mix.noiseOn
         
@@ -891,7 +892,13 @@ final class AudioEngine: ObservableObject {
         self.binauralOn = mix.binauralOn
         
         self.podVolume = mix.podVolume
-        
+
+        // NOTE: resume deliberately does NOT reconcileSoundsToMode() — resume must faithfully
+        // restore exactly what was playing (a tested contract), and a SavedMix carries no mode,
+        // so snapping to the *current* mode would corrupt a mix made for the other one. A truly
+        // mode-aware resume needs a `mode` field on SavedMix (a backward-compatible schema add);
+        // until then, restoring the sound as-saved is the honest behavior.
+
         if let urlStr = mix.podcastUrl {
             // Seek straight to the snapshot's stored position; fall back to the saved-position map
             // (resume: true) for older snapshots that predate podcastPosition.
@@ -954,7 +961,7 @@ final class AudioEngine: ObservableObject {
         noiseVolume = p.noiseVolume
         noiseOn = p.noiseOn
         extraLayers = (p.extraLayers ?? []).prefix(Self.maxExtraLayers).map {
-            ExtraNoiseLayer(id: $0.id, type: NoiseType.migrate($0.type), volume: $0.volume)
+            ExtraNoiseLayer(id: $0.id, type: NoiseType.migrate($0.type), volume: $0.volume, muted: $0.muted)
         }
 
         binauralPreset = p.binauralPreset
@@ -1005,7 +1012,7 @@ final class AudioEngine: ObservableObject {
         if let data = d.data(forKey: "extraLayers"),
            let layers = try? JSONDecoder().decode([ExtraNoiseLayer].self, from: data) {
             extraLayers = layers.prefix(Self.maxExtraLayers).map {
-                ExtraNoiseLayer(id: $0.id, type: NoiseType.migrate($0.type), volume: $0.volume)
+                ExtraNoiseLayer(id: $0.id, type: NoiseType.migrate($0.type), volume: $0.volume, muted: $0.muted)
             }
         } else {
             extraLayers = []
@@ -1107,6 +1114,7 @@ final class AudioEngine: ObservableObject {
               let type = AVAudioSession.InterruptionType(rawValue: typeValue) else { return }
 
         if type == .began {
+            Log.timer.notice("interruption began (podWasPlaying=\(self.isPodPlaying, privacy: .public))")
             podWasPlayingBeforeInterruption = podWasPlayingBeforeInterruption || isPodPlaying
             genEngine.handleInterruption(shouldResume: false)
             if isPodPlaying { podPlayer.pause() }
@@ -1130,7 +1138,9 @@ final class AudioEngine: ObservableObject {
                 genEngine.handleInterruption(shouldResume: true)
             }
 
-            if options.contains(.shouldResume), podWasPlayingBeforeInterruption {
+            let willResumePod = options.contains(.shouldResume) && podWasPlayingBeforeInterruption
+            Log.timer.notice("interruption ended (shouldResume=\(options.contains(.shouldResume), privacy: .public), resumingPod=\(willResumePod, privacy: .public))")
+            if willResumePod {
                 podPlayer.resume()
             }
             podWasPlayingBeforeInterruption = false
@@ -1140,7 +1150,9 @@ final class AudioEngine: ObservableObject {
     private func handleRouteChange(note: Notification) {
         guard let reasonValue = note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt,
               let reason = AVAudioSession.RouteChangeReason(rawValue: reasonValue) else { return }
-        
+
+        Log.timer.notice("route change: reason=\(reasonValue, privacy: .public) (headphones-gone=\(reason == .oldDeviceUnavailable, privacy: .public))")
+
         // Headphones unplugged: follow the HIG for spoken media — pause the podcast so a
         // voice doesn't suddenly play out the phone speaker (waking the room). Keep the
         // ambient noise bed going — it's a calibrated, limiter-bounded background you fall
@@ -1168,5 +1180,12 @@ final class AudioEngine: ObservableObject {
 
     private func handleAppBackground() {
         podPlayer.flushPositionsToDisk()
+        // Capture "Last Night" now, not only on pause/stop: an overnight jetsam while still
+        // playing would otherwise leave a stale resume snapshot. saveLast is a synchronous
+        // UserDefaults write, so it's durable by the time we suspend.
+        saveLastMix()
+        // Force any deferred mixes.json write to run — a preset saved in the last half-second
+        // must not be lost if the app is jettisoned overnight.
+        mixStore.flushPendingWrites()
     }
 }

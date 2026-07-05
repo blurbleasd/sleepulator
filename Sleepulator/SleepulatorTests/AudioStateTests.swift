@@ -946,3 +946,37 @@ final class PomodoroProgressTests: XCTestCase {
         XCTAssertEqual(p.phaseElapsed(at: Date().addingTimeInterval(120)), 120, accuracy: 0.1)
     }
 }
+
+// MARK: - Resume / persistence integrity
+
+/// "Resume Last Night" must restore the exact recipe faithfully — including a muted extra layer,
+/// which the four rebuild maps used to drop. Resume deliberately does NOT reconcile to the current
+/// mode (see resumeMix's NOTE): a SavedMix carries no mode, so snapping would corrupt a cross-mode
+/// mix. These tests use Sleep-valid inputs so "faithful" is unambiguous.
+@MainActor
+final class ResumeIntegrityTests: XCTestCase {
+    private func lastNight(noiseType: String, layers: [ExtraNoiseLayer]) -> SavedMix {
+        SavedMix(name: "Last Night", noiseOn: true, noiseVolume: 0.4, noiseType: noiseType,
+                 binauralOn: false, binVolume: 0.3, binauralPreset: "delta", podVolume: 0.7,
+                 podcastUrl: nil, podcastId: nil, extraLayers: layers)
+    }
+
+    func testResumePreservesMutedLayer() {
+        let engine = AudioEngine()
+        engine.focusMode = false
+        engine.resumeMix(lastNight(noiseType: "brown",
+                                   layers: [ExtraNoiseLayer(id: "L1", type: "rain", volume: 0.5, muted: true)]))
+        XCTAssertEqual(engine.extraLayers.first?.type, "rain")
+        XCTAssertEqual(engine.extraLayers.first?.muted, true,
+                       "muted must survive the rebuild map — it used to un-mute on resume")
+    }
+
+    func testResumeRestoresSoundFaithfully() {
+        // Resume is faithful: it restores the saved sound as-is and does NOT reconcile to the
+        // current mode (a SavedMix carries no mode; snapping would corrupt a cross-mode mix).
+        let engine = AudioEngine()
+        engine.focusMode = false
+        engine.resumeMix(lastNight(noiseType: "green", layers: []))   // green is a valid Sleep sound
+        XCTAssertEqual(engine.noiseType, "green")
+    }
+}

@@ -135,6 +135,7 @@ final class SleepTimerService: ObservableObject {
         timerRemaining = tailDuration
         backstop.schedule(after: tailDuration)
         updateLiveActivity()
+        Log.timer.notice("ambient tail begin: podcast stopped, bed continues \(Int(self.tailDuration), privacy: .public)s")
     }
 
     /// Out-of-process safety net for the terminal stop (see protocol doc). Injectable for tests.
@@ -155,6 +156,7 @@ final class SleepTimerService: ObservableObject {
         startLiveActivity()
 
         armTick()
+        Log.timer.notice("sleep timer started: \(minutes, privacy: .public)m")
     }
 
     /// Create + start the 1 Hz GCD wall-clock timer. Split out of `startSleepTimer` so the
@@ -198,6 +200,7 @@ final class SleepTimerService: ObservableObject {
         guard Date() >= end else { return }
         if timerRemaining != 0 { timerRemaining = 0 }
         didFire = true
+        Log.timer.notice("terminal stop: duration timer expired while suspended (reconcile on foreground)")
         stopAllFn?()
         cancelTimer(resetMoon: false)
     }
@@ -218,6 +221,7 @@ final class SleepTimerService: ObservableObject {
             }
             if self.timerRemaining != 0 { self.timerRemaining = 0 }
             didFire = true
+            Log.timer.notice("terminal stop: end-of-episode reached")
             stopAllFn?()
             cancelTimer(resetMoon: false)
             return
@@ -259,6 +263,7 @@ final class SleepTimerService: ObservableObject {
                 if self.timerRemaining != 0 { self.timerRemaining = 0 }
                 guard !self.didFire else { return }
                 self.didFire = true
+                Log.timer.notice("terminal stop: duration timer fade complete")
                 self.stopAllFn?()
                 self.cancelTimer(resetMoon: false)
                 return
@@ -305,6 +310,7 @@ final class SleepTimerService: ObservableObject {
                 self.updateFadeMultFn?(1.0)
             }
 
+            Log.timer.notice("sleep timer +15m → \(Int(self.timerRemaining), privacy: .public)s left")
             // Move the out-of-process net to the new, later deadline.
             backstop.schedule(after: self.timerRemaining)
 
