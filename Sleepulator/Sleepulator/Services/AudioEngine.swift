@@ -463,11 +463,21 @@ final class AudioEngine: ObservableObject {
         // Last Night" — saveLastMix captures a loaded-but-paused episode) and the bed plays on
         // for the configured span, continuing the fade. See SleepTimerService.beginTail().
         sleepTimer.stopPodcastFn = { [weak self] in
+            // The tail deliberately silences the podcast for the night — a call ending after
+            // the handoff must not resurrect it (see podWasPlayingBeforeInterruption).
+            self?.podWasPlayingBeforeInterruption = false
             self?.podPlayer.pause()
         }
         sleepTimer.tailEligibleFn = { [weak self] in
             guard let self else { return false }
-            return self.isPodPlaying && (self.noiseOn || self.binauralOn)
+            // The tail needs an ambient bed AND a podcast in tonight's mix — but not a
+            // *still-playing* one: requiring `isPodPlaying` at the exact expiry moment meant
+            // an episode that happened to end a couple of minutes early cancelled the
+            // configured tail and hard-stopped the bed. `hasLoadedEpisode` survives the
+            // episode ending (the player is kept), while still excluding pure-bed nights —
+            // whose timers should stop when the user said stop, not gain a near-silent
+            // 15–60 min zombie tail. (`stopPodcastFn` is a pause — a no-op when idle.)
+            return self.hasLoadedEpisode && (self.noiseOn || self.binauralOn)
         }
         sleepTimer.ambientTailFn = {
             Double(UserDefaults.standard.integer(forKey: "ambientTailMinutes")) * 60.0
@@ -835,6 +845,9 @@ final class AudioEngine: ObservableObject {
     func pauseAll() {
         isMasterPauseTransition = true
         saveLastMix()
+        // An explicit pause between interruption .began/.ended must stick — without this,
+        // the .ended resume would override the user's pause (see the flag's doc comment).
+        podWasPlayingBeforeInterruption = false
         noiseOn = false
         binauralOn = false
         if isPodPlaying { podPlayer.pause() }
@@ -965,6 +978,11 @@ final class AudioEngine: ObservableObject {
 
     func stopAll() {
         saveLastMix()
+        // An explicit stop between interruption .began/.ended must stick: PodcastPlayer.stop()
+        // keeps the player, so a stale captured flag would let the .ended resume restart a
+        // podcast the user (or the timer's terminal stop) deliberately silenced — full volume,
+        // no timer, all night. Invalidate the capture on every deliberate stop.
+        podWasPlayingBeforeInterruption = false
         noiseOn = false
         binauralOn = false
         podPlayer.stop()
@@ -1075,15 +1093,28 @@ final class AudioEngine: ObservableObject {
     
     // MARK: - Queue Delegation
     // MARK: Interruption
+
+    /// Whether the podcast was playing when the interruption began. `.began`'s `pause()` flips
+    /// `isPodPlaying` to false, so checking the live flag at `.ended` always read "wasn't
+    /// playing" — a phone call or alarm at bedtime permanently silenced the podcast for the
+    /// night. Captured at `.began`, consumed at `.ended`. OR-ed on capture so a nested second
+    /// `.began` (which sees the already-paused state) can't erase the pending resume.
+    /// Main-queue only (AudioSessionController hops every forward to main).
+    private var podWasPlayingBeforeInterruption = false
+
     private func handleInterruption(note: Notification) {
         guard let typeValue = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
               let type = AVAudioSession.InterruptionType(rawValue: typeValue) else { return }
-        
+
         if type == .began {
+            podWasPlayingBeforeInterruption = podWasPlayingBeforeInterruption || isPodPlaying
             genEngine.handleInterruption(shouldResume: false)
             if isPodPlaying { podPlayer.pause() }
         } else if type == .ended {
-            guard let optionsValue = note.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt else { return }
+            // A missing options key must not abort recovery: the old early-return here skipped
+            // the suspend-cancel, the session reactivation, AND the engine restart — a silent
+            // dead bed for the rest of the night. Default to "no options" and recover anyway.
+            let optionsValue = note.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0
             let options = AVAudioSession.InterruptionOptions(rawValue: optionsValue)
 
             // A power-save suspend scheduled just before the call must not fire after we
@@ -1099,9 +1130,10 @@ final class AudioEngine: ObservableObject {
                 genEngine.handleInterruption(shouldResume: true)
             }
 
-            if options.contains(.shouldResume) {
-                if isPodPlaying { podPlayer.resume() }
+            if options.contains(.shouldResume), podWasPlayingBeforeInterruption {
+                podPlayer.resume()
             }
+            podWasPlayingBeforeInterruption = false
         }
     }
     
@@ -1117,6 +1149,10 @@ final class AudioEngine: ObservableObject {
         // actually works on a speaker.
         if reason == .oldDeviceUnavailable {
             if isPodPlaying { podPlayer.pause() }
+            // Headphones went away — also void a pending post-interruption resume, or a call
+            // during which the AirPods died would resume the spoken podcast on the SPEAKER
+            // (the exact wake-the-room case this pause exists to prevent).
+            podWasPlayingBeforeInterruption = false
         }
 
         // Any route transition re-picks true-binaural (headphones) vs isochronic (speaker).

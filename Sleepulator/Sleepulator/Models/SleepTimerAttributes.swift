@@ -10,9 +10,31 @@ public struct SleepTimerAttributes: ActivityAttributes {
         /// When true the timer ends with the current episode (not a fixed duration), so the
         /// Live Activity hides the "+15m" button — you can't extend an episode.
         var isEndOfEpisode: Bool = false
+        /// True during the ambient tail (podcast stopped, bed easing to silence). The Live
+        /// Activity hides "+15m": bumping mid-tail would snap the faded bed to full volume —
+        /// a wake-up — so the service also drops the intent (see bumpTimer()).
+        var isInTail: Bool = false
     }
 
     public init() {}
+}
+
+extension SleepTimerAttributes.ContentState {
+    /// Manual decode with optional Bool keys. Synthesized Codable ignores `= false` defaults
+    /// and throws on a missing key — but ActivityKit persists activity payloads across app
+    /// updates, so a Live Activity started by a build without `isInTail` (or the older
+    /// `isEndOfEpisode`) must still decode in the new widget binary instead of dying on the
+    /// lock screen. In an extension so the synthesized memberwise init and encode survive.
+    public init(from decoder: Decoder) throws {
+        enum Keys: String, CodingKey { case timerRemaining, endDate, isEndOfEpisode, isInTail }
+        let c = try decoder.container(keyedBy: Keys.self)
+        self.init(
+            timerRemaining: try c.decode(TimeInterval.self, forKey: .timerRemaining),
+            endDate: try c.decodeIfPresent(Date.self, forKey: .endDate),
+            isEndOfEpisode: try c.decodeIfPresent(Bool.self, forKey: .isEndOfEpisode) ?? false,
+            isInTail: try c.decodeIfPresent(Bool.self, forKey: .isInTail) ?? false
+        )
+    }
 }
 
 /// Focus-mode Pomodoro Live Activity — the phase ring you actually glance at. Shared with the

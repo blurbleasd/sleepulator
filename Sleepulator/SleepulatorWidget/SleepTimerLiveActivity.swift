@@ -52,7 +52,7 @@ struct SleepTimerLiveActivity: Widget {
                 }
                 DynamicIslandExpandedRegion(.bottom) {
                     if #available(iOS 17.0, *) {
-                        TimerControlButtons(isEndOfEpisode: context.state.isEndOfEpisode)
+                        TimerControlButtons(state: context.state)
                     } else {
                         Text("Audio fades out, then stops")
                             .font(.caption2)
@@ -89,7 +89,7 @@ private struct SleepTimerLockScreenView: View {
                     Text("Sleep timer")
                         .font(.headline)
                         .foregroundStyle(.white)
-                    Text(state.isEndOfEpisode ? "Stops when the episode ends" : "Audio fades out, then stops")
+                    Text(subtitle)
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.7))
                 }
@@ -99,22 +99,30 @@ private struct SleepTimerLockScreenView: View {
                     .foregroundStyle(.white)
             }
             if #available(iOS 17.0, *) {
-                TimerControlButtons(isEndOfEpisode: state.isEndOfEpisode)
+                TimerControlButtons(state: state)
             }
         }
         .padding()
+    }
+
+    private var subtitle: String {
+        if state.isInTail { return "Winding down — ambient only" }
+        return state.isEndOfEpisode ? "Stops when the episode ends" : "Audio fades out, then stops"
     }
 }
 
 /// "+15m" / "Stop" controls backed by LiveActivityIntents — they run in the app's process so the
 /// timer can be extended or stopped from the lock screen without opening the app.
+/// "+15m" is hidden for the end-of-episode timer (you can't extend an episode) AND during the
+/// ambient tail (bumping would snap the already-faded bed back toward full volume — a wake-up;
+/// the service also drops the intent as a backstop, see SleepTimerService.bumpTimer()).
 @available(iOS 17.0, *)
 private struct TimerControlButtons: View {
-    let isEndOfEpisode: Bool
+    let state: SleepTimerAttributes.ContentState
 
     var body: some View {
         HStack(spacing: 10) {
-            if !isEndOfEpisode {
+            if !state.isEndOfEpisode && !state.isInTail {
                 Button(intent: BumpSleepTimerIntent()) {
                     Label("15 min", systemImage: "plus")
                         .font(.caption.weight(.semibold))

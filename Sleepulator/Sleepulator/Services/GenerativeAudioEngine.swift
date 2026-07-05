@@ -189,12 +189,16 @@ final class GenerativeAudioEngine {
             default: layerGain = p.layerGain2; type = Int(p.layerType2)
             }
 
-            // Smooth the fade target locally to prevent zipper noise
+            // Smooth the fade target locally to prevent zipper noise. The step is scaled by
+            // the buffer's real duration (0.1 full-scale per second): a fixed per-callback
+            // step made the slew buffer-size-dependent — iOS raises the IO buffer ~8× when
+            // the screen locks, which stretched a ~10s fade response to ~90s overnight.
+            let fadeStep = 0.1 * Float(frameCount) / ns.pointee.sampleRate
             if ns.pointee.fadeMult > p.targetFadeMult {
-                ns.pointee.fadeMult -= 0.001
+                ns.pointee.fadeMult -= fadeStep
                 if ns.pointee.fadeMult < p.targetFadeMult { ns.pointee.fadeMult = p.targetFadeMult }
             } else if ns.pointee.fadeMult < p.targetFadeMult {
-                ns.pointee.fadeMult += 0.001
+                ns.pointee.fadeMult += fadeStep
                 if ns.pointee.fadeMult > p.targetFadeMult { ns.pointee.fadeMult = p.targetFadeMult }
             }
 
@@ -369,12 +373,14 @@ final class GenerativeAudioEngine {
             let p = paramsBuffer[SLPAtomicIndexLoadAcquire(readIdx)]
 
             // The beat node now owns its own fade smoothing (it used to read the noise node's,
-            // which no longer exists once noise is split into independent layers).
+            // which no longer exists once noise is split into independent layers). Step scaled
+            // by buffer duration — same rationale as the noise nodes (buffer-size-independent).
+            let fadeStep = 0.1 * Float(frameCount) / statePtr.pointee.sampleRate
             if statePtr.pointee.fadeMult > p.targetFadeMult {
-                statePtr.pointee.fadeMult -= 0.001
+                statePtr.pointee.fadeMult -= fadeStep
                 if statePtr.pointee.fadeMult < p.targetFadeMult { statePtr.pointee.fadeMult = p.targetFadeMult }
             } else if statePtr.pointee.fadeMult < p.targetFadeMult {
-                statePtr.pointee.fadeMult += 0.001
+                statePtr.pointee.fadeMult += fadeStep
                 if statePtr.pointee.fadeMult > p.targetFadeMult { statePtr.pointee.fadeMult = p.targetFadeMult }
             }
 

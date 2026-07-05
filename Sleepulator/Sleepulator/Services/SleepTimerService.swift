@@ -110,7 +110,10 @@ final class SleepTimerService: ObservableObject {
     /// Stops just the podcast at phase-1 expiry; the noise/binaural bed plays through the tail.
     var stopPodcastFn: (() -> Void)?
 
-    private var inTail = false
+    /// Published (rare — flips at most twice a night) so in-app bump surfaces can hide with
+    /// the Live Activity's "+15m": bumpTimer() drops the intent in-tail, and a visible button
+    /// that haptics-then-does-nothing at the drowsiest moment of the night is worse than none.
+    @Published private(set) var inTail = false
     private var tailDuration: TimeInterval = 1
     /// The fade level at the moment the tail began. The tail fade continues DOWN from here —
     /// never a jump back to full volume right as the podcast drops out (that's a wake-up).
@@ -285,13 +288,19 @@ final class SleepTimerService: ObservableObject {
     func bumpTimer() {
         // Only meaningful for the fixed-duration timer; you can't extend an episode.
         guard kind == .duration else { return }
+        // Never during the ambient tail: the snap to full volume below would blast an
+        // already-faded bed to 100% mid-drift-off — the exact wake-up the tail exists to
+        // prevent — and the tail fade math would then freeze near-silent for the added span.
+        // The Live Activity hides "+15m" while in-tail (ContentState.isInTail), but the
+        // notification can still arrive from a stale render or a Shortcut; drop it here too.
+        guard !inTail else { return }
         if let currentEnd = sleepTimerEnd {
             let newEnd = currentEnd.addingTimeInterval(15 * 60)
             sleepTimerEnd = newEnd
             self.timerRemaining += 15 * 60
             // Grow the total too, so the moon eases back up the arc proportionally.
             self.timerTotal += 15 * 60
-            
+
             if self.timerRemaining > 600 {
                 self.updateFadeMultFn?(1.0)
             }
@@ -332,9 +341,9 @@ final class SleepTimerService: ObservableObject {
         guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
         
         let attributes = SleepTimerAttributes()
-        let contentState = SleepTimerAttributes.ContentState(timerRemaining: timerRemaining, endDate: sleepTimerEnd, isEndOfEpisode: kind == .endOfEpisode)
+        let contentState = SleepTimerAttributes.ContentState(timerRemaining: timerRemaining, endDate: sleepTimerEnd, isEndOfEpisode: kind == .endOfEpisode, isInTail: inTail)
         let content = ActivityContent(state: contentState, staleDate: sleepTimerEnd)
-        
+
         do {
             currentActivity = try Activity.request(attributes: attributes, content: content)
         } catch {
@@ -342,11 +351,11 @@ final class SleepTimerService: ObservableObject {
         }
         #endif
     }
-    
+
     private func updateLiveActivity() {
         #if canImport(ActivityKit)
         guard let activity = currentActivity else { return }
-        let contentState = SleepTimerAttributes.ContentState(timerRemaining: timerRemaining, endDate: sleepTimerEnd, isEndOfEpisode: kind == .endOfEpisode)
+        let contentState = SleepTimerAttributes.ContentState(timerRemaining: timerRemaining, endDate: sleepTimerEnd, isEndOfEpisode: kind == .endOfEpisode, isInTail: inTail)
         let content = ActivityContent(state: contentState, staleDate: sleepTimerEnd)
 
         Task {
@@ -410,6 +419,24 @@ final class PomodoroService: ObservableObject {
     var progress: Double {
         guard phaseTotal > 0 else { return 0 }
         return min(1, max(0, 1 - remaining / phaseTotal))
+    }
+
+    /// Continuous elapsed fraction at `now`, computed from the phase end-date rather than the
+    /// 1 Hz-published `remaining` — lets the Focus ring deplete smoothly between ticks instead of
+    /// stepping once a second. Reads `phaseEnd`/`phaseTotal` (set on the main thread); call on the
+    /// main thread. Falls back to the published `progress` when idle.
+    func progress(at now: Date) -> Double {
+        guard isRunning, phaseTotal > 0, let end = phaseEnd else { return progress }
+        let remainingNow = max(0, end.timeIntervalSince(now))
+        return min(1, max(0, 1 - remainingNow / phaseTotal))
+    }
+
+    /// Seconds since the current phase began (0 exactly at a boundary). Lets the ring ease its
+    /// arc back in over the first moment of a new phase instead of snapping from empty to full.
+    /// Same main-thread read discipline as `progress(at:)`; 0 when idle.
+    func phaseElapsed(at now: Date) -> TimeInterval {
+        guard isRunning, phaseTotal > 0, let end = phaseEnd else { return 0 }
+        return max(0, phaseTotal - max(0, end.timeIntervalSince(now)))
     }
 
     init() {
