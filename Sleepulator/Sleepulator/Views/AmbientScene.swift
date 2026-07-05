@@ -173,9 +173,14 @@ struct RainOnGlassDepthScene: AmbientScene {
     let id = "rain-on-glass-depth"
     let title = "Rain (depth)"
     let mood = SceneMood.sleep
+    /// The drops' far world parallaxes with gyro (held-in-hand bonus); flat on a nightstand it
+    /// still reads deep from focus + refraction. HomeView.reconcileMotion gates CoreMotion on this.
+    var usesMotion: Bool { true }
 
     func makeBackdrop(_ ctx: SceneContext) -> AnyView {
-        AnyView(RainGlassDepthView(paused: ctx.paused))
+        AnyView(RainGlassDepthView(paused: ctx.paused,
+                                   sleepTimer: ctx.sleepTimer,
+                                   tilt: ctx.tilt))
     }
 }
 #endif

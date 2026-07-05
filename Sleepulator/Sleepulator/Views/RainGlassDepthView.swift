@@ -1,31 +1,43 @@
 import SwiftUI
 
-/// Rain on Glass — **Depth Edition**. The depth evolution of `RainGlassView`: a near-black
-/// window whose droplets are real lenses, each bending an inverted, magnified pinch of the
-/// bright lights behind the glass. Plan of record: RAIN-ON-GLASS-DEPTH-SPEC.md.
+/// Rain on Glass — **Depth Edition**. The depth evolution of `RainGlassView`: a near-black window
+/// whose droplets are real lenses, each bending an inverted, magnified pinch of the bright lights
+/// behind the glass. Plan of record: RAIN-ON-GLASS-DEPTH-SPEC.md.
+///
+/// A thin wrapper over `DepthBackdrop` (the `.layerEffect` sibling of `ShaderBackdrop`), which owns
+/// the redraw loop, the `SceneClock` night-slowdown, the `sleepTimer` reactive seam, and the settle.
+/// This view supplies only the composited far world + the two on-device A/B knobs — the same
+/// wrapper shape as `AuroraMetalView` over `ShaderBackdrop`.
 ///
 /// Composition (far → near), per spec §6.1:
 ///   0. near-black sky/glass gradient (OLED-dark base),
-///   1. a BRIGHT, soft bokeh field — brightened + densified from the old 5 dim blobs so most
-///      drops have a light to refract (§6.1 prerequisite, not polish),
+///   1. a BRIGHT, soft bokeh field — brightened + densified from the old 5 dim blobs so most drops
+///      have a light to refract (§6.1 prerequisite, not polish),
 ///   2. a low band of distant windows/streetlights + faint haze,
-///   3+4. condensation + droplets — generated in the `RainGlass.metal` lens shader, which is
-///      attached as a `.layerEffect` to the composited far world (the one layer it may sample).
+///   3+4. condensation + droplets — generated in the `RainGlass.metal` lens shader, attached by the
+///      host as a `.layerEffect` to this composited far world (the one layer it may sample, §6.0).
 ///
-/// The far world is drawn once with radial-gradient falloff (no per-frame `.blur`) and flattened
-/// via `drawingGroup()`, so the background blur is **baked once**, not a Gaussian per pixel per
-/// frame (§6.2 battery trap). The only animated cost is the shader, driven by one `TimelineView`.
+/// The far world is drawn once with radial-gradient falloff (no per-frame `.blur`); the host flattens
+/// it via `drawingGroup()`, so the background blur is **baked once**, not a Gaussian per pixel per
+/// frame (§6.2 battery trap). The only animated cost is the shader, driven by the host's `TimelineView`.
 ///
-/// Settle (§6.1): when `paused` the `TimelineView` is **dropped entirely** — one static render
-/// pass, no redraw loop on the all-night occluded screen. Not a `settle=1` uniform.
+/// Settle (§6.1): the host's `TimelineView(paused:)` stops the loop when `paused` and renders one
+/// static pass at the frozen `SceneClock` pose — no redraw loop on the occluded all-night screen, and
+/// no `t: 0` snap back to birth pose (the bug the depth-host was built to fix).
 ///
-/// A/B: registered alongside the shipping `RainOnGlassScene` (DEBUG only) so it can be compared
-/// on device. Tune `refraction` / `density` here, the rest in `RainGlass.metal`.
+/// `nightSlowdown` is 0 for now: P2 tunes it and adds a `night` uniform to `RainGlass.metal` so the
+/// rain thins / glass fogs / bokeh defocuses as `nightProgress` rises. The seam is wired here today
+/// (the host passes `night` through and the view takes `sleepTimer`), so P2 is a shader change, not a
+/// plumbing change.
 struct RainGlassDepthView: View {
     /// True only when the deep night-dim veil has occluded the screen — freeze for battery.
     var paused: Bool = false
     /// Warm key for Sleep; a cool key is possible later for a Focus "rain (day)" variant.
     var warm: Bool = true
+    /// Read live (not observed) inside the redraw so the rain settles as the night progresses (P2).
+    var sleepTimer: SleepTimerService? = nil
+    /// Smoothed gyro tilt (x = roll, y = pitch), sampled live for the far-world parallax bonus.
+    var tilt: (() -> SIMD2<Float>)? = nil
 
     // ---- on-device A/B knobs (edit + rebuild — spec §10 step 4) ----------------------
     // refraction 0 → flat tinted beads (proves the shader seam, §10 step 2);
@@ -34,52 +46,29 @@ struct RainGlassDepthView: View {
     private let refraction: Double = 1.0
     private let density: Double = 0.55
 
-    @State private var motion = TiltSource()
-    @State private var t0 = Date().timeIntervalSinceReferenceDate   // elapsed stays Float-precise all night
-
     var body: some View {
-        GeometryReader { geo in
-            let size = geo.size
-            // Settle = stop the loop, not a frozen uniform (§6.1): no TimelineView when paused.
-            if paused {
-                lensed(size: size, t: 0)
-            } else {
-                TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { tl in
-                    lensed(size: size, t: tl.date.timeIntervalSinceReferenceDate - t0)
-                }
-            }
-        }
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
-        .ignoresSafeArea()
-        .onAppear { if !paused { motion.start() } }
-        .onDisappear { motion.stop() }
-        .onChange(of: paused) { _, nowPaused in
-            if nowPaused { motion.stop() } else { motion.start() }
-        }
-    }
-
-    /// The far world with the droplet-as-lens shader attached. `maxSampleOffset` must cover the
-    /// farthest the lens reaches from a pixel: the v2 shader's inverted-lens interior samples up
-    /// to `LENS_VIEW` (0.20 × layer height ≈ 175 pt on a 6.7") away, plus rim bend + gyro shift —
-    /// 220 covers it with margin. (Was 64 for the old slope-smear shader.)
-    @ViewBuilder
-    private func lensed(size: CGSize, t: Double) -> some View {
-        let g = motion.tilt
-        farWorld(size: size)
-            .layerEffect(
-                ShaderLibrary.rainGlassLens(
-                    .float(t),
-                    .float2(size),
-                    .float2(g.x, g.y),
-                    .float(refraction),
-                    .float(density)
-                ),
-                maxSampleOffset: CGSize(width: 220, height: 220)
+        // maxSampleOffset must cover the farthest the lens reaches from a pixel: the shader's
+        // inverted-lens interior samples up to `LENS_VIEW` (0.20 × layer height ≈ 175 pt on a 6.7")
+        // away, plus rim bend + gyro shift — 220 covers it with margin.
+        DepthBackdrop(
+            paused: paused,
+            nightSlowdown: 0,          // P2 tunes this + adds the `night` shader reaction
+            sleepTimer: sleepTimer,
+            tilt: tilt,
+            maxSampleOffset: CGSize(width: 220, height: 220),
+            farWorld: { size in farWorld(size: size) }
+        ) { s in
+            ShaderLibrary.rainGlassLens(
+                .float(s.phase),
+                .float2(s.size),
+                .float2(s.gyro.x, s.gyro.y),
+                .float(refraction),
+                .float(density)
             )
+        }
     }
 
-    // MARK: - The far world (static; blur baked into the gradient falloff, flattened once)
+    // MARK: - The far world (static; blur baked into the gradient falloff, flattened by the host)
 
     private func farWorld(size: CGSize) -> some View {
         ZStack {
@@ -100,8 +89,6 @@ struct RainGlassDepthView: View {
                 .position(x: size.width * 0.5, y: size.height * 0.62)
                 .blendMode(.screen)
         }
-        .frame(width: size.width, height: size.height)
-        .drawingGroup()   // flatten the far world to one cached texture (bake the blur once)
     }
 
     // MARK: - Deterministic bokeh field (fixed seed → stable across launches)

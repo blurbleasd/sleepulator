@@ -120,3 +120,72 @@ struct ShaderBackdrop: View {
             .colorEffect(makeShader(inputs))
     }
 }
+
+/// The `.layerEffect` sibling of `ShaderBackdrop`, for **depth** scenes whose droplets / refraction
+/// must *sample* the far world behind them (the lens) — which `.colorEffect` can't do (it gets only
+/// the pixel it's replacing, never the neighbourhood). Same three gifts `ShaderBackdrop` hands the
+/// `.colorEffect` scenes, here for lens scenes:
+///   • `SceneClock` night-slowdown (`phase += Δt·rate`) — monotonic, no runs-backward, freeze holds pose,
+///   • `sleepTimer.nightProgress` reactivity, sampled *live* each tick (never observed → no re-render storm),
+///   • the built-in `TimelineView(paused:)` freeze — one static pass at the frozen pose, and a stable
+///     view identity across the night-dim veil (an `if paused {} else { … }` swap resets state).
+///
+/// The far world is a caller-supplied view (gradient + bokeh + haze). This host flattens it once via
+/// `drawingGroup()` so the background blur is *baked*, not a per-frame Gaussian (§6.2 battery trap),
+/// then attaches the caller's lens shader as a `.layerEffect` sampling that one baked layer.
+///
+/// Why a second host instead of generalizing `ShaderBackdrop`: the two differ at the one place that
+/// matters — `.colorEffect` (a pure pixel map) vs `.layerEffect` (samples the layer) — so two small
+/// honest hosts read clearer than one type forced to be both. Built now (not pre-emptively) because a
+/// *second* depth scene — the P4 ocean — is about to ask for exactly this rail.
+struct DepthBackdrop<FarWorld: View>: View {
+    var paused: Bool
+    /// How hard the night settles this scene: phase rate = `1 − nightSlowdown × nightProgress`.
+    /// 0 until a scene tunes it (P2 also adds a `night` shader uniform for the fog / defocus reaction).
+    var nightSlowdown: Double
+    var sleepTimer: SleepTimerService?
+    /// Smoothed gyro tilt, sampled live for the far-world parallax; `.zero` when motion is off.
+    var tilt: (() -> SIMD2<Float>)? = nil
+    /// How far the lens reaches from a pixel — sets `.layerEffect(maxSampleOffset:)`. Must cover the
+    /// shader's widest tap (the inverted-lens interior + rim bend + gyro shift).
+    var maxSampleOffset: CGSize
+    /// The far world the lens samples, drawn once and flattened by this host.
+    @ViewBuilder var farWorld: (CGSize) -> FarWorld
+    /// Builds the scene's lens shader from this frame's inputs.
+    var makeShader: (SceneShaderInputs) -> Shader
+
+    /// Random start so the field opens at a fresh pose each appearance (see `SceneClock.init`).
+    @State private var clock = SceneClock(start: .random(in: 0...2048))
+
+    var body: some View {
+        GeometryReader { geo in
+            let size = geo.size
+            // `paused:` on the schedule (not an if/else branch swap) keeps the view's identity stable
+            // across the freeze, and renders one static pass at the frozen `SceneClock` pose — not a
+            // `t: 0` snap back to the birth pose (the bug this host was extracted to kill).
+            TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: paused)) { tl in
+                lensed(size: size, now: paused ? nil : tl.date.timeIntervalSinceReferenceDate)
+            }
+        }
+        .ignoresSafeArea()
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+
+    private func lensed(size: CGSize, now: TimeInterval?) -> some View {
+        let night = sleepTimer?.nightProgress ?? 0
+        if let now { clock.tick(now: now, rate: 1.0 - nightSlowdown * night) }
+        let inputs = SceneShaderInputs(
+            phase: Float(clock.phase),
+            elapsed: Float(clock.elapsed),
+            size: size,
+            night: Float(night),
+            audio: 0,
+            gyro: tilt?() ?? .zero,
+            frozen: now == nil)
+        return farWorld(size)
+            .frame(width: size.width, height: size.height)
+            .drawingGroup()   // flatten the far world to one cached texture (bake the blur once)
+            .layerEffect(makeShader(inputs), maxSampleOffset: maxSampleOffset)
+    }
+}
