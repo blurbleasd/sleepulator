@@ -818,3 +818,131 @@ final class OPMLParserTests: XCTestCase {
         XCTAssertEqual(OPMLParser().parse(url: url).count, 0)
     }
 }
+
+// MARK: - Ambient tail integrity (the "+15m mid-tail volume blast" fix)
+
+/// The ambient tail must never be interrupted by a lock-screen "+15m": bumpTimer used to snap
+/// the fade multiplier to 1.0 — an already-faded bed popping to full volume mid-drift-off —
+/// and then freeze near-silent for the added span. The intent is now dropped while in-tail
+/// (the Live Activity also hides the button via ContentState.isInTail).
+final class SleepTimerTailTests: XCTestCase {
+    private final class NoopBackstop: SleepTimerBackstopScheduling {
+        func schedule(after seconds: TimeInterval) {}
+        func cancel() {}
+    }
+
+    /// Reference box for recording fade updates — the stored closure outlives the helper
+    /// call, so an inout-to-pointer capture here would be undefined behavior.
+    private final class FadeLog {
+        var values: [Double] = []
+    }
+
+    /// Drives an end-of-episode timer to its expiry so the service hands off to the tail
+    /// (externalTick runs synchronously on the calling thread — no waits needed).
+    private func serviceInTail(fadeLog: FadeLog? = nil) -> SleepTimerService {
+        let svc = SleepTimerService()
+        svc.backstop = NoopBackstop()
+        svc.ambientTailFn = { 300 }
+        svc.tailEligibleFn = { true }
+        svc.stopPodcastFn = { }
+        if let fadeLog {
+            svc.updateFadeMultFn = { fadeLog.values.append($0) }
+        }
+        svc.startEndOfEpisode(remaining: 60)
+        svc.externalTick(remaining: 0.3)   // episode over → tail handoff
+        return svc
+    }
+
+    func testEpisodeEndHandsOffToTailInsteadOfStopping() {
+        let svc = SleepTimerService()
+        svc.backstop = NoopBackstop()
+        var stops = 0
+        var podcastStops = 0
+        svc.stopAllFn = { stops += 1 }
+        svc.stopPodcastFn = { podcastStops += 1 }
+        svc.ambientTailFn = { 300 }
+        svc.tailEligibleFn = { true }
+
+        svc.startEndOfEpisode(remaining: 60)
+        svc.externalTick(remaining: 0.3)
+
+        XCTAssertEqual(podcastStops, 1, "the tail silences only the podcast")
+        XCTAssertEqual(stops, 0, "the terminal stop must wait for the tail to run out")
+        XCTAssertEqual(svc.timerRemaining, 300, accuracy: 1.5, "deadline extended by the tail span")
+        svc.cancelTimer()
+    }
+
+    func testBumpIsDroppedDuringTail() {
+        let fades = FadeLog()
+        let svc = serviceInTail(fadeLog: fades)
+        XCTAssertTrue(svc.inTail, "handoff must publish inTail so bump surfaces can hide")
+        let before = svc.timerRemaining
+        fades.values.removeAll()
+
+        svc.bumpTimer()
+
+        XCTAssertEqual(svc.timerRemaining, before, accuracy: 0.5,
+                       "+15m must not extend the tail")
+        XCTAssertTrue(fades.values.isEmpty,
+                      "bump-in-tail must not touch the fade — the old path snapped it to 1.0")
+        svc.cancelTimer()
+        XCTAssertFalse(svc.inTail, "cancel must clear the tail so bump surfaces can return")
+    }
+
+    func testBumpStillWorksBeforeTheTail() {
+        let svc = SleepTimerService()
+        svc.backstop = NoopBackstop()
+        svc.startSleepTimer(minutes: 30)
+        let before = svc.timerRemaining
+
+        svc.bumpTimer()
+
+        XCTAssertEqual(svc.timerRemaining, before + 900, accuracy: 1.5)
+        svc.cancelTimer()
+    }
+}
+
+// MARK: - Pomodoro continuous ring progress
+
+/// The Focus ring depletes off the phase end-date via `progress(at:)` (smooth) rather than the
+/// 1 Hz-published `progress` (stepped). Verify the continuous form tracks elapsed time and is
+/// inert when idle.
+final class PomodoroProgressTests: XCTestCase {
+    func testContinuousProgressTracksElapsed() {
+        let p = PomodoroService()
+        p.workMinutes = 10          // 600 s work phase
+        p.start()
+        defer { p.stop() }          // cancel the real GCD timer
+
+        // Just started → ~0 elapsed; halfway/threequarter points track linearly.
+        XCTAssertEqual(p.progress(at: Date()), 0.0, accuracy: 0.02)
+        XCTAssertEqual(p.progress(at: Date().addingTimeInterval(300)), 0.5, accuracy: 0.02)
+        XCTAssertEqual(p.progress(at: Date().addingTimeInterval(450)), 0.75, accuracy: 0.02)
+    }
+
+    func testContinuousProgressClampsAndIdles() {
+        let p = PomodoroService()
+        p.workMinutes = 10
+        // Idle: no phase running → 0, and it must not read a stale phaseEnd.
+        XCTAssertEqual(p.progress(at: Date().addingTimeInterval(9999)), 0.0, accuracy: 1e-9)
+
+        p.start()
+        defer { p.stop() }
+        // Past the phase end → clamped to 1, never overshoots.
+        XCTAssertEqual(p.progress(at: Date().addingTimeInterval(10_000)), 1.0, accuracy: 1e-9)
+    }
+
+    func testPhaseElapsedDrivesTheBoundaryRefill() {
+        let p = PomodoroService()
+        p.workMinutes = 10
+        // Idle → 0 (no refill outside a session).
+        XCTAssertEqual(p.phaseElapsed(at: Date().addingTimeInterval(5)), 0.0, accuracy: 1e-9)
+
+        p.start()
+        defer { p.stop() }
+        // ~0 at the boundary (arc starts empty, then eases in), tracking wall-clock after.
+        XCTAssertEqual(p.phaseElapsed(at: Date()), 0.0, accuracy: 0.05)
+        XCTAssertEqual(p.phaseElapsed(at: Date().addingTimeInterval(0.5)), 0.5, accuracy: 0.05)
+        XCTAssertEqual(p.phaseElapsed(at: Date().addingTimeInterval(120)), 120, accuracy: 0.1)
+    }
+}

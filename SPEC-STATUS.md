@@ -22,8 +22,8 @@ current plan.
 
 ## Open work, ranked
 
-1. Device pass (TESTING.md) — unblocks the limiter default, Apple Music, resume-race, and observation-slice verifications in one run. Now also covers: noise-type soft-swap, "Start Sleep Mix" Siri intent, resume widget deep link, MetricKit payload delivery (all added 2026-07-04, unverified).
+1. Device pass (TESTING.md) — unblocks the limiter default, Apple Music, resume-race, and observation-slice verifications in one run. Now also covers: noise-type soft-swap, "Start Sleep Mix" Siri intent, resume widget deep link, MetricKit payload delivery (all added 2026-07-04, unverified), and the 2026-07-05 night-audio fixes (interruption wasPlaying snapshot + stop-during-call invalidation §3B4-5, ambient-tail integrity + buffer-independent fade slew §3C3-4).
 2. Idle-based scene freeze without a running timer.
-3. Scene A/B on device: retuned Metal aurora (star twinkle decorrelated, motion up, lateral travel) and the v2 rain-depth lens shader — both tuned blind, expect a knob-turning round.
+3. Scene A/B on device: retuned Metal aurora (star twinkle decorrelated, motion up, lateral travel) and the v2 rain-depth lens shader — both tuned blind, expect a knob-turning round. Now also covers the SceneClock/ShaderBackdrop refactor (2026-07-05: integrated night-slowdown phase — fixes the motion-runs-backward bug — freeze-in-place pause, meteor/comet night gating, FocusBackdrop paused conversion; TESTING.md §3H is the checklist, all unverified on device).
 4. Wake alarm (gentle rising audio — reverse of the sleep fade) and a StandBy-mode check of the Live Activity: discussed 2026-07-04, need design input / a device.
 5. ~~Focus resume-label cross-mode copy bug (FOCUS-MODE-SPEC R2)~~ — fixed 2026-07-04 (HomeView statusText mirrors the palette snap).
