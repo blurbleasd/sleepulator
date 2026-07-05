@@ -271,6 +271,22 @@ struct StillWaterCanvasScene: AmbientScene {
         AnyView(StillWaterView(paused: ctx.paused, sleepTimer: ctx.sleepTimer, audioLevel: ctx.audioLevel))
     }
 }
+
+/// DEBUG-only A/B sibling: the **depth edition** of Still Water — the ocean generalization of the
+/// rain-glass depth recipe (RAIN-ON-GLASS-DEPTH-SPEC §2). Rides the shared `.layerEffect`
+/// `DepthBackdrop`: the near swell refracts a composited far world (sky + moon + hazy horizon) into a
+/// wave-distorted reflection — near-sharp swell, far-soft horizon — reactive via `DepthReactivity`
+/// (F1). Second consumer of the depth host (the trigger that justified building it). A/B against
+/// `StillWaterScene` on device; retire the flat one if the depth version wins (§10).
+struct StillWaterDepthScene: AmbientScene {
+    let id = "still-water-depth"
+    let title = "Still water (depth)"
+    let mood = SceneMood.sleep
+
+    func makeBackdrop(_ ctx: SceneContext) -> AnyView {
+        AnyView(StillWaterDepthView(paused: ctx.paused, sleepTimer: ctx.sleepTimer))
+    }
+}
 #endif
 
 /// "Deep space" (Sleep): a slow nebula of domain-warped FBM cloud over a parallax star field,
@@ -310,6 +326,7 @@ enum SceneRegistry {
         #if DEBUG
         scenes.append(RainOnGlassDepthScene())     // A/B sibling, DEBUG builds only
         scenes.append(StillWaterCanvasScene())     // A/B vs the Metal still water, DEBUG builds only
+        scenes.append(StillWaterDepthScene())      // depth A/B vs the flat Metal still water, DEBUG only
         scenes.append(EmbersCanvasScene())         // A/B vs the dark Metal embers, DEBUG builds only
         #endif
         scenes.append(contentsOf: [

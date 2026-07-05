@@ -195,9 +195,16 @@ test added (would duplicate).
   rate); `RainGlass.metal` gains `fogAmt` + `defocus` uniforms (dry glass fogs, far world defocuses —
   the same 5 blur taps spread wider, no new per-frame cost); `RainGlassDepthView.makeShader` maps night
   through F1. Mist thins via the existing `density` uniform.
-- **Verified:** Debug sim build SUCCEEDED (Metal + Swift compile clean); 11/11 unit tests green
-  (`DepthReactivityTests` 5, `SceneClockTests` 6). **Unverified on device:** freeze-in-place, the
-  reactive settle, parallax, and the P1 power budget — the curve *values* are device-A/B tuning.
+- **P4** — ocean on the new host: `StillWaterDepthView` + `StillWaterLens.metal` (new), registered as
+  a DEBUG A/B sibling `StillWaterDepthScene` alongside the flat still water. The near swell refracts a
+  composited sky far world (gradient + moon glow + hazy horizon) into a wave-distorted reflection —
+  near-sharp swell, far-soft horizon — reactive via the same `DepthReactivity` (F1) + `nightSlowdown`.
+  Second consumer of `DepthBackdrop`, proving the recipe generalizes (the spec §5 toolkit trigger). A
+  `refraction` A/B knob (0 = flat mirror, proves the seam) mirrors rain-depth.
+- **Verified:** Debug sim build SUCCEEDED (Metal + Swift compile clean, incl. the new ocean shader);
+  11/11 unit tests green (`DepthReactivityTests` 5, `SceneClockTests` 6). **Unverified on device:**
+  freeze-in-place, the reactive settle, the ocean reflection look, parallax, and the P1 power budget —
+  the shader constants + curve values are device-A/B tuning (rain and ocean both).
 
 ## Open strategic risk (carried into the deep review)
 The differentiator (reactive depth-real scenes) is exactly the part that is 100% unverified on
