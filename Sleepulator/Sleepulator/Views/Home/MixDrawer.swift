@@ -24,17 +24,17 @@ struct MixDrawer: View {
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 16) {
+            VStack(spacing: UI.lg) {
                 Text("Your mix")
                     .font(.system(.headline, design: .rounded).bold())
                     .foregroundColor(pal.text)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 20)
+                    .padding(.horizontal, UI.xl)
 
                 MixPanel(audio: audio, pal: pal, onPickEpisode: onPickEpisode)
 
                 HomeBottomBar(audio: audio, pal: pal)
-                    .padding(.top, 4)
+                    .padding(.top, UI.xs)
 
                 if canSaveMix {
                     Button(action: {
@@ -46,9 +46,11 @@ struct MixDrawer: View {
                             Text("Save mix").font(.subheadline.bold())
                         }
                         .foregroundColor(pal.accent)
-                        .padding(.horizontal, 16).padding(.vertical, 10)
-                        .background(pal.accent.opacity(0.1))
-                        .cornerRadius(12)
+                        .padding(.horizontal, UI.lg).padding(.vertical, 10)
+                        .background(Capsule().fill(pal.accent.opacity(0.12)))
+                        .overlay(Capsule().strokeBorder(
+                            LinearGradient(colors: [pal.accent.opacity(0.5), pal.accent.opacity(0.12)],
+                                           startPoint: .top, endPoint: .bottom), lineWidth: 1))
                     }
                 }
 
@@ -60,10 +62,11 @@ struct MixDrawer: View {
                               selectedId: audio.focusMode ? $focusSceneId : $sleepSceneId,
                               pal: pal)
             }
-            .padding(.vertical, 22)
+            .padding(.vertical, UI.xl)
         }
         .background(pal.bg.ignoresSafeArea())
         .preferredColorScheme(.dark)
+        // "Name your mix" + a text field is self-evident — no explanatory message line.
         .alert("Name your mix", isPresented: $showNameDialog) {
             TextField("Mix name", text: $draftName)
             Button("Save") {
@@ -80,8 +83,6 @@ struct MixDrawer: View {
                 }
             }
             Button("Cancel", role: .cancel) { }
-        } message: {
-            Text("Save this soundscape to reuse it anytime.")
         }
         .alert("Replace this mix?", isPresented: $showOverwriteConfirm) {
             Button("Replace", role: .destructive) {

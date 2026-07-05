@@ -8,52 +8,68 @@ struct TimerSelectionSheet: View {
     /// Ambient-only span appended after the podcast stops at expiry (0 = off). Read live by
     /// SleepTimerService, so changing it mid-timer still applies.
     @AppStorage("ambientTailMinutes") private var ambientTailMinutes = 0
+    /// Hero number size — @ScaledMetric so it grows with Dynamic Type instead of a fixed 44pt.
+    @ScaledMetric private var heroSize: CGFloat = 44
 
     private var timerActive: Bool { audio.sleepTimer.timerRemaining > 0 }
 
     var body: some View {
-        VStack(spacing: 22) {
+        VStack(spacing: UI.xl) {
             Text("Sleep Timer")
                 .font(.title2.bold())
                 .foregroundColor(pal.text)
 
-            Text("Fade out smoothly over…")
-                .foregroundColor(pal.dim)
+            // One confident value — the slider and the presets both drive this number. Replaces a
+            // "Fade out smoothly over…" caption *and* a separate "N minutes" line saying it twice.
+            HStack(alignment: .firstTextBaseline, spacing: UI.xs) {
+                Text("\(Int(timerMinutes))")
+                    .font(.system(size: heroSize, weight: .semibold, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundColor(pal.text)
+                    .contentTransition(.numericText())
+                Text("min")
+                    .font(.system(.title3, design: .rounded))
+                    .foregroundColor(pal.dim)
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("\(Int(timerMinutes)) minutes")
 
-            // Presets now *select* a duration (they no longer fire-and-dismiss), so tapping one
-            // and then nudging the slider is a single coherent flow ending in one Start button.
-            HStack(spacing: 12) {
+            // Presets *select* a duration (they no longer fire-and-dismiss); nudging the slider
+            // after is one coherent flow ending in a single Start button.
+            HStack(spacing: UI.md) {
                 ForEach([15, 30, 45, 60], id: \.self) { mins in
                     let selected = Int(timerMinutes) == mins
                     Button(action: {
-                        timerMinutes = Double(mins)
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { timerMinutes = Double(mins) }
                         UISelectionFeedbackGenerator().selectionChanged()
                     }) {
                         Text("\(mins)m")
                             .font(.headline)
-                            .padding(.horizontal, 16)
+                            .padding(.horizontal, UI.lg)
                             .padding(.vertical, 10)
-                            .background(selected ? pal.accent.opacity(0.25) : Color(white: 0.15))
-                            .foregroundColor(selected ? pal.accent : pal.text)
-                            .cornerRadius(10)
-                            .overlay(RoundedRectangle(cornerRadius: 10)
-                                .stroke(selected ? pal.accent.opacity(0.7) : .clear, lineWidth: 1))
+                            .foregroundColor(selected ? pal.text : pal.dim)
+                            .background(Capsule().fill(selected ? pal.accent.opacity(0.18) : pal.text.opacity(0.06)))
+                            .overlay {
+                                // Selected: lit gradient border. Unselected: a faint hairline so the
+                                // chip still reads as a tappable button on a dimmed screen (the 6%
+                                // fill alone was near-invisible).
+                                Capsule().strokeBorder(
+                                    selected
+                                        ? LinearGradient(colors: [pal.accent.opacity(0.7), pal.accent.opacity(0.15)],
+                                                         startPoint: .top, endPoint: .bottom)
+                                        : LinearGradient(colors: [pal.text.opacity(0.12), pal.text.opacity(0.12)],
+                                                         startPoint: .top, endPoint: .bottom),
+                                    lineWidth: selected ? 1 : 0.5)
+                            }
                     }
                     .frame(minWidth: 44, minHeight: 44)
                     .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
                 }
             }
 
-            VStack(spacing: 8) {
-                Text("\(Int(timerMinutes)) minutes")
-                    .font(.headline)
-                    .foregroundColor(pal.text)
-                    .monospacedDigit()
-
-                Slider(value: $timerMinutes, in: 5...120, step: 5)
-                    .tint(pal.accent)
-            }
-            .padding(.horizontal, 40)
+            Slider(value: $timerMinutes, in: 5...120, step: 5)
+                .tint(pal.accent)
+                .padding(.horizontal, 40)
 
             // Ambient tail — only meaningful when a podcast is in the mix: at expiry (or the
             // episode's end) the podcast stops and the noise bed keeps fading for this span.
@@ -62,20 +78,28 @@ struct TimerSelectionSheet: View {
                     Text("Then ambient only for…")
                         .font(.caption)
                         .foregroundColor(pal.dim)
-                    HStack(spacing: 10) {
+                    HStack(spacing: UI.sm) {
                         ForEach([0, 15, 30, 60], id: \.self) { mins in
                             let selected = ambientTailMinutes == mins
                             Button(action: {
-                                ambientTailMinutes = mins
+                                withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { ambientTailMinutes = mins }
                                 UISelectionFeedbackGenerator().selectionChanged()
                             }) {
                                 Text(mins == 0 ? "Off" : "+\(mins)m")
                                     .font(.subheadline.weight(.semibold))
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 8)
-                                    .background(selected ? pal.accent.opacity(0.25) : Color(white: 0.15))
-                                    .foregroundColor(selected ? pal.accent : pal.dim)
-                                    .cornerRadius(9)
+                                    .padding(.horizontal, UI.md)
+                                    .padding(.vertical, UI.sm)
+                                    .foregroundColor(selected ? pal.text : pal.dim)
+                                    .background(Capsule().fill(selected ? pal.accent.opacity(0.18) : pal.text.opacity(0.06)))
+                                    .overlay {
+                                        Capsule().strokeBorder(
+                                            selected
+                                                ? LinearGradient(colors: [pal.accent.opacity(0.7), pal.accent.opacity(0.15)],
+                                                                 startPoint: .top, endPoint: .bottom)
+                                                : LinearGradient(colors: [pal.text.opacity(0.12), pal.text.opacity(0.12)],
+                                                                 startPoint: .top, endPoint: .bottom),
+                                            lineWidth: selected ? 1 : 0.5)
+                                    }
                             }
                             .frame(minWidth: 44, minHeight: 44)
                             .accessibilityLabel(mins == 0 ? "No ambient tail" : "Ambient continues \(mins) minutes after the podcast stops")
@@ -96,8 +120,7 @@ struct TimerSelectionSheet: View {
                     .foregroundColor(pal.bg)
                     .frame(maxWidth: .infinity, minHeight: 44)
                     .padding()
-                    .background(pal.accent)
-                    .cornerRadius(12)
+                    .background(Capsule().fill(pal.accent))
             }
             .padding(.horizontal, 40)
 
@@ -112,10 +135,10 @@ struct TimerSelectionSheet: View {
                     Label("Stop at end of episode", systemImage: "text.append")
                         .font(.subheadline.weight(.semibold))
                         .foregroundColor(pal.accent)
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 12)
+                        .padding(.horizontal, UI.xl)
+                        .padding(.vertical, UI.md)
                         .frame(minHeight: 44)
-                        .overlay(RoundedRectangle(cornerRadius: 12).stroke(pal.accent.opacity(0.6), lineWidth: 1))
+                        .overlay(Capsule().strokeBorder(pal.accent.opacity(0.5), lineWidth: 1))
                 }
             }
 
@@ -136,7 +159,7 @@ struct TimerSelectionSheet: View {
 
             Spacer()
         }
-        .padding(.top, 30)
+        .padding(.top, UI.xxl)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(pal.bg.ignoresSafeArea())
     }

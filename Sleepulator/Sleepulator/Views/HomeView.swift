@@ -254,15 +254,22 @@ struct HomeView: View {
                 VStack(spacing: 20) {
                     if audio.focusMode {
                         // Focus: the depleting Pomodoro ring is the hero. The orb still
-                        // play/pauses audio; the ring + readout report the session.
-                        FocusHero(audio: audio, pomodoro: audio.pomodoro, pal: pal, tap: heroTap)
+                        // play/pauses audio; the ring + readout report the session. Freeze the
+                        // ring/orb redraw when backgrounded or low-luminance (Focus never engages
+                        // the sleep veil, so scenesFrozen reduces to those two here).
+                        FocusHero(audio: audio, pomodoro: audio.pomodoro, pal: pal, tap: heroTap,
+                                  paused: scenesFrozen)
 
                         FocusSessionReadout(pomodoro: audio.pomodoro,
                                             pal: pal,
                                             idleStatus: statusText(),
                                             layers: activeLayers)
                     } else {
-                        OrbButton(audio: audio, pal: pal, tap: heroTap)
+                        // Freeze the orb's breath whenever it isn't visible: the chrome has
+                        // faded to the screensaver (opacity 0 below) OR the screen is occluded/
+                        // backgrounded/low-luminance. Stops the all-night invisible blur composite.
+                        OrbButton(audio: audio, pal: pal, tap: heroTap,
+                                  paused: audio.ambientScreensaver || scenesFrozen)
 
                         SleepStatusLine(base: statusText(),
                                         showMinute: audio.isAnythingPlaying,

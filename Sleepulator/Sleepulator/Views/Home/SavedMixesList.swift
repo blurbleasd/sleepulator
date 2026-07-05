@@ -14,6 +14,22 @@ struct SavedMixesList: View {
         return parts.isEmpty ? "Silent" : parts.joined(separator: " + ")
     }
 
+    /// True when this preset's sound *recipe* matches what's playing right now — the card wears a
+    /// "now playing" rim. Stateless: it compares live engine state, so swapping a sound or toggling
+    /// a layer clears it (volume tweaks do NOT — levels aren't part of the recipe). A silent preset
+    /// never matches, so an idle mixer highlights nothing. Extra stacked layers are folded in when
+    /// the noise bed is on, so "Brown" and "Brown + Rain" can't both light up at once.
+    private func isActive(_ p: SoundPreset) -> Bool {
+        guard p.noiseOn || p.binauralOn else { return false }
+        guard p.noiseOn == audio.noiseOn, (!p.noiseOn || p.noiseType == audio.noiseType),
+              p.binauralOn == audio.binauralOn, (!p.binauralOn || p.binauralPreset == audio.binauralPreset)
+        else { return false }
+        guard p.noiseOn else { return true }   // extra layers only play with the noise bed
+        let live = audio.extraLayers.filter { !($0.muted ?? false) }.map(\.type).sorted()
+        let saved = (p.extraLayers ?? []).filter { !($0.muted ?? false) }.map(\.type).sorted()
+        return live == saved
+    }
+
     // A horizontal row of compact preset cards — tap to apply (sounds swap, any podcast keeps
     // playing), long-press to rename or delete.
     var body: some View {
@@ -26,6 +42,7 @@ struct SavedMixesList: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 10) {
                     ForEach(presets, id: \.id) { (mix: SoundPreset) in
+                        let active = isActive(mix)
                         Button(action: {
                             audio.applyPreset(mix)
                             UIImpactFeedbackGenerator(style: .light).impactOccurred()
@@ -37,14 +54,24 @@ struct SavedMixesList: View {
                                     .lineLimit(1)
                                 Text(mixSummary(mix))
                                     .font(.caption2)
-                                    .foregroundColor(pal.dim)
+                                    // Bright cream when active (legible) — accent-on-accent-tint
+                                    // fell below AA, the same reason chips use cream when selected.
+                                    .foregroundColor(active ? pal.text : pal.dim)
                                     .lineLimit(1)
                             }
                             .frame(width: 132, alignment: .leading)
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 11)
-                            .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(pal.accent.opacity(0.12)))
-                            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(pal.accent.opacity(0.22), lineWidth: 0.5))
+                            .padding(.horizontal, UI.lg)
+                            .padding(.vertical, UI.md)
+                            // Active card wears a brighter accent rim + a touch more fill — a
+                            // "now playing" cue, no glow (the drawer is a look-at-it surface,
+                            // but keep to warmth-not-brightness per the house rule).
+                            .background(RoundedRectangle(cornerRadius: UI.cardRadius, style: .continuous)
+                                .fill(pal.accent.opacity(active ? 0.18 : 0.12)))
+                            .overlay(RoundedRectangle(cornerRadius: UI.cardRadius, style: .continuous)
+                                .strokeBorder(LinearGradient(colors: [pal.accent.opacity(active ? 0.7 : 0.35),
+                                                                      pal.accent.opacity(active ? 0.2 : 0.08)],
+                                                             startPoint: .top, endPoint: .bottom),
+                                              lineWidth: active ? 1 : 0.5))
                         }
                         .buttonStyle(.plain)
                         .contextMenu {
@@ -55,7 +82,7 @@ struct SavedMixesList: View {
                                 Label("Delete", systemImage: "trash")
                             }
                         }
-                        .accessibilityLabel("Apply mix \(mix.name)")
+                        .accessibilityLabel("\(active ? "Now playing: " : "Apply mix ")\(mix.name)")
                         .accessibilityHint("Long press to rename or delete")
                     }
                 }
@@ -141,7 +168,7 @@ struct WarmMixerRow: View {
             // Volume + sound picker appear only when the layer is ON, so an idle layer is a
             // single tight row instead of a tall panel — big space win when most are off.
             if isOn {
-                VolumeBar(value: $volume, accent: pal.accent, onEditingChanged: { editing in
+                VolumeBar(value: $volume, accent: pal.accent, thumbColor: pal.text, onEditingChanged: { editing in
                     if editing { UIImpactFeedbackGenerator(style: .light).impactOccurred() }
                     else { UIImpactFeedbackGenerator(style: .medium).impactOccurred() }
                 })

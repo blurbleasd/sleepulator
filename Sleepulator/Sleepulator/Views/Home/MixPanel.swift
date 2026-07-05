@@ -26,22 +26,20 @@ struct MixPanel: View {
                     pal: pal,
                     onToggle: { audio.togglePodcast() }
                 )
-                .glassPanel()
+                .glassPanel(pal)
             } else {
+                // Empty state: one clean line + a chevron. The chevron *is* "tap to choose" — a
+                // "Choose an episode" caption underneath only restated it (and was unreadable dim
+                // 11pt at 2am anyway).
                 Button(action: onPickEpisode) {
-                    HStack(spacing: 12) {
+                    HStack(spacing: UI.md) {
                         Image(systemName: "mic.fill")
                             .frame(minWidth: 30)
                             .foregroundColor(pal.dim)
                             .font(.title3)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Podcast")
-                                .font(.system(.headline, design: .rounded))
-                                .foregroundColor(pal.dim)
-                            Text("Choose an episode")
-                                .font(.caption)
-                                .foregroundColor(pal.dim.opacity(0.7))
-                        }
+                        Text("Podcast")
+                            .font(.system(.headline, design: .rounded))
+                            .foregroundColor(pal.dim)
                         Spacer()
                         Image(systemName: "chevron.right")
                             .font(.footnote.weight(.semibold))
@@ -51,13 +49,13 @@ struct MixPanel: View {
                 }
                 .buttonStyle(.plain)
                 .frame(minHeight: 44)
-                .glassPanel()
+                .glassPanel(pal)
                 .accessibilityLabel("Podcast, no episode loaded")
                 .accessibilityHint("Opens the Podcasts tab to choose an episode")
             }
 
             WarmMixerRow(
-                icon: "waveform.path.ecg",
+                icon: "waveform",
                 title: audio.noiseType.capitalized,
                 isOn: $audio.noiseOn,
                 volume: $audio.noiseVolume,
@@ -65,7 +63,7 @@ struct MixPanel: View {
                 options: noisePalette,
                 selection: $audio.noiseType
             )
-            .glassPanel()
+            .glassPanel(pal)
 
             // Stacked extra noise layers (rain + brown, …). Only shown while the noise bed is
             // on, since the layers play *with* it. The switch MUTES the layer in place (type +
@@ -91,7 +89,7 @@ struct MixPanel: View {
                             set: { audio.setExtraLayerType(layer.id, $0) }
                         )
                     )
-                    .glassPanel()
+                    .glassPanel(pal)
                     .contextMenu {
                         Button(role: .destructive) {
                             audio.removeExtraLayer(layer.id)
@@ -118,7 +116,9 @@ struct MixPanel: View {
 
             WarmMixerRow(
                 icon: "headphones",
-                title: "Binaural (\(audio.binauralPreset.capitalized))",
+                // Just "Binaural" — the selected preset is the chip's job below; a parenthetical
+                // in the title said the same state twice.
+                title: "Binaural",
                 isOn: $audio.binauralOn,
                 volume: $audio.binVolume,
                 pal: pal,
@@ -126,13 +126,13 @@ struct MixPanel: View {
                 optionLabels: ["delta":"Deep","theta":"Drift","alpha":"Relax","beta":"Concentrate","gamma":"Focus"],
                 selection: $audio.binauralPreset
             )
-            .glassPanel()
+            .glassPanel(pal)
 
             // Apple Music — Focus only. DRM means it can't be a true mixer channel (no volume
             // slider / limiter); it plays alongside via the system player. See APPLE-MUSIC-FOCUS-SPEC.
             if audio.focusMode {
                 AppleMusicMixRow(audio: audio, pal: pal) { showingMusicPicker = true }
-                    .glassPanel()
+                    .glassPanel(pal)
             }
         }
         .padding(.horizontal, 20)
@@ -144,7 +144,7 @@ struct MixPanel: View {
 
 /// The Focus-mode Apple Music row: a "choose music" call-to-action until something is selected,
 /// then an on/off toggle. No volume slider on purpose — Apple Music plays at the device's system
-/// music volume (the DRM stream can't be level-shaped in-app); the caption says so.
+/// music volume (the DRM stream can't be level-shaped in-app).
 struct AppleMusicMixRow: View {
     @ObservedObject var audio: AudioEngine
     let pal: Palette
@@ -157,15 +157,12 @@ struct AppleMusicMixRow: View {
                     .frame(minWidth: 30)
                     .foregroundColor(audio.appleMusicOn ? pal.accent : pal.dim)
                     .font(.title3)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(audio.appleMusicOn && !audio.appleMusicTitle.isEmpty ? audio.appleMusicTitle : "Apple Music")
-                        .font(.system(.headline, design: .rounded))
-                        .foregroundColor(pal.text)
-                        .lineLimit(1)
-                    Text("Plays over your sounds · device volume")
-                        .font(.caption)
-                        .foregroundColor(pal.dim.opacity(0.8))
-                }
+                // One line — the row is self-evident (music icon, a search affordance, a toggle).
+                // "Plays over your sounds · device volume" was a spec footnote, not a control.
+                Text(audio.appleMusicOn && !audio.appleMusicTitle.isEmpty ? audio.appleMusicTitle : "Apple Music")
+                    .font(.system(.headline, design: .rounded))
+                    .foregroundColor(pal.text)
+                    .lineLimit(1)
                 Spacer()
                 Button(action: onPick) {
                     Image(systemName: "magnifyingglass")
@@ -187,19 +184,14 @@ struct AppleMusicMixRow: View {
             .accessibilityLabel("Apple Music")
         } else {
             Button(action: onPick) {
-                HStack(spacing: 12) {
+                HStack(spacing: UI.md) {
                     Image(systemName: "music.note")
                         .frame(minWidth: 30)
                         .foregroundColor(pal.dim)
                         .font(.title3)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Apple Music")
-                            .font(.system(.headline, design: .rounded))
-                            .foregroundColor(pal.dim)
-                        Text("Choose music")
-                            .font(.caption)
-                            .foregroundColor(pal.dim.opacity(0.7))
-                    }
+                    Text("Apple Music")
+                        .font(.system(.headline, design: .rounded))
+                        .foregroundColor(pal.dim)
                     Spacer()
                     Image(systemName: "chevron.right")
                         .font(.footnote.weight(.semibold))

@@ -19,7 +19,7 @@ struct HomeBottomBar: View {
             }
             .accessibilityLabel(audio.isMuted ? "Unmute" : "Mute")
 
-            VolumeBar(value: $audio.masterVolume, accent: pal.accent)
+            VolumeBar(value: $audio.masterVolume, accent: pal.accent, thumbColor: pal.text, style: .master)
                 .accessibilityLabel("Master volume")
         }
         .padding(.horizontal, 16)
