@@ -185,11 +185,19 @@ monotonic `phase` for any `rate ≥ 0` (`testPhaseNeverRewindsWhenRateDrops:90`)
 (`testZeroAndNegativeRateHoldPhaseButAdvanceElapsed:128`). All 6 pass against the E1 changes. No new
 test added (would duplicate).
 
-**E1 status:** the shared `.layerEffect` depth-host (`DepthBackdrop` in `ShaderBackdrop.swift`) is
-built; `RainGlassDepthView` is a thin wrapper over it (drops its own `TiltSource`/`TimelineView`/`t:0`
-freeze), and `RainOnGlassDepthScene` passes `sleepTimer` + `tilt` with `usesMotion: true`. Debug
-simulator build SUCCEEDED; `SceneClockTests` green. **Behavior (freeze-in-place, reactive seam,
-parallax) is unverified on device** — P1 gate applies.
+**E1 / F1 / P2 status (built + unit-verified; on-device behavior unverified — P1 gate):**
+- **E1** — shared `.layerEffect` depth-host `DepthBackdrop` (`ShaderBackdrop.swift`); `RainGlassDepthView`
+  is a thin wrapper (dropped its own `TiltSource`/`TimelineView`/`t:0` freeze); `RainOnGlassDepthScene`
+  passes `sleepTimer` + `tilt`, `usesMotion: true`. Committed `5cf29cf`.
+- **F1** — `DepthReactivity` (`Services/DepthReactivity.swift`): pure `nightProgress → density/fog/defocus`
+  vocabulary, smoothstep-eased, clamped, monotonic. 5 unit tests (`DepthReactivityTests`).
+- **P2** — reactive-depth wired: `nightSlowdown: 0.5` (rain eases to half speed via the SceneClock
+  rate); `RainGlass.metal` gains `fogAmt` + `defocus` uniforms (dry glass fogs, far world defocuses —
+  the same 5 blur taps spread wider, no new per-frame cost); `RainGlassDepthView.makeShader` maps night
+  through F1. Mist thins via the existing `density` uniform.
+- **Verified:** Debug sim build SUCCEEDED (Metal + Swift compile clean); 11/11 unit tests green
+  (`DepthReactivityTests` 5, `SceneClockTests` 6). **Unverified on device:** freeze-in-place, the
+  reactive settle, parallax, and the P1 power budget — the curve *values* are device-A/B tuning.
 
 ## Open strategic risk (carried into the deep review)
 The differentiator (reactive depth-real scenes) is exactly the part that is 100% unverified on

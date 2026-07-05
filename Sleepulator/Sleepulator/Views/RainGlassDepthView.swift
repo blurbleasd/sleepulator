@@ -25,10 +25,11 @@ import SwiftUI
 /// static pass at the frozen `SceneClock` pose — no redraw loop on the occluded all-night screen, and
 /// no `t: 0` snap back to birth pose (the bug the depth-host was built to fix).
 ///
-/// `nightSlowdown` is 0 for now: P2 tunes it and adds a `night` uniform to `RainGlass.metal` so the
-/// rain thins / glass fogs / bokeh defocuses as `nightProgress` rises. The seam is wired here today
-/// (the host passes `night` through and the view takes `sleepTimer`), so P2 is a shader change, not a
-/// plumbing change.
+/// Reactive depth (P2): as `nightProgress` rises the rain eases to half speed (`nightSlowdown: 0.5`,
+/// applied via the host's `SceneClock` rate), the mist thins, the dry glass fogs, and the far world
+/// defocuses further. The shared `DepthReactivity` (F1) maps night → those knobs; the `makeShader`
+/// closure hands them to `RainGlass.metal` as the `density` / `fogAmt` / `defocus` uniforms. The
+/// curves are tunable + unit-tested off-device; the *look* is on-device A/B (P1 gate).
 struct RainGlassDepthView: View {
     /// True only when the deep night-dim veil has occluded the screen — freeze for battery.
     var paused: Bool = false
@@ -52,18 +53,26 @@ struct RainGlassDepthView: View {
         // away, plus rim bend + gyro shift — 220 covers it with margin.
         DepthBackdrop(
             paused: paused,
-            nightSlowdown: 0,          // P2 tunes this + adds the `night` shader reaction
+            nightSlowdown: 0.5,        // rain eases to half speed by timer end (matches Aurora)
             sleepTimer: sleepTimer,
             tilt: tilt,
             maxSampleOffset: CGSize(width: 220, height: 220),
             farWorld: { size in farWorld(size: size) }
         ) { s in
-            ShaderLibrary.rainGlassLens(
+            // Reactive depth (P2): the shared DepthReactivity vocabulary (F1) maps nightProgress →
+            // thinned mist + fogged glass + defocused far world. Bedtime base = the A/B `density`
+            // knob, clear glass (fog 0), no extra blur (defocus 1).
+            let r = DepthReactivity.at(
+                night: s.night,
+                base: DepthReactivity.Base(density: Float(density), fog: 0, defocus: 1))
+            return ShaderLibrary.rainGlassLens(
                 .float(s.phase),
                 .float2(s.size),
                 .float2(s.gyro.x, s.gyro.y),
                 .float(refraction),
-                .float(density)
+                .float(r.density),
+                .float(r.fog),
+                .float(r.defocus)
             )
         }
     }

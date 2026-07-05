@@ -164,9 +164,14 @@ inline float mist(float2 uv, float time) {
 
 // ----------------------------------------------------------------------------------
 [[ stitchable ]]
+// `fogAmt` / `defocus` are the night reaction, computed on the Swift side by `DepthReactivity`
+// (F1) from `nightProgress`: as the night settles, the dry glass fogs (fogAmt 0 → 1) and the far
+// world defocuses further (defocus 1 → ~2.4). Motion slowdown is applied upstream via the host's
+// SceneClock rate, so `time` already arrives night-slowed — nothing to do for it here.
 half4 rainGlassLens(float2 pos, SwiftUI::Layer layer,
                     float time, float2 size, float2 gyro,
-                    float refraction, float density) {
+                    float refraction, float density,
+                    float fogAmt, float defocus) {
     using namespace rgv2;
 
     float2 uv = pos / size.y;                    // top-down uv; v grows downward (drops fall +v)
@@ -184,7 +189,9 @@ half4 rainGlassLens(float2 pos, SwiftUI::Layer layer,
 
     // --- far-world samples (the §6.1 focus gap) -------------------------------------
     // Dry glass = blurred + dimmed + milky. Drops/wakes = progressively sharp.
-    float e = BLUR_PX / size.y;
+    // `defocus` widens the blur tap as the night deepens (1 = bedtime, ~2.4 = full night) — still
+    // the same 5 taps, only spread wider, so no new per-frame cost (the §6.2 battery trap).
+    float e = BLUR_PX / size.y * defocus;
     half3 blurred = ( RG_SAMPLE(uv + par)
                     + RG_SAMPLE(uv + par + float2( e,  e))
                     + RG_SAMPLE(uv + par + float2(-e,  e))
@@ -192,7 +199,10 @@ half4 rainGlassLens(float2 pos, SwiftUI::Layer layer,
                     + RG_SAMPLE(uv + par + float2(-e, -e)) ) / 5.0h;
     half3 sharp = RG_SAMPLE(uv + par);
 
-    half3 fog = blurred * half(FOG_DIM) + half(FOG_MILK);
+    // Dry glass fogs up as the night settles: dimmer far world + a milkier lift (`fogAmt` 0 at
+    // bedtime → 1 at timer end). Drops/wakes below stay sharp — the fog is the *dry* glass.
+    half3 fog = blurred * half(FOG_DIM * (1.0 - 0.30 * fogAmt))
+              + half(FOG_MILK) + half(0.05 * fogAmt);
     half3 rgb = fog;
 
     // Wake: recently wiped glass — part-way back to sharp, slightly dim (wet film).
