@@ -14,6 +14,21 @@ public struct SleepTimerAttributes: ActivityAttributes {
 
     public init() {}
 }
+
+/// Focus-mode Pomodoro Live Activity — the phase ring you actually glance at. Shared with the
+/// widget target the same way as SleepTimerAttributes (this file is in both memberships).
+public struct PomodoroAttributes: ActivityAttributes {
+    public struct ContentState: Codable, Hashable {
+        var isWork: Bool
+        var isLongBreak: Bool
+        /// The current phase's end — ActivityKit renders the countdown from this for free.
+        var endDate: Date?
+        var cycle: Int
+        var totalCycles: Int
+    }
+
+    public init() {}
+}
 #endif
 
 // MARK: - Live Activity intents (shared app + widget target)

@@ -54,6 +54,15 @@ struct SettingsView: View {
     
 
     
+    /// UserDefaults-backed binding for the sleep-aware queue hold (read at advance time by
+    /// AudioEngine, so no live plumbing is needed).
+    private var holdQueueBinding: Binding<Bool> {
+        Binding(
+            get: { UserDefaults.standard.bool(forKey: "holdQueueDuringSleepTimer") },
+            set: { UserDefaults.standard.set($0, forKey: "holdQueueDuringSleepTimer") }
+        )
+    }
+
     var body: some View {
         NavigationStack {
             ZStack {
@@ -71,6 +80,15 @@ struct SettingsView: View {
                             Toggle("Auto-Play Next Episode", isOn: $queue.autoPlay)
                                 .toggleStyle(SwitchToggleStyle(tint: pal.accent))
                                 .foregroundColor(pal.dim)
+
+                            // Sleep-aware hold: don't burn through (and mark finished) episodes
+                            // you sleep through — see AudioEngine.onQueueAdvance.
+                            Toggle("Pause Queue During Sleep Timer", isOn: holdQueueBinding)
+                                .toggleStyle(SwitchToggleStyle(tint: pal.accent))
+                                .foregroundColor(pal.dim)
+                            Text("With a sleep timer running, finish the current episode and keep only the ambient sounds going.")
+                                .font(.caption2)
+                                .foregroundColor(pal.dim.opacity(0.7))
 
                             Toggle("Shuffle Queue", isOn: $queue.shuffleQueue)
                                 .toggleStyle(SwitchToggleStyle(tint: pal.accent))

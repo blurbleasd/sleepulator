@@ -67,20 +67,24 @@ struct MixPanel: View {
             )
             .glassPanel()
 
-            // Stacked extra noise layers (rain + brown, …). Only shown while the noise bed is on,
-            // since the layers play *with* it; toggling a layer's switch off removes it.
+            // Stacked extra noise layers (rain + brown, …). Only shown while the noise bed is
+            // on, since the layers play *with* it. The switch MUTES the layer in place (type +
+            // volume survive, engine declicks the slot to 0) — removal moved to the long-press
+            // menu, so trying a layer on/off no longer destroys its settings.
             if audio.noiseOn {
                 ForEach(audio.extraLayers) { layer in
                     WarmMixerRow(
                         icon: "plus.circle",
                         title: layer.type.capitalized,
-                        isOn: .constant(true),
+                        isOn: Binding(
+                            get: { !(layer.muted ?? false) },
+                            set: { audio.setExtraLayerMuted(layer.id, !$0) }
+                        ),
                         volume: Binding(
                             get: { layer.volume },
                             set: { audio.setExtraLayerVolume(layer.id, $0) }
                         ),
                         pal: pal,
-                        onToggle: { audio.removeExtraLayer(layer.id) },
                         options: noisePalette,
                         selection: Binding(
                             get: { layer.type },
@@ -88,6 +92,13 @@ struct MixPanel: View {
                         )
                     )
                     .glassPanel()
+                    .contextMenu {
+                        Button(role: .destructive) {
+                            audio.removeExtraLayer(layer.id)
+                        } label: {
+                            Label("Remove layer", systemImage: "trash")
+                        }
+                    }
                 }
 
                 if audio.extraLayers.count < AudioEngine.maxExtraLayers {

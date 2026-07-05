@@ -221,9 +221,19 @@ struct NowPlayingSheet: View {
                             Image(systemName: "list.dash")
                                 .foregroundColor(pal.accent)
                                 .accessibilityHidden(true)
-                            Text("Up Next")
-                                .font(.system(.title3, design: .rounded).bold())
-                                .foregroundColor(pal.text)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text("Up Next")
+                                    .font(.system(.title3, design: .rounded).bold())
+                                    .foregroundColor(pal.text)
+                                // Total remaining time — handy when picking a sleep-timer length.
+                                // Durations of 0 (unknown/live) are simply not counted.
+                                let secs = queue.queue.dropFirst().reduce(0.0) { $0 + max(0, $1.duration ?? 0) }
+                                if secs > 60 {
+                                    Text("\(queue.queue.count - 1) episode\(queue.queue.count == 2 ? "" : "s") · \(Int(secs) / 3600 > 0 ? "\(Int(secs) / 3600)h " : "")\((Int(secs) % 3600) / 60)m")
+                                        .font(.caption)
+                                        .foregroundColor(pal.dim)
+                                }
+                            }
                             Spacer()
                             Button(action: { queue.shuffleRemainingQueue() }) {
                                 Image(systemName: "shuffle")

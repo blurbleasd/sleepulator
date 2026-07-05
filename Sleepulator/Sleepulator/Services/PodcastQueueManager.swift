@@ -155,15 +155,18 @@ final class PodcastQueueManager: ObservableObject {
         queue = [current] + remaining
     }
 
-    func advanceQueue(finishedEpId: String? = nil) {
+    /// `suppressAutoPlay`: advance the queue data (drop the finished head, honor
+    /// delete-on-completion) but do NOT start the next episode — used by the sleep-aware
+    /// hold, so the morning queue is clean while the night stays ambient-only.
+    func advanceQueue(finishedEpId: String? = nil, suppressAutoPlay: Bool = false) {
         if !self.queue.isEmpty {
             let finishedEp = self.queue.removeFirst()
             if deleteOnCompletion, let url = URL(string: finishedEp.audioUrl) {
                 AudioDownloader.shared.deleteCachedEpisode(for: url)
             }
         }
-        
-        if !self.autoPlay || self.queue.isEmpty {
+
+        if !self.autoPlay || suppressAutoPlay || self.queue.isEmpty {
             pausePodcastFn?()
             return
         }

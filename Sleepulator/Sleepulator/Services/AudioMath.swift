@@ -1,7 +1,17 @@
 import Foundation
 
 public struct AudioMath {
-    
+
+    /// Perceptual (audio) taper for the mixer's volume sliders: gain = position². A linear
+    /// position→gain map crams the useful bedtime range into the bottom fifth of the track;
+    /// squaring gives fine control at the low levels sleep mixes actually live at.
+    /// NOTE: applied where volumes are handed to the engines — persisted slider values are
+    /// unchanged, but any given position now plays quieter than before (the safe direction).
+    public static func perceptualGain(_ position: Double) -> Double {
+        let p = min(max(position, 0), 1)
+        return p * p
+    }
+
     public static func getCarrierAndBeat(for preset: String) -> (carrier: Float, beat: Float) {
         switch preset {
         case "theta": return (200.0, 6.0)

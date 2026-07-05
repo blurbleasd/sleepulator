@@ -62,6 +62,19 @@ struct FocusSessionReadout: View {
                     .accessibilityLabel("\(clock(pomodoro.remaining)) remaining")
 
                 CycleDots(pomodoro: pomodoro, pal: pal)
+
+                // Skip the rest of the phase — end a break early / bail out of an interval.
+                Button(action: {
+                    pomodoro.skipPhase()
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                }) {
+                    Label(pomodoro.phase == .work ? "End interval" : "Skip break",
+                          systemImage: "forward.end")
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(pal.accent)
+                        .frame(minHeight: 44)
+                }
+                .buttonStyle(.plain)
             } else {
                 Text(idleStatus)
                     .font(.system(.callout, design: .rounded).weight(.medium))

@@ -371,7 +371,7 @@ final class AudioEngine: ObservableObject {
         // jump, when music starts/stops). The podcast isn't ducked: it's paused while music plays.
         genEngine.setMaster(masterMult * appleMusicDuck)
         genEngine.setFade(multiplier: fadeMultiplier)
-        podPlayer.setVolume(podVolume * masterMult * fadeMultiplier)
+        podPlayer.setVolume(AudioMath.perceptualGain(podVolume) * masterMult * fadeMultiplier)
     }
     
     init() {
@@ -429,6 +429,14 @@ final class AudioEngine: ObservableObject {
         //     Auto-Play / Shuffle toggles) observe it directly.
         //   - mixStore (user-action): HomeView (lastMix) + MixDrawer (savedPresets) observe it.
         pomodoro.chimeFn = { [weak self] in self?.chime.play() }
+        // FOCUS-MODE-SPEC R6: breaks *feel* different — the ambient bed dips to ~70% during a
+        // rest phase and restores on work/stop. Rides the sleep-timer fade multiplier, which
+        // is free here (the two timers are mutually exclusive by mode), so the change gets the
+        // same smooth per-sample ramp as the timer fade.
+        pomodoro.phaseChangedFn = { [weak self] phase, running in
+            guard let self else { return }
+            self.fadeMultiplier = (running && phase == .rest) ? 0.7 : 1.0
+        }
 
         // PlaybackSettings holds the values + persistence; these callbacks apply each change to the
         // live audio path (the side-effects that used to live in the engine's @Published didSets).
@@ -450,6 +458,19 @@ final class AudioEngine: ObservableObject {
         }
         sleepTimer.stopAllFn = { [weak self] in
             self?.stopAll()
+        }
+        // Ambient tail: at expiry the podcast pauses (keeping episode + position for "Resume
+        // Last Night" — saveLastMix captures a loaded-but-paused episode) and the bed plays on
+        // for the configured span, continuing the fade. See SleepTimerService.beginTail().
+        sleepTimer.stopPodcastFn = { [weak self] in
+            self?.podPlayer.pause()
+        }
+        sleepTimer.tailEligibleFn = { [weak self] in
+            guard let self else { return false }
+            return self.isPodPlaying && (self.noiseOn || self.binauralOn)
+        }
+        sleepTimer.ambientTailFn = {
+            Double(UserDefaults.standard.integer(forKey: "ambientTailMinutes")) * 60.0
         }
         sleepTimer.updateFadeMultFn = { [weak self] mult in
             self?.fadeMultiplier = mult
@@ -523,6 +544,15 @@ final class AudioEngine: ObservableObject {
                 // natural end; this covers the exact boundary if the last tick missed it.)
                 if self.sleepTimer.isEndOfEpisode {
                     self.stopAll()
+                    return
+                }
+                // Sleep-aware hold: with a sleep timer running you're presumably asleep — burning
+                // through the queue marks episodes you never heard as finished. When the option
+                // is on, finish the current episode, tidy the queue (head drops, next is cued for
+                // morning), and let the ambient bed carry the rest of the night.
+                if self.sleepTimer.timerRemaining > 0,
+                   UserDefaults.standard.bool(forKey: "holdQueueDuringSleepTimer") {
+                    self.queueManager.advanceQueue(finishedEpId: finishedEpId, suppressAutoPlay: true)
                     return
                 }
                 self.queueManager.advanceQueue(finishedEpId: finishedEpId)
@@ -638,7 +668,7 @@ final class AudioEngine: ObservableObject {
 
     private func syncGenEngine() {
         genEngine.setNoiseLayers(buildNoiseLayers(), on: noiseOn)
-        genEngine.setBinaural(on: binauralOn, volume: binVolume, preset: binauralPreset)
+        genEngine.setBinaural(on: binauralOn, volume: AudioMath.perceptualGain(binVolume), preset: binauralPreset)
         syncBeatMode()
         updateEnginePower()
     }
@@ -646,9 +676,12 @@ final class AudioEngine: ObservableObject {
     /// The full ordered noise stack handed to the engine: the primary noise (layer 0) plus any
     /// extra layers (capped). The engine silences everything when `noiseOn` is false.
     private func buildNoiseLayers() -> [(type: String, volume: Double)] {
-        var layers: [(type: String, volume: Double)] = [(noiseType, noiseVolume)]
+        // Volumes pass through the perceptual taper here — the single point where slider
+        // positions become engine gains. Muted extra layers keep their slot (type + volume
+        // preserved for un-mute) at gain 0.
+        var layers: [(type: String, volume: Double)] = [(noiseType, AudioMath.perceptualGain(noiseVolume))]
         for l in extraLayers.prefix(Self.maxExtraLayers) {
-            layers.append((l.type, l.volume))
+            layers.append((l.type, (l.muted ?? false) ? 0.0 : AudioMath.perceptualGain(l.volume)))
         }
         return layers
     }
@@ -676,6 +709,13 @@ final class AudioEngine: ObservableObject {
     func setExtraLayerVolume(_ id: String, _ volume: Double) {
         guard let i = extraLayers.firstIndex(where: { $0.id == id }) else { return }
         extraLayers[i].volume = volume
+    }
+
+    /// Mute/un-mute an extra layer in place — the layer (and its volume) survives, unlike
+    /// `removeExtraLayer`. The engine keeps the slot at gain 0, so un-muting declicks back in.
+    func setExtraLayerMuted(_ id: String, _ muted: Bool) {
+        guard let i = extraLayers.firstIndex(where: { $0.id == id }) else { return }
+        extraLayers[i].muted = muted
     }
 
     private var suspendWorkItem: DispatchWorkItem?

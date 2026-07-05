@@ -5,6 +5,9 @@ struct TimerSelectionSheet: View {
     @Binding var isPresented: Bool
     let pal: Palette
     @AppStorage("timerMinutes") private var timerMinutes = 30.0
+    /// Ambient-only span appended after the podcast stops at expiry (0 = off). Read live by
+    /// SleepTimerService, so changing it mid-timer still applies.
+    @AppStorage("ambientTailMinutes") private var ambientTailMinutes = 0
 
     private var timerActive: Bool { audio.sleepTimer.timerRemaining > 0 }
 
@@ -51,6 +54,36 @@ struct TimerSelectionSheet: View {
                     .tint(pal.accent)
             }
             .padding(.horizontal, 40)
+
+            // Ambient tail — only meaningful when a podcast is in the mix: at expiry (or the
+            // episode's end) the podcast stops and the noise bed keeps fading for this span.
+            if audio.hasLoadedEpisode {
+                VStack(spacing: 8) {
+                    Text("Then ambient only for…")
+                        .font(.caption)
+                        .foregroundColor(pal.dim)
+                    HStack(spacing: 10) {
+                        ForEach([0, 15, 30, 60], id: \.self) { mins in
+                            let selected = ambientTailMinutes == mins
+                            Button(action: {
+                                ambientTailMinutes = mins
+                                UISelectionFeedbackGenerator().selectionChanged()
+                            }) {
+                                Text(mins == 0 ? "Off" : "+\(mins)m")
+                                    .font(.subheadline.weight(.semibold))
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 8)
+                                    .background(selected ? pal.accent.opacity(0.25) : Color(white: 0.15))
+                                    .foregroundColor(selected ? pal.accent : pal.dim)
+                                    .cornerRadius(9)
+                            }
+                            .frame(minWidth: 44, minHeight: 44)
+                            .accessibilityLabel(mins == 0 ? "No ambient tail" : "Ambient continues \(mins) minutes after the podcast stops")
+                            .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+                        }
+                    }
+                }
+            }
 
             // Single commit for the duration timer.
             Button(action: {

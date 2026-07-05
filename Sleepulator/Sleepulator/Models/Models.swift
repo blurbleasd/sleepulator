@@ -41,6 +41,9 @@ nonisolated struct ExtraNoiseLayer: Codable, Identifiable, Equatable {
     var id: String = UUID().uuidString
     var type: String
     var volume: Double
+    /// Temporarily silenced without losing the layer or its volume (the mixer row's toggle).
+    /// Optional per the schema-evolution rule above — old saves decode as nil (= not muted).
+    var muted: Bool? = nil
 }
 
 /// The "Last Night" resume snapshot: what was playing when you stopped, INCLUDING the

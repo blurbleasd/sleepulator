@@ -101,6 +101,39 @@ final class SleepTimerService: ObservableObject {
     var stopAllFn: (() -> Void)?
     var updateFadeMultFn: ((Double) -> Void)?
 
+    // MARK: Ambient tail — "keep the bed going after the podcast fades"
+    /// Seconds of ambient-only playback appended after the podcast stops at expiry (0 = off).
+    /// Read live from the owner so a Settings change applies to the running timer.
+    var ambientTailFn: () -> TimeInterval = { 0 }
+    /// True when a tail makes sense right now: a podcast is playing AND an ambient bed is on.
+    var tailEligibleFn: () -> Bool = { false }
+    /// Stops just the podcast at phase-1 expiry; the noise/binaural bed plays through the tail.
+    var stopPodcastFn: (() -> Void)?
+
+    private var inTail = false
+    private var tailDuration: TimeInterval = 1
+    /// The fade level at the moment the tail began. The tail fade continues DOWN from here —
+    /// never a jump back to full volume right as the podcast drops out (that's a wake-up).
+    private var tailStartMult: Double = 1.0
+    /// Last multiplier handed to `updateFadeMultFn` — the tail's starting point.
+    private var lastFadeMult: Double = 1.0
+
+    /// Phase 1 → 2 of the terminal stop: silence the podcast, extend the deadline by the tail,
+    /// and let the (already partly faded) ambient bed carry on, easing to silence over the tail.
+    /// Runs on the main queue (callers are tick()/externalTick() main-queue blocks).
+    private func beginTail() {
+        inTail = true
+        tailDuration = max(60, ambientTailFn())
+        tailStartMult = lastFadeMult
+        stopPodcastFn?()
+        let end = Date().addingTimeInterval(tailDuration)
+        sleepTimerEnd = end
+        timerTotal += tailDuration      // the moon keeps easing down, never snaps back up
+        timerRemaining = tailDuration
+        backstop.schedule(after: tailDuration)
+        updateLiveActivity()
+    }
+
     /// Out-of-process safety net for the terminal stop (see protocol doc). Injectable for tests.
     var backstop: SleepTimerBackstopScheduling = NotificationBackstopScheduler()
 
@@ -118,6 +151,13 @@ final class SleepTimerService: ObservableObject {
 
         startLiveActivity()
 
+        armTick()
+    }
+
+    /// Create + start the 1 Hz GCD wall-clock timer. Split out of `startSleepTimer` so the
+    /// end-of-episode → ambient-tail handoff (which becomes a duration timer) can arm it too.
+    private func armTick() {
+        sleepTimer?.cancel()
         let t = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .userInitiated))
         t.schedule(deadline: .now() + 1.0, repeating: 1.0)
         t.setEventHandler { [weak self] in
@@ -164,6 +204,15 @@ final class SleepTimerService: ObservableObject {
     func externalTick(remaining: TimeInterval) {
         guard kind == .endOfEpisode, !didFire else { return }
         if remaining <= 0.4 {
+            // Ambient tail: the episode is over — hand off to a duration timer for the tail
+            // span so the bed eases you the rest of the way down instead of cutting with the
+            // episode. beginTail() pauses the podcast before AVPlayer would auto-advance.
+            if !inTail, ambientTailFn() > 0, tailEligibleFn() {
+                kind = .duration
+                beginTail()
+                armTick()   // end-of-episode had no wall-clock timer; the tail needs one
+                return
+            }
             if self.timerRemaining != 0 { self.timerRemaining = 0 }
             didFire = true
             stopAllFn?()
@@ -174,7 +223,9 @@ final class SleepTimerService: ObservableObject {
         // Carry the ambient bed gently down to silence as the episode ends. Fade only over the
         // final 90 s (or the whole episode if it's shorter than that), full volume before then.
         let fadeDur = min(90.0, max(1.0, self.timerTotal))
-        updateFadeMultFn?(Double(AudioMath.getFadeMultiplier(timerRemaining: remaining, fadeDuration: fadeDur)))
+        let mult = Double(AudioMath.getFadeMultiplier(timerRemaining: remaining, fadeDuration: fadeDur))
+        lastFadeMult = mult
+        updateFadeMultFn?(mult)
     }
 
     func backgroundTick() {
@@ -194,6 +245,13 @@ final class SleepTimerService: ObservableObject {
             guard self.kind == .duration, let end = self.sleepTimerEnd else { return }
             let remaining = end.timeIntervalSince(now)
             if remaining <= 0 {
+                // Ambient tail (phase 1 → 2): with a tail configured and a podcast still in the
+                // mix, stop only the podcast and extend the deadline — the bed plays on, fading
+                // from its current level over the tail. The final stop fires at the new deadline.
+                if !self.inTail, !self.didFire, self.ambientTailFn() > 0, self.tailEligibleFn() {
+                    self.beginTail()
+                    return
+                }
                 // Publish the terminal value once, then fire exactly once.
                 if self.timerRemaining != 0 { self.timerRemaining = 0 }
                 guard !self.didFire else { return }
@@ -212,7 +270,13 @@ final class SleepTimerService: ObservableObject {
             if Int(remaining) != Int(self.timerRemaining) {
                 self.timerRemaining = remaining
             }
-            self.updateFadeMultFn?(Double(AudioMath.getFadeMultiplier(timerRemaining: remaining)))
+            // During the tail, continue DOWN from the level the fade had already reached
+            // (tailStartMult) across the tail span — never back up to full volume.
+            let mult: Double = self.inTail
+                ? self.tailStartMult * Double(AudioMath.getFadeMultiplier(timerRemaining: remaining, fadeDuration: self.tailDuration))
+                : Double(AudioMath.getFadeMultiplier(timerRemaining: remaining))
+            self.lastFadeMult = mult
+            self.updateFadeMultFn?(mult)
             // Update live activity periodically (e.g., every 15 mins or when a bump occurs)
             // ActivityKit doesn't recommend updating every second.
         }
@@ -245,6 +309,9 @@ final class SleepTimerService: ObservableObject {
         sleepTimerEnd = nil
         kind = .none
         timerRemaining = 0
+        inTail = false
+        tailStartMult = 1.0
+        lastFadeMult = 1.0
         // Tear down the out-of-process net too: the in-process stop fired, or the user/mode
         // switch cancelled the timer. (Also fires on the terminal stop, which calls this.)
         backstop.cancel()
@@ -325,9 +392,17 @@ final class PomodoroService: ObservableObject {
 
     /// Called at every phase boundary so the owner can play a chime.
     var chimeFn: (() -> Void)?
+    /// Fired on start, every phase boundary, and stop — (newPhase, isRunning). AudioEngine
+    /// uses it to soften the ambient bed during breaks (FOCUS-MODE-SPEC R6).
+    var phaseChangedFn: ((Phase, Bool) -> Void)?
 
     private var timer: DispatchSourceTimer?
     private var phaseEnd: Date?
+    private static let phaseNotifId = "app.sleepulator.pomodoro.phase"
+    private var requestedNotifAuth = false
+    #if canImport(ActivityKit)
+    private var pomoActivity: Activity<PomodoroAttributes>?
+    #endif
     /// Length of the phase currently counting down — denominator for `progress`.
     private var phaseTotal: TimeInterval = 0
 
@@ -353,6 +428,9 @@ final class PomodoroService: ObservableObject {
         restIsLong = false
         beginPhase(minutes: workMinutes)
         isRunning = true
+        phaseChangedFn?(.work, true)
+        schedulePhaseEndNotification()
+        startLiveActivity()
 
         let t = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .userInitiated))
         t.schedule(deadline: .now() + 1.0, repeating: 1.0)
@@ -367,6 +445,16 @@ final class PomodoroService: ObservableObject {
         phaseEnd = nil
         isRunning = false
         remaining = 0
+        cancelPhaseEndNotification()
+        endLiveActivity()
+        phaseChangedFn?(phase, false)
+    }
+
+    /// Skip the rest of the current phase — end a break early, or bail out of a work interval
+    /// (which still counts the cycle, matching the natural boundary's accounting).
+    func skipPhase() {
+        guard isRunning else { return }
+        advancePhase()
     }
 
     private func beginPhase(minutes: Int) {
@@ -383,24 +471,115 @@ final class PomodoroService: ObservableObject {
             guard self.isRunning, let end = self.phaseEnd else { return }
             let r = end.timeIntervalSince(now)
             if r <= 0 {
-                self.chimeFn?()
-                if self.phase == .work {
-                    // Finished a work interval. Every Nth one earns a long break.
-                    self.completedCycles += 1
-                    let longDue = self.completedCycles % max(1, self.cyclesBeforeLongBreak) == 0
-                    self.restIsLong = longDue
-                    self.phase = .rest
-                    self.beginPhase(minutes: longDue ? self.longRestMinutes : self.restMinutes)
-                } else {
-                    self.restIsLong = false
-                    self.phase = .work
-                    self.beginPhase(minutes: self.workMinutes)
-                }
+                self.advancePhase()
             } else {
                 self.remaining = r
             }
         }
     }
+
+    /// One phase boundary — natural (tick) or user skip: chime, flip work↔rest, notify the
+    /// owner, and re-arm the backgrounded-phase-end notification + Live Activity.
+    private func advancePhase() {
+        chimeFn?()
+        if phase == .work {
+            // Finished a work interval. Every Nth one earns a long break.
+            completedCycles += 1
+            let longDue = completedCycles % max(1, cyclesBeforeLongBreak) == 0
+            restIsLong = longDue
+            phase = .rest
+            beginPhase(minutes: longDue ? longRestMinutes : restMinutes)
+        } else {
+            restIsLong = false
+            phase = .work
+            beginPhase(minutes: workMinutes)
+        }
+        phaseChangedFn?(phase, true)
+        schedulePhaseEndNotification()
+        updateLiveActivity()
+    }
+
+    // MARK: Backgrounded phase-end notification (FOCUS-MODE-SPEC R5)
+    // The chime only sounds while the app is rendering audio; pause the bed and background the
+    // app and phase boundaries would pass silently. A local notification at each phase end
+    // covers that — iOS suppresses it while the app is foreground (no delegate opts in), so
+    // active users just hear the chime. Provisional auth: quiet, no permission prompt.
+
+    private func schedulePhaseEndNotification() {
+        let center = UNUserNotificationCenter.current()
+        if !requestedNotifAuth {
+            requestedNotifAuth = true
+            center.requestAuthorization(options: [.alert, .provisional]) { _, _ in }
+        }
+        center.removePendingNotificationRequests(withIdentifiers: [Self.phaseNotifId])
+        guard let end = phaseEnd else { return }
+        let secs = end.timeIntervalSinceNow
+        guard secs > 1 else { return }
+
+        let content = UNMutableNotificationContent()
+        if phase == .work {
+            content.title = "Focus interval finished"
+            content.body = "Time for a \(restIsLongNext ? "long break" : "break")."
+        } else {
+            content.title = "Break's over"
+            content.body = "Back to focus."
+        }
+        content.sound = nil   // the in-app chime covers foreground; keep the net quiet
+        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: max(1, secs), repeats: false)
+        center.add(UNNotificationRequest(identifier: Self.phaseNotifId, content: content, trigger: trigger))
+    }
+
+    /// Whether the break that FOLLOWS the current work interval will be a long one.
+    private var restIsLongNext: Bool {
+        (completedCycles + 1) % max(1, cyclesBeforeLongBreak) == 0
+    }
+
+    private func cancelPhaseEndNotification() {
+        let center = UNUserNotificationCenter.current()
+        center.removePendingNotificationRequests(withIdentifiers: [Self.phaseNotifId])
+        center.removeDeliveredNotifications(withIdentifiers: [Self.phaseNotifId])
+    }
+
+    // MARK: Live Activity (lock screen / Dynamic Island ring for the running session)
+    // Updated only at phase boundaries — ActivityKit's own countdown text ticks per-second
+    // for free via `endDate`, so no per-second updates are pushed.
+
+    private func startLiveActivity() {
+        #if canImport(ActivityKit)
+        guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
+        let content = ActivityContent(state: pomoState(), staleDate: phaseEnd)
+        pomoActivity = try? Activity.request(attributes: PomodoroAttributes(), content: content)
+        #endif
+    }
+
+    private func updateLiveActivity() {
+        #if canImport(ActivityKit)
+        guard let activity = pomoActivity else { return }
+        let content = ActivityContent(state: pomoState(), staleDate: phaseEnd)
+        Task { await activity.update(content) }
+        #endif
+    }
+
+    private func endLiveActivity() {
+        #if canImport(ActivityKit)
+        guard let activity = pomoActivity else { return }
+        let content = ActivityContent(state: pomoState(), staleDate: nil)
+        Task { await activity.end(content, dismissalPolicy: .immediate) }
+        pomoActivity = nil
+        #endif
+    }
+
+    #if canImport(ActivityKit)
+    private func pomoState() -> PomodoroAttributes.ContentState {
+        PomodoroAttributes.ContentState(
+            isWork: phase == .work,
+            isLongBreak: restIsLong,
+            endDate: phaseEnd,
+            cycle: min((completedCycles % max(1, cyclesBeforeLongBreak)) + 1, max(1, cyclesBeforeLongBreak)),
+            totalCycles: max(1, cyclesBeforeLongBreak)
+        )
+    }
+    #endif
 }
 
 // MARK: - Chime
