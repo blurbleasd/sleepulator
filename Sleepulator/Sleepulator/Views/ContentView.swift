@@ -9,6 +9,8 @@ struct ContentView: View {
     @AppStorage("autoNightDim") private var autoNightDim = true
     @State private var nightDimmed = false
     @State private var dimWorkItem: DispatchWorkItem?
+    @State private var veilCaptionShown = true
+    @State private var veilCaptionHide: DispatchWorkItem?
     /// Tracks the timer's active/idle state so the dim side-effect fires only on the transition,
     /// not on every per-second `timerRemaining` publish (which would reschedule the 60 s dim work
     /// item forever and it would never fire).
@@ -49,6 +51,19 @@ struct ContentView: View {
     private func cancelDim() {
         dimWorkItem?.cancel()
         dimWorkItem = nil
+    }
+
+    // Show the veil's "Tap to wake" hint briefly each time the veil engages, then fade it out
+    // so the occluded screen holds no lit pixels (see the burn-in note at the overlay).
+    private func flashVeilCaption() {
+        veilCaptionHide?.cancel()
+        // Animated so re-engagements ride the veil's own fade-in rather than popping a frame in.
+        withAnimation(.easeInOut(duration: 0.8)) { veilCaptionShown = true }
+        let work = DispatchWorkItem {
+            withAnimation(.easeInOut(duration: 2)) { self.veilCaptionShown = false }
+        }
+        veilCaptionHide = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 6, execute: work)
     }
 
     var body: some View {
@@ -95,13 +110,19 @@ struct ContentView: View {
                     .contentShape(Rectangle())
                     .onTapGesture { wake() }
                     .overlay(
+                        // The caption fades out after a few seconds: under the veil it was the
+                        // only lit element on screen — a fixed, dim-white string held for eight
+                        // hours a night is a textbook OLED burn-in anchor, and fading it lets
+                        // the panel go true black. VoiceOver keeps the label below regardless.
                         Text("Tap to wake")
                             .font(.caption)
                             .foregroundColor(.white.opacity(0.16))
+                            .opacity(veilCaptionShown ? 1 : 0)
                     )
                     .transition(.opacity)
                     .accessibilityAddTraits(.isButton)
                     .accessibilityLabel("Screen dimmed for sleep. Tap to wake.")
+                    .onAppear { flashVeilCaption() }
             }
         }
         // Force dark mode for bedtime aesthetic

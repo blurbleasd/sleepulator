@@ -11,7 +11,10 @@ enum SceneMood {
 struct SceneContext {
     let palette: Palette
     let reduceMotion: Bool
-    /// True once the screensaver has engaged — scenes settle to static for battery.
+    /// True when the screen is actually occluded — the night-dim veil, backgrounding, or a
+    /// low-luminance/Always-On display — so scenes settle to static for battery. NOT the
+    /// lighter controls-faded screensaver: scenes keep animating through that (it's the show).
+    /// See `HomeView.scenesFrozen` / the `nightDimmed → audio.screenDimmed` hand-off.
     let paused: Bool
     /// The sleep timer, for time-reactive sleep scenes (e.g. the setting moon).
     let sleepTimer: SleepTimerService
@@ -61,7 +64,7 @@ struct NightSkyScene: AmbientScene {
             ZStack {
                 StarfieldView(paused: ctx.paused)
                     .ignoresSafeArea()
-                ShootingStarView()
+                ShootingStarView(paused: ctx.paused, sleepTimer: ctx.sleepTimer)
                     .ignoresSafeArea()
                 // Darkening must observe the timer itself: nightProgress is computed (not
                 // @Published) and the timer is no longer forwarded through `audio`, so HomeView
@@ -108,7 +111,8 @@ struct EnergyScene: AmbientScene {
     let mood = SceneMood.focus
 
     func makeBackdrop(_ ctx: SceneContext) -> AnyView {
-        AnyView(FocusBackdrop(accent: ctx.palette.accent, reduceMotion: ctx.reduceMotion))
+        AnyView(FocusBackdrop(accent: ctx.palette.accent, reduceMotion: ctx.reduceMotion,
+                              paused: ctx.paused))
     }
 }
 
@@ -178,13 +182,16 @@ struct RainOnGlassDepthScene: AmbientScene {
 
 /// "Breathe": a soft warm glow that swells and fades on a slow breath cadence — follow it and
 /// your own breath slows. The most directly lulling scene (entrainment, not just ambience).
+/// Takes the timer so the glow dims with the night (read live inside its own redraw, per the
+/// animating-scene convention) — it was the only sleep scene that stayed bedtime-bright at
+/// nightProgress 1.
 struct BreathingBloomScene: AmbientScene {
     let id = "breathing-bloom"
     let title = "Breathe"
     let mood = SceneMood.sleep
 
     func makeBackdrop(_ ctx: SceneContext) -> AnyView {
-        AnyView(BreathingBloomView(paused: ctx.paused))
+        AnyView(BreathingBloomView(paused: ctx.paused, sleepTimer: ctx.sleepTimer))
     }
 }
 

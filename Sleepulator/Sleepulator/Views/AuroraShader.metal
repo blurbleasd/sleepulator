@@ -19,9 +19,17 @@ using namespace metal;
 // rewritten 2026-07 as an original implementation on this same kit.)
 //
 // Driven from SwiftUI `.colorEffect`: each pixel returns its own colour, so it
-// attaches to a plain full-screen Rectangle. Swift owns the live values — time,
-// size, nightProgress, audioLevel, gyro — and everything else is a `constant`
-// below (edit + rebuild, no Swift change).
+// attaches to a plain full-screen Rectangle. Swift owns the live values —
+// phase, time, size, nightProgress, audioLevel, gyro — and everything else is
+// a `constant` below (edit + rebuild, no Swift change).
+//
+// TIME CONTRACT (all four Metal scenes; see SceneClock in ShaderBackdrop.swift):
+//   `phase` — night-slowed *integrated* time. Use for every motion term (flow,
+//     travel, waves). Never multiply it by a night factor here: scaling an
+//     absolute time by a shrinking factor rewinds the motion — that was the
+//     "aurora drifts backward late in the timer" bug.
+//   `time`  — monotonic elapsed time, rate-independent. Use for cyclic terms
+//     (breath, twinkle, dither) whose *frequency* shouldn't slow with the night.
 // ============================================================================
 
 namespace aur {
@@ -72,7 +80,7 @@ inline float fbm(float2 p) {
 // ----------------------------------------------------------------------------------
 [[ stitchable ]]
 half4 auroraField(float2 pos, half4 color,
-                  float time, float2 size,
+                  float phase, float time, float2 size,
                   float night, float audio, float2 gyro) {
     using namespace aur;
 
@@ -82,8 +90,9 @@ half4 auroraField(float2 pos, half4 color,
 
     float p = clamp(night, 0.0, 1.0);        // night progress: 0 start → 1 timer end
     float a = clamp(audio, 0.0, 1.0);        // smoothed audio level
-    float motion = 1.0 - 0.5 * p;            // wind motion amplitude down as the night settles
-    float t = time * FLOW * motion;
+    float motion = 1.0 - 0.5 * p;            // wind motion *amplitude* down as the night settles
+    // Rate slowdown lives in `phase` (integrated Swift-side) — see the time contract above.
+    float t = phase * FLOW;
 
     // Gyro parallax (a watching-window bonus; 0 on a flat nightstand).
     x += gyro.x * 0.03;
@@ -99,8 +108,9 @@ half4 auroraField(float2 pos, half4 color,
         float bright = 1.0 - 0.22 * fl;
 
         // Lateral march: the whole field travels across the sky, nearer layers faster —
-        // the strongest "it's alive" cue at nightstand distance. Slows as the night settles.
-        float xl = x + time * TRAVEL * (0.6 + 0.4 * fl) * motion;
+        // the strongest "it's alive" cue at nightstand distance. Slows as the night settles
+        // (via `phase`, whose rate the night modulates).
+        float xl = x + phase * TRAVEL * (0.6 + 0.4 * fl);
 
         // Domain warp the horizontal coordinate → folds that move and never repeat.
         float w  = fbm(float2(xl * 1.6 + t * speed, fl * 3.1 + t * 0.30));

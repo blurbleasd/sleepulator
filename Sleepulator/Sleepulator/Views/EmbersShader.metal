@@ -16,8 +16,11 @@ using namespace metal;
 // Original implementation; standard hash + value-noise + FBM technique (public
 // domain), no third-party shader source copied. Clean to ship.
 //
-// Driven from SwiftUI `.colorEffect`. Swift owns time, size, nightProgress,
-// audioLevel; everything else is a `constant` below (edit + rebuild).
+// Driven from SwiftUI `.colorEffect`. Swift owns phase, time, size,
+// nightProgress, audioLevel; everything else is a `constant` below
+// (edit + rebuild). `phase` is night-slowed integrated time for motion terms,
+// `time` is monotonic elapsed for cyclic terms — see the time contract in
+// AuroraShader.metal / SceneClock in ShaderBackdrop.swift.
 // ============================================================================
 
 namespace ember {
@@ -67,7 +70,7 @@ inline float3 ramp(float d) {
 // ----------------------------------------------------------------------------------
 [[ stitchable ]]
 half4 emberField(float2 pos, half4 color,
-                 float time, float2 size,
+                 float phase, float time, float2 size,
                  float night, float audio) {
     using namespace ember;
 
@@ -77,8 +80,8 @@ half4 emberField(float2 pos, half4 color,
     float p = clamp(night, 0.0, 1.0);
     float a = clamp(audio, 0.0, 1.0);
     float dim = 1.0 - 0.5 * p;                 // coals settle darker toward night
-    float tA = time * DRIFT * (1.0 - 0.3 * p); // drift slows a touch as the night deepens
-    float tS = time * SWIRL;
+    float tA = phase * DRIFT;                  // drift slows with the night (rate lives in phase)
+    float tS = time * SWIRL;                   // swirl keeps its constant, hypnotic rate
 
     // Gentle differential swirl around a low center — inner and outer churn at different rates,
     // which reads as slow, hypnotic rotation rather than a uniform spin.

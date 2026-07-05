@@ -18,15 +18,20 @@ using namespace metal;
 // the technique. (Cf. AuroraShader.metal — same noise basis, redefined locally
 // because each .metal file is its own translation unit.)
 //
-// Driven from SwiftUI `.colorEffect`. Swift owns time, size, nightProgress,
-// audioLevel; everything else is a `constant` below (edit + rebuild).
+// Driven from SwiftUI `.colorEffect`. Swift owns phase, time, size,
+// nightProgress, audioLevel; everything else is a `constant` below
+// (edit + rebuild). `phase` is night-slowed integrated time for motion terms
+// (waves, ripple spread), `time` is monotonic elapsed for cyclic terms — see
+// the time contract in AuroraShader.metal / SceneClock in ShaderBackdrop.swift.
+// (The old `time × motion` form didn't still the pond, it *retracted* the
+// ripples once the product's derivative went negative.)
 // ============================================================================
 
 namespace sw {
 
 // ---- tunables --------------------------------------------------------------------
 constant int   OCTAVES   = 4;      // FBM detail — the battery knob.
-constant float FLOW       = 0.50;  // surface drift speed (× motion)
+constant float FLOW       = 0.50;  // surface drift speed (× phase — never re-scale by night here)
 constant float HORIZON    = 0.42;  // sky / water split (0 top → 1 bottom)
 constant float2 MOON      = float2(0.5, 0.16);   // moon position in the sky
 constant float3 MOONLIGHT = float3(0.66, 0.78, 0.98);  // cool moonlit blue-white
@@ -64,15 +69,15 @@ inline float fbm(float2 p) {
 // ----------------------------------------------------------------------------------
 [[ stitchable ]]
 half4 stillWaterField(float2 pos, half4 color,
-                      float time, float2 size,
+                      float phase, float time, float2 size,
                       float night, float audio) {
     using namespace sw;
 
     float2 uv = pos / size;
     float p = clamp(night, 0.0, 1.0);
     float a = clamp(audio, 0.0, 1.0);
-    float motion = 1.0 - 0.5 * p;
-    float t = time * FLOW * motion;
+    float motion = 1.0 - 0.5 * p;              // stills ripple *amplitude* toward night
+    float t = phase * FLOW;                    // drift rate slowdown lives in phase
     float moonDim = 1.0 - 0.6 * p;
 
     // --- base sky / water gradient ---
