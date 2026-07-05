@@ -172,3 +172,52 @@ class NightDampingTests: XCTestCase {
         XCTAssertEqual(NightDamping.factor(nightProgress: -0.2, bedtime: false), 1.0, accuracy: 1e-9)
     }
 }
+
+/// `DepthReactivity` — the shared night → depth-knob vocabulary (density thins, fog rises, the far
+/// world defocuses as the sleep timer winds down). Pure, so it's tested off-device (the device
+/// ritual can't cover the curve shape). F1 of the visual-moat plan.
+class DepthReactivityTests: XCTestCase {
+    private let base = DepthReactivity.Base(density: 0.55, fog: 0.10, defocus: 1.0)
+
+    func testNightZeroReturnsBase() {
+        // At bedtime the scene renders exactly as authored — no reaction yet.
+        let r = DepthReactivity.at(night: 0, base: base)
+        XCTAssertEqual(r.density, base.density, accuracy: 1e-6)
+        XCTAssertEqual(r.fog, base.fog, accuracy: 1e-6)
+        XCTAssertEqual(r.defocus, base.defocus, accuracy: 1e-6)
+    }
+
+    func testNightOneIsFullySettled() {
+        let r = DepthReactivity.at(night: 1, base: base)
+        XCTAssertEqual(r.density, base.density * (1 - DepthReactivity.densityThin), accuracy: 1e-6)
+        XCTAssertEqual(r.fog, base.fog + DepthReactivity.fogRise, accuracy: 1e-6)
+        XCTAssertEqual(r.defocus, base.defocus + DepthReactivity.defocusRise, accuracy: 1e-6)
+    }
+
+    func testMonotonicAcrossTheNight() {
+        // Density only falls; fog and defocus only rise — the reaction never reverses mid-run
+        // (a non-monotonic curve would read as the rain "picking back up" as you drift off).
+        var lastDensity = Float.greatestFiniteMagnitude
+        var lastFog = -Float.greatestFiniteMagnitude
+        var lastDefocus = -Float.greatestFiniteMagnitude
+        for i in 0...100 {
+            let r = DepthReactivity.at(night: Float(i) / 100, base: base)
+            XCTAssertLessThanOrEqual(r.density, lastDensity + 1e-6, "density must not rise")
+            XCTAssertGreaterThanOrEqual(r.fog, lastFog - 1e-6, "fog must not fall")
+            XCTAssertGreaterThanOrEqual(r.defocus, lastDefocus - 1e-6, "defocus must not fall")
+            lastDensity = r.density; lastFog = r.fog; lastDefocus = r.defocus
+        }
+    }
+
+    func testNightClampsOutOfRange() {
+        // Below 0 reads as bedtime; above 1 reads as fully settled — no overshoot past the ends.
+        XCTAssertEqual(DepthReactivity.at(night: -0.5, base: base), DepthReactivity.at(night: 0, base: base))
+        XCTAssertEqual(DepthReactivity.at(night: 1.7, base: base), DepthReactivity.at(night: 1, base: base))
+    }
+
+    func testFogNeverExceedsOne() {
+        // A scene that starts already hazy must not push fog past full opacity at night.
+        let hazy = DepthReactivity.Base(density: 0.55, fog: 0.8, defocus: 1.0)
+        XCTAssertLessThanOrEqual(DepthReactivity.at(night: 1, base: hazy).fog, 1.0)
+    }
+}
