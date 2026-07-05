@@ -161,6 +161,7 @@ struct TimerSelectionSheet: View {
         }
         .padding(.top, UI.xxl)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(pal.bg.ignoresSafeArea())
+        // Translucent sheet backdrop (see the presentationBackground at the call site) — the scene
+        // drifts behind rather than a flat fill.
     }
 }

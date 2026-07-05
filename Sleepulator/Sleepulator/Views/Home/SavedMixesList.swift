@@ -108,7 +108,10 @@ struct WarmMixerRow: View {
     @Binding var volume: Double
     let pal: Palette
     var onToggle: (() -> Void)? = nil
-    
+    /// When set, the row shows a visible remove control (extra stacked layers). Primary rows
+    /// leave it nil — they're core layers you toggle, not remove.
+    var onRemove: (() -> Void)? = nil
+
     var options: [String] = []
     var optionLabels: [String: String]? = nil
     var selection: Binding<String>? = nil
@@ -127,6 +130,20 @@ struct WarmMixerRow: View {
         .labelsHidden()
         .toggleStyle(SwitchToggleStyle(tint: pal.accent))
         .accessibilityLabel(Text(title))   // VoiceOver: identify which layer this switch is
+    }
+
+    /// Visible remove affordance for stacked layers — the destructive action used to hide in a
+    /// long-press menu nobody found, so an added sound felt un-removable.
+    @ViewBuilder private var removeButton: some View {
+        if let onRemove {
+            Button(action: onRemove) {
+                Image(systemName: "minus.circle.fill")
+                    .font(.title3)
+                    .foregroundColor(pal.dim)
+            }
+            .frame(minWidth: 44, minHeight: 44)
+            .accessibilityLabel("Remove \(title) layer")
+        }
     }
 
     @ViewBuilder private var iconAndTitle: some View {
@@ -155,12 +172,13 @@ struct WarmMixerRow: View {
             if typeSize.isAccessibilitySize {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(alignment: .firstTextBaseline) { iconAndTitle; Spacer() }
-                    HStack { Spacer(); rowToggle }
+                    HStack { Spacer(); removeButton; rowToggle }
                 }
             } else {
                 HStack(alignment: .firstTextBaseline) {
                     iconAndTitle
                     Spacer()
+                    removeButton
                     rowToggle
                 }
             }

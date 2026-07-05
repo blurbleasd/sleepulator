@@ -327,10 +327,12 @@ struct HomeView: View {
                         .frame(minHeight: 36)
                     }
                 }
-                // Clear the floating mini-player when an episode is loaded (it spans ~114–180pt
-                // up from the screen bottom; the controls sit above the tab bar, so they need a
-                // generous inset to clear its top). Tune by eye on device.
-                .padding(.bottom, audio.hasLoadedEpisode ? 112 : 22)
+                // The mini-player floats over the bottom in EVERY state (it shows an idle
+                // "Nothing playing" bar when nothing's loaded), so the controls need this inset
+                // even with no episode — the old `: 22` let the always-present bar cover the
+                // "Build mix" button. A constant also stops the row jumping when a podcast
+                // loads/unloads. Tune by eye on device.
+                .padding(.bottom, 112)
             }
             .opacity(audio.ambientScreensaver ? 0 : 1)
             .allowsHitTesting(!audio.ambientScreensaver)
@@ -439,6 +441,9 @@ struct HomeView: View {
             TimerSelectionSheet(audio: audio, isPresented: $showTimerActionSheet, pal: pal)
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
+                // Let the home scene drift dimly behind the sheet so the glass panels have real
+                // moving content to refract — the difference between a flat box and real glass.
+                .presentationBackground(pal.bg.opacity(0.72))
         }
         .sheet(isPresented: $showMix) {
             MixDrawer(audio: audio, mixStore: mixStore, pal: pal, onPickEpisode: {
@@ -447,6 +452,7 @@ struct HomeView: View {
             })
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
+                .presentationBackground(pal.bg.opacity(0.72))
         }
     }
 }

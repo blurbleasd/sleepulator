@@ -64,7 +64,8 @@ struct MixDrawer: View {
             }
             .padding(.vertical, UI.xl)
         }
-        .background(pal.bg.ignoresSafeArea())
+        // No opaque fill here — the sheet's presentationBackground (a translucent dusk tint) lets
+        // the home scene show through so the glass rows refract living content.
         .preferredColorScheme(.dark)
         // "Name your mix" + a text field is self-evident — no explanatory message line.
         .alert("Name your mix", isPresented: $showNameDialog) {

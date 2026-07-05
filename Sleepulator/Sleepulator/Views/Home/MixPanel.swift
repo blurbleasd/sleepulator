@@ -83,6 +83,10 @@ struct MixPanel: View {
                             set: { audio.setExtraLayerVolume(layer.id, $0) }
                         ),
                         pal: pal,
+                        onRemove: {
+                            audio.removeExtraLayer(layer.id)
+                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        },
                         options: noisePalette,
                         selection: Binding(
                             get: { layer.type },
@@ -90,13 +94,6 @@ struct MixPanel: View {
                         )
                     )
                     .glassPanel(pal)
-                    .contextMenu {
-                        Button(role: .destructive) {
-                            audio.removeExtraLayer(layer.id)
-                        } label: {
-                            Label("Remove layer", systemImage: "trash")
-                        }
-                    }
                 }
 
                 if audio.extraLayers.count < AudioEngine.maxExtraLayers {
