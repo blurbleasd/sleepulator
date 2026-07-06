@@ -389,7 +389,25 @@ struct SettingsView: View {
                         .accentColor(pal.accent)
                         .glassPanel()
                         .padding(.horizontal)
-                        
+
+                        // Build identity footer — glance here to confirm which build the device is
+                        // running. Version/build are static across manual builds, so the build time
+                        // (executable mod date) is the line that actually distinguishes them.
+                        VStack(spacing: 3) {
+                            Text("Sleepulator \(AppInfo.versionBuild)")
+                                .font(.footnote.weight(.medium))
+                                .foregroundColor(pal.dim)
+                            if let built = AppInfo.builtAtLabel {
+                                Text("Built \(built)")
+                                    .font(.caption2)
+                                    .foregroundColor(pal.dim.opacity(0.7))
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 4)
+                        .accessibilityElement(children: .combine)
+                        .accessibilityLabel(AppInfo.accessibilitySummary)
+
                         Spacer().frame(height: 80) // 80 is the miniPlayerInset
                     }
                     .padding(.top, 20)
