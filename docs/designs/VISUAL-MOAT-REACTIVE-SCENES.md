@@ -215,6 +215,11 @@ test added (would duplicate).
   (set in `HomeView.reconcileMotion`). Plain class, `SceneClock`/`TiltSource` pattern (no `@Published`).
   Only samples while animating — a frozen scene renders no frames, so settled-state power (trivially
   fine) never bloats the log. Turns P3's "clear win" + P1's power budget from a vibe into numbers.
+- **P6a** — app-level "Ambient motion" toggle (Settings ▸ Display, `@AppStorage("ambientMotion")`,
+  default ON): OFF adds `!ambientMotion` as another reason in `HomeView.scenesFrozen`, so the backdrop
+  holds a static frame (and CoreMotion stops via a `reconcileMotion` onChange). An explicit override on
+  top of system Reduce Motion, which by convention only gates parallax (SCREENSAVER-LIBRARY-SPEC §5) —
+  this is the home for the user who wants the scene itself still. Added to Backup/Restore keys.
 - **Verified:** Debug sim build SUCCEEDED (Metal + Swift compile clean, incl. the new ocean shader);
   14/14 unit tests green (`DepthReactivityTests` 5, `MetalShadersTests` 3, `SceneClockTests` 6).
   **Unverified on device:** freeze-in-place, the reactive settle, the ocean reflection look, parallax,

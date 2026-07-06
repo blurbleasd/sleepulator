@@ -15,6 +15,7 @@ struct SettingsView: View {
     @AppStorage("bedtimeMode") private var bedtimeMode = false
     @AppStorage("autoNightDim") private var autoNightDim = true
     @AppStorage("breathingOnRamp") private var breathingOnRamp = false
+    @AppStorage("ambientMotion") private var ambientMotion = true
 
     /// Scalar UserDefaults keys included in Backup/Restore. Single source of truth for both the
     /// export and the restore whitelist: restore writes nothing outside this set plus the
@@ -28,8 +29,8 @@ struct SettingsView: View {
         "masterVolume", "autoPlay", "shuffleQueue", "deleteOnCompletion", "hideFinishedEpisodes",
         "nightLimiterEnabled", "sleepEQEnabled", "sleepEQIntensity", "limiterByMode",
         "beatRouting", "skipInterval", "playbackSpeed", "focusMode", "sceneSleep", "sceneFocus",
-        "bedtimeMode", "autoNightDim", "breathingOnRamp", "timerMinutes", "pomoWork", "pomoRest",
-        "pomoLongRest", "pomoCycles"
+        "bedtimeMode", "autoNightDim", "breathingOnRamp", "ambientMotion", "timerMinutes",
+        "pomoWork", "pomoRest", "pomoLongRest", "pomoCycles"
     ]
 
     /// Backup keys that map to StorageManager files (not UserDefaults), with the Codable type each
@@ -279,6 +280,19 @@ struct SettingsView: View {
                             .foregroundColor(pal.dim)
 
                             Text("Once a sleep timer is running, the screen fades to black after a minute so it doesn't light the room. Tap to wake.")
+                                .font(.caption)
+                                .foregroundColor(pal.dim)
+
+                            Divider().background(pal.dim.opacity(0.2))
+
+                            Toggle(isOn: $ambientMotion) {
+                                Text("Ambient motion")
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            .toggleStyle(SwitchToggleStyle(tint: pal.accent))
+                            .foregroundColor(pal.dim)
+
+                            Text("Let the backdrop scenes drift, ripple, and parallax. Turn off to hold them on a single still frame — calmer, and a touch easier on the battery. (System Reduce Motion already stops the tilt parallax; this stills the scene itself.)")
                                 .font(.caption)
                                 .foregroundColor(pal.dim)
                         }

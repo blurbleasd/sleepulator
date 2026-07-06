@@ -49,17 +49,23 @@ struct HomeView: View {
 
     /// Scenes (and CoreMotion) settle to a static frame whenever the screen is occluded by the
     /// night-dim veil, the app isn't active (backgrounded / app-switcher), or the display is in a
-    /// low-luminance / Always-On state. Previously freezing was gated on the sleep-timer veil alone,
-    /// so a no-timer session animated at full rate all night. This is purely additive — it only
-    /// adds reasons to freeze, never removes the veil case.
+    /// low-luminance / Always-On state — or the user turned off the app-level "Ambient motion"
+    /// setting. Previously freezing was gated on the sleep-timer veil alone, so a no-timer session
+    /// animated at full rate all night. This is purely additive — it only adds reasons to freeze,
+    /// never removes the veil case.
     private var scenesFrozen: Bool {
-        audio.screenDimmed || scenePhase != .active || isLuminanceReduced
+        audio.screenDimmed || scenePhase != .active || isLuminanceReduced || !ambientMotion
     }
 
     // Selected backdrop scene per mode (persisted). Changing it re-renders the home; the
     // Build-mix drawer writes these via SceneSelector.
     @AppStorage("sceneSleep") private var sleepSceneId = "night-sky"
     @AppStorage("sceneFocus") private var focusSceneId = "energy"
+    /// App-level "Ambient motion" override (Settings ▸ Display). ON by default = the current behavior;
+    /// OFF stills the backdrop to a static frame. An explicit control on top of system Reduce Motion,
+    /// which by convention only gates parallax (SCREENSAVER-LIBRARY-SPEC §5) — the app toggle is the
+    /// home for the user who wants the scene itself to hold still.
+    @AppStorage("ambientMotion") private var ambientMotion = true
 
     private var currentScene: any AmbientScene {
         let mood: SceneMood = audio.focusMode ? .focus : .sleep
@@ -226,6 +232,7 @@ struct HomeView: View {
             .onChange(of: scenePhase) { _, _ in reconcileMotion() }
             .onChange(of: isLuminanceReduced) { _, _ in reconcileMotion() }
             .onChange(of: currentScene.id) { _, _ in reconcileMotion() }
+            .onChange(of: ambientMotion) { _, _ in reconcileMotion() }   // stop CoreMotion when motion is off
             
             // Ambient-minimal foreground: the night sky is the screen. A mode toggle up top,
             // a single central orb (play/pause) with the active sounds as pills, and one
