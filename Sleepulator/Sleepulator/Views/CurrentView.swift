@@ -18,10 +18,6 @@ struct CurrentView: View {
         let op: Double         // base opacity
     }
 
-    private static let workTint = Color(red: 0.36, green: 0.62, blue: 0.96)  // cool blue
-    private static let restTint = Color(red: 0.30, green: 0.72, blue: 0.66)  // teal (ease)
-    private static let idleTint = Color(red: 0.40, green: 0.56, blue: 0.84)
-
     private static let streams: [Stream] = build()
 
     private static func build() -> [Stream] {
@@ -65,24 +61,23 @@ struct CurrentView: View {
     }
 
     private func flowPhase(_ now: Date) -> Double {
-        let running = pomodoro.isRunning
-        let work = pomodoro.phase == .work
-        // Work builds momentum with progress; rest eases. This is the flow *rate*.
-        let driveSpeed: Double = running ? (work ? 0.85 + 0.55 * pomodoro.progress : 0.55) : 0.65
+        // Work builds momentum with progress; rest eases. This is the flow *rate* (shared mapping,
+        // so the Metal A/B sibling can't drift from the Canvas here).
+        let driveSpeed = FocusDrivers.look(isRunning: pomodoro.isRunning,
+                                           isWork: pomodoro.phase == .work,
+                                           progress: pomodoro.progress).speed
         if !paused { clock.tick(now: now.timeIntervalSinceReferenceDate, rate: driveSpeed) }
         return clock.phase
     }
 
     private func draw(_ ctx: GraphicsContext, _ size: CGSize, flow: Double) {
-        let running = pomodoro.isRunning
-        let work = pomodoro.phase == .work
-        let prog = pomodoro.progress
-
-        // Drive the look from the session: work builds momentum with progress; rest eases.
-        // (Speed is integrated into `flow` above; opacity/amplitude modulate instantaneously.)
-        let driveOp:  Double = running ? (work ? 0.55 + 0.45 * prog : 0.34) : 0.45
-        let driveAmp: Double = running ? (work ? 0.70 + 0.50 * prog : 0.55) : 0.65
-        let tint = running ? (work ? Self.workTint : Self.restTint) : Self.idleTint
+        // Drive the look from the session via the shared mapping (speed is integrated into `flow`
+        // above; opacity/amplitude modulate instantaneously).
+        let look = FocusDrivers.look(isRunning: pomodoro.isRunning,
+                                     isWork: pomodoro.phase == .work,
+                                     progress: pomodoro.progress)
+        let driveOp = look.op, driveAmp = look.amp
+        let tint = look.color
 
         let steps = 36
         for s in Self.streams {

@@ -70,7 +70,7 @@ inline float fbm(float2 p) {
 [[ stitchable ]]
 half4 stillWaterField(float2 pos, half4 color,
                       float phase, float time, float2 size,
-                      float night, float audio) {
+                      float night, float audio, float reactive) {
     using namespace sw;
 
     float2 uv = pos / size;
@@ -116,7 +116,29 @@ half4 stillWaterField(float2 pos, half4 color,
             float ring = smoothstep(0.045, 0.0, abs(dist - r)) * (1.0 - prog);
             ripple += ring;
         }
-        waves += ripple * 0.5 * motion;
+        float still = 1.0 - 0.55 * p;        // the pond stills toward night
+        float swell;                          // brightness gain on the moonpath (1.0 = none)
+
+        // Audio reactivity, two ways (gated by the `reactive` uniform — see StillWaterMetalView):
+        if (reactive < 0.5) {
+            // Shipping path — audio is a gentle GLOBAL brightness swell on the moonpath. Same
+            // source as before the reactive uniform existed; Reduce Motion routes here too.
+            waves += ripple * 0.5 * motion;
+            swell = 1.0 + 0.30 * a;          // ripples reach a little brighter on a swell
+        } else {
+            // Structural — audio disturbs the SURFACE (the wave field), not the brightness, so the
+            // reflection shimmers/breaks up where the light lives instead of the whole pond lifting.
+            // Constants are first guesses; tune DOWN on device (subtle or it wakes you).
+            float agitate = 1.0 + 0.6 * a;               // ripples spread harder on a swell
+            waves += ripple * 0.5 * motion * agitate;
+            if (a > 0.02) {                              // skip the extra fbm on silent passages
+                waves += (fbm(wuv * 1.7 + float2(0.0, t)) - 0.5) * 0.08 * a * motion;   // fine chop
+            }
+            // `pow(waves, 5)` below strongly AMPLIFIES pushes in the already-bright moonpath — soft-
+            // ceiling the wave height first so a loud transient can't drive the glint to a hard 1.0.
+            waves = min(waves, 0.92);
+            swell = 1.0;                                 // no global gain — the shimmer is structural
+        }
 
         // The moon's reflected path: a soft vertical column under the moon, shimmering where the
         // wave ridges catch the light. Wider + brighter toward the foreground.
@@ -124,8 +146,6 @@ half4 stillWaterField(float2 pos, half4 color,
         float glint  = pow(clamp(waves, 0.0, 1.0), 5.0);
         float path   = column * glint * (0.35 + 0.65 * depth);
 
-        float still = 1.0 - 0.55 * p;        // the pond stills toward night
-        float swell = 1.0 + 0.30 * a;        // ripples reach a little brighter on a swell
         col += MOONLIGHT * path * still * swell * moonDim;
 
         // A faint overall sheen so the dark water isn't dead flat.

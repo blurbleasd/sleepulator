@@ -128,6 +128,26 @@ struct CurrentScene: AmbientScene {
     }
 }
 
+#if DEBUG
+/// DEBUG-only A/B sibling of `CurrentScene`: the Metal edition (a domain-warped FBM flow-field
+/// shader — CurrentShader.metal `currentField` via `CurrentMetalView`, driven by the shared
+/// `FocusDrivers` mapping so it reads the Pomodoro identically to the Canvas Current). Registered
+/// alongside the Canvas scene so the two can be compared on a real device over a full, *unoccluded*
+/// Focus session (look + thermal + battery — Focus never freezes like the Sleep scenes do, so this
+/// is the real power test). Reduce Motion feeds the flow clock rate 0 → static field. Retire
+/// `CurrentScene` once this clearly wins; take the thermal verdict from a Release/Profile build.
+struct CurrentMetalScene: AmbientScene {
+    let id = "current-metal"
+    let title = "Current (Metal)"
+    let mood = SceneMood.focus
+
+    func makeBackdrop(_ ctx: SceneContext) -> AnyView {
+        AnyView(CurrentMetalView(paused: ctx.paused, pomodoro: ctx.pomodoro,
+                                 reduceMotion: ctx.reduceMotion))
+    }
+}
+#endif
+
 /// "Tide" (Focus): a calm cool level that rises across a work interval and recedes on a break —
 /// an ambient, glanceable progress cue.
 struct TideScene: AmbientScene {
@@ -287,6 +307,26 @@ struct StillWaterDepthScene: AmbientScene {
         AnyView(StillWaterDepthView(paused: ctx.paused, sleepTimer: ctx.sleepTimer))
     }
 }
+
+/// DEBUG-only A/B sibling: the STRUCTURAL audio-reactivity variant of the flat Metal Still Water.
+/// Same `stillWaterField` shader but `reactive: true`, so audio disturbs the wave FIELD (the moon
+/// reflection shimmers/breaks up with the bed) instead of a global brightness swell. A/B against
+/// `StillWaterScene` over a pre-sleep session with audio playing: does the structural response read
+/// better AND stay subtle enough not to wake you? Promote (make it the default + delete the shader's
+/// `reactive < 0.5` branch) once it wins on device. Passes `reduceMotion` so it falls to the calm
+/// branch under Reduce Motion. (Orthogonal to `StillWaterDepthScene`, which is the layer-lens depth
+/// A/B — this one is about audio response on the flat scene.)
+struct StillWaterReactiveScene: AmbientScene {
+    let id = "still-water-reactive"
+    let title = "Still water (reactive)"
+    let mood = SceneMood.sleep
+
+    func makeBackdrop(_ ctx: SceneContext) -> AnyView {
+        AnyView(StillWaterMetalView(paused: ctx.paused, sleepTimer: ctx.sleepTimer,
+                                    audioLevel: ctx.audioLevel, reactive: true,
+                                    reduceMotion: ctx.reduceMotion))
+    }
+}
 #endif
 
 /// "Deep space" (Sleep): a slow nebula of domain-warped FBM cloud over a parallax star field,
@@ -327,7 +367,9 @@ enum SceneRegistry {
         scenes.append(RainOnGlassDepthScene())     // A/B sibling, DEBUG builds only
         scenes.append(StillWaterCanvasScene())     // A/B vs the Metal still water, DEBUG builds only
         scenes.append(StillWaterDepthScene())      // depth A/B vs the flat Metal still water, DEBUG only
+        scenes.append(StillWaterReactiveScene())   // A/B: structural audio reactivity, DEBUG builds only
         scenes.append(EmbersCanvasScene())         // A/B vs the dark Metal embers, DEBUG builds only
+        scenes.append(CurrentMetalScene())         // A/B vs the Canvas Current (Focus), DEBUG builds only
         #endif
         scenes.append(contentsOf: [
             BreathingBloomScene(), AuroraScene(), EmbersScene(), StillWaterScene(), DeepSpaceScene(),
