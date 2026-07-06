@@ -106,7 +106,10 @@ struct ShaderBackdrop: View {
 
     private func field(size: CGSize, now: TimeInterval?) -> some View {
         let night = sleepTimer?.nightProgress ?? 0
-        if let now { clock.tick(now: now, rate: 1.0 - nightSlowdown * night) }
+        if let now {
+            clock.tick(now: now, rate: 1.0 - nightSlowdown * night)
+            SceneDiagnostics.shared.frame(now: now)          // F3: per-scene fps / thermal / battery
+        }
         let inputs = SceneShaderInputs(
             phase: Float(clock.phase),
             elapsed: Float(clock.elapsed),
@@ -179,7 +182,10 @@ struct DepthBackdrop<FarWorld: View>: View {
 
     private func lensed(size: CGSize, now: TimeInterval?) -> some View {
         let night = sleepTimer?.nightProgress ?? 0
-        if let now { clock.tick(now: now, rate: 1.0 - nightSlowdown * night) }
+        if let now {
+            clock.tick(now: now, rate: 1.0 - nightSlowdown * night)
+            SceneDiagnostics.shared.frame(now: now)          // F3: per-scene fps / thermal / battery
+        }
         let inputs = SceneShaderInputs(
             phase: Float(clock.phase),
             elapsed: Float(clock.elapsed),

@@ -209,6 +209,12 @@ test added (would duplicate).
   is never gated off; the pure decision `MetalShaders.isAvailable` is unit-tested (3 cases). Whether
   the gate actively falls back or is effectively log-only depends on runtime `functionNames`
   enumeration — verified on device — but it can only ever help, never break the working path.
+- **F3** — measured A/B: `Services/SceneDiagnostics.swift` samples per-scene **fps + `thermalState` +
+  battery** into the `Log.scene` overnight trail every ~30s of actual rendering. Fed one `frame()` per
+  rendered frame by both hosts (`ShaderBackdrop` + `DepthBackdrop`); tagged with the active scene id
+  (set in `HomeView.reconcileMotion`). Plain class, `SceneClock`/`TiltSource` pattern (no `@Published`).
+  Only samples while animating — a frozen scene renders no frames, so settled-state power (trivially
+  fine) never bloats the log. Turns P3's "clear win" + P1's power budget from a vibe into numbers.
 - **Verified:** Debug sim build SUCCEEDED (Metal + Swift compile clean, incl. the new ocean shader);
   14/14 unit tests green (`DepthReactivityTests` 5, `MetalShadersTests` 3, `SceneClockTests` 6).
   **Unverified on device:** freeze-in-place, the reactive settle, the ocean reflection look, parallax,
