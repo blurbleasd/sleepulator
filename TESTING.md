@@ -206,6 +206,58 @@ the brightness you actually use at night, in **both** Sleep and Focus.
    non-head episode) and let it finish. ✅ The episode that finished is the one removed/deleted —
    never an innocent head.
 
+### L. Depth scenes — the shared `.layerEffect` host: rain-depth + ocean (added 2026-07-05, unverified)
+The visual-moat build (commits E1→P6a; `docs/designs/VISUAL-MOAT-REACTIVE-SCENES.md`). `DepthBackdrop`
+(ShaderBackdrop.swift) is a new `.layerEffect` host — the depth scenes now ride `SceneClock` +
+`sleepTimer.nightProgress` + the built-in `paused:` freeze, same rail as the `.colorEffect` scenes in
+§3H. Both depth scenes are **DEBUG-only** A/B siblings, reached by swiping the home backdrop
+(`HomeView.cycleScene`): **"Rain (depth)"** next to the shipping "Rain on glass", **"Still water
+(depth)"** next to "Still water". The ocean lens was **authored blind** — expect a real tuning round;
+this section is where you do it. Do it in a dark room at your real bedtime brightness.
+
+1. **Freeze-in-place (the E1 fix — the load-bearing one).** Swipe to "Rain (depth)". Start a Sleep mix
+   + timer, let the veil engage; tap to wake after ≥ 10 min. ✅ The drops resume from the pose they
+   froze at — **no snap back to a birth pose** (the `t:0` bug E1 removed; the old DEBUG rain-depth did
+   snap). Repeat via lock/unlock (scenePhase) and the app switcher. Repeat for "Still water (depth)".
+2. **Reactive settle — rain (P2).** On "Rain (depth)", run a short timer (10–15 min) and watch the last
+   minutes. ✅ The rain eases to ~half speed, the mist thins, the dry glass fogs (dimmer + milkier), and
+   the lights behind defocus further — all *smoothly*, monotonic, never a jump when `nightProgress`
+   ticks. At bedtime (night 0) it looks exactly as it did before (base params).
+3. **Reactive settle — ocean (P2/P4).** Same short-timer run on "Still water (depth)". ✅ The swell
+   calms, the horizon fogs, the reflection softens as the night deepens; motion eases (never
+   stall-and-reverse).
+4. **Ocean reads as water (P4 — the blind-authored part).** Prop "Still water (depth)" and just look.
+   ✅ It reads as a night pond: the moon + horizon glow appear *reflected and rippling* in the water,
+   near foreground swell sharper, the horizon a soft near-mirror. If it reads as a smeared mirror or the
+   moon reflection lands wrong, tune `StillWaterLens.metal` (`AMP`, `HORIZON`, `MOONX`, reflectivity) +
+   `StillWaterDepthView` (moon glow position/size, `swellBase`) and rebuild. Prove the seam first with
+   `refraction = 0` (flat mirror), then dial it up (§10 step 2→3).
+5. **A/B vs the flat scenes (P3, retire on a clear win).** Swipe between "Rain (depth)" ↔ "Rain on
+   glass", and "Still water (depth)" ↔ "Still water", at the bedside over a full timer. Decide by the
+   **clear-win rule:** the depth version ships only if it holds framerate with no measurable battery
+   regression vs the flat baseline (read the diagnostics log, item 6) **and** you prefer it blind in ≥ 2
+   of 3 sessions. Otherwise iterate, or hit the **kill criteria** — if after two A/B cycles it can't
+   clear the power budget without cutting drop count / fps / DoF below where the "whoa" survives, cut
+   back to the flat scene.
+6. **Measured, not eyeballed — read the F3 diagnostics log (P1 power budget).** After a 30–60 min run per
+   scene, Settings ▸ Advanced ▸ Diagnostics ▸ "Export last night's log". ✅ It carries
+   `scene=… fps=… thermal=… battery=…` lines (category `scene`). Confirm: fps holds ≈ 30 on the depth
+   scenes; `thermal` stays `nominal`/`fair` (never `serious`); per-scene battery drain is ≤ the flat
+   baseline (measure the shipping rain / still-water first as the baseline). Confirm an 8 h locked run's
+   drain is within budget too (log battery % at sleep and at wake).
+7. **Idle-freeze truly stops the loop (P5).** With NO timer running, stop touching the phone; after ~8 s
+   the backdrop settles (screensaver). On a depth scene, check Instruments → Core Animation (or that the
+   `scene` fps lines stop in the log). ✅ The shader redraw loop is *stopped* (0 fps), not just faded — a
+   depth scene left on the nightstand with no timer must not run the `.layerEffect` all night. Both scenes.
+8. **Shader guard — no silent black (F2).** ✅ At launch the log carries `Metal shader preflight: all N
+   known shaders present`. If a lens ever fails to compile, its backdrop shows the bare far world
+   (bokeh / sky), never a black pane, plus a `not in the default library` line. (To exercise on purpose,
+   a dev can rename a stitchable function and rebuild — optional.)
+9. **Ambient-motion toggle (P6a).** Settings ▸ Display ▸ **Ambient motion → OFF**. ✅ The backdrop
+   immediately holds a single still frame (try rain-depth, ocean, and a `.colorEffect` scene like Aurora
+   — all still), CoreMotion stops (Energy Log: no motion updates), tilt parallax gone. Back ON → the
+   scene resumes from its frozen pose, no pop. The toggle survives Backup → Restore.
+
 ---
 
 ## Quick release checklist
@@ -218,6 +270,7 @@ the brightness you actually use at night, in **both** Sleep and Focus.
 - [ ] Night Limiter acceptance, if enabling by default (§3D)
 - [ ] All-night soak (§3E)
 - [ ] Ambient scenes: freeze/resume + phase clock (§3H), after any scene-engine change
+- [ ] Depth scenes: freeze-in-place, reactive settle, A/B vs flat, F3 power log (§3L), after depth-scene changes
 
 ## Device-pass log
 
