@@ -40,6 +40,7 @@ struct StillWaterDepthView: View {
             nightSlowdown: 0.5,        // pond drift eases to half speed by timer end (matches still water)
             sleepTimer: sleepTimer,
             maxSampleOffset: CGSize(width: 100, height: 1000),
+            shaderName: "stillWaterLens",
             farWorld: { size in farWorld(size: size) }
         ) { s in
             // Reactive depth (P2): DepthReactivity (F1) maps nightProgress → swell (density) / fog /

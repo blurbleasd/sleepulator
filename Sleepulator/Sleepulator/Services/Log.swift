@@ -15,6 +15,9 @@ enum Log {
     /// (interruption, route change, limiter attach) that explain a silent bed at 3 a.m. Kept in
     /// its own category so "export last night's log" reads as a coherent timeline.
     static let timer   = Logger(subsystem: subsystem, category: "timer")
+    /// Ambient scene / Metal shader diagnostics — e.g. a stitchable shader missing from the
+    /// compiled metallib (which would otherwise render a silent black backdrop). See `MetalShaders`.
+    static let scene   = Logger(subsystem: subsystem, category: "scene")
 
     /// Activate the shared audio session, logging (rather than silently swallowing) any failure.
     /// A lost activation race on a resume/interruption path is exactly how the bed goes silent at

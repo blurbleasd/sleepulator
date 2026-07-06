@@ -201,10 +201,18 @@ test added (would duplicate).
   near-sharp swell, far-soft horizon — reactive via the same `DepthReactivity` (F1) + `nightSlowdown`.
   Second consumer of `DepthBackdrop`, proving the recipe generalizes (the spec §5 toolkit trigger). A
   `refraction` A/B knob (0 = flat mirror, proves the seam) mirrors rain-depth.
+- **F2** — silent-failure guard: `Services/MetalShaders.swift` preflights the compiled metallib at
+  launch (logs any missing known shader via a new `Log.scene` category) and `DepthBackdrop` gates its
+  `.layerEffect` on availability — a missing lens renders the bare far-world scaffold, not a broken
+  effect or silent black pane. **Fail-safe by construction:** if the library enumerates none of the
+  known stitchable functions (enumeration gap), every shader is treated available so a working effect
+  is never gated off; the pure decision `MetalShaders.isAvailable` is unit-tested (3 cases). Whether
+  the gate actively falls back or is effectively log-only depends on runtime `functionNames`
+  enumeration — verified on device — but it can only ever help, never break the working path.
 - **Verified:** Debug sim build SUCCEEDED (Metal + Swift compile clean, incl. the new ocean shader);
-  11/11 unit tests green (`DepthReactivityTests` 5, `SceneClockTests` 6). **Unverified on device:**
-  freeze-in-place, the reactive settle, the ocean reflection look, parallax, and the P1 power budget —
-  the shader constants + curve values are device-A/B tuning (rain and ocean both).
+  14/14 unit tests green (`DepthReactivityTests` 5, `MetalShadersTests` 3, `SceneClockTests` 6).
+  **Unverified on device:** freeze-in-place, the reactive settle, the ocean reflection look, parallax,
+  the F2 fallback path firing, and the P1 power budget — shader constants + curve values are device-A/B.
 
 ## Open strategic risk (carried into the deep review)
 The differentiator (reactive depth-real scenes) is exactly the part that is 100% unverified on

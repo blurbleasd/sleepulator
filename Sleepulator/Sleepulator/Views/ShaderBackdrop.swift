@@ -149,6 +149,11 @@ struct DepthBackdrop<FarWorld: View>: View {
     /// How far the lens reaches from a pixel — sets `.layerEffect(maxSampleOffset:)`. Must cover the
     /// shader's widest tap (the inverted-lens interior + rim bend + gyro shift).
     var maxSampleOffset: CGSize
+    /// The lens shader's `[[stitchable]]` function name — for the F2 availability gate. If it isn't in
+    /// the compiled metallib, the host renders the bare far world (the 2D scaffold) instead of a
+    /// broken / blank effect, and `MetalShaders` logs the miss once. Fail-safe: a working shader is
+    /// never gated off (see `MetalShaders`).
+    var shaderName: String
     /// The far world the lens samples, drawn once and flattened by this host.
     @ViewBuilder var farWorld: (CGSize) -> FarWorld
     /// Builds the scene's lens shader from this frame's inputs.
@@ -183,9 +188,21 @@ struct DepthBackdrop<FarWorld: View>: View {
             audio: 0,
             gyro: tilt?() ?? .zero,
             frozen: now == nil)
-        return farWorld(size)
+        // Flatten the far world to one cached texture (bake the blur once, §6.2).
+        let base = farWorld(size)
             .frame(width: size.width, height: size.height)
-            .drawingGroup()   // flatten the far world to one cached texture (bake the blur once)
-            .layerEffect(makeShader(inputs), maxSampleOffset: maxSampleOffset)
+            .drawingGroup()
+        return composite(base, inputs)
+    }
+
+    /// Attach the lens — unless the shader isn't in the compiled metallib (F2): then render the bare
+    /// far-world scaffold rather than a broken effect or a silent black pane (logged once, fail-safe).
+    @ViewBuilder
+    private func composite(_ base: some View, _ inputs: SceneShaderInputs) -> some View {
+        if MetalShaders.available(shaderName) {
+            base.layerEffect(makeShader(inputs), maxSampleOffset: maxSampleOffset)
+        } else {
+            base
+        }
     }
 }

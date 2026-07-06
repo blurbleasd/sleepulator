@@ -221,3 +221,30 @@ class DepthReactivityTests: XCTestCase {
         XCTAssertLessThanOrEqual(DepthReactivity.at(night: 1, base: hazy).fog, 1.0)
     }
 }
+
+/// `MetalShaders.isAvailable` — the fail-safe shader-availability decision (F2). The property that
+/// matters: it must NEVER gate a working shader off (a false "missing" would blank a good scene),
+/// while still catching a real miss when enumeration is trustworthy.
+class MetalShadersTests: XCTestCase {
+    private let known: Set<String> = ["rainGlassLens", "stillWaterLens", "auroraField"]
+
+    func testPresentShaderIsAvailable() {
+        let lib: Set<String> = ["rainGlassLens", "stillWaterLens", "auroraField", "someFragmentFn"]
+        XCTAssertTrue(MetalShaders.isAvailable("rainGlassLens", in: lib, known: known))
+    }
+
+    func testConfirmedMissIsUnavailable() {
+        // The library DOES enumerate stitchables (auroraField present), so a lens absent from it is a
+        // genuine miss → gate it (fall back to the scaffold).
+        let lib: Set<String> = ["auroraField"]
+        XCTAssertFalse(MetalShaders.isAvailable("rainGlassLens", in: lib, known: known))
+    }
+
+    func testEnumerationGapFailsSafeToAvailable() {
+        // The library lists NONE of the known stitchables — enumeration doesn't cover them on this
+        // runtime, so we can't distinguish a real miss from a gap. Must fail safe: treat as available,
+        // never blank a working shader.
+        XCTAssertTrue(MetalShaders.isAvailable("rainGlassLens", in: ["someVertexFn"], known: known))
+        XCTAssertTrue(MetalShaders.isAvailable("stillWaterLens", in: [], known: known))
+    }
+}

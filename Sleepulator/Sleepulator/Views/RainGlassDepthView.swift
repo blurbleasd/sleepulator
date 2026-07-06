@@ -57,6 +57,7 @@ struct RainGlassDepthView: View {
             sleepTimer: sleepTimer,
             tilt: tilt,
             maxSampleOffset: CGSize(width: 220, height: 220),
+            shaderName: "rainGlassLens",
             farWorld: { size in farWorld(size: size) }
         ) { s in
             // Reactive depth (P2): the shared DepthReactivity vocabulary (F1) maps nightProgress →

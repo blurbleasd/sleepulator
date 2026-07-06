@@ -8,6 +8,10 @@ struct SleepulatorApp: App {
         // MetricKit only accumulates while a subscriber is registered — register at launch,
         // exactly once. Payloads land ~daily; see MetricsCollector for storage + Settings UI.
         MetricsCollector.shared.start()
+
+        // Preflight the Metal scene shaders: log any that didn't make it into the compiled metallib,
+        // so a failed shader is a breadcrumb in the overnight trail, not a silent black backdrop (F2).
+        MetalShaders.preflight()
     }
 
     var body: some Scene {
