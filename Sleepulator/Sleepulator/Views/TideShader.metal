@@ -58,24 +58,28 @@ half4 tideField(float2 pos, half4 color,
 
     // Waterline (uv-y, 0 top → 1 bottom): water sits below it. Two offset waves + a little FBM so
     // the surface breathes organically instead of marching.
+    // Focus wants ENERGY: bigger, faster surface waves than a calm Sleep pond would use.
     float surfaceY = 1.0 - clamp(level, 0.0, 1.0);
-    float wave = 0.012 * sin(x * 2.2 * 6.28318530718 + phase * 0.5)
-               + 0.006 * sin(x * 1.3 * 6.28318530718 - phase * 0.32)
-               + 0.005 * (fbm(float2(x * 3.0, phase * 0.2)) - 0.5);
+    float wave = 0.028 * sin(x * 2.2 * 6.28318530718 + phase * 1.1)
+               + 0.016 * sin(x * 1.3 * 6.28318530718 - phase * 0.7)
+               + 0.010 * (fbm(float2(x * 3.0, phase * 0.5)) - 0.5);
     float surf = surfaceY + wave;
 
     float below = y - surf;                              // > 0 under the surface
     if (below > 0.0) {
         float d = clamp(below / max(1.0 - surf, 0.001), 0.0, 1.0);   // 0 at surface → 1 at floor
-        col += tint * mix(0.30, 0.05, d);                            // brighter near the surface
-        // Specular shimmer riding the surface (fades with depth).
-        float sh = fbm(float2(x * 6.0 - phase * 0.10, d * 4.0));
-        col += tint * pow(sh, 3.0) * 0.06 * (1.0 - d);
+        col += tint * mix(0.42, 0.06, d);                            // brighter body
+        // Moving caustics: two counter-drifting noise fields make bright light dance across the
+        // water — the awake, energetic surface life that Focus wants (not a still pond).
+        float ca = fbm(float2(x * 7.0 + phase * 0.6, d * 3.0 - phase * 0.4));
+        float cb = fbm(float2(x * 5.0 - phase * 0.5, d * 2.0 + phase * 0.3));
+        float caustic = pow(clamp(ca * cb * 2.2, 0.0, 1.0), 2.5);
+        col += (tint + float3(0.15)) * caustic * 0.5 * (1.0 - 0.5 * d);
     }
 
-    // Crisp waterline + a faint glow just above it.
-    col += tint * smoothstep(0.006, 0.0, abs(y - surf)) * 0.5;
-    col += tint * smoothstep(0.03, 0.0, max(surf - y, 0.0)) * 0.05;
+    // Crisp bright waterline + a faint glow just above it.
+    col += tint * smoothstep(0.006, 0.0, abs(y - surf)) * 0.7;
+    col += tint * smoothstep(0.03, 0.0, max(surf - y, 0.0)) * 0.06;
 
     col = col / (col + 0.85);                            // filmic roll-off
     col += (hash21(pos + fmod(phase, 64.0)) - 0.5) / 255.0;   // dither (kills OLED banding)

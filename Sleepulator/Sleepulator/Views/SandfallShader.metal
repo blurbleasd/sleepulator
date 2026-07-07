@@ -72,16 +72,20 @@ half4 sandField(float2 pos, half4 color,
     if (py >= yTop && py <= yNeck && dx <= topHW && py >= surfaceY) sandMask = 1.0;   // top bulb
     if (py >= yNeck && py <= yBot && dx <= botHW && py >= fillY)    sandMask = 1.0;   // bottom mound
     float grain = 0.72 + 0.56 * fbm(pos * 0.06);          // granular texture, not a flat fill
-    col += sand * sandMask * 0.34 * grain;
+    // Animated sparkle so the settled sand shimmers with life instead of sitting dead-flat — Focus
+    // wants energy, so the piles glint rather than lie static.
+    float sparkle = pow(fbm(pos * 0.14 + float2(0.0, phase * 6.0)), 4.0);
+    col += sand * sandMask * (0.40 * grain + 0.9 * sparkle);
 
     // --- falling column through the neck (running & mid-interval) ---
     if (p > 0.02 && p < 0.98) {
         float streamTop = yNeck;
         float streamBot = max(fillY, yNeck + 2.0);
-        if (py > streamTop && py < streamBot && dx < W * 0.02) {
-            float nz = fbm(float2(px * 0.4, (py - phase * 90.0) * 0.08));   // advected downward
-            float centre = smoothstep(W * 0.02, 0.0, dx);                   // brightest on the axis
-            col += sand * smoothstep(0.45, 0.9, nz) * centre * 0.5;
+        if (py > streamTop && py < streamBot && dx < W * 0.03) {
+            // Faster, denser, brighter cascade — the most kinetic part of the scene should read.
+            float nz = fbm(float2(px * 0.6, (py - phase * 190.0) * 0.10));
+            float centre = smoothstep(W * 0.03, 0.0, dx);
+            col += (sand + float3(0.10)) * smoothstep(0.35, 0.85, nz) * centre * 0.85;
         }
     }
 

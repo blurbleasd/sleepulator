@@ -27,10 +27,10 @@ using namespace metal;
 namespace cur {
 
 // ---- tunables (edit + rebuild) ---------------------------------------------------
-constant int   STREAMS  = 5;      // depth of flowing streams accumulated additively
+constant int   STREAMS  = 7;      // depth of flowing streams accumulated additively (Focus = livelier)
 constant int   FBM_OCT  = 4;      // FBM detail for the fold — the battery knob (3 cheaper)
-constant float DRIFT    = 0.9;    // maps SceneClock phase → advection distance
-constant float SWAY     = 0.14;   // vertical undulation amplitude (scaled by driveAmp)
+constant float DRIFT    = 1.25;   // maps SceneClock phase → advection distance (faster flow)
+constant float SWAY     = 0.16;   // vertical undulation amplitude (scaled by driveAmp)
 
 // Deep-indigo base (matches the Canvas Current gradient: top → bottom).
 constant float3 BASE_TOP = float3(0.04, 0.06, 0.12);
