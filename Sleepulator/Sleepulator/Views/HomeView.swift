@@ -462,6 +462,11 @@ struct HomeView: View {
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
                 .presentationBackground(pal.bg.opacity(0.72))
+                // Scene-visible half-sheet (the "easy + pleasant" mixer ask): at .medium the home
+                // scene above stays BRIGHT and LIVE — no dimming scrim, still tappable — so you can
+                // hear-and-see the mix while you adjust it. Dragging up to .large re-dims so the full
+                // editor (saved mixes, scene picker) has the screen. iOS 16.4+ / target is iOS 17.
+                .presentationBackgroundInteraction(.enabled(upThrough: .medium))
         }
     }
 }
