@@ -3,22 +3,22 @@
 using namespace metal;
 
 // ============================================================================
-// Tide (Focus) — a cool water level whose height tracks the Pomodoro.
+// Tide (Focus) — energy-first. Rising, pulsing bands of cool light surging up
+// the field: a "tide" of energy, not a slow water level.
 // ----------------------------------------------------------------------------
-// The Metal edition of the CPU `TideView` (which stroked one sine surface + a
-// flat gradient fill on a Canvas). Here the surface is per-pixel: an FBM-warped
-// waterline with depth shading below and a crisp bright line + specular shimmer
-// at the surface. `level` (0…1) is the fill height; the waterline undulates from
-// `phase` (a SceneClock time, frozen under Reduce Motion / occlusion).
-//
-// Helpers are defined locally (namespace `tide`), same self-contained convention
-// as CurrentShader/StillWaterShader (each .metal is its own translation unit).
-// Swift owns level + tint from the same mapping the Canvas TideView uses.
+// The Focus brief is INVIGORATING (the opposite of the Sleep scenes' calm). So
+// this pivoted away from the Canvas TideView's slow rising level: the Pomodoro
+// now drives ENERGY (intensity + speed + colour), not a slow gauge, and the
+// primary motion is kinetic — bright FBM-warped bands scroll upward and pulse.
+//   energy (0…1) — work builds it with progress, rest eases, idle sits mid
+//   tint         — work=blue / rest=teal / idle=muted blue
+// Helpers are local (namespace `tide`); `phase` is a SceneClock time (frozen
+// under Reduce Motion / occlusion).
 // ============================================================================
 
 namespace tide {
 
-constant float3 BASE_TOP = float3(0.03, 0.05, 0.10);   // sky above the water
+constant float3 BASE_TOP = float3(0.03, 0.05, 0.11);
 constant float3 BASE_BOT = float3(0.015, 0.02, 0.05);
 
 inline float hash21(float2 p) {
@@ -47,41 +47,33 @@ inline float fbm(float2 p) {
 [[ stitchable ]]
 half4 tideField(float2 pos, half4 color,
                 float phase, float2 size,
-                float level, float3 tint) {
+                float energy, float3 tint) {
     using namespace tide;
 
     float2 uv = pos / size;
     float x = uv.x, y = uv.y;
-
-    // Base sky above the water.
     float3 col = mix(BASE_TOP, BASE_BOT, y);
 
-    // Waterline (uv-y, 0 top → 1 bottom): water sits below it. Two offset waves + a little FBM so
-    // the surface breathes organically instead of marching.
-    // Focus wants ENERGY: bigger, faster surface waves than a calm Sleep pond would use.
-    float surfaceY = 1.0 - clamp(level, 0.0, 1.0);
-    float wave = 0.028 * sin(x * 2.2 * 6.28318530718 + phase * 1.1)
-               + 0.016 * sin(x * 1.3 * 6.28318530718 - phase * 0.7)
-               + 0.010 * (fbm(float2(x * 3.0, phase * 0.5)) - 0.5);
-    float surf = surfaceY + wave;
+    float e = clamp(energy, 0.0, 1.0);
+    float scroll = phase * (0.5 + 0.9 * e);              // bands rise faster with energy
 
-    float below = y - surf;                              // > 0 under the surface
-    if (below > 0.0) {
-        float d = clamp(below / max(1.0 - surf, 0.001), 0.0, 1.0);   // 0 at surface → 1 at floor
-        col += tint * mix(0.42, 0.06, d);                            // brighter body
-        // Moving caustics: two counter-drifting noise fields make bright light dance across the
-        // water — the awake, energetic surface life that Focus wants (not a still pond).
-        float ca = fbm(float2(x * 7.0 + phase * 0.6, d * 3.0 - phase * 0.4));
-        float cb = fbm(float2(x * 5.0 - phase * 0.5, d * 2.0 + phase * 0.3));
-        float caustic = pow(clamp(ca * cb * 2.2, 0.0, 1.0), 2.5);
-        col += (tint + float3(0.15)) * caustic * 0.5 * (1.0 - 0.5 * d);
+    // Bright bands scrolling UP the field, each FBM-warped so it wanders, each pulsing on its own
+    // beat — a surging, rhythmic energy that reads as awake, not a calm rising level.
+    float bands = 0.0;
+    for (int i = 0; i < 5; i++) {
+        float fi = float(i);
+        float warp = (fbm(float2(x * 3.0 + scroll, fi * 4.0)) - 0.5) * 2.4;
+        float yy   = y * 4.0 + scroll + fi * 0.37;       // upward travel (continuous → no seam)
+        float band = pow(0.5 + 0.5 * sin(yy * 6.28318530718 - warp), 6.0);
+        float pulse = 0.6 + 0.4 * sin(phase * 2.0 + fi * 1.7 + x * 2.0);
+        bands += band * pulse * (0.85 - 0.10 * fi);
     }
+    col += tint * bands * (0.30 + 0.70 * e) * 0.45;
 
-    // Crisp bright waterline + a faint glow just above it.
-    col += tint * smoothstep(0.006, 0.0, abs(y - surf)) * 0.7;
-    col += tint * smoothstep(0.03, 0.0, max(surf - y, 0.0)) * 0.06;
+    // A faint ambient glow lifts with energy so a work sprint literally brightens the field.
+    col += tint * 0.04 * e;
 
-    col = col / (col + 0.85);                            // filmic roll-off
-    col += (hash21(pos + fmod(phase, 64.0)) - 0.5) / 255.0;   // dither (kills OLED banding)
+    col = col / (col + 0.85);                             // filmic roll-off
+    col += (hash21(pos + fmod(phase, 64.0)) - 0.5) / 255.0;   // dither
     return half4(half3(saturate(col)), 1.0h);
 }

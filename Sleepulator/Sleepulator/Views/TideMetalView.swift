@@ -36,8 +36,9 @@ struct TideMetalView: View {
         let running = pomodoro.isRunning
         let work = pomodoro.phase == .work
         let prog = min(max(pomodoro.progress, 0), 1)
-        // Matches TideView.draw: rises through work, recedes through a break, low calm pool idle.
-        let level = running ? (work ? 0.08 + 0.84 * prog : max(0.08, 0.92 - 0.6 * prog)) : 0.08
+        // Energy-first: the Pomodoro drives INTENSITY (a work sprint builds + brightens the surge;
+        // a break eases; idle sits mid), not a slow rising level.
+        let energy = running ? (work ? 0.55 + 0.45 * prog : 0.40) : 0.50
         let tint = running ? (work ? Self.workTint : Self.restTint) : Self.idleTint
 
         if let now { clock.tick(now: now, rate: reduceMotion ? 0 : 1) }
@@ -48,7 +49,7 @@ struct TideMetalView: View {
                 ShaderLibrary.tideField(
                     .float(phase),
                     .float2(size),
-                    .float(Float(level)),
+                    .float(Float(energy)),
                     .float3(Float(tint.x), Float(tint.y), Float(tint.z))
                 )
             )

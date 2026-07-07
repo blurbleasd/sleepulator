@@ -33,8 +33,12 @@ struct SandfallMetalView: View {
 
     private func field(size: CGSize, now: TimeInterval?) -> some View {
         let running = pomodoro.isRunning
+        let work = pomodoro.phase == .work
         let prog = min(max(pomodoro.progress, 0), 1)
-        let sand = running ? (pomodoro.phase == .work ? Self.workSand : Self.restSand) : Self.idleSand
+        // Energy-first: the Pomodoro drives the downpour's INTENSITY (work builds + brightens; break
+        // eases; idle mid), not a slow hourglass level.
+        let energy = running ? (work ? 0.55 + 0.45 * prog : 0.40) : 0.50
+        let sand = running ? (work ? Self.workSand : Self.restSand) : Self.idleSand
 
         if let now { clock.tick(now: now, rate: reduceMotion ? 0 : 1) }
         let phase = Float(clock.phase)
@@ -44,7 +48,7 @@ struct SandfallMetalView: View {
                 ShaderLibrary.sandField(
                     .float(phase),
                     .float2(size),
-                    .float(Float(prog)),
+                    .float(Float(energy)),
                     .float3(Float(sand.x), Float(sand.y), Float(sand.z))
                 )
             )
