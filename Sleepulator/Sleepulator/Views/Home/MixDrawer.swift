@@ -12,7 +12,7 @@ struct MixDrawer: View {
     /// and routes to the Podcasts tab.
     var onPickEpisode: () -> Void = {}
     @AppStorage("sceneSleep") private var sleepSceneId = "night-sky"
-    @AppStorage("sceneFocus") private var focusSceneId = "energy"
+    @AppStorage("sceneFocus") private var focusSceneId = "current"
     @State private var showNameDialog = false
     @State private var draftName = ""
     @State private var showOverwriteConfirm = false

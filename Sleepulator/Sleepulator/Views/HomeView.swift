@@ -60,7 +60,7 @@ struct HomeView: View {
     // Selected backdrop scene per mode (persisted). Changing it re-renders the home; the
     // Build-mix drawer writes these via SceneSelector.
     @AppStorage("sceneSleep") private var sleepSceneId = "night-sky"
-    @AppStorage("sceneFocus") private var focusSceneId = "energy"
+    @AppStorage("sceneFocus") private var focusSceneId = "current"
     /// App-level "Ambient motion" override (Settings ▸ Display). ON by default = the current behavior;
     /// OFF stills the backdrop to a static frame. An explicit control on top of system Reduce Motion,
     /// which by convention only gates parallax (SCREENSAVER-LIBRARY-SPEC §5) — the app toggle is the

@@ -104,17 +104,9 @@ struct NightFade<Content: View>: View {
     }
 }
 
-/// The default Focus backdrop: a slow cool "energy" sweep over the deep-indigo gradient.
-struct EnergyScene: AmbientScene {
-    let id = "energy"
-    let title = "Energy"
-    let mood = SceneMood.focus
-
-    func makeBackdrop(_ ctx: SceneContext) -> AnyView {
-        AnyView(FocusBackdrop(accent: ctx.palette.accent, reduceMotion: ctx.reduceMotion,
-                              paused: ctx.paused))
-    }
-}
+// (EnergyScene retired 2026-07-06 — a rotating blurred glow with no depth/reactivity; a weak
+// concept Metal wouldn't save. Focus now defaults to "current". FocusBackdrop in Backdrops.swift
+// is now dead code, safe to delete in a cleanup pass.)
 
 /// "Current" (Focus): cool streams that quicken/brighten through a work interval and ease on a
 /// break — momentum without flicker.
@@ -160,17 +152,23 @@ struct TideScene: AmbientScene {
     }
 }
 
-/// "Deep work" (Focus): a near-minimal cool field, crispest mid-session and softer at the
-/// boundaries — the calmest, lowest-distraction backdrop.
-struct DeepWorkScene: AmbientScene {
-    let id = "deep-work"
-    let title = "Deep work"
+#if DEBUG
+/// DEBUG-only A/B sibling of `TideScene`: the Metal edition (`TideShader.metal` `tideField` via
+/// `TideMetalView`) — a per-pixel water level whose height tracks the Pomodoro, with an FBM-
+/// modulated surface, depth shading, a crisp waterline and specular glints, instead of the flat
+/// Canvas fill. Reduce Motion stills the surface. A/B against the Canvas Tide on device; promote
+/// once it wins. (Deep work retired 2026-07-06 — invisible-by-design, a weak concept.)
+struct TideMetalScene: AmbientScene {
+    let id = "tide-metal"
+    let title = "Tide (Metal)"
     let mood = SceneMood.focus
 
     func makeBackdrop(_ ctx: SceneContext) -> AnyView {
-        AnyView(DeepWorkView(paused: ctx.paused, pomodoro: ctx.pomodoro))
+        AnyView(TideMetalView(paused: ctx.paused, pomodoro: ctx.pomodoro,
+                              reduceMotion: ctx.reduceMotion))
     }
 }
+#endif
 
 /// "Rain on glass": a misted window with soft lights behind and droplets sliding down the
 /// glass. Ambient (not time-reactive); pairs naturally with the rain sound.
@@ -355,6 +353,24 @@ struct SandfallScene: AmbientScene {
     }
 }
 
+#if DEBUG
+/// DEBUG-only A/B sibling of `SandfallScene`: the Metal edition (`SandfallShader.metal`
+/// `sandField` via `SandfallMetalView`) — a procedural hourglass with FBM-granular sand in both
+/// bulbs, the top draining and the bottom mounding as the Pomodoro runs, and a turbulent falling
+/// column through the neck, instead of 14 stiff Canvas grains. Reduce Motion stills the fall.
+/// A/B against the Canvas Sandfall on device; promote once it wins.
+struct SandfallMetalScene: AmbientScene {
+    let id = "sandfall-metal"
+    let title = "Sandfall (Metal)"
+    let mood = SceneMood.focus
+
+    func makeBackdrop(_ ctx: SceneContext) -> AnyView {
+        AnyView(SandfallMetalView(paused: ctx.paused, pomodoro: ctx.pomodoro,
+                                  reduceMotion: ctx.reduceMotion))
+    }
+}
+#endif
+
 // MARK: - Registry
 
 /// Lists every scene and resolves a persisted selection id to a scene. Selection itself lives
@@ -370,10 +386,12 @@ enum SceneRegistry {
         scenes.append(StillWaterReactiveScene())   // A/B: structural audio reactivity, DEBUG builds only
         scenes.append(EmbersCanvasScene())         // A/B vs the dark Metal embers, DEBUG builds only
         scenes.append(CurrentMetalScene())         // A/B vs the Canvas Current (Focus), DEBUG builds only
+        scenes.append(TideMetalScene())            // A/B vs the Canvas Tide (Focus), DEBUG builds only
+        scenes.append(SandfallMetalScene())        // A/B vs the Canvas Sandfall (Focus), DEBUG builds only
         #endif
         scenes.append(contentsOf: [
             BreathingBloomScene(), AuroraScene(), EmbersScene(), StillWaterScene(), DeepSpaceScene(),
-            EnergyScene(), CurrentScene(), TideScene(), DeepWorkScene(), SandfallScene()
+            CurrentScene(), TideScene(), SandfallScene()
         ] as [any AmbientScene])
         return scenes
     }()
