@@ -102,17 +102,18 @@ struct HomeView: View {
 
     private func scheduleIdleFade() {
         idleFade?.cancel()
-        // Sleep mode only — and now regardless of whether audio is playing, so the screen settles
-        // to the bare backdrop on its own (Focus keeps its controls + session readout visible).
-        guard !audio.focusMode else { return }
+        // Both modes settle to the bare backdrop on their own after a spell of no interaction.
+        // Sleep fades fast (you want the room dark quickly); Focus lingers longer before the scene
+        // takes over — the session readout is useful mid-work, and a good Focus scene encodes the
+        // Pomodoro progress anyway, so losing the numbers to the screensaver is no real loss.
+        let delay: TimeInterval = audio.focusMode ? 10 : 3
         let work = DispatchWorkItem {
-            guard !self.audio.focusMode else { return }
             withAnimation(.easeInOut(duration: 0.9)) { self.audio.ambientScreensaver = true }
         }
         idleFade = work
-        // Fades quickly after a spell of no interaction; any touch reschedules it (see the
-        // simultaneousGesture in body), so it only runs once you've stopped touching the screen.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 8, execute: work)
+        // Any touch reschedules it (see the simultaneousGesture in body), so it only runs once
+        // you've stopped touching the screen.
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
     }
 
     private func wakeChrome() {
@@ -423,10 +424,10 @@ struct HomeView: View {
         .onChange(of: audio.isAnythingPlaying) { _, playing in
             if playing { scheduleIdleFade() } else { wakeChrome() }
         }
-        .onChange(of: audio.focusMode) { _, focus in
-            // Never screensaver while focusing — the session readout must stay visible.
-            if focus { idleFade?.cancel(); withAnimation { audio.ambientScreensaver = false } }
-            else { scheduleIdleFade() }
+        .onChange(of: audio.focusMode) { _, _ in
+            // Switching mood counts as interaction: bring the chrome back and restart the idle
+            // countdown so the new mood's screensaver timing (Sleep fast / Focus longer) applies.
+            wakeChrome()
         }
         .fullScreenCover(isPresented: $showBreathing) {
             BreathingView(isPresented: $showBreathing)
