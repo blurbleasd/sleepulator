@@ -580,6 +580,12 @@ final class PomodoroService: ObservableObject {
     private func startLiveActivity() {
         #if canImport(ActivityKit)
         guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
+        // End any activity left over from a previous run/relaunch BEFORE requesting a fresh one, so
+        // we never stack duplicates that a later Stop can't reach. Snapshot the stale set first so
+        // the end task can't catch the new activity we're about to request.
+        let stale = Activity<PomodoroAttributes>.activities
+        let staleFinal = ActivityContent(state: pomoState(), staleDate: nil)
+        Task { for a in stale { await a.end(staleFinal, dismissalPolicy: .immediate) } }
         let content = ActivityContent(state: pomoState(), staleDate: phaseEnd)
         pomoActivity = try? Activity.request(attributes: PomodoroAttributes(), content: content)
         #endif
@@ -595,10 +601,17 @@ final class PomodoroService: ObservableObject {
 
     private func endLiveActivity() {
         #if canImport(ActivityKit)
-        guard let activity = pomoActivity else { return }
-        let content = ActivityContent(state: pomoState(), staleDate: nil)
-        Task { await activity.end(content, dismissalPolicy: .immediate) }
         pomoActivity = nil
+        let final = ActivityContent(state: pomoState(), staleDate: nil)
+        // End the tracked activity AND any persisted/orphaned ones. After an app relaunch the
+        // in-memory `pomoActivity` handle is nil while a Pomodoro ring is still on the lock screen /
+        // Dynamic Island — ending only the handle (the old code) is why Stop left it stuck. Ending
+        // every activity of the type dismisses it no matter how it got there.
+        Task {
+            for activity in Activity<PomodoroAttributes>.activities {
+                await activity.end(final, dismissalPolicy: .immediate)
+            }
+        }
         #endif
     }
 
