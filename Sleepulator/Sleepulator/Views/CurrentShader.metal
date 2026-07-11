@@ -85,22 +85,34 @@ half4 currentField(float2 pos, half4 color,
         float baseY = 0.16 + fi / float(STREAMS) * 0.66;
         float speed = 0.55 + 0.5 * fract(sin(fi * 12.9898) * 43758.5453);
 
-        // Advect left→right — the "it's flowing" cue.
+        // Advect — the "it's flowing" cue. Everything below samples in the stream's MOVING
+        // frame (xl), so the patterns TRANSLATE with the flow instead of boiling in place
+        // (device 2026-07-11: in-place decorrelation reads as static; translation reads as motion).
         float xl = x + t * speed;
 
-        // Domain-warp the vertical position → folds that move and never repeat.
-        float warp = fbm(float2(xl * 1.7, fi * 3.1 + t * 0.40), FBM_OCT);
+        // Domain-warp the vertical position → folds that mostly travel, gently evolving.
+        float warp = fbm(float2(xl * 1.7, fi * 3.1 + t * 0.12), FBM_OCT);
         float cy   = baseY + (warp - 0.5) * amp;
 
-        // Soft line around the stream centre; thickness breathes with a second noise.
-        float thick = 0.010 + 0.028 * fbm(float2(xl * 3.0 + fi, t * 0.5), 3);
+        // Soft line around the stream centre; thickness breathes slowly.
+        float thick = 0.010 + 0.028 * fbm(float2(xl * 3.0 + fi, t * 0.15), 3);
         float line  = smoothstep(thick, 0.0, abs(y - cy));
 
-        // Brightness varies along the stream so it reads as light, not a wire.
-        float glow  = 0.35 + 0.65 * fbm(float2(xl * 5.0, fi * 7.0 - t), 3);
+        // Brightness pattern fixed in the moving frame → the bright stretches visibly slide.
+        float glow  = 0.35 + 0.65 * fbm(float2(xl * 2.5, fi * 7.0), 3);
+
+        // A bright pulse travels along each stream — the unmistakable direction + energy cue.
+        // Signed wrapped distance + asymmetric gaussian: short SOFT front, long tail behind
+        // (a raw fract() ramp put a hard 0→1 cliff at the head — visible vertical seams, sim
+        // capture 2026-07-11).
+        float prate = 0.35 + 0.20 * speed;
+        float xp    = fract(fract(sin(fi * 78.233) * 43758.5453) - t * prate);
+        float pdist = fract(x - xp + 0.5) - 0.5;          // 0 at head; + behind, − ahead
+        float pw    = pdist > 0.0 ? 0.10 : 0.022;         // long tail, soft short front
+        float pulse = exp(-(pdist * pdist) / (pw * pw));
 
         float depth = 1.0 - 0.22 * fi / float(STREAMS);   // nearer streams a touch dimmer → depth
-        col += tint * line * glow * op * depth;
+        col += tint * line * (glow + pulse * 1.2) * op * depth;
     }
 
     // Faint low glow the streams seem to ride over.

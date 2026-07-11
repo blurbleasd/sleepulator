@@ -3,17 +3,23 @@
 using namespace metal;
 
 // ============================================================================
-// Tide (Focus) — energy-first. Rising, pulsing bands of cool light surging up
-// the field: a "tide" of energy, not a slow water level.
+// Tide (Focus) — energy-first. A surge of cool light rising up the field.
 // ----------------------------------------------------------------------------
-// The Focus brief is INVIGORATING (the opposite of the Sleep scenes' calm). So
-// this pivoted away from the Canvas TideView's slow rising level: the Pomodoro
-// now drives ENERGY (intensity + speed + colour), not a slow gauge, and the
-// primary motion is kinetic — bright FBM-warped bands scroll upward and pulse.
-//   energy (0…1) — work builds it with progress, rest eases, idle sits mid
-//   tint         — work=blue / rest=teal / idle=muted blue
-// Helpers are local (namespace `tide`); `phase` is a SceneClock time (frozen
-// under Reduce Motion / occlusion).
+// Rewrite of the first energy-first attempt, which read STATIC on device: its
+// five bands were phase-offset ~evenly across one period, so although every
+// band moved, their SUM flattened to a near-uniform glow. Lesson (device
+// 2026-07-11): keep features few and UNEQUAL — a dominant surge the eye can
+// track — and make motion translation, not superposition mush.
+//
+// Two deliberately unequal band systems, both travelling UP (feature at
+// (y+rise)·k = const ⇒ y falls as rise grows):
+//   • main surge: sharp bright ridges (pow 7), ~3 on screen, undulating in x,
+//     with crest sparkle that rides the ridge (same moving frame),
+//   • counter-swell: broad dim bands at a different frequency and 0.55× the
+//     speed — depth without evening out the sum.
+//   energy (0…1) — work builds it with progress (faster + brighter), rest
+//                   eases, idle sits mid.  tint — work/rest/idle colour.
+// `phase` is a SceneClock time (frozen under Reduce Motion / occlusion).
 // ============================================================================
 
 namespace tide {
@@ -55,23 +61,32 @@ half4 tideField(float2 pos, half4 color,
     float3 col = mix(BASE_TOP, BASE_BOT, y);
 
     float e = clamp(energy, 0.0, 1.0);
-    float scroll = phase * (0.5 + 0.9 * e);              // bands rise faster with energy
+    float rise = phase * (0.22 + 0.26 * e);              // upward travel rate
 
-    // Bright bands scrolling UP the field, each FBM-warped so it wanders, each pulsing on its own
-    // beat — a surging, rhythmic energy that reads as awake, not a calm rising level.
-    float bands = 0.0;
-    for (int i = 0; i < 5; i++) {
-        float fi = float(i);
-        float warp = (fbm(float2(x * 3.0 + scroll, fi * 4.0)) - 0.5) * 2.4;
-        float yy   = y * 4.0 + scroll + fi * 0.37;       // upward travel (continuous → no seam)
-        float band = pow(0.5 + 0.5 * sin(yy * 6.28318530718 - warp), 6.0);
-        float pulse = 0.6 + 0.4 * sin(phase * 2.0 + fi * 1.7 + x * 2.0);
-        bands += band * pulse * (0.85 - 0.10 * fi);
-    }
-    col += tint * bands * (0.30 + 0.70 * e) * 0.45;
+    // Main surge: ridges with a CRISP bright crest line the eye can track (the first cut's
+    // soft pow-only lobes read as drifting smoke — sim capture 2026-07-11; the crest core is
+    // what makes it a wavefront).
+    float wob1  = (fbm(float2(x * 2.6, phase * 0.25)) - 0.5) * 0.55;
+    float yy1   = (y + rise) * 3.0 + wob1;
+    float s1    = 0.5 + 0.5 * sin(yy1 * 6.28318530718);
+    float band1 = pow(s1, 10.0);
+    float core  = smoothstep(0.955, 0.998, s1);          // thin bright waterline at each crest
 
-    // A faint ambient glow lifts with energy so a work sprint literally brightens the field.
-    col += tint * 0.04 * e;
+    // Crest sparkle rides the surge (same moving frame, so it travels with it).
+    float spark = fbm(float2(x * 8.0, (y + rise) * 8.0));
+    float crest = band1 * (0.35 + 0.65 * pow(spark, 2.0)) + core * (0.55 + 0.45 * spark);
+
+    // Counter-swell: broad dim bands, different frequency, 0.55× the speed —
+    // depth behind the surge without flattening the sum.
+    float wob2  = (fbm(float2(x * 1.7 + 3.7, phase * 0.18)) - 0.5) * 0.8;
+    float yy2   = (y + rise * 0.55) * 1.6 + wob2 + 0.3;
+    float band2 = pow(0.5 + 0.5 * sin(yy2 * 6.28318530718), 3.0);
+
+    // A slow whole-field pulse keeps it breathing; energy brightens everything.
+    float pulse = 0.75 + 0.25 * sin(phase * 1.6);
+    col += tint * crest * (0.50 + 0.80 * e) * pulse;
+    col += tint * band2 * (0.11 + 0.18 * e);
+    col += tint * 0.05 * e;
 
     col = col / (col + 0.85);                             // filmic roll-off
     col += (hash21(pos + fmod(phase, 64.0)) - 0.5) / 255.0;   // dither
