@@ -452,12 +452,19 @@ struct SettingsView: View {
                 showAlert = true
             }
         }
-        .fileExporter(isPresented: $isExportingLog, document: logDocument, contentType: .plainText, defaultFilename: "sleepulator-log") { result in
-            if case .failure(let error) = result {
-                alertTitle = "Log Export Failed"
-                alertMessage = error.localizedDescription
-                showAlert = true
-            }
+        // The log exporter must live on its OWN node: two .fileExporter modifiers chained on the
+        // same view shadow each other (only the last presents — a long-standing SwiftUI defect),
+        // which silently broke "Export Data" when this second exporter was added for the
+        // overnight log trail. A clear background anchor gives it a separate attachment point.
+        .background {
+            Color.clear
+                .fileExporter(isPresented: $isExportingLog, document: logDocument, contentType: .plainText, defaultFilename: "sleepulator-log") { result in
+                    if case .failure(let error) = result {
+                        alertTitle = "Log Export Failed"
+                        alertMessage = error.localizedDescription
+                        showAlert = true
+                    }
+                }
         }
         .alert(alertTitle, isPresented: $showAlert) {
             Button("OK", role: .cancel) {}
