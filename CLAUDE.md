@@ -7,8 +7,10 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
 
 > The original React/Vite **PWA is archived** in `archive_webapp/` (not built or deployed).
 > The server-side "Sleep Safe" ffmpeg proxy is **gone**, replaced by an on-device Night
-> Limiter (see `AUDIO-LIMITER-SPEC.md`). The only live service is the Cloudflare **feed proxy**
-> (`AppConfig.feedProxyUrl` in `AudioEngine.swift`).
+> Limiter (see `AUDIO-LIMITER-SPEC.md`). There is **no longer any app-owned backend**: the
+> Cloudflare feed proxy was removed (the `AppConfig.feedProxyUrl` it lived in is gone — `AppConfig`
+> now holds only `nightLimiterEnabled`). RSS feeds are fetched **directly** from the publisher, and
+> the only external endpoint is Apple's iTunes podcast **search** API (`ITunesSearchManager`).
 
 ## Layout (Xcode project at `Sleepulator/Sleepulator.xcodeproj`)
 - **App** — `Sleepulator/Sleepulator/`
@@ -20,7 +22,10 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   - `Models/Models.swift` — `Podcast`, `Episode`, `SavedMix`, `NoiseType`.
   - `PrivacyInfo.xcprivacy`, `Info.plist`.
 - **Widget** — `SleepulatorWidget/` (sleep-timer Live Activity).
-- **Tests** — `SleepulatorTests/` (XCTest: `AudioMathTests`, `AudioStateTests`).
+- **Tests** — `SleepulatorTests/` (XCTest). Three files, many suites: `AudioMathTests.swift`;
+  `AudioStateTests.swift` (also holds `PodcastParserTests`, `OPMLParserTests`,
+  `StorageManagerTests`, `NetRetryTests`, `CacheEvictionTests`, the sleep-timer suites, and
+  more); `PersistenceTests.swift` (`PersistenceMigrator` / `MixStore`).
 
 ## Services (the core)
 - `AudioEngine` — the app-facing `ObservableObject` facade. Owns UI state + policy, delegates
@@ -62,8 +67,10 @@ Unit tests can't catch the iOS audio bugs (no real render thread / session in XC
 interruptions, route changes, background keep-alive, looping, the limiter, and the sleep-timer
 **fade + terminal stop** are device-specific. Anything touching the engine, session, limiter, or
 timer must be verified on a **real iPhone, installed, screen locked, over a full timer run.**
-State clearly when something is shipped-but-unverified-on-device. (Note: `TESTING.md` still
-describes the archived web PWA — there is no written native device-test pass yet.)
+State clearly when something is shipped-but-unverified-on-device. `TESTING.md` holds the
+native device-test checklist and a device-pass log — record each pass there. The Night
+Limiter ships **off by default** (`AppConfig.nightLimiterEnabled`) until its acceptance
+section (TESTING.md §3D) passes on device.
 
 ## Skill routing
 

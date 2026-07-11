@@ -26,7 +26,11 @@ final class PodcastQueueManager: ObservableObject {
     }
     @Published var finishedEpisodes: Set<String> = [] {
         didSet {
-            let arr = Array(finishedEpisodes)
+            // Persist the RECENCY order (`finishedOrder`), not `Array(finishedEpisodes)`: a Set has
+            // no order, so saving it lost the recency the cap depends on — after relaunch the
+            // trim-oldest cap would drop arbitrary entries. Every writer updates `finishedOrder`
+            // before assigning `finishedEpisodes = Set(finishedOrder)`, so this is current here.
+            let arr = finishedOrder
             storageQueue.async { UserDefaults.standard.set(arr, forKey: "finishedEpisodes") }
         }
     }
@@ -121,6 +125,18 @@ final class PodcastQueueManager: ObservableObject {
     func addToQueue(_ episode: Episode) {
         if !queue.contains(where: { $0.id == episode.id }) { queue.append(episode) }
     }
+
+    /// Append several episodes to the end of the queue at once, skipping any already queued.
+    /// One mutation → one persist + one publish (vs. N appends). Returns the number actually added
+    /// so the caller can confirm to the user. Used by the detail view's "add filtered" bulk action.
+    @discardableResult
+    func addAllToQueue(_ episodes: [Episode]) -> Int {
+        let existing = Set(queue.map { $0.id })
+        let toAdd = episodes.filter { !existing.contains($0.id) }
+        guard !toAdd.isEmpty else { return 0 }
+        queue.append(contentsOf: toAdd)
+        return toAdd.count
+    }
     
     func moveQueue(fromOffsets source: IndexSet, toOffset destination: Int) {
         queue.move(fromOffsets: source, toOffset: destination)
@@ -143,15 +159,32 @@ final class PodcastQueueManager: ObservableObject {
         queue = [current] + remaining
     }
 
-    func advanceQueue(finishedEpId: String? = nil) {
-        if !self.queue.isEmpty {
-            let finishedEp = self.queue.removeFirst()
-            if deleteOnCompletion, let url = URL(string: finishedEp.audioUrl) {
-                AudioDownloader.shared.deleteCachedEpisode(for: url)
+    /// `suppressAutoPlay`: advance the queue data (drop the finished head, honor
+    /// delete-on-completion) but do NOT start the next episode — used by the sleep-aware
+    /// hold, so the morning queue is clean while the night stays ambient-only.
+    func advanceQueue(finishedEpId: String? = nil, suppressAutoPlay: Bool = false) {
+        // Remove the episode that ACTUALLY finished, identified by id — not just the head. The
+        // head is normally the playing episode, but if the queue was reordered (or the head
+        // removed) while it played, `removeFirst()` would drop the wrong episode and, with
+        // delete-on-completion, DELETE the wrong cached download. Fall back to the head only when
+        // no id is given (legacy callers); if the id is already gone, remove nothing.
+        let finishedEp: Episode?
+        if let id = finishedEpId {
+            if let idx = queue.firstIndex(where: { $0.id == id }) {
+                finishedEp = queue.remove(at: idx)
+            } else {
+                finishedEp = nil   // already removed elsewhere — don't drop/delete an innocent one
             }
+        } else if !queue.isEmpty {
+            finishedEp = queue.removeFirst()
+        } else {
+            finishedEp = nil
         }
-        
-        if !self.autoPlay || self.queue.isEmpty {
+        if deleteOnCompletion, let ep = finishedEp, let url = URL(string: ep.audioUrl) {
+            AudioDownloader.shared.deleteCachedEpisode(for: url)
+        }
+
+        if !self.autoPlay || suppressAutoPlay || self.queue.isEmpty {
             pausePodcastFn?()
             return
         }

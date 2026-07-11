@@ -23,6 +23,27 @@ class AudioStateTests: XCTestCase {
         XCTAssertEqual(qm.queue.count, 0)
     }
 
+    // Regression: advanceQueue must remove the episode that ACTUALLY finished (by id), not blindly
+    // the head — otherwise a reordered queue drops (and, with delete-on-completion, deletes) the
+    // wrong one.
+    func testAdvanceRemovesFinishedByIdNotHead() {
+        let qm = PodcastQueueManager()
+        qm.autoPlay = false
+        qm.queue = [makeEpisode("A"), makeEpisode("B"), makeEpisode("C")]
+
+        qm.advanceQueue(finishedEpId: "B")          // B finished, but it's NOT the head
+        XCTAssertFalse(qm.queue.contains { $0.id == "B" }, "the finished episode is removed")
+        XCTAssertEqual(qm.queue.map(\.id), ["A", "C"], "the head (A) is untouched")
+    }
+
+    func testAdvanceWithUnknownIdRemovesNothing() {
+        let qm = PodcastQueueManager()
+        qm.autoPlay = false
+        qm.queue = [makeEpisode("A"), makeEpisode("B")]
+        qm.advanceQueue(finishedEpId: "gone")       // already removed elsewhere
+        XCTAssertEqual(qm.queue.map(\.id), ["A", "B"], "no id match → drop nothing (don't delete an innocent one)")
+    }
+
     func testShuffleKeepsCurrentFirst() {
         let qm = PodcastQueueManager()
         qm.queue = [makeEpisode("1"), makeEpisode("2"), makeEpisode("3")]
@@ -92,21 +113,30 @@ class AudioStateTests: XCTestCase {
         XCTAssertTrue(engine.binauralOn)
     }
 
+    // Hermetic + instant: the prune rule is now a pure function, so this no longer writes to the
+    // shared StorageManager singleton or waits on a 1-second wall-clock flush (the old version did
+    // both — slow and order-dependent).
     func testPositionPruneCapsAt100() {
-        var mockPositions: [String: Double] = [:]
-        for i in 0..<105 { mockPositions["\(i)"] = Double(i) }
-        StorageManager.shared.save(mockPositions, to: "positions.json")
+        var positions: [String: Double] = [:]
+        for i in 0..<105 { positions["\(i)"] = Double(i) }
 
-        let player = PodcastPlayer()               // loads the 105 saved positions
-        player.flushPositionsToDisk()              // should trim to <= 100
+        let pruned = PodcastPlayer.prunedPositions(positions, keeping: "42")
+        XCTAssertEqual(pruned.count, 100)
+        XCTAssertNotNil(pruned["42"], "the currently-playing id must always be kept")
+    }
 
-        let exp = expectation(description: "flush to disk")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { exp.fulfill() }
-        wait(for: [exp], timeout: 2.0)
+    func testPositionPruneNoOpUnderCap() {
+        let positions = ["a": 1.0, "b": 2.0, "c": 3.0]
+        let pruned = PodcastPlayer.prunedPositions(positions, keeping: "a", cap: 100)
+        XCTAssertEqual(pruned, positions, "a map already under the cap is returned unchanged")
+    }
 
-        let saved: [String: Double]? = StorageManager.shared.load(from: "positions.json")
-        XCTAssertNotNil(saved)
-        XCTAssertLessThanOrEqual(saved!.count, 100)
+    func testPositionPruneKeepsCurrentEvenAtBoundary() {
+        var positions: [String: Double] = [:]
+        for i in 0..<101 { positions["ep\(i)"] = Double(i) }
+        let pruned = PodcastPlayer.prunedPositions(positions, keeping: "ep100", cap: 100)
+        XCTAssertEqual(pruned.count, 100)
+        XCTAssertNotNil(pruned["ep100"], "current id survives even when exactly one over the cap")
     }
 }
 
@@ -787,5 +817,187 @@ final class OPMLParserTests: XCTestCase {
                        "http(s) only, deduped, order preserved")
         XCTAssertEqual(feeds.first?.id, "https://a.example/feed", "id must be the stable feed url")
         XCTAssertEqual(feeds.first?.name, "Show A")
+    }
+
+    // A truncated/corrupt OPML must not crash or hang — feeds parsed before the malformed
+    // point are still returned (XMLParser stops there; the parse failure is logged).
+    func testCorruptOPMLKeepsFeedsParsedBeforeError() throws {
+        let opml = """
+        <?xml version="1.0"?>
+        <opml version="1.0"><body>
+          <outline text="Show A" type="rss" xmlUrl="https://a.example/feed"/>
+          <outline text="Broken
+        """
+        let feeds = try parse(opml)
+        XCTAssertEqual(feeds.map(\.url), ["https://a.example/feed"],
+                       "feeds before the malformed point survive a corrupt OPML")
+    }
+
+    func testMissingFileReturnsEmpty() {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(UUID().uuidString)-nonexistent.opml")
+        XCTAssertEqual(OPMLParser().parse(url: url).count, 0)
+    }
+}
+
+// MARK: - Ambient tail integrity (the "+15m mid-tail volume blast" fix)
+
+/// The ambient tail must never be interrupted by a lock-screen "+15m": bumpTimer used to snap
+/// the fade multiplier to 1.0 — an already-faded bed popping to full volume mid-drift-off —
+/// and then freeze near-silent for the added span. The intent is now dropped while in-tail
+/// (the Live Activity also hides the button via ContentState.isInTail).
+final class SleepTimerTailTests: XCTestCase {
+    private final class NoopBackstop: SleepTimerBackstopScheduling {
+        func schedule(after seconds: TimeInterval) {}
+        func cancel() {}
+    }
+
+    /// Reference box for recording fade updates — the stored closure outlives the helper
+    /// call, so an inout-to-pointer capture here would be undefined behavior.
+    private final class FadeLog {
+        var values: [Double] = []
+    }
+
+    /// Drives an end-of-episode timer to its expiry so the service hands off to the tail
+    /// (externalTick runs synchronously on the calling thread — no waits needed).
+    private func serviceInTail(fadeLog: FadeLog? = nil) -> SleepTimerService {
+        let svc = SleepTimerService()
+        svc.backstop = NoopBackstop()
+        svc.ambientTailFn = { 300 }
+        svc.tailEligibleFn = { true }
+        svc.stopPodcastFn = { }
+        if let fadeLog {
+            svc.updateFadeMultFn = { fadeLog.values.append($0) }
+        }
+        svc.startEndOfEpisode(remaining: 60)
+        svc.externalTick(remaining: 0.3)   // episode over → tail handoff
+        return svc
+    }
+
+    func testEpisodeEndHandsOffToTailInsteadOfStopping() {
+        let svc = SleepTimerService()
+        svc.backstop = NoopBackstop()
+        var stops = 0
+        var podcastStops = 0
+        svc.stopAllFn = { stops += 1 }
+        svc.stopPodcastFn = { podcastStops += 1 }
+        svc.ambientTailFn = { 300 }
+        svc.tailEligibleFn = { true }
+
+        svc.startEndOfEpisode(remaining: 60)
+        svc.externalTick(remaining: 0.3)
+
+        XCTAssertEqual(podcastStops, 1, "the tail silences only the podcast")
+        XCTAssertEqual(stops, 0, "the terminal stop must wait for the tail to run out")
+        XCTAssertEqual(svc.timerRemaining, 300, accuracy: 1.5, "deadline extended by the tail span")
+        svc.cancelTimer()
+    }
+
+    func testBumpIsDroppedDuringTail() {
+        let fades = FadeLog()
+        let svc = serviceInTail(fadeLog: fades)
+        XCTAssertTrue(svc.inTail, "handoff must publish inTail so bump surfaces can hide")
+        let before = svc.timerRemaining
+        fades.values.removeAll()
+
+        svc.bumpTimer()
+
+        XCTAssertEqual(svc.timerRemaining, before, accuracy: 0.5,
+                       "+15m must not extend the tail")
+        XCTAssertTrue(fades.values.isEmpty,
+                      "bump-in-tail must not touch the fade — the old path snapped it to 1.0")
+        svc.cancelTimer()
+        XCTAssertFalse(svc.inTail, "cancel must clear the tail so bump surfaces can return")
+    }
+
+    func testBumpStillWorksBeforeTheTail() {
+        let svc = SleepTimerService()
+        svc.backstop = NoopBackstop()
+        svc.startSleepTimer(minutes: 30)
+        let before = svc.timerRemaining
+
+        svc.bumpTimer()
+
+        XCTAssertEqual(svc.timerRemaining, before + 900, accuracy: 1.5)
+        svc.cancelTimer()
+    }
+}
+
+// MARK: - Pomodoro continuous ring progress
+
+/// The Focus ring depletes off the phase end-date via `progress(at:)` (smooth) rather than the
+/// 1 Hz-published `progress` (stepped). Verify the continuous form tracks elapsed time and is
+/// inert when idle.
+final class PomodoroProgressTests: XCTestCase {
+    func testContinuousProgressTracksElapsed() {
+        let p = PomodoroService()
+        p.workMinutes = 10          // 600 s work phase
+        p.start()
+        defer { p.stop() }          // cancel the real GCD timer
+
+        // Just started → ~0 elapsed; halfway/threequarter points track linearly.
+        XCTAssertEqual(p.progress(at: Date()), 0.0, accuracy: 0.02)
+        XCTAssertEqual(p.progress(at: Date().addingTimeInterval(300)), 0.5, accuracy: 0.02)
+        XCTAssertEqual(p.progress(at: Date().addingTimeInterval(450)), 0.75, accuracy: 0.02)
+    }
+
+    func testContinuousProgressClampsAndIdles() {
+        let p = PomodoroService()
+        p.workMinutes = 10
+        // Idle: no phase running → 0, and it must not read a stale phaseEnd.
+        XCTAssertEqual(p.progress(at: Date().addingTimeInterval(9999)), 0.0, accuracy: 1e-9)
+
+        p.start()
+        defer { p.stop() }
+        // Past the phase end → clamped to 1, never overshoots.
+        XCTAssertEqual(p.progress(at: Date().addingTimeInterval(10_000)), 1.0, accuracy: 1e-9)
+    }
+
+    func testPhaseElapsedDrivesTheBoundaryRefill() {
+        let p = PomodoroService()
+        p.workMinutes = 10
+        // Idle → 0 (no refill outside a session).
+        XCTAssertEqual(p.phaseElapsed(at: Date().addingTimeInterval(5)), 0.0, accuracy: 1e-9)
+
+        p.start()
+        defer { p.stop() }
+        // ~0 at the boundary (arc starts empty, then eases in), tracking wall-clock after.
+        XCTAssertEqual(p.phaseElapsed(at: Date()), 0.0, accuracy: 0.05)
+        XCTAssertEqual(p.phaseElapsed(at: Date().addingTimeInterval(0.5)), 0.5, accuracy: 0.05)
+        XCTAssertEqual(p.phaseElapsed(at: Date().addingTimeInterval(120)), 120, accuracy: 0.1)
+    }
+}
+
+// MARK: - Resume / persistence integrity
+
+/// "Resume Last Night" must restore the exact recipe faithfully — including a muted extra layer,
+/// which the four rebuild maps used to drop. Resume deliberately does NOT reconcile to the current
+/// mode (see resumeMix's NOTE): a SavedMix carries no mode, so snapping would corrupt a cross-mode
+/// mix. These tests use Sleep-valid inputs so "faithful" is unambiguous.
+@MainActor
+final class ResumeIntegrityTests: XCTestCase {
+    private func lastNight(noiseType: String, layers: [ExtraNoiseLayer]) -> SavedMix {
+        SavedMix(name: "Last Night", noiseOn: true, noiseVolume: 0.4, noiseType: noiseType,
+                 binauralOn: false, binVolume: 0.3, binauralPreset: "delta", podVolume: 0.7,
+                 podcastUrl: nil, podcastId: nil, extraLayers: layers)
+    }
+
+    func testResumePreservesMutedLayer() {
+        let engine = AudioEngine()
+        engine.focusMode = false
+        engine.resumeMix(lastNight(noiseType: "brown",
+                                   layers: [ExtraNoiseLayer(id: "L1", type: "rain", volume: 0.5, muted: true)]))
+        XCTAssertEqual(engine.extraLayers.first?.type, "rain")
+        XCTAssertEqual(engine.extraLayers.first?.muted, true,
+                       "muted must survive the rebuild map — it used to un-mute on resume")
+    }
+
+    func testResumeRestoresSoundFaithfully() {
+        // Resume is faithful: it restores the saved sound as-is and does NOT reconcile to the
+        // current mode (a SavedMix carries no mode; snapping would corrupt a cross-mode mix).
+        let engine = AudioEngine()
+        engine.focusMode = false
+        engine.resumeMix(lastNight(noiseType: "green", layers: []))   // green is a valid Sleep sound
+        XCTAssertEqual(engine.noiseType, "green")
     }
 }

@@ -9,6 +9,8 @@ struct ContentView: View {
     @AppStorage("autoNightDim") private var autoNightDim = true
     @State private var nightDimmed = false
     @State private var dimWorkItem: DispatchWorkItem?
+    @State private var veilCaptionShown = true
+    @State private var veilCaptionHide: DispatchWorkItem?
     /// Tracks the timer's active/idle state so the dim side-effect fires only on the transition,
     /// not on every per-second `timerRemaining` publish (which would reschedule the 60 s dim work
     /// item forever and it would never fire).
@@ -51,6 +53,19 @@ struct ContentView: View {
         dimWorkItem = nil
     }
 
+    // Show the veil's "Tap to wake" hint briefly each time the veil engages, then fade it out
+    // so the occluded screen holds no lit pixels (see the burn-in note at the overlay).
+    private func flashVeilCaption() {
+        veilCaptionHide?.cancel()
+        // Animated so re-engagements ride the veil's own fade-in rather than popping a frame in.
+        withAnimation(.easeInOut(duration: 0.8)) { veilCaptionShown = true }
+        let work = DispatchWorkItem {
+            withAnimation(.easeInOut(duration: 2)) { self.veilCaptionShown = false }
+        }
+        veilCaptionHide = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 6, execute: work)
+    }
+
     var body: some View {
         ZStack(alignment: .bottom) {
             TabView(selection: $selectedTab) {
@@ -83,7 +98,7 @@ struct ContentView: View {
             // Mini-player floats above the tab bar (a ZStack overlay, not a TabView safe-area
             // inset — that docks it ON the UIKit tab bar). Tabs reserve room for it themselves
             // (Home's bottom inset below, PodcastDetail's contentMargins).
-            MiniPlayerView(audio: audio, progress: audio.playbackProgress, selectedTab: $selectedTab)
+            MiniPlayerView(audio: audio, progress: audio.playbackProgress, queue: audio.queueManager, selectedTab: $selectedTab)
                 .opacity(homeScreensaver ? 0 : 1)
                 .allowsHitTesting(!homeScreensaver)
                 .animation(.easeInOut(duration: 0.9), value: homeScreensaver)
@@ -95,13 +110,19 @@ struct ContentView: View {
                     .contentShape(Rectangle())
                     .onTapGesture { wake() }
                     .overlay(
+                        // The caption fades out after a few seconds: under the veil it was the
+                        // only lit element on screen — a fixed, dim-white string held for eight
+                        // hours a night is a textbook OLED burn-in anchor, and fading it lets
+                        // the panel go true black. VoiceOver keeps the label below regardless.
                         Text("Tap to wake")
                             .font(.caption)
                             .foregroundColor(.white.opacity(0.16))
+                            .opacity(veilCaptionShown ? 1 : 0)
                     )
                     .transition(.opacity)
                     .accessibilityAddTraits(.isButton)
                     .accessibilityLabel("Screen dimmed for sleep. Tap to wake.")
+                    .onAppear { flashVeilCaption() }
             }
         }
         // Force dark mode for bedtime aesthetic
@@ -134,6 +155,14 @@ struct ContentView: View {
             // tick never fired. Reconcile the instant we're foregrounded so audio can't keep
             // playing past the timer. No-op when nothing expired.
             if phase == .active { audio.sleepTimer.reconcileIfExpired() }
+        }
+        // The resume widget's deep link (sleepulator://resume). Routed through the same
+        // notification the "Start Sleepulator Mix" Siri intent posts (SleepulatorIntents.swift),
+        // which AudioEngine already observes — one code path for every hands-off start.
+        .onOpenURL { url in
+            if url.scheme == "sleepulator" && url.host == "resume" {
+                NotificationCenter.default.post(name: Notification.Name("StartSleepulatorMix"), object: nil)
+            }
         }
     }
 }

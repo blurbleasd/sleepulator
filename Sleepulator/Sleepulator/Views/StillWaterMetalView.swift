@@ -6,53 +6,42 @@ import SwiftUI
 /// few points. It replaces the CPU `StillWaterView`, which stroked ellipse *outlines* (wireframe
 /// rings).
 ///
-/// Same `SceneContext` inputs as the other sleep scenes, sampled *live* each tick (never observed,
-/// to avoid the `@Published` re-render storm CLAUDE.md warns about):
+/// A thin wrapper over `ShaderBackdrop`, which owns the redraw loop, the settle, and the
+/// `SceneClock` phase integration (`nightSlowdown: 0.5` → the pond's drift stills to half speed
+/// by timer end, without the rewind bug of scaling absolute time — which visibly *retracted*
+/// the spreading ripples here):
 ///   - `sleepTimer.nightProgress` stills the pond and dims the moon,
-///   - `audioLevel` swells the ripples a touch with the generative bed.
+///   - `audioLevel` drives the reflection: `reactive == false` is the shipping global brightness
+///     swell; `reactive == true` (DEBUG A/B sibling) disturbs the wave field *structurally* so the
+///     moonpath shimmers/breaks up with the bed instead of the whole pond lifting.
 ///
-/// Settle (battery): when `paused` the `TimelineView` is dropped entirely — one static shader
-/// pass, no redraw loop on the all-night occluded screen.
+/// Reduce Motion adds no shader path: it forces the `reactive` uniform to 0, so those users get the
+/// calm, motionless global-gain branch.
 struct StillWaterMetalView: View {
     /// True only when the deep night-dim veil has occluded the screen — freeze for battery.
     var paused: Bool = false
     /// Read live (not observed) so the pond stills as the night progresses.
     var sleepTimer: SleepTimerService? = nil
-    /// Smoothed audio level (~0…1), sampled live so the ripples swell with the bed.
+    /// Smoothed audio level (~0…1), sampled live so the reflection responds to the bed.
     var audioLevel: (() -> Double)? = nil
-
-    /// Anchor elapsed time to launch so the shader's `time` stays Float-precise all night.
-    @State private var t0 = Date().timeIntervalSinceReferenceDate
+    /// Opt into the structural audio response (the DEBUG A/B variant). Off = shipping global swell.
+    var reactive: Bool = false
+    /// When true, force the calm branch (`reactive` uniform → 0) so no extra surface motion is added.
+    var reduceMotion: Bool = false
 
     var body: some View {
-        GeometryReader { geo in
-            let size = geo.size
-            if paused {
-                field(size: size, t: 0)
-            } else {
-                TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { tl in
-                    field(size: size, t: tl.date.timeIntervalSinceReferenceDate - t0)
-                }
-            }
-        }
-        .ignoresSafeArea()
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
-    }
-
-    @ViewBuilder
-    private func field(size: CGSize, t: Double) -> some View {
-        let night = sleepTimer?.nightProgress ?? 0
-        let level = audioLevel?() ?? 0
-        Rectangle()
-            .fill(.black)
-            .colorEffect(
-                ShaderLibrary.stillWaterField(
-                    .float(t),
-                    .float2(size),
-                    .float(night),
-                    .float(level)
-                )
+        // Reduce Motion routes to the calm branch: it must not add the structural surface motion.
+        let reactiveFlag: Float = (reactive && !reduceMotion) ? 1 : 0
+        ShaderBackdrop(paused: paused, nightSlowdown: 0.5,
+                       sleepTimer: sleepTimer, audioLevel: audioLevel) { s in
+            ShaderLibrary.stillWaterField(
+                .float(s.phase),
+                .float(s.elapsed),
+                .float2(s.size),
+                .float(s.night),
+                .float(s.audio),
+                .float(reactiveFlag)
             )
+        }
     }
 }

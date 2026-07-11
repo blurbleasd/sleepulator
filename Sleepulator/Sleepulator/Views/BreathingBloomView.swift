@@ -8,6 +8,10 @@ import SwiftUI
 struct BreathingBloomView: View {
     /// True only when the screen is occluded by the deep night-dim veil — freeze for battery.
     var paused: Bool = false
+    /// Read live (not observed) inside the redraw so the glow dims as the night winds down —
+    /// only the glow: the near-black background holds, so the fade reads as the light dying,
+    /// not the scene going transparent.
+    var sleepTimer: SleepTimerService? = nil
 
     // A soft candle/amber warmth on near-black. Warm = cozy + sleep-appropriate.
     var tint: Color = Color(red: 1.0, green: 0.84, blue: 0.6)
@@ -28,15 +32,18 @@ struct BreathingBloomView: View {
         }
     }
 
+    /// Freeze-in-place clock: the paused static frame holds the breath pose it froze at
+    /// (not `breath(0)`, which snapped to fully-exhaled on every un-occlusion).
+    /// Deliberately starts at 0 — unlike the other scenes' random start, opening at
+    /// `breath(0)` (fully exhaled, about to inhale) is the right entry point for entrainment.
+    @State private var clock = SceneClock()
+
     var body: some View {
         ZStack {
             Color(red: 0.03, green: 0.025, blue: 0.035).ignoresSafeArea()
-            if paused {
-                bloom(Self.breath(0))
-            } else {
-                TimelineView(.animation(minimumInterval: 1.0 / 20.0)) { tl in
-                    bloom(Self.breath(tl.date.timeIntervalSinceReferenceDate))
-                }
+            TimelineView(.animation(minimumInterval: 1.0 / 20.0, paused: paused)) { tl in
+                bloom(Self.breath(ticked(tl.date)),
+                      nightDim: 1 - 0.8 * (sleepTimer?.nightProgress ?? 0))
             }
         }
         .ignoresSafeArea()
@@ -44,9 +51,14 @@ struct BreathingBloomView: View {
         .accessibilityHidden(true)
     }
 
+    private func ticked(_ now: Date) -> Double {
+        if !paused { clock.tick(now: now.timeIntervalSinceReferenceDate, rate: 1) }
+        return clock.elapsed
+    }
+
     /// The glow at breath value `b` — a dim wide halo + a brighter core, both swelling and
     /// fading together so the breath reads as depth, not a flat throbbing disc.
-    private func bloom(_ b: Double) -> some View {
+    private func bloom(_ b: Double, nightDim: Double) -> some View {
         GeometryReader { geo in
             let d = min(geo.size.width, geo.size.height)
             ZStack {
@@ -62,7 +74,7 @@ struct BreathingBloomView: View {
                     .blur(radius: 22)
             }
             .scaleEffect(0.75 + 0.25 * b)
-            .opacity(0.4 + 0.5 * b)
+            .opacity((0.4 + 0.5 * b) * nightDim)
             .position(x: geo.size.width / 2, y: geo.size.height / 2)
         }
     }

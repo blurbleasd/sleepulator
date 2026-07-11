@@ -14,23 +14,28 @@ struct SettingsView: View {
     @ObservedObject var settings: PlaybackSettings
     @AppStorage("bedtimeMode") private var bedtimeMode = false
     @AppStorage("autoNightDim") private var autoNightDim = true
+    @AppStorage("breathingOnRamp") private var breathingOnRamp = false
+    @AppStorage("ambientMotion") private var ambientMotion = true
 
     /// Scalar UserDefaults keys included in Backup/Restore. Single source of truth for both the
     /// export and the restore whitelist: restore writes nothing outside this set plus the
     /// file-backed collections below, so a malformed or hostile backup can't inject arbitrary
     /// defaults. Keep new persisted settings in sync here.
-    private static let backupScalarKeys: [String] = [
+    // `nonisolated` so the off-main backup export/import (Task.detached) can read these without a
+    // cross-actor hop — the View is @MainActor by default (SWIFT_DEFAULT_ACTOR_ISOLATION), which
+    // would otherwise make this access an error under Swift 6 mode. Plain Sendable data.
+    private nonisolated static let backupScalarKeys: [String] = [
         "noiseVolume", "noiseType", "binVolume", "binauralPreset", "podVolume", "stereoWidth",
         "masterVolume", "autoPlay", "shuffleQueue", "deleteOnCompletion", "hideFinishedEpisodes",
         "nightLimiterEnabled", "sleepEQEnabled", "sleepEQIntensity", "limiterByMode",
         "beatRouting", "skipInterval", "playbackSpeed", "focusMode", "sceneSleep", "sceneFocus",
-        "bedtimeMode", "autoNightDim", "timerMinutes", "pomoWork", "pomoRest", "pomoLongRest",
-        "pomoCycles"
+        "bedtimeMode", "autoNightDim", "breathingOnRamp", "ambientMotion", "timerMinutes",
+        "pomoWork", "pomoRest", "pomoLongRest", "pomoCycles"
     ]
 
     /// Backup keys that map to StorageManager files (not UserDefaults), with the Codable type each
     /// must decode into before restore will write it.
-    private static let backupFileBacked: [String: String] = [
+    private nonisolated static let backupFileBacked: [String: String] = [
         "savedPlaylists": "mixes.json",
         "savedPodcasts": "library.json",
         "upNextQueue": "queue.json",
@@ -50,6 +55,15 @@ struct SettingsView: View {
     
 
     
+    /// UserDefaults-backed binding for the sleep-aware queue hold (read at advance time by
+    /// AudioEngine, so no live plumbing is needed).
+    private var holdQueueBinding: Binding<Bool> {
+        Binding(
+            get: { UserDefaults.standard.bool(forKey: "holdQueueDuringSleepTimer") },
+            set: { UserDefaults.standard.set($0, forKey: "holdQueueDuringSleepTimer") }
+        )
+    }
+
     var body: some View {
         NavigationStack {
             ZStack {
@@ -67,6 +81,15 @@ struct SettingsView: View {
                             Toggle("Auto-Play Next Episode", isOn: $queue.autoPlay)
                                 .toggleStyle(SwitchToggleStyle(tint: pal.accent))
                                 .foregroundColor(pal.dim)
+
+                            // Sleep-aware hold: don't burn through (and mark finished) episodes
+                            // you sleep through — see AudioEngine.onQueueAdvance.
+                            Toggle("Pause Queue During Sleep Timer", isOn: holdQueueBinding)
+                                .toggleStyle(SwitchToggleStyle(tint: pal.accent))
+                                .foregroundColor(pal.dim)
+                            Text("With a sleep timer running, finish the current episode and keep only the ambient sounds going.")
+                                .font(.caption2)
+                                .foregroundColor(pal.dim.opacity(0.7))
 
                             Toggle("Shuffle Queue", isOn: $queue.shuffleQueue)
                                 .toggleStyle(SwitchToggleStyle(tint: pal.accent))
@@ -133,7 +156,7 @@ struct SettingsView: View {
                                     .foregroundColor(pal.dim)
                                     .fixedSize()
                             }
-                            VolumeBar(value: $settings.stereoWidth, accent: pal.accent, range: 0...1.5)
+                            VolumeBar(value: $settings.stereoWidth, accent: pal.accent, range: 0...1.5, style: .parameter, tapToSet: true)
                                 .accessibilityLabel("Stereo width")
                                 .accessibilityValue(settings.stereoWidth < 0.05 ? "Mono" : "\(Int((settings.stereoWidth / 1.5) * 100)) percent")
                             Text("Lower keeps the bass centered on phone and laptop speakers; higher opens the noise up in headphones.")
@@ -188,7 +211,7 @@ struct SettingsView: View {
                                             .foregroundColor(pal.dim)
                                             .fixedSize()
                                     }
-                                    VolumeBar(value: $settings.sleepEQIntensity, accent: pal.accent, range: 0...2)
+                                    VolumeBar(value: $settings.sleepEQIntensity, accent: pal.accent, range: 0...2, style: .parameter, tapToSet: true)
                                         .accessibilityLabel("Sleep EQ softening amount")
                                         .accessibilityValue(eqAmountLabel)
                                 }
@@ -223,6 +246,26 @@ struct SettingsView: View {
                         .glassPanel()
                         .padding(.horizontal)
                         
+                        // Wind-down
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Wind-down")
+                                .font(.title3.bold())
+                                .foregroundColor(pal.text)
+
+                            Toggle(isOn: $breathingOnRamp) {
+                                Text("Start with a minute of breathing")
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            .toggleStyle(SwitchToggleStyle(tint: pal.accent))
+                            .foregroundColor(pal.dim)
+
+                            Text("When you begin a Sleep session, a calm breathing glow leads for about a minute, then your mix starts automatically. Tap “Start now” to skip ahead.")
+                                .font(.caption)
+                                .foregroundColor(pal.dim)
+                        }
+                        .glassPanel()
+                        .padding(.horizontal)
+
                         // Display
                         VStack(alignment: .leading, spacing: 12) {
                             Text("Display")
@@ -237,6 +280,19 @@ struct SettingsView: View {
                             .foregroundColor(pal.dim)
 
                             Text("Once a sleep timer is running, the screen fades to black after a minute so it doesn't light the room. Tap to wake.")
+                                .font(.caption)
+                                .foregroundColor(pal.dim)
+
+                            Divider().background(pal.dim.opacity(0.2))
+
+                            Toggle(isOn: $ambientMotion) {
+                                Text("Ambient motion")
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            .toggleStyle(SwitchToggleStyle(tint: pal.accent))
+                            .foregroundColor(pal.dim)
+
+                            Text("Let the backdrop scenes drift, ripple, and parallax. Turn off to hold them on a single still frame — calmer, and a touch easier on the battery. (System Reduce Motion already stops the tilt parallax; this stills the scene itself.)")
                                 .font(.caption)
                                 .foregroundColor(pal.dim)
                         }
@@ -276,13 +332,82 @@ struct SettingsView: View {
                                         .frame(minWidth: 44, minHeight: 44)
                                     }
                                 }
+
+                                // Diagnostics (MetricKit) — battery / hang / crash payloads
+                                // collected by iOS, stored locally, shareable for analysis.
+                                VStack(alignment: .leading, spacing: 16) {
+                                    Text("Diagnostics")
+                                        .font(.headline)
+                                        .foregroundColor(pal.text)
+
+                                    Text("iOS delivers battery, hang, and crash reports about once a day while the app is in use. Stored on this device only.")
+                                        .font(.caption)
+                                        .foregroundColor(pal.dim)
+
+                                    NavigationLink {
+                                        DiagnosticsListView(pal: pal)
+                                    } label: {
+                                        HStack {
+                                            Text("View reports")
+                                                .foregroundColor(pal.accent)
+                                            Spacer()
+                                            Image(systemName: "chevron.right")
+                                                .font(.footnote.weight(.semibold))
+                                                .foregroundColor(pal.dim)
+                                        }
+                                        .frame(minHeight: 44)
+                                        .contentShape(Rectangle())
+                                    }
+                                    .buttonStyle(.plain)
+
+                                    // Export the overnight log trail (timer, interruption, route,
+                                    // limiter breadcrumbs) — the bedside way to see why the bed
+                                    // behaved as it did without tethering to Console.app.
+                                    Button {
+                                        Task {
+                                            let text = await LogExport.collect()
+                                            logDocument = TextDocument(text: text)
+                                            isExportingLog = true
+                                        }
+                                    } label: {
+                                        HStack {
+                                            Text("Export last night's log")
+                                                .foregroundColor(pal.accent)
+                                            Spacer()
+                                            Image(systemName: "square.and.arrow.up")
+                                                .font(.footnote.weight(.semibold))
+                                                .foregroundColor(pal.dim)
+                                        }
+                                        .frame(minHeight: 44)
+                                        .contentShape(Rectangle())
+                                    }
+                                    .buttonStyle(.plain)
+                                }
                             }
                             .padding(.top, 16)
                         }
                         .accentColor(pal.accent)
                         .glassPanel()
                         .padding(.horizontal)
-                        
+
+                        // Build identity footer — glance here to confirm which build the device is
+                        // running. Version/build are static across manual builds, so the build time
+                        // (executable mod date) is the line that actually distinguishes them.
+                        VStack(spacing: 3) {
+                            Text("Sleepulator \(AppInfo.versionBuild)")
+                                .font(.footnote.weight(.medium))
+                                .foregroundColor(pal.dim)
+                            if let built = AppInfo.builtAtLabel {
+                                Text("Built \(built)")
+                                    .font(.caption2)
+                                    .foregroundColor(pal.dim.opacity(0.7))
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 4)
+                        .accessibilityElement(children: .combine)
+                        .accessibilityLabel(AppInfo.accessibilitySummary)
+
                         Spacer().frame(height: 80) // 80 is the miniPlayerInset
                     }
                     .padding(.top, 20)
@@ -327,6 +452,13 @@ struct SettingsView: View {
                 showAlert = true
             }
         }
+        .fileExporter(isPresented: $isExportingLog, document: logDocument, contentType: .plainText, defaultFilename: "sleepulator-log") { result in
+            if case .failure(let error) = result {
+                alertTitle = "Log Export Failed"
+                alertMessage = error.localizedDescription
+                showAlert = true
+            }
+        }
         .alert(alertTitle, isPresented: $showAlert) {
             Button("OK", role: .cancel) {}
         } message: {
@@ -337,13 +469,15 @@ struct SettingsView: View {
     @State private var isImporting = false
     @State private var isExporting = false
     @State private var exportDocument: JSONDocument?
+    @State private var isExportingLog = false
+    @State private var logDocument: TextDocument?
     @State private var alertTitle = ""
     @State private var alertMessage = ""
     @State private var showAlert = false
     
     /// Re-encode a backup section and confirm it decodes into the Codable type the target file
     /// expects. Returns the JSON bytes to write, or nil if the section is malformed/unexpected.
-    private static func validatedFileData(key: String, value: Any) -> Data? {
+    private nonisolated static func validatedFileData(key: String, value: Any) -> Data? {
         guard let data = try? JSONSerialization.data(withJSONObject: value, options: []) else { return nil }
         let decoder = JSONDecoder()
         let valid: Bool
@@ -398,7 +532,7 @@ struct SettingsView: View {
                         // Only write a collection that actually decodes into its expected
                         // type — a malformed section is skipped, never written as garbage.
                         if let validated = Self.validatedFileData(key: key, value: value) {
-                            StorageManager.shared.writeRaw(validated, to: file)
+                            await StorageManager.shared.writeRaw(validated, to: file)
                             restored += 1
                         } else { skipped += 1 }
                     } else if key == "lastMix" {
@@ -464,7 +598,7 @@ struct SettingsView: View {
             // Mixes, library, queue, and positions were migrated off UserDefaults into
             // StorageManager files — pull their raw JSON so the backup is actually complete.
             for (key, file) in Self.backupFileBacked {
-                if let data = StorageManager.shared.rawData(for: file),
+                if let data = await StorageManager.shared.rawData(for: file),
                    let obj = try? JSONSerialization.jsonObject(with: data, options: .allowFragments) {
                     backupDict[key] = obj
                 }
@@ -483,7 +617,7 @@ struct SettingsView: View {
 struct JSONDocument: FileDocument {
     static var readableContentTypes: [UTType] { [.json] }
     var data: Data
-    
+
     init(data: Data) { self.data = data }
     init(configuration: ReadConfiguration) throws {
         if let data = configuration.file.regularFileContents {
@@ -494,5 +628,83 @@ struct JSONDocument: FileDocument {
     }
     func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
         return FileWrapper(regularFileWithContents: data)
+    }
+}
+
+/// Plain-text wrapper for the "Export logs" share sheet (the overnight LogExport trail).
+struct TextDocument: FileDocument {
+    static var readableContentTypes: [UTType] { [.plainText] }
+    var text: String
+
+    init(text: String) { self.text = text }
+    init(configuration: ReadConfiguration) throws {
+        if let data = configuration.file.regularFileContents {
+            self.text = String(decoding: data, as: UTF8.self)
+        } else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+    }
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        return FileWrapper(regularFileWithContents: Data(text.utf8))
+    }
+}
+
+/// Settings ▸ Advanced ▸ Diagnostics: the MetricKit payloads MetricsCollector has stored,
+/// newest first, each shareable (AirDrop the JSON to a Mac for analysis). Payloads arrive
+/// on iOS's schedule (~daily), so an empty list on a fresh install is expected.
+struct DiagnosticsListView: View {
+    let pal: Palette
+    @State private var files: [URL] = []
+
+    var body: some View {
+        ZStack {
+            pal.bg.ignoresSafeArea()
+            if files.isEmpty {
+                VStack(spacing: 8) {
+                    Image(systemName: "waveform.path.ecg.rectangle")
+                        .font(.largeTitle)
+                        .foregroundColor(pal.dim)
+                    Text("No reports yet")
+                        .font(.headline)
+                        .foregroundColor(pal.text)
+                    Text("iOS delivers battery and stability reports about once a day. Check back after a night's use.")
+                        .font(.caption)
+                        .foregroundColor(pal.dim)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 40)
+                }
+            } else {
+                ScrollView {
+                    VStack(spacing: 10) {
+                        ForEach(files, id: \.self) { url in
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(url.lastPathComponent.hasPrefix("diagnostic") ? "Crash / hang report" : "Daily metrics")
+                                        .font(.system(.subheadline, design: .rounded).weight(.semibold))
+                                        .foregroundColor(pal.text)
+                                    Text(url.lastPathComponent)
+                                        .font(.caption2)
+                                        .foregroundColor(pal.dim)
+                                        .lineLimit(1)
+                                }
+                                Spacer()
+                                ShareLink(item: url) {
+                                    Image(systemName: "square.and.arrow.up")
+                                        .foregroundColor(pal.accent)
+                                        .frame(width: 44, height: 44)
+                                }
+                                .accessibilityLabel("Share report")
+                            }
+                            .glassPanel()
+                        }
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.top, 12)
+                }
+            }
+        }
+        .navigationTitle("Diagnostics")
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear { files = MetricsCollector.shared.payloadFiles() }
     }
 }

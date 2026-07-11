@@ -189,12 +189,16 @@ final class GenerativeAudioEngine {
             default: layerGain = p.layerGain2; type = Int(p.layerType2)
             }
 
-            // Smooth the fade target locally to prevent zipper noise
+            // Smooth the fade target locally to prevent zipper noise. The step is scaled by
+            // the buffer's real duration (0.1 full-scale per second): a fixed per-callback
+            // step made the slew buffer-size-dependent — iOS raises the IO buffer ~8× when
+            // the screen locks, which stretched a ~10s fade response to ~90s overnight.
+            let fadeStep = 0.1 * Float(frameCount) / ns.pointee.sampleRate
             if ns.pointee.fadeMult > p.targetFadeMult {
-                ns.pointee.fadeMult -= 0.001
+                ns.pointee.fadeMult -= fadeStep
                 if ns.pointee.fadeMult < p.targetFadeMult { ns.pointee.fadeMult = p.targetFadeMult }
             } else if ns.pointee.fadeMult < p.targetFadeMult {
-                ns.pointee.fadeMult += 0.001
+                ns.pointee.fadeMult += fadeStep
                 if ns.pointee.fadeMult > p.targetFadeMult { ns.pointee.fadeMult = p.targetFadeMult }
             }
 
@@ -347,8 +351,11 @@ final class GenerativeAudioEngine {
 
     private func setupEngine(startEngine: Bool = true) {
         let session = AVAudioSession.sharedInstance()
-        try? session.setCategory(.playback, mode: .default, options: [])
-        try? session.setActive(true)
+        // Read the shared desired options (AudioSessionConfig) rather than hardcoding `[]`, so a
+        // generative (re)start while Apple Music is mixing doesn't drop `.mixWithOthers` and
+        // interrupt the music. Exclusive playback is still the default (options empty).
+        AudioSessionConfig.applyCategory()
+        Log.activateAudioSession("engine setup")
 
         let sr = Float(session.sampleRate)
         for i in 0..<kMaxNoiseLayers { (noiseStatePtr + i).pointee.sampleRate = sr }
@@ -366,12 +373,14 @@ final class GenerativeAudioEngine {
             let p = paramsBuffer[SLPAtomicIndexLoadAcquire(readIdx)]
 
             // The beat node now owns its own fade smoothing (it used to read the noise node's,
-            // which no longer exists once noise is split into independent layers).
+            // which no longer exists once noise is split into independent layers). Step scaled
+            // by buffer duration — same rationale as the noise nodes (buffer-size-independent).
+            let fadeStep = 0.1 * Float(frameCount) / statePtr.pointee.sampleRate
             if statePtr.pointee.fadeMult > p.targetFadeMult {
-                statePtr.pointee.fadeMult -= 0.001
+                statePtr.pointee.fadeMult -= fadeStep
                 if statePtr.pointee.fadeMult < p.targetFadeMult { statePtr.pointee.fadeMult = p.targetFadeMult }
             } else if statePtr.pointee.fadeMult < p.targetFadeMult {
-                statePtr.pointee.fadeMult += 0.001
+                statePtr.pointee.fadeMult += fadeStep
                 if statePtr.pointee.fadeMult > p.targetFadeMult { statePtr.pointee.fadeMult = p.targetFadeMult }
             }
 
@@ -450,6 +459,8 @@ final class GenerativeAudioEngine {
         engine.connect(mainMixer, to: limiterNode, format: format)
         engine.connect(limiterNode, to: engine.outputNode, format: format)
 
+        // audio-thread only: the tap closure is the sole reader and writer of `lastSampleTime`
+        // (single-writer/single-reader), so the bare `var` capture needs no synchronization.
         var lastSampleTime: AVAudioFramePosition = 0
         limiterNode.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, time in
             guard let chData = buffer.floatChannelData?[0] else { return }
@@ -497,6 +508,9 @@ final class GenerativeAudioEngine {
     // Ceilings cap how hard a full slider drives each generator, so ambient stays a
     // background bed that can't overpower a podcast.
     private static let noiseMaxGain: Float = 0.5
+    // Note: `softClip` is applied to the noise output but intentionally NOT to the binaural node —
+    // it's safe because binaural is capped at this 0.15 ceiling and the downstream limiter catches
+    // any residual peaks, so there's nothing for a clipper to do here.
     private static let binauralMaxGain: Float = 0.15
 
     /// Set all noise layers at once. `layers` is ordered (layer 0 first); any slots beyond the
@@ -579,7 +593,7 @@ final class GenerativeAudioEngine {
     /// Start rendering if it isn't already (called before noise/binaural turn on).
     func resumeIfNeeded() {
         guard !engine.isRunning else { return }
-        try? AVAudioSession.sharedInstance().setActive(true)
+        Log.activateAudioSession("resumeIfNeeded")
         startEngineSafely("resume")
     }
 
@@ -614,8 +628,7 @@ final class GenerativeAudioEngine {
 
     func handleInterruption(shouldResume: Bool) {
         if shouldResume {
-            let session = AVAudioSession.sharedInstance()
-            try? session.setActive(true)
+            Log.activateAudioSession("interruption")
             startEngineSafely("interruption")
         } else {
             engine.pause()

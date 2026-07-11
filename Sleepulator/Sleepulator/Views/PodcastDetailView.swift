@@ -171,6 +171,24 @@ struct PodcastDetailView: View {
                         .overlay(RoundedRectangle(cornerRadius: 22).stroke(pal.accent, lineWidth: 1))
                 }
                 .disabled(podcast.episodes.isEmpty)
+
+                // Append the currently-shown (filtered) episodes to the queue — respects Hide
+                // Finished + the search filter, unlike Play All / Shuffle which take every episode.
+                Button(action: {
+                    audio.queueManager.addAllToQueue(visibleEpisodes)
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                }) {
+                    Image(systemName: "text.badge.plus")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundColor(pal.accent)
+                        .frame(width: 46, height: 40)
+                        .background(pal.bg)
+                        .cornerRadius(22)
+                        .overlay(RoundedRectangle(cornerRadius: 22).stroke(pal.accent, lineWidth: 1))
+                }
+                .disabled(visibleEpisodes.isEmpty)
+                .accessibilityLabel("Add \(visibleEpisodes.count) shown episodes to queue")
+
                 Spacer(minLength: 0)
             }
         }

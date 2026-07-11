@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct BreathingView: View {
     @Binding var isPresented: Bool
@@ -97,6 +98,11 @@ struct BreathingView: View {
         }
         .onAppear {
             startBreathing()
+        }
+        .onChange(of: instruction) { _, phase in
+            // The pacer is purely visual — announce each phase change so VoiceOver users
+            // can follow the rhythm without watching the orb. No-op when VoiceOver is off.
+            UIAccessibility.post(notification: .announcement, argument: phase)
         }
         .onDisappear {
             timer?.invalidate()

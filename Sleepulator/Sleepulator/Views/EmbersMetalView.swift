@@ -5,13 +5,11 @@ import SwiftUI
 /// differential swirl. Deliberately dark, lulling, and hypnotic — significant *but slow* motion,
 /// no flames / white-hot cores / sparks (the first fire take was too stimulating for sleep).
 ///
-/// Same `SceneContext` inputs as the other sleep scenes, sampled *live* each tick (never observed,
-/// to avoid the `@Published` re-render storm CLAUDE.md warns about):
+/// A thin wrapper over `ShaderBackdrop`, which owns the redraw loop, the settle, and the
+/// `SceneClock` phase integration (`nightSlowdown: 0.3` → the churn's drift eases as the night
+/// deepens, without the rewind bug of scaling absolute time):
 ///   - `sleepTimer.nightProgress` settles the coals darker and slows the churn,
 ///   - `audioLevel` lifts them gently with the generative bed.
-///
-/// Settle (battery): when `paused` the `TimelineView` is dropped entirely — one static shader
-/// pass, no redraw loop on the all-night occluded screen.
 struct EmbersMetalView: View {
     /// True only when the deep night-dim veil has occluded the screen — freeze for battery.
     var paused: Bool = false
@@ -20,38 +18,16 @@ struct EmbersMetalView: View {
     /// Smoothed audio level (~0…1), sampled live so the coals lift with the bed.
     var audioLevel: (() -> Double)? = nil
 
-    /// Anchor elapsed time to launch so the shader's `time` stays Float-precise all night.
-    @State private var t0 = Date().timeIntervalSinceReferenceDate
-
     var body: some View {
-        GeometryReader { geo in
-            let size = geo.size
-            if paused {
-                field(size: size, t: 0)
-            } else {
-                TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { tl in
-                    field(size: size, t: tl.date.timeIntervalSinceReferenceDate - t0)
-                }
-            }
-        }
-        .ignoresSafeArea()
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
-    }
-
-    @ViewBuilder
-    private func field(size: CGSize, t: Double) -> some View {
-        let night = sleepTimer?.nightProgress ?? 0
-        let level = audioLevel?() ?? 0
-        Rectangle()
-            .fill(.black)
-            .colorEffect(
-                ShaderLibrary.emberField(
-                    .float(t),
-                    .float2(size),
-                    .float(night),
-                    .float(level)
-                )
+        ShaderBackdrop(paused: paused, nightSlowdown: 0.3,
+                       sleepTimer: sleepTimer, audioLevel: audioLevel) { s in
+            ShaderLibrary.emberField(
+                .float(s.phase),
+                .float(s.elapsed),
+                .float2(s.size),
+                .float(s.night),
+                .float(s.audio)
             )
+        }
     }
 }

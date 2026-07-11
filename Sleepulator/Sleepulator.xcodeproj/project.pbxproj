@@ -12,6 +12,7 @@
 		896817FB2FE6F20900C5DF4D /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 896817FA2FE6F20900C5DF4D /* SwiftUI.framework */; };
 		8968180C2FE6F20E00C5DF4D /* SleepulatorWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 896817F72FE6F20900C5DF4D /* SleepulatorWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		BB02BB02BB02BB02BB02BB02 /* SleepulatorTests/AudioStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA01AA01AA01AA01AA01AA01 /* SleepulatorTests/AudioStateTests.swift */; };
+		DD04DD04DD04DD04DD04DD04 /* SleepulatorTests/PersistenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC03CC03CC03CC03CC03CC03 /* SleepulatorTests/PersistenceTests.swift */; };
 		FE194EFB101EFDEB44D73448 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = AB899D16B0611E1DE7BE7027 /* Foundation.framework */; };
 /* End PBXBuildFile section */
 
@@ -56,6 +57,7 @@
 		AA01AA01AA01AA01AA01AA01 /* SleepulatorTests/AudioStateTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SleepulatorTests/AudioStateTests.swift; sourceTree = "<group>"; };
 		AB899D16B0611E1DE7BE7027 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
 		C5D5D733507738D0157791A3 /* SleepulatorTests/AudioMathTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SleepulatorTests/AudioMathTests.swift; sourceTree = "<group>"; };
+		CC03CC03CC03CC03CC03CC03 /* SleepulatorTests/PersistenceTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SleepulatorTests/PersistenceTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -136,6 +138,7 @@
 				18E370CCB927FE199F422346 /* Info.plist */,
 				C5D5D733507738D0157791A3 /* SleepulatorTests/AudioMathTests.swift */,
 				AA01AA01AA01AA01AA01AA01 /* SleepulatorTests/AudioStateTests.swift */,
+				CC03CC03CC03CC03CC03CC03 /* SleepulatorTests/PersistenceTests.swift */,
 			);
 			name = SleepulatorTests;
 			sourceTree = "<group>";
@@ -317,6 +320,7 @@
 			files = (
 				2E448B63520859F2E217098F /* SleepulatorTests/AudioMathTests.swift in Sources */,
 				BB02BB02BB02BB02BB02BB02 /* SleepulatorTests/AudioStateTests.swift in Sources */,
+				DD04DD04DD04DD04DD04DD04 /* SleepulatorTests/PersistenceTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

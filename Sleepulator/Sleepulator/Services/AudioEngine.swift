@@ -3,9 +3,17 @@ import Combine
 import AVFoundation
 import Network
 import SwiftUI
+import MusicKit
+import os
 
 enum AppConfig {
-    static let nightLimiterEnabled = true
+    /// Default for fresh installs only (a user's explicit Settings toggle, persisted in
+    /// UserDefaults, always wins). Per the CLAUDE.md verification gate and
+    /// AUDIO-LIMITER-SPEC.md acceptance criteria, the limiter's MTAudioProcessingTap runs on a
+    /// real-time thread and must be verified on a real iPhone (installed, screen locked, full
+    /// timer run, known loud spot) before shipping enabled by default. Flip to `true` once that
+    /// device pass is done and recorded in TESTING.md.
+    static let nightLimiterEnabled = false
 }
 
 /// Network reachability as its own tiny observable, so views that only care about online/offline
@@ -103,6 +111,10 @@ final class AudioEngine: ObservableObject {
 
     private let genEngine = GenerativeAudioEngine()
     private let podPlayer = PodcastPlayer()
+    /// Apple Music as a parallel, Focus-only source. DRM means it can't go through the generative
+    /// mixer or the limiter tap — it plays alongside via MusicKit's system player with the session
+    /// in `.mixWithOthers`. See APPLE-MUSIC-FOCUS-SPEC.md.
+    private let appleMusic = AppleMusicPlayer()
     private let chime = ChimePlayer()
     private let storageQueue = DispatchQueue(label: "app.sleepulator.storage", qos: .utility)
     
@@ -119,7 +131,38 @@ final class AudioEngine: ObservableObject {
     }
     
     @Published var noiseType: String {
-        didSet { UserDefaults.standard.set(noiseType, forKey: "noiseType"); syncGenEngine() }
+        // Persist off the main thread (matches the volume setters). The audio-side apply goes
+        // through softSwapPrimaryNoise: while the bed is audibly playing, a hard mid-render
+        // generator swap is a timbre jump-cut (noticeable at 3 a.m.), so we dip layer 0 to
+        // silence first — the render thread's per-sample declick ramp (~70 ms) makes both
+        // edges click-free — then switch at the bottom and ramp back. Off/quiet paths apply
+        // immediately, exactly as before.
+        didSet {
+            let v = noiseType
+            storageQueue.async { UserDefaults.standard.set(v, forKey: "noiseType") }
+            softSwapPrimaryNoise(from: oldValue)
+        }
+    }
+
+    /// Monotonic token so rapid re-picks (or any newer engine sync) cancel an in-flight dip.
+    private var noiseSwapToken = 0
+
+    /// See `noiseType.didSet`. Timing: gain reaches silence in ~70 ms (declick coefficient
+    /// 0.0015/sample @44.1k), so the swap lands at 140 ms with the old sound fully out; the
+    /// ramp back up is masked the same way. If the user changes anything else mid-dip, the
+    /// resulting syncGenEngine() applies the new type at once — a rare, acceptable race.
+    private func softSwapPrimaryNoise(from oldType: String) {
+        guard noiseOn, oldType != noiseType else { syncGenEngine(); return }
+        noiseSwapToken += 1
+        let token = noiseSwapToken
+        // Dip: hand the engine the OLD generator at volume 0; declick fades it out.
+        var layers = buildNoiseLayers()
+        layers[0] = (oldType, 0.0)
+        genEngine.setNoiseLayers(layers, on: true)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.14) { [weak self] in
+            guard let self, self.noiseSwapToken == token else { return }
+            self.syncGenEngine()   // new type, real volume — declick ramps it back in
+        }
     }
     /// Cap on *extra* stacked noise layers (the primary `noiseType` is always layer 0).
     static let maxExtraLayers = kMaxNoiseLayers - 1
@@ -137,7 +180,9 @@ final class AudioEngine: ObservableObject {
         }
     }
     @Published var binauralPreset: String {
-        didSet { UserDefaults.standard.set(binauralPreset, forKey: "binauralPreset"); syncGenEngine() }
+        // Persist off the main thread (matches the volume setters); syncGenEngine() stays
+        // synchronous so the beat changes immediately.
+        didSet { let v = binauralPreset; storageQueue.async { UserDefaults.standard.set(v, forKey: "binauralPreset") }; syncGenEngine() }
     }
     @Published var playbackSpeed: Double {
         didSet { UserDefaults.standard.set(playbackSpeed, forKey: "playbackSpeed"); podPlayer.setSpeed(playbackSpeed) }
@@ -225,6 +270,22 @@ final class AudioEngine: ObservableObject {
     @Published var binauralOn = false { didSet { syncGenEngine(); if !isMasterPauseTransition { lastActiveSnapshot.bin = binauralOn } } }
     @Published var isPodPlaying = false { didSet { syncGenEngine(); if !isMasterPauseTransition { lastActiveSnapshot.pod = isPodPlaying } } }
     var isAnythingPlaying: Bool { isPodPlaying || noiseOn || binauralOn }
+
+    // MARK: Apple Music (Focus-only parallel source)
+    // Low-frequency toggles, safe to @Published (a track change fires at most once per song, not
+    // the 1 Hz churn the coarse-ObservableObject rule warns about). Deliberately NOT part of
+    // `isAnythingPlaying` / the master-transport snapshot in v1 — it's a separate, system-owned
+    // player, kept out of the resume-snapshot machinery to avoid scope creep.
+    @Published var appleMusicOn = false { didSet { syncAllVolumes() } }
+    @Published var appleMusicTitle = ""
+    /// True once the user has chosen something to play this session (picker CTA vs. on/off toggle).
+    var hasAppleMusicSelection: Bool { appleMusic.hasSelection }
+
+    /// How far the generative bed (noise + binaural) ducks while Apple Music plays — option (b) of
+    /// the balance model: Apple Music plays at device volume and can't be level-shaped (DRM), so we
+    /// pull the *bed* down underneath it instead. 0.45 ≈ −7 dB; tuned by ear, adjust on device.
+    static let musicDuckLevel: Double = 0.45
+    private var appleMusicDuck: Double { appleMusicOn ? Self.musicDuckLevel : 1.0 }
     
     // Not @Published: no view renders this, and the RMS tap fires ~20×/sec. Publishing it
     // invalidated HomeView + every child holding `audio` 20 times a second all night for a
@@ -256,7 +317,11 @@ final class AudioEngine: ObservableObject {
     static let sleepNoises = ["brown", "rain", "ocean", "pink", "green", "forest"]
     static let focusNoises = ["pink", "fan", "white", "gray"]
     static let sleepBinaurals = ["delta", "theta"]
-    static let focusBinaurals = ["alpha", "smr", "beta", "gamma"]
+    // Focus binaurals: alpha → beta → gamma, a clean low/mid/high progression. SMR (13 Hz) was
+    // retired — it's a neurofeedback construct with little binaural-beat-specific evidence and sat
+    // as a near-duplicate between alpha and beta. A persisted/saved "smr" is snapped to alpha by
+    // reconcileSoundsToMode (and aliased to alpha in AudioMath.getCarrierAndBeat as a backstop).
+    static let focusBinaurals = ["alpha", "beta", "gamma"]
 
     @Published var focusMode: Bool {
         didSet {
@@ -267,6 +332,9 @@ final class AudioEngine: ObservableObject {
             reconcileSoundsToMode()
             // If the limiter follows the mode, update it (Sleep = on, Focus = off).
             applyLimiterForMode()
+            // Apple Music is Focus-only: leaving Focus stops it and reverts the session to
+            // exclusive playback so Sleep's all-night behavior (and the limiter) is unaffected.
+            if !focusMode { stopAppleMusic() }
         }
     }
 
@@ -276,8 +344,10 @@ final class AudioEngine: ObservableObject {
     func reconcileSoundsToMode() {
         let noises = focusMode ? Self.focusNoises : Self.sleepNoises
         let binaurals = focusMode ? Self.focusBinaurals : Self.sleepBinaurals
-        if !noises.contains(noiseType) { noiseType = noises.first! }
-        if !binaurals.contains(binauralPreset) { binauralPreset = binaurals.first! }
+        // Palettes are static and non-empty today, but never crash the all-night path over it:
+        // fall back to known-good defaults if a palette is ever accidentally emptied.
+        if !noises.contains(noiseType) { noiseType = noises.first ?? "brown" }
+        if !binaurals.contains(binauralPreset) { binauralPreset = binaurals.first ?? "delta" }
         // Drop any extra layer whose sound isn't in the new mode's palette, so a cross-mode layer
         // can't leak across (same rule the primary noise follows above).
         let filtered = extraLayers.filter { noises.contains($0.type) }
@@ -296,10 +366,13 @@ final class AudioEngine: ObservableObject {
     private func syncAllVolumes() {
         let masterMult = isMuted ? 0.0 : masterVolume
         // Master is a fast, per-sample-smoothed multiplier; the timer fade is the slow
-        // ramp. Keep them separate so the master slider responds immediately.
-        genEngine.setMaster(masterMult)
+        // ramp. Keep them separate so the master slider responds immediately. The bed (noise +
+        // binaural) is additionally ducked under Apple Music — `appleMusicDuck` rides through the
+        // master multiplier, so it gets the same per-sample smoothing (a gentle dip/rise, not a
+        // jump, when music starts/stops). The podcast isn't ducked: it's paused while music plays.
+        genEngine.setMaster(masterMult * appleMusicDuck)
         genEngine.setFade(multiplier: fadeMultiplier)
-        podPlayer.setVolume(podVolume * masterMult * fadeMultiplier)
+        podPlayer.setVolume(AudioMath.perceptualGain(podVolume) * masterMult * fadeMultiplier)
     }
     
     init() {
@@ -311,7 +384,7 @@ final class AudioEngine: ObservableObject {
         if let data = UserDefaults.standard.data(forKey: "extraLayers"),
            let layers = try? JSONDecoder().decode([ExtraNoiseLayer].self, from: data) {
             self.extraLayers = layers.prefix(Self.maxExtraLayers).map {
-                ExtraNoiseLayer(id: $0.id, type: NoiseType.migrate($0.type), volume: $0.volume)
+                ExtraNoiseLayer(id: $0.id, type: NoiseType.migrate($0.type), volume: $0.volume, muted: $0.muted)
             }
         }
         self.binauralPreset = UserDefaults.standard.string(forKey: "binauralPreset") ?? "delta"
@@ -357,6 +430,14 @@ final class AudioEngine: ObservableObject {
         //     Auto-Play / Shuffle toggles) observe it directly.
         //   - mixStore (user-action): HomeView (lastMix) + MixDrawer (savedPresets) observe it.
         pomodoro.chimeFn = { [weak self] in self?.chime.play() }
+        // FOCUS-MODE-SPEC R6: breaks *feel* different — the ambient bed dips to ~70% during a
+        // rest phase and restores on work/stop. Rides the sleep-timer fade multiplier, which
+        // is free here (the two timers are mutually exclusive by mode), so the change gets the
+        // same smooth per-sample ramp as the timer fade.
+        pomodoro.phaseChangedFn = { [weak self] phase, running in
+            guard let self else { return }
+            self.fadeMultiplier = (running && phase == .rest) ? 0.7 : 1.0
+        }
 
         // PlaybackSettings holds the values + persistence; these callbacks apply each change to the
         // live audio path (the side-effects that used to live in the engine's @Published didSets).
@@ -378,6 +459,29 @@ final class AudioEngine: ObservableObject {
         }
         sleepTimer.stopAllFn = { [weak self] in
             self?.stopAll()
+        }
+        // Ambient tail: at expiry the podcast pauses (keeping episode + position for "Resume
+        // Last Night" — saveLastMix captures a loaded-but-paused episode) and the bed plays on
+        // for the configured span, continuing the fade. See SleepTimerService.beginTail().
+        sleepTimer.stopPodcastFn = { [weak self] in
+            // The tail deliberately silences the podcast for the night — a call ending after
+            // the handoff must not resurrect it (see podWasPlayingBeforeInterruption).
+            self?.podWasPlayingBeforeInterruption = false
+            self?.podPlayer.pause()
+        }
+        sleepTimer.tailEligibleFn = { [weak self] in
+            guard let self else { return false }
+            // The tail needs an ambient bed AND a podcast in tonight's mix — but not a
+            // *still-playing* one: requiring `isPodPlaying` at the exact expiry moment meant
+            // an episode that happened to end a couple of minutes early cancelled the
+            // configured tail and hard-stopped the bed. `hasLoadedEpisode` survives the
+            // episode ending (the player is kept), while still excluding pure-bed nights —
+            // whose timers should stop when the user said stop, not gain a near-silent
+            // 15–60 min zombie tail. (`stopPodcastFn` is a pause — a no-op when idle.)
+            return self.hasLoadedEpisode && (self.noiseOn || self.binauralOn)
+        }
+        sleepTimer.ambientTailFn = {
+            Double(UserDefaults.standard.integer(forKey: "ambientTailMinutes")) * 60.0
         }
         sleepTimer.updateFadeMultFn = { [weak self] mult in
             self?.fadeMultiplier = mult
@@ -440,10 +544,12 @@ final class AudioEngine: ObservableObject {
             DispatchQueue.main.async { self?.playbackNote = note }
         }
         
-        podPlayer.onQueueAdvance = { [weak self] finishedEpId in
+        podPlayer.onQueueAdvance = { [weak self] finishedEpId, didFinish in
             DispatchQueue.main.async {
                 guard let self = self else { return }
-                if let id = finishedEpId {
+                // Only a natural end marks the episode played. A failed / stalled-lost stream
+                // must NOT be recorded as heard (it would vanish under "hide finished episodes").
+                if didFinish, let id = finishedEpId {
                     self.queueManager.markFinished(id)
                 }
                 // End-of-episode sleep timer: stop everything when this episode ends rather than
@@ -451,6 +557,15 @@ final class AudioEngine: ObservableObject {
                 // natural end; this covers the exact boundary if the last tick missed it.)
                 if self.sleepTimer.isEndOfEpisode {
                     self.stopAll()
+                    return
+                }
+                // Sleep-aware hold: with a sleep timer running you're presumably asleep — burning
+                // through the queue marks episodes you never heard as finished. When the option
+                // is on, finish the current episode, tidy the queue (head drops, next is cued for
+                // morning), and let the ambient bed carry the rest of the night.
+                if self.sleepTimer.timerRemaining > 0,
+                   UserDefaults.standard.bool(forKey: "holdQueueDuringSleepTimer") {
+                    self.queueManager.advanceQueue(finishedEpId: finishedEpId, suppressAutoPlay: true)
                     return
                 }
                 self.queueManager.advanceQueue(finishedEpId: finishedEpId)
@@ -469,7 +584,24 @@ final class AudioEngine: ObservableObject {
         podPlayer.backgroundTick = { [weak self] in
             self?.sleepTimer.backgroundTick()
         }
-        
+
+        // Apple Music (Focus-only). Republish the system player's coarse state and yield the
+        // lock-screen now-playing info to MusicKit while it's playing (one transport owner).
+        appleMusic.onPlaybackStateChanged = { [weak self] playing in
+            guard let self else { return }
+            self.appleMusicOn = playing
+            self.podPlayer.suppressNowPlaying = playing
+            // When the music stops on its own (track list ended, user paused from the lock screen),
+            // drop `.mixWithOthers` so the app returns to exclusive playback.
+            if !playing { self.setAppleMusicMixing(false) }
+        }
+        appleMusic.onNowPlayingChanged = { [weak self] title, _ in
+            self?.appleMusicTitle = title
+        }
+        appleMusic.onNote = { [weak self] note in
+            DispatchQueue.main.async { self?.playbackNote = note }
+        }
+
         // Audio-session plumbing is owned by AudioSessionController (Slice A3). It forwards
         // each event here via closures, hopping to the main queue first (AVAudioSession delivers
         // these on an arbitrary system thread) so the handlers can safely touch @Published state
@@ -549,7 +681,7 @@ final class AudioEngine: ObservableObject {
 
     private func syncGenEngine() {
         genEngine.setNoiseLayers(buildNoiseLayers(), on: noiseOn)
-        genEngine.setBinaural(on: binauralOn, volume: binVolume, preset: binauralPreset)
+        genEngine.setBinaural(on: binauralOn, volume: AudioMath.perceptualGain(binVolume), preset: binauralPreset)
         syncBeatMode()
         updateEnginePower()
     }
@@ -557,9 +689,12 @@ final class AudioEngine: ObservableObject {
     /// The full ordered noise stack handed to the engine: the primary noise (layer 0) plus any
     /// extra layers (capped). The engine silences everything when `noiseOn` is false.
     private func buildNoiseLayers() -> [(type: String, volume: Double)] {
-        var layers: [(type: String, volume: Double)] = [(noiseType, noiseVolume)]
+        // Volumes pass through the perceptual taper here — the single point where slider
+        // positions become engine gains. Muted extra layers keep their slot (type + volume
+        // preserved for un-mute) at gain 0.
+        var layers: [(type: String, volume: Double)] = [(noiseType, AudioMath.perceptualGain(noiseVolume))]
         for l in extraLayers.prefix(Self.maxExtraLayers) {
-            layers.append((l.type, l.volume))
+            layers.append((l.type, (l.muted ?? false) ? 0.0 : AudioMath.perceptualGain(l.volume)))
         }
         return layers
     }
@@ -587,6 +722,13 @@ final class AudioEngine: ObservableObject {
     func setExtraLayerVolume(_ id: String, _ volume: Double) {
         guard let i = extraLayers.firstIndex(where: { $0.id == id }) else { return }
         extraLayers[i].volume = volume
+    }
+
+    /// Mute/un-mute an extra layer in place — the layer (and its volume) survives, unlike
+    /// `removeExtraLayer`. The engine keeps the slot at gain 0, so un-muting declicks back in.
+    func setExtraLayerMuted(_ id: String, _ muted: Bool) {
+        guard let i = extraLayers.firstIndex(where: { $0.id == id }) else { return }
+        extraLayers[i].muted = muted
     }
 
     private var suspendWorkItem: DispatchWorkItem?
@@ -620,6 +762,63 @@ final class AudioEngine: ObservableObject {
     func togglePodcast() {
         if isPodPlaying { podPlayer.pause() } else { resumePodcast() }
     }
+
+    // MARK: Apple Music (Focus-only parallel source)
+
+    /// Ask for Apple Music authorization (prompts on first use); for the picker's gating.
+    func ensureAppleMusicAuthorized() async -> Bool {
+        await appleMusic.ensureAuthorized()
+    }
+
+    /// Catalog search for the picker UI.
+    func searchAppleMusic(_ term: String) async -> MusicCatalogSearchResponse? {
+        await appleMusic.search(term)
+    }
+
+    /// Begin (or replace) the Apple Music queue with a chosen item and play it. Authorizes first,
+    /// pauses any podcast (one spoken/music transport at a time), and layers `.mixWithOthers` onto
+    /// the session so our activation doesn't stop MusicKit's player.
+    func startAppleMusic<Item: PlayableMusicItem>(_ item: Item) {
+        Task { @MainActor in
+            guard await appleMusic.ensureAuthorized() else { return }
+            if isPodPlaying { podPlayer.pause() }
+            setAppleMusicMixing(true)
+            await appleMusic.play(item)
+        }
+    }
+
+    /// Toggle the existing Apple Music selection (no-op if nothing chosen yet).
+    func toggleAppleMusic() {
+        Task { @MainActor in
+            if appleMusic.isPlaying {
+                appleMusic.pause()
+            } else {
+                guard appleMusic.hasSelection else { return }
+                if isPodPlaying { podPlayer.pause() }
+                setAppleMusicMixing(true)
+                await appleMusic.resume()
+            }
+        }
+    }
+
+    /// Stop Apple Music and revert the session to exclusive playback. Safe to call when idle.
+    private func stopAppleMusic() {
+        appleMusic.stop()
+        appleMusicOn = false
+        podPlayer.suppressNowPlaying = false
+        setAppleMusicMixing(false)
+    }
+
+    /// Add/remove `.mixWithOthers` and re-assert the category + activation. `.mixWithOthers` is on
+    /// ONLY while Apple Music is the active Focus source; the rest of the time the app keeps
+    /// exclusive `.playback` (the all-night Sleep default).
+    private func setAppleMusicMixing(_ on: Bool) {
+        let desired: AVAudioSession.CategoryOptions = on ? [.mixWithOthers] : []
+        guard AudioSessionConfig.options != desired else { return }
+        AudioSessionConfig.options = desired
+        AudioSessionConfig.applyCategory()
+        Log.activateAudioSession("apple music mixing=\(on)")
+    }
     
     /// First-run "show me the magic" start: bring up a layered noise + binaural bed (using the
     /// stored defaults — brown + delta for Sleep) so the very first tap demonstrates that the app
@@ -649,9 +848,13 @@ final class AudioEngine: ObservableObject {
     func pauseAll() {
         isMasterPauseTransition = true
         saveLastMix()
+        // An explicit pause between interruption .began/.ended must stick — without this,
+        // the .ended resume would override the user's pause (see the flag's doc comment).
+        podWasPlayingBeforeInterruption = false
         noiseOn = false
         binauralOn = false
         if isPodPlaying { podPlayer.pause() }
+        if appleMusic.isPlaying { appleMusic.pause() }
         isMasterPauseTransition = false
     }
     
@@ -682,7 +885,7 @@ final class AudioEngine: ObservableObject {
         self.noiseType = NoiseType.migrate(mix.noiseType)
         self.noiseVolume = mix.noiseVolume
         self.extraLayers = (mix.extraLayers ?? []).prefix(Self.maxExtraLayers).map {
-            ExtraNoiseLayer(id: $0.id, type: NoiseType.migrate($0.type), volume: $0.volume)
+            ExtraNoiseLayer(id: $0.id, type: NoiseType.migrate($0.type), volume: $0.volume, muted: $0.muted)
         }
         self.noiseOn = mix.noiseOn
         
@@ -691,7 +894,13 @@ final class AudioEngine: ObservableObject {
         self.binauralOn = mix.binauralOn
         
         self.podVolume = mix.podVolume
-        
+
+        // NOTE: resume deliberately does NOT reconcileSoundsToMode() — resume must faithfully
+        // restore exactly what was playing (a tested contract), and a SavedMix carries no mode,
+        // so snapping to the *current* mode would corrupt a mix made for the other one. A truly
+        // mode-aware resume needs a `mode` field on SavedMix (a backward-compatible schema add);
+        // until then, restoring the sound as-saved is the honest behavior.
+
         if let urlStr = mix.podcastUrl {
             // Seek straight to the snapshot's stored position; fall back to the saved-position map
             // (resume: true) for older snapshots that predate podcastPosition.
@@ -711,6 +920,18 @@ final class AudioEngine: ObservableObject {
         }
         if binauralOn { parts.append(binauralPreset.capitalized) }
         return parts.isEmpty ? "My Mix" : parts.joined(separator: " + ")
+    }
+
+    /// True if saving under `name` would overwrite an existing preset in the current mode —
+    /// using the same trim + empty→`defaultPresetName()` fallback and case-insensitive match that
+    /// `savePreset` uses, so the UI's "replace existing?" check agrees with what save actually does.
+    func presetWouldOverwrite(named name: String) -> Bool {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let finalName = trimmed.isEmpty ? defaultPresetName() : trimmed
+        let mode = focusMode ? "focus" : "sleep"
+        return mixStore.savedPresets.contains {
+            $0.mode == mode && $0.name.caseInsensitiveCompare(finalName) == .orderedSame
+        }
     }
 
     /// Save the current ambient recipe as a named preset for this mode. A same-name preset in
@@ -742,7 +963,7 @@ final class AudioEngine: ObservableObject {
         noiseVolume = p.noiseVolume
         noiseOn = p.noiseOn
         extraLayers = (p.extraLayers ?? []).prefix(Self.maxExtraLayers).map {
-            ExtraNoiseLayer(id: $0.id, type: NoiseType.migrate($0.type), volume: $0.volume)
+            ExtraNoiseLayer(id: $0.id, type: NoiseType.migrate($0.type), volume: $0.volume, muted: $0.muted)
         }
 
         binauralPreset = p.binauralPreset
@@ -766,9 +987,15 @@ final class AudioEngine: ObservableObject {
 
     func stopAll() {
         saveLastMix()
+        // An explicit stop between interruption .began/.ended must stick: PodcastPlayer.stop()
+        // keeps the player, so a stale captured flag would let the .ended resume restart a
+        // podcast the user (or the timer's terminal stop) deliberately silenced — full volume,
+        // no timer, all night. Invalidate the capture on every deliberate stop.
+        podWasPlayingBeforeInterruption = false
         noiseOn = false
         binauralOn = false
         podPlayer.stop()
+        stopAppleMusic()
         sleepTimer.cancelTimer()
     }
 
@@ -787,7 +1014,7 @@ final class AudioEngine: ObservableObject {
         if let data = d.data(forKey: "extraLayers"),
            let layers = try? JSONDecoder().decode([ExtraNoiseLayer].self, from: data) {
             extraLayers = layers.prefix(Self.maxExtraLayers).map {
-                ExtraNoiseLayer(id: $0.id, type: NoiseType.migrate($0.type), volume: $0.volume)
+                ExtraNoiseLayer(id: $0.id, type: NoiseType.migrate($0.type), volume: $0.volume, muted: $0.muted)
             }
         } else {
             extraLayers = []
@@ -875,15 +1102,29 @@ final class AudioEngine: ObservableObject {
     
     // MARK: - Queue Delegation
     // MARK: Interruption
+
+    /// Whether the podcast was playing when the interruption began. `.began`'s `pause()` flips
+    /// `isPodPlaying` to false, so checking the live flag at `.ended` always read "wasn't
+    /// playing" — a phone call or alarm at bedtime permanently silenced the podcast for the
+    /// night. Captured at `.began`, consumed at `.ended`. OR-ed on capture so a nested second
+    /// `.began` (which sees the already-paused state) can't erase the pending resume.
+    /// Main-queue only (AudioSessionController hops every forward to main).
+    private var podWasPlayingBeforeInterruption = false
+
     private func handleInterruption(note: Notification) {
         guard let typeValue = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
               let type = AVAudioSession.InterruptionType(rawValue: typeValue) else { return }
-        
+
         if type == .began {
+            Log.timer.notice("interruption began (podWasPlaying=\(self.isPodPlaying, privacy: .public))")
+            podWasPlayingBeforeInterruption = podWasPlayingBeforeInterruption || isPodPlaying
             genEngine.handleInterruption(shouldResume: false)
             if isPodPlaying { podPlayer.pause() }
         } else if type == .ended {
-            guard let optionsValue = note.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt else { return }
+            // A missing options key must not abort recovery: the old early-return here skipped
+            // the suspend-cancel, the session reactivation, AND the engine restart — a silent
+            // dead bed for the rest of the night. Default to "no options" and recover anyway.
+            let optionsValue = note.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0
             let options = AVAudioSession.InterruptionOptions(rawValue: optionsValue)
 
             // A power-save suspend scheduled just before the call must not fire after we
@@ -893,22 +1134,27 @@ final class AudioEngine: ObservableObject {
 
             // Reactivate the session before resuming whichever source was active. Previously
             // only the generative branch did this, so a podcast-only user got silence.
-            try? AVAudioSession.sharedInstance().setActive(true)
+            Log.activateAudioSession("post-interruption")
 
             if noiseOn || binauralOn {
                 genEngine.handleInterruption(shouldResume: true)
             }
 
-            if options.contains(.shouldResume) {
-                if isPodPlaying { podPlayer.resume() }
+            let willResumePod = options.contains(.shouldResume) && podWasPlayingBeforeInterruption
+            Log.timer.notice("interruption ended (shouldResume=\(options.contains(.shouldResume), privacy: .public), resumingPod=\(willResumePod, privacy: .public))")
+            if willResumePod {
+                podPlayer.resume()
             }
+            podWasPlayingBeforeInterruption = false
         }
     }
     
     private func handleRouteChange(note: Notification) {
         guard let reasonValue = note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt,
               let reason = AVAudioSession.RouteChangeReason(rawValue: reasonValue) else { return }
-        
+
+        Log.timer.notice("route change: reason=\(reasonValue, privacy: .public) (headphones-gone=\(reason == .oldDeviceUnavailable, privacy: .public))")
+
         // Headphones unplugged: follow the HIG for spoken media — pause the podcast so a
         // voice doesn't suddenly play out the phone speaker (waking the room). Keep the
         // ambient noise bed going — it's a calibrated, limiter-bounded background you fall
@@ -917,6 +1163,10 @@ final class AudioEngine: ObservableObject {
         // actually works on a speaker.
         if reason == .oldDeviceUnavailable {
             if isPodPlaying { podPlayer.pause() }
+            // Headphones went away — also void a pending post-interruption resume, or a call
+            // during which the AirPods died would resume the spoken podcast on the SPEAKER
+            // (the exact wake-the-room case this pause exists to prevent).
+            podWasPlayingBeforeInterruption = false
         }
 
         // Any route transition re-picks true-binaural (headphones) vs isochronic (speaker).
@@ -932,5 +1182,12 @@ final class AudioEngine: ObservableObject {
 
     private func handleAppBackground() {
         podPlayer.flushPositionsToDisk()
+        // Capture "Last Night" now, not only on pause/stop: an overnight jetsam while still
+        // playing would otherwise leave a stale resume snapshot. saveLast is a synchronous
+        // UserDefaults write, so it's durable by the time we suspend.
+        saveLastMix()
+        // Force any deferred mixes.json write to run — a preset saved in the last half-second
+        // must not be lost if the app is jettisoned overnight.
+        mixStore.flushPendingWrites()
     }
 }

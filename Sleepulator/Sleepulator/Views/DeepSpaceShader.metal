@@ -16,8 +16,13 @@ using namespace metal;
 // trick, reimplemented here, no code copied). Clean to ship with credit to the
 // techniques.
 //
-// Driven from SwiftUI `.colorEffect`. Swift owns time, size, nightProgress,
-// audioLevel, gyro; everything else is a `constant` below (edit + rebuild).
+// Driven from SwiftUI `.colorEffect`. Swift owns phase, time, size,
+// nightProgress, audioLevel, gyro; everything else is a `constant` below
+// (edit + rebuild). `phase` is night-slowed integrated time for motion terms,
+// `time` is monotonic elapsed for cyclic terms (twinkle, breath, the comet
+// cycle, dither) — see the time contract in AuroraShader.metal / SceneClock in
+// ShaderBackdrop.swift. COMET_SEC/COMET_WIN are mirrored in DeepSpaceMetalView
+// (the frozen-frame comet dodge) — keep them in sync.
 // ============================================================================
 
 namespace neb {
@@ -62,10 +67,13 @@ inline float3 palette(float d) {
 }
 
 // One parallax star tier: a scrolling, gyro-shifted grid where rare cells hold a twinkling star.
-inline float3 starTier(float2 uv, float time, float depth, float2 gyro, float thresh) {
+// Positional drift rides `drift` (the night-slowed phase — the tiers settle with the nebula, and
+// the frozen-frame comet dodge can shift only twinkle pose, never star positions); twinkle rides
+// `twinkle` (monotonic elapsed) so its frequency holds through the night.
+inline float3 starTier(float2 uv, float drift, float twinkle, float depth, float2 gyro, float thresh) {
     float2 p = uv;
     p += gyro * (0.01 + depth * 0.04);          // nearer tiers shift more with tilt
-    p.y += time * (0.002 + depth * 0.004);       // a slow downward drift
+    p.y += drift * (0.002 + depth * 0.004);      // a slow downward drift
     float2 g = p * (60.0 + depth * 120.0);
     float2 id = floor(g);
     float h = hash21(id + depth * 17.0);
@@ -73,7 +81,7 @@ inline float3 starTier(float2 uv, float time, float depth, float2 gyro, float th
     float2 st = fract(g) - 0.5;
     float d = length(st);
     float core = smoothstep(0.18, 0.0, d);
-    float tw = 0.5 + 0.5 * sin(time * (1.0 + h * 2.0) + h * 100.0);
+    float tw = 0.5 + 0.5 * sin(twinkle * (1.0 + h * 2.0) + h * 100.0);
     float3 tint = mix(float3(0.75, 0.82, 1.0), float3(1.0, 0.9, 0.8), fract(h * 7.0));
     return tint * core * tw * (0.4 + depth * 0.8);
 }
@@ -83,7 +91,7 @@ inline float3 starTier(float2 uv, float time, float depth, float2 gyro, float th
 // ----------------------------------------------------------------------------------
 [[ stitchable ]]
 half4 nebulaField(float2 pos, half4 color,
-                  float time, float2 size,
+                  float phase, float time, float2 size,
                   float night, float audio, float2 gyro) {
     using namespace neb;
 
@@ -93,7 +101,7 @@ half4 nebulaField(float2 pos, half4 color,
     float p = clamp(night, 0.0, 1.0);
     float a = clamp(audio, 0.0, 1.0);
     float dim = (1.0 - 0.45 * p);
-    float t = time * DRIFT * (1.0 - 0.4 * p);
+    float t = phase * DRIFT;                     // drift rate slowdown lives in phase
 
     float3 col = float3(0.004, 0.005, 0.012);     // deep space black, faint blue lift
 
@@ -115,14 +123,17 @@ half4 nebulaField(float2 pos, half4 color,
     col *= breath;
 
     // --- parallax star field (three tiers: far/dim → near/bright) ---
-    col += starTier(auv, time, 0.0, gyro, 0.985);
-    col += starTier(auv, time, 0.5, gyro, 0.990);
-    col += starTier(auv, time, 1.0, gyro, 0.994);
+    col += starTier(auv, phase, time, 0.0, gyro, 0.985);
+    col += starTier(auv, phase, time, 0.5, gyro, 0.990);
+    col += starTier(auv, phase, time, 1.0, gyro, 0.994);
 
     // --- a rare comet, sweeping diagonally every COMET_SEC ---
+    // Transients sleep too: the comet fades out as the night deepens and is gone past
+    // p ≈ 0.75 — a bright streak at 4am is a wake risk, not a delight.
     float idx = floor(time / COMET_SEC);
     float ph  = fract(time / COMET_SEC);
     float win = smoothstep(0.0, 0.02, ph) * smoothstep(COMET_WIN, COMET_WIN - 0.05, ph);
+    win *= 1.0 - smoothstep(0.35, 0.75, p);
     if (win > 0.001) {
         float seg = ph / COMET_WIN;
         float2 s = float2(-0.15 * aspect, 0.12 + hash21(float2(idx, 1.0)) * 0.30);
@@ -137,8 +148,11 @@ half4 nebulaField(float2 pos, half4 color,
         col += float3(0.85, 0.92, 1.0) * (tail * 0.6 + core) * win * dim;
     }
 
-    // Filmic roll-off + hash dither (kills OLED banding).
+    // Filmic roll-off + hash dither (kills OLED banding). Wrap `time` small before the hash: hours
+    // into a session `time` reaches tens of thousands and the hash's internal fract() overflows
+    // float precision, freezing the dither and letting banding return. 64 s period, invisible
+    // because the dither is pure noise. (See AuroraShader.metal for the full rationale.)
     col = col / (col + 0.9);
-    col += (hash21(pos + time) - 0.5) / 255.0;
+    col += (hash21(pos + fmod(time, 64.0)) - 0.5) / 255.0;
     return half4(half3(saturate(col)), 1.0h);
 }

@@ -3,170 +3,246 @@
 using namespace metal;
 
 // ============================================================================
-// Rain on Glass — Depth Edition · running-drops + lens layer effect
+// Rain on Glass — Depth Edition · droplet-as-lens layer effect (v2)
 // ----------------------------------------------------------------------------
 // Plan of record: RAIN-ON-GLASS-DEPTH-SPEC.md (§6.0 / §6.1 / §6.2).
 //
 // Attached (via SwiftUI `.layerEffect`) to a STATIC composited "far world":
-// near-black gradient + a bright, soft bokeh field + a low band of distant
-// windows (see RainGlassDepthView). That single layer is all the shader may
-// sample (§6.0). The whole glass is alive: a dense scrolling grid streams a
-// running drop down EVERY column, each with a trail + scattered droplets, over
-// a fine animated mist (no "weirdly static" beads).
+// near-black gradient + bright bokeh + a low band of distant windows (see
+// RainGlassDepthView). That single layer is all the shader may sample (§6.0).
 //
 // -- ATTRIBUTION / LICENSE ---------------------------------------------------
-// The running-drops technique is adapted (GLSL -> Metal) from Martijn Steinrucken
-// (BigWIngs / "The Art of Code"), "Heartfelt" -- https://www.shadertoy.com/view/ltffzl
-// (c) 2017 Martijn Steinrucken, CC BY-NC-SA 3.0. This Metal port is a derivative
-// work and inherits that license: fine for THIS personal, non-commercial app, with
-// credit. BEFORE PUBLISHING / MONETIZING Sleepulator, either get the author's
-// permission (countfrolic@gmail.com / @The_ArtOfCode -- he has a public tutorial on
-// this effect) or clean-room reimplement the idea. See RAIN-ON-GLASS-DEPTH-SPEC.md.
-// ----------------------------------------------------------------------------
+// Original implementation (2026-07): replaces the earlier port of a CC BY-NC-SA
+// Shadertoy ("Heartfelt"), written so the app carries no share-alike baggage.
+// Built from the same public-domain construction kit as the repo's other
+// shaders (hash21 / value-noise style hashing; see AuroraShader.metal). The
+// drop lifecycle, lens model, wake model, and all constants are this file's
+// own. NOTE for the log: the author of this rewrite had read the old port —
+// if lawyer-grade clean-room provenance ever matters, have someone diff the
+// two and confirm no expression carried over (the structure is deliberately
+// different: per-cycle reseeded drops vs a scrolled grid; a true inverted
+// lens vs slope-smear; an analytic spherical-cap normal vs 3-tap gradient).
 //
-// Depth comes from two cues, no second texture and no per-frame blur pass:
-//   1. Refraction — the drop field's slope (∇mask) bends the far-world sample,
-//      so the bright lights smear/flip through the drops (§6.2 the lens).
-//   2. Differential focus — dry glass is fogged + dim, drops are CLEAR windows
-//      onto the far world; the eye reads that focus gap as distance (§6.1 DoF).
+// What sells the depth (§6.1 / §6.2), in order:
+//   1. THE LENS — inside each near drop the far world appears INVERTED and
+//      compressed (a water droplet is a strong wide-angle lens). This is the
+//      photographed look; the old slope-smear never inverted anything.
+//   2. FOCUS GAP — dry glass shows a small 5-tap BLUR of the far world (plus
+//      dim + milk); drops are sharp. The eye reads sharp-inside-blurry as
+//      depth far better than dim-vs-bright.
+//   3. Wakes — a drop leaves a semi-clear drying streak with beads behind it.
 //
-// Swift owns the live values: time, size, gyro, and two master A/B uniforms —
-// `refraction` (0 = no bend, drops are just clear-vs-fog; 1 = full lens) and
-// `density` (static-mist amount). Everything else is a `constant` below — edit
-// + rebuild, no Swift change (§10 step 4).
+// Swift owns time, size, gyro, and the two A/B uniforms: `refraction`
+// (0 = clear flat beads, 1 = full lens) and `density` (mist amount). All else
+// is a `constant` below — edit + rebuild (§10 step 4).
+//
+// Precision: per-drop cycles use fract/floor of (time * rate) — at 8 h that's
+// O(10³), where float still has ~2e-4 of fract resolution: drops stay smooth
+// all night. Hash inputs are cell/cycle indices (small integers), so hashing
+// never degrades the way an unwrapped continuous coordinate would.
 // ============================================================================
 
-namespace rg {
+namespace rgv2 {
 
 // ---- tunables (edit + rebuild) ---------------------------------------------------
-constant float RAIN_SPEED  = 0.14;   // overall fall speed (smaller = calmer)
-constant float DROP_SCALE  = 2.1;    // >1 = smaller, denser drops (fixes "massive bubbles")
-constant float REFRACT     = 0.32;   // lens displacement strength (× the refraction uniform)
-constant float SPEC_SCALE  = 45.0;   // catch-light sensitivity to drop slope
-constant float SPEC_BRIGHT = 0.16;   // catch-light brightness (low → no bright combs)
-constant float FOG_DIM     = 0.55;   // how dark the dry (fogged) glass is vs a clear drop
-constant float FOG_MILK    = 0.012;  // faint milky lift on the fogged glass (low → stays dark)
-constant float PARALLAX_UV = 0.02;   // max gyro far-world shift, uv units (held-only bonus)
-constant float STATIC_AMT  = 0.40;   // baseline static-mist amount (× the density uniform)
-constant float TRAIL_SHEEN = 0.03;   // faint wet sheen along trails
+constant float FALL        = 0.055;  // base fall rate, cycles/s (smaller = calmer rain)
+constant float COLW        = 0.075;  // column width, uv units → ~6 near lanes on a portrait phone
+constant float R_DROP      = 0.030;  // near-layer drop radius, uv units
+constant float LENS_VIEW   = 0.20;   // half-width of world seen through a drop, uv units.
+                                     // MUST stay <= maxSampleOffset/size.y (Swift side: 220px).
+constant float RIM_BEND    = 0.10;   // meniscus refraction at the drop rim, uv units
+constant float FOG_DIM     = 0.52;   // how dark the dry (fogged) glass is vs a clear drop
+constant float FOG_MILK    = 0.014;  // faint milky lift on the fogged glass
+constant float BLUR_PX     = 2.6;    // fog blur tap radius, px — the §6.1 focus gap
+constant float WAKE_LEN    = 0.38;   // how far above a drop its drying streak reaches, uv
+constant float WAKE_CLEAR  = 0.42;   // how much of the sharp world shows through a fresh wake
+constant float MIST_CELLS  = 42.0;   // condensation grid density
+constant float MIST_AMT    = 0.55;   // mist clarity contribution (× the density uniform)
+constant float SPEC_POW    = 3.0;    // catch-light falloff (higher = tighter glints)
+constant float SPEC_BRIGHT = 0.20;   // catch-light brightness
+constant float PARALLAX_UV = 0.02;   // max gyro far-world shift (held-in-hand bonus)
 
-// -- hashing (Heartfelt's) ---------------------------------------------------------
-inline float  N(float x) { return fract(sin(x * 12.9898) * 43758.5453); }
-inline float3 N13(float p) {
-    float3 p3 = fract(float3(p, p, p) * float3(.1031, .11369, .13787));
-    p3 += dot(p3, p3.yzx + 19.19);
-    return fract(float3((p3.x + p3.y) * p3.z, (p3.x + p3.z) * p3.y, (p3.y + p3.z) * p3.x));
-}
-inline float saw(float b, float t) { return smoothstep(0.0, b, t) * smoothstep(1.0, b, t); }
-
-// One layer of running drops over an aspect-square uv (uv * size.y == pos).
-// Returns (dropMask, trailMask): a main teardrop falling per grid cell, scattered
-// droplets along its wake, and the trail behind it.
-inline float2 dropLayer(float2 uv, float t) {
-    float2 UV = uv;                          // pre-scroll, for the wiggle + droplet phase
-    uv.y += t * 0.75;                        // the whole field scrolls down
-    float2 a = float2(6.0, 1.0);
-    float2 grid = a * 2.0;
-    float2 id = floor(uv * grid);
-    uv.y += N(id.x);                         // stagger each column
-    id = floor(uv * grid);
-    float3 n = N13(id.x * 35.2 + id.y * 2376.1);
-    float2 st = fract(uv * grid) - float2(0.5, 0.0);
-
-    float x = n.x - 0.5;
-    float y = UV.y * 20.0;
-    float wiggle = sin(y + sin(y));
-    x += wiggle * (0.5 - abs(x)) * (n.z - 0.5);
-    x *= 0.7;
-
-    float ti = fract(t + n.z);
-    y = (saw(0.85, ti) - 0.5) * 0.9 + 0.5;   // the drop's falling position in-cell
-    float2 p = float2(x, y);
-
-    float d = length((st - p) * a.yx);       // squashed → a vertical teardrop
-    float mainDrop = smoothstep(0.4, 0.0, d);
-
-    float r = sqrt(smoothstep(1.0, y, st.y));
-    float cd = abs(st.x - x);
-    float trail = smoothstep(0.23 * r, 0.15 * r * r, cd);
-    float trailFront = smoothstep(-0.02, 0.02, st.y - y);
-    trail *= trailFront * r * r;
-
-    float y2 = fract(UV.y * 10.0) + (st.y - 0.5);
-    float dd = length(st - float2(x, y2));
-    float droplets = smoothstep(0.3, 0.0, dd);
-
-    float m = mainDrop + droplets * r * trailFront;
-    return float2(m, trail);
+// House hash (same public construction as the repo's other shaders).
+inline float hash21(float2 p) {
+    p = fract(p * float2(123.34, 345.45));
+    p += dot(p, p + 34.345);
+    return fract(p.x * p.y);
 }
 
-// Fine static mist that fades in/out over time (so nothing reads as frozen).
-inline float staticDrops(float2 uv, float t) {
-    uv *= 40.0;
-    float2 id = floor(uv);
-    uv = fract(uv) - 0.5;
-    float3 n = N13(id.x * 107.45 + id.y * 3543.654);
-    float2 p = (n.xy - 0.5) * 0.7;
-    float d = length(uv - p);
-    float fade = saw(0.025, fract(t + n.z));
-    return smoothstep(0.3, 0.0, d) * fract(n.z * 10.0) * fade;
+// Everything the composite needs to know about the nearest running drop.
+struct Drops {
+    float  core;     // 1 inside the drop body (lens region), soft edge
+    float  rim;      // rim weight (meniscus band, where the bend lives)
+    float2 nrm;      // spherical-cap surface normal, xy projection
+    float2 center;   // drop centre, uv
+    float  radius;   // drop radius, uv
+    float  wake;     // drying-streak weight above the drop
+};
+
+// The running-drop layer. Columns of independent drops; each fall re-seeds its
+// x-offset, size, and meander from (column, cycle-index), so no two passes down
+// the pane repeat — the old port replayed the identical path every cycle.
+inline Drops dropLayer(float2 uv, float time) {
+    Drops o = { 0.0, 0.0, float2(0.0), float2(0.0), R_DROP, 0.0 };
+
+    float ci = floor(uv.x / COLW);              // column index
+    float cx = (ci + 0.5) * COLW;               // column centre
+
+    // Column personality (fixed): fall rate + phase.
+    float h1 = hash21(float2(ci, 3.7));
+    float h2 = hash21(float2(ci, 17.9));
+    float rate = FALL * (0.65 + 0.8 * h1);
+    float cyc  = time * rate + h2 * 9.0;
+    float k    = floor(cyc);                    // cycle index — reseeds each pass
+    float f    = fract(cyc);
+
+    // Per-cycle personality: some cycles are dry (no drop), the rest vary.
+    float r1 = hash21(float2(ci * 7.31, k));
+    float r2 = hash21(float2(ci * 3.17, k + 13.0));
+    float r3 = hash21(float2(ci * 9.73, k + 41.0));
+    float active = step(0.25, r1);              // ~75% of cycles carry a drop
+
+    // Fall path: eased (gravity), entering above the top edge and exiting below.
+    float y = (pow(f, 1.55) * 1.25 - 0.10);
+    // Meander: a gentle S-curve whose shape is re-seeded per cycle.
+    float mx = cx + (r2 - 0.5) * COLW * 0.55
+             + sin(y * (7.0 + r3 * 6.0) + r3 * 6.2831) * COLW * 0.16;
+
+    float r = R_DROP * (0.65 + 0.7 * r2);
+    float2 c = float2(mx, y);
+
+    // Slightly tall drop: squash x a touch so it reads as a running bead.
+    float2 d2 = (uv - c) * float2(1.15, 0.9);
+    float d = length(d2);
+
+    float body = smoothstep(r, r * 0.86, d) * active;          // soft-edged body
+    float q    = clamp(d / max(r, 1e-4), 0.0, 1.0);
+    float cap  = sqrt(max(0.0, 1.0 - q * q));                  // spherical-cap height
+    o.core   = body * smoothstep(0.95, 0.72, q);               // interior (lens)
+    o.rim    = body * (1.0 - smoothstep(0.95, 0.72, q));       // meniscus band
+    o.nrm    = (d > 1e-5 ? d2 / d : float2(0.0)) * (1.0 - cap); // strongest at the rim
+    o.center = c;
+    o.radius = r;
+
+    // Wake: a drying streak above the drop along the same meander path.
+    float above = y - uv.y;                                    // >0 where the drop passed
+    if (active > 0.5 && above > 0.0) {
+        float pathX = cx + (r2 - 0.5) * COLW * 0.55
+                    + sin(uv.y * (7.0 + r3 * 6.0) + r3 * 6.2831) * COLW * 0.16;
+        float lat = abs(uv.x - pathX);
+        float streak = smoothstep(r * 0.7, r * 0.25, lat)
+                     * smoothstep(WAKE_LEN, 0.02, above);      // dries with distance
+        // Beads left along the wake — small clarity dots that also catch light.
+        float bcell = floor(uv.y * 34.0);
+        float bh = hash21(float2(ci * 13.7 + k, bcell));
+        float bead = step(0.72, bh) * smoothstep(r * 0.5, r * 0.15, lat)
+                   * smoothstep(WAKE_LEN, 0.05, above);
+        // Fade the wake out over the last stretch of the cycle so it doesn't vanish in a
+        // visible pop when the cycle (and its per-cycle seeds) resets.
+        o.wake = clamp(streak * 0.7 + bead * 0.9, 0.0, 1.0) * (1.0 - smoothstep(0.88, 1.0, f));
+    }
+    return o;
 }
 
-// Combined drop "height" at a uv — running drops + mist. Also returns the trail.
-//
-// Two drop layers at different scales/speeds, with the second grid offset by a non-integer so
-// its columns never line up with the first. A single grid read as "geometric" (evenly spaced
-// columns marching down); interleaving a denser, faster, smaller-drop layer breaks that
-// regularity into something that scans as real rain, and the scale gap reads as near/far depth.
-inline float dropMask(float2 uv, float t, float density, thread float &trailOut) {
-    float2 c1 = dropLayer(uv, t);                                   // near: larger, slower drops
-    float2 c2 = dropLayer(uv * 1.85 + float2(4.3, 1.7), t * 1.27);  // far: smaller, faster, offset
-    trailOut = max(c1.y, c2.y);
-    float drops = c1.x + c2.x * 0.8;
-    return drops + staticDrops(uv, t) * STATIC_AMT * density;
+// Condensation mist: static micro-droplets that condense and evaporate on slow,
+// per-cell cycles — clarity specks, no lensing (too small to resolve an image).
+inline float mist(float2 uv, float time) {
+    float2 g  = uv * MIST_CELLS;
+    float2 id = floor(g);
+    float2 fp = fract(g) - 0.5;
+    float  h  = hash21(id);
+    float  hb = hash21(id + 57.0);
+    float2 p  = (float2(h, hb) - 0.5) * 0.6;
+    float  d  = length(fp - p);
+    // Slow condense→hold→evaporate cycle, phase-offset per cell.
+    float ph = fract(time * 0.045 + h * 11.0);
+    float life = smoothstep(0.00, 0.15, ph) * smoothstep(1.0, 0.55, ph);
+    return smoothstep(0.16, 0.03, d) * life * step(0.35, hb);
 }
 
-} // namespace rg
+} // namespace rgv2
 
 // ----------------------------------------------------------------------------------
 [[ stitchable ]]
+// `fogAmt` / `defocus` are the night reaction, computed on the Swift side by `DepthReactivity`
+// (F1) from `nightProgress`: as the night settles, the dry glass fogs (fogAmt 0 → 1) and the far
+// world defocuses further (defocus 1 → ~2.4). Motion slowdown is applied upstream via the host's
+// SceneClock rate, so `time` already arrives night-slowed — nothing to do for it here.
 half4 rainGlassLens(float2 pos, SwiftUI::Layer layer,
                     float time, float2 size, float2 gyro,
-                    float refraction, float density) {
-    using namespace rg;
+                    float refraction, float density,
+                    float fogAmt, float defocus) {
+    using namespace rgv2;
 
-    // Heartfelt assumes bottom-up Y (Shadertoy); `.layerEffect` is top-down, so flip
-    // into a bottom-up uv → drops FALL down. DROP_SCALE shrinks/densifies the field.
-    float2 uv = float2(pos.x, size.y - pos.y) / size.y;   // bottom-up, v in [0,1]
-    float t = time * RAIN_SPEED;
-    float2 duv = uv * DROP_SCALE;
+    float2 uv = pos / size.y;                    // top-down uv; v grows downward (drops fall +v)
+    float2 par = gyro * PARALLAX_UV;             // far-world parallax (0 on a nightstand)
 
-    // height field + its gradient (3 taps, no extra texture samples).
-    float trail = 0.0, tx = 0.0, ty = 0.0;
-    float e  = 1.0 / size.y;                    // ~1px in uv
-    float m  = dropMask(duv, t, density, trail);
-    float mx = dropMask((uv + float2(e, 0.0)) * DROP_SCALE, t, density, tx);
-    float my = dropMask((uv + float2(0.0, e)) * DROP_SCALE, t, density, ty);
-    float2 nrm = float2(mx - m, my - m);       // slope of the wet surface (∂mask/∂uv)
+    // Clamped layer tap helper coords (SwiftUI::Layer samples in pixels, top-down).
+    #define RG_SAMPLE(u) layer.sample(clamp((u) * size.y, float2(0.0), size)).rgb
 
-    // refraction: bend the far-world sample by the drop slope → the lens. Work in
-    // bottom-up uv, then flip the sample point back to real (top-down) pixels.
-    float2 sUV = uv - nrm * (REFRACT * refraction) + gyro * PARALLAX_UV;
-    float2 pbu = sUV * size.y;
-    float2 px = clamp(float2(pbu.x, size.y - pbu.y), float2(0.0), size);
-    half3 far = layer.sample(px).rgb;
+    // --- the wet surface -----------------------------------------------------------
+    // Near layer: full lens treatment. Far layer: smaller/faster, slope-bend only
+    // (cheaper, and far drops are too small to read an image through anyway).
+    Drops near = dropLayer(uv, time);
+    Drops far  = dropLayer(uv * 1.8 + float2(0.37, 0.0), time * 1.35);
+    float mistM = mist(uv, time) * MIST_AMT * density;
 
-    // differential focus: dry glass is fogged + dim, drops are clear windows.
-    half3 fog = far * half(FOG_DIM) + half(FOG_MILK);
-    float clarity = smoothstep(0.0, 0.18, m);
-    half3 rgb = mix(fog, far, half(clarity));
+    // --- far-world samples (the §6.1 focus gap) -------------------------------------
+    // Dry glass = blurred + dimmed + milky. Drops/wakes = progressively sharp.
+    // `defocus` widens the blur tap as the night deepens (1 = bedtime, ~2.4 = full night) — still
+    // the same 5 taps, only spread wider, so no new per-frame cost (the §6.2 battery trap).
+    float e = BLUR_PX / size.y * defocus;
+    half3 blurred = ( RG_SAMPLE(uv + par)
+                    + RG_SAMPLE(uv + par + float2( e,  e))
+                    + RG_SAMPLE(uv + par + float2(-e,  e))
+                    + RG_SAMPLE(uv + par + float2( e, -e))
+                    + RG_SAMPLE(uv + par + float2(-e, -e)) ) / 5.0h;
+    half3 sharp = RG_SAMPLE(uv + par);
 
-    // catch-light: the upper-left slope of each bead catches the light.
-    float spec = clamp((nrm.x + nrm.y) * SPEC_SCALE, 0.0, 1.0);
-    rgb += half3(half(spec * spec * clarity * SPEC_BRIGHT));
+    // Dry glass fogs up as the night settles: dimmer far world + a milkier lift (`fogAmt` 0 at
+    // bedtime → 1 at timer end). Drops/wakes below stay sharp — the fog is the *dry* glass.
+    half3 fog = blurred * half(FOG_DIM * (1.0 - 0.30 * fogAmt))
+              + half(FOG_MILK) + half(0.05 * fogAmt);
+    half3 rgb = fog;
 
-    // faint wet sheen along the trails.
-    rgb += half3(half(trail * TRAIL_SHEEN));
+    // Wake: recently wiped glass — part-way back to sharp, slightly dim (wet film).
+    rgb = mix(rgb, sharp * 0.9h, half(near.wake * WAKE_CLEAR));
 
+    // Mist specks: tiny clear points.
+    rgb = mix(rgb, sharp, half(clamp(mistM, 0.0, 1.0) * 0.6));
+
+    // Far drops: clear + slope-bent sample (no inversion at that size).
+    if (far.core + far.rim > 0.003) {
+        float2 bent = uv + par - far.nrm * (RIM_BEND * 0.7 * refraction);
+        half3 farCol = RG_SAMPLE(bent);
+        rgb = mix(rgb, farCol, half(clamp((far.core + far.rim) * 0.85, 0.0, 1.0)));
+    }
+
+    // Near drop: THE LENS. Interior shows the far world inverted + compressed about
+    // the drop centre; the rim band does meniscus bending. `refraction` fades the
+    // whole optic down to "clear flat bead" for the A/B (§10 step 2).
+    if (near.core + near.rim > 0.003) {
+        float2 local = (uv - near.center) / max(near.radius, 1e-4);   // [-1, 1] across the drop
+        float2 lensUV = near.center + par - local * (LENS_VIEW * refraction)
+                                    + local * near.radius * (1.0 - refraction);
+        half3 lensCol = RG_SAMPLE(lensUV);
+
+        float2 bent = uv + par - near.nrm * (RIM_BEND * refraction);
+        half3 rimCol = RG_SAMPLE(bent);
+
+        rgb = mix(rgb, rimCol, half(clamp(near.rim, 0.0, 1.0)));
+        rgb = mix(rgb, lensCol, half(clamp(near.core, 0.0, 1.0)));
+
+        // Catch-light: a tight powered glint on the upper-left of the cap — reads as
+        // the room's light on the meniscus (the old linear ramp made flat combs).
+        float2 L = normalize(float2(-0.55, -0.84));                    // upper-left
+        float s = pow(clamp(dot(normalize(near.nrm + float2(1e-5, 0.0)), L), 0.0, 1.0), SPEC_POW);
+        rgb += half3(half(s * near.rim * SPEC_BRIGHT));
+    }
+
+    // Faint sheen so wakes read wet even over dark sky.
+    rgb += half3(half(near.wake * 0.02));
+
+    #undef RG_SAMPLE
     return half4(rgb, 1.0h);
 }

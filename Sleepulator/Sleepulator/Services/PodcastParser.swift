@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 class PodcastParser: NSObject, XMLParserDelegate {
     struct ParsedFeed {
@@ -116,6 +117,12 @@ class PodcastParser: NSObject, XMLParserDelegate {
             ?? String(data: CDATABlock, encoding: .isoLatin1)
             ?? String(data: CDATABlock, encoding: .windowsCP1252) {
             accumulate(string)
+        } else {
+            // Nearly unreachable (Latin-1 accepts any byte sequence), but if it ever happens,
+            // salvage what we can rather than silently dropping the show-notes block.
+            // String(decoding:as:) never fails — invalid sequences become U+FFFD.
+            Log.network.warning("Feed CDATA block failed strict decoding; using lossy UTF-8 (\(CDATABlock.count) bytes)")
+            accumulate(String(decoding: CDATABlock, as: UTF8.self))
         }
     }
 

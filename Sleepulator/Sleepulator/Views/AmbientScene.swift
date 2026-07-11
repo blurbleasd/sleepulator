@@ -11,7 +11,10 @@ enum SceneMood {
 struct SceneContext {
     let palette: Palette
     let reduceMotion: Bool
-    /// True once the screensaver has engaged — scenes settle to static for battery.
+    /// True when the screen is actually occluded — the night-dim veil, backgrounding, or a
+    /// low-luminance/Always-On display — so scenes settle to static for battery. NOT the
+    /// lighter controls-faded screensaver: scenes keep animating through that (it's the show).
+    /// See `HomeView.scenesFrozen` / the `nightDimmed → audio.screenDimmed` hand-off.
     let paused: Bool
     /// The sleep timer, for time-reactive sleep scenes (e.g. the setting moon).
     let sleepTimer: SleepTimerService
@@ -61,7 +64,7 @@ struct NightSkyScene: AmbientScene {
             ZStack {
                 StarfieldView(paused: ctx.paused)
                     .ignoresSafeArea()
-                ShootingStarView()
+                ShootingStarView(paused: ctx.paused, sleepTimer: ctx.sleepTimer)
                     .ignoresSafeArea()
                 // Darkening must observe the timer itself: nightProgress is computed (not
                 // @Published) and the timer is no longer forwarded through `audio`, so HomeView
@@ -101,16 +104,9 @@ struct NightFade<Content: View>: View {
     }
 }
 
-/// The default Focus backdrop: a slow cool "energy" sweep over the deep-indigo gradient.
-struct EnergyScene: AmbientScene {
-    let id = "energy"
-    let title = "Energy"
-    let mood = SceneMood.focus
-
-    func makeBackdrop(_ ctx: SceneContext) -> AnyView {
-        AnyView(FocusBackdrop(accent: ctx.palette.accent, reduceMotion: ctx.reduceMotion))
-    }
-}
+// (EnergyScene retired 2026-07-06 — a rotating blurred glow with no depth/reactivity; a weak
+// concept Metal wouldn't save. Focus now defaults to "current". FocusBackdrop in Backdrops.swift
+// is now dead code, safe to delete in a cleanup pass.)
 
 /// "Current" (Focus): cool streams that quicken/brighten through a work interval and ease on a
 /// break — momentum without flicker.
@@ -124,6 +120,26 @@ struct CurrentScene: AmbientScene {
     }
 }
 
+#if DEBUG
+/// DEBUG-only A/B sibling of `CurrentScene`: the Metal edition (a domain-warped FBM flow-field
+/// shader — CurrentShader.metal `currentField` via `CurrentMetalView`, driven by the shared
+/// `FocusDrivers` mapping so it reads the Pomodoro identically to the Canvas Current). Registered
+/// alongside the Canvas scene so the two can be compared on a real device over a full, *unoccluded*
+/// Focus session (look + thermal + battery — Focus never freezes like the Sleep scenes do, so this
+/// is the real power test). Reduce Motion feeds the flow clock rate 0 → static field. Retire
+/// `CurrentScene` once this clearly wins; take the thermal verdict from a Release/Profile build.
+struct CurrentMetalScene: AmbientScene {
+    let id = "current-metal"
+    let title = "Current (Metal)"
+    let mood = SceneMood.focus
+
+    func makeBackdrop(_ ctx: SceneContext) -> AnyView {
+        AnyView(CurrentMetalView(paused: ctx.paused, pomodoro: ctx.pomodoro,
+                                 reduceMotion: ctx.reduceMotion))
+    }
+}
+#endif
+
 /// "Tide" (Focus): a calm cool level that rises across a work interval and recedes on a break —
 /// an ambient, glanceable progress cue.
 struct TideScene: AmbientScene {
@@ -136,17 +152,23 @@ struct TideScene: AmbientScene {
     }
 }
 
-/// "Deep work" (Focus): a near-minimal cool field, crispest mid-session and softer at the
-/// boundaries — the calmest, lowest-distraction backdrop.
-struct DeepWorkScene: AmbientScene {
-    let id = "deep-work"
-    let title = "Deep work"
+#if DEBUG
+/// DEBUG-only A/B sibling of `TideScene`: the Metal edition (`TideShader.metal` `tideField` via
+/// `TideMetalView`) — a per-pixel water level whose height tracks the Pomodoro, with an FBM-
+/// modulated surface, depth shading, a crisp waterline and specular glints, instead of the flat
+/// Canvas fill. Reduce Motion stills the surface. A/B against the Canvas Tide on device; promote
+/// once it wins. (Deep work retired 2026-07-06 — invisible-by-design, a weak concept.)
+struct TideMetalScene: AmbientScene {
+    let id = "tide-metal"
+    let title = "Tide (Metal)"
     let mood = SceneMood.focus
 
     func makeBackdrop(_ ctx: SceneContext) -> AnyView {
-        AnyView(DeepWorkView(paused: ctx.paused, pomodoro: ctx.pomodoro))
+        AnyView(TideMetalView(paused: ctx.paused, pomodoro: ctx.pomodoro,
+                              reduceMotion: ctx.reduceMotion))
     }
 }
+#endif
 
 /// "Rain on glass": a misted window with soft lights behind and droplets sliding down the
 /// glass. Ambient (not time-reactive); pairs naturally with the rain sound.
@@ -169,22 +191,30 @@ struct RainOnGlassDepthScene: AmbientScene {
     let id = "rain-on-glass-depth"
     let title = "Rain (depth)"
     let mood = SceneMood.sleep
+    /// The drops' far world parallaxes with gyro (held-in-hand bonus); flat on a nightstand it
+    /// still reads deep from focus + refraction. HomeView.reconcileMotion gates CoreMotion on this.
+    var usesMotion: Bool { true }
 
     func makeBackdrop(_ ctx: SceneContext) -> AnyView {
-        AnyView(RainGlassDepthView(paused: ctx.paused))
+        AnyView(RainGlassDepthView(paused: ctx.paused,
+                                   sleepTimer: ctx.sleepTimer,
+                                   tilt: ctx.tilt))
     }
 }
 #endif
 
 /// "Breathe": a soft warm glow that swells and fades on a slow breath cadence — follow it and
 /// your own breath slows. The most directly lulling scene (entrainment, not just ambience).
+/// Takes the timer so the glow dims with the night (read live inside its own redraw, per the
+/// animating-scene convention) — it was the only sleep scene that stayed bedtime-bright at
+/// nightProgress 1.
 struct BreathingBloomScene: AmbientScene {
     let id = "breathing-bloom"
     let title = "Breathe"
     let mood = SceneMood.sleep
 
     func makeBackdrop(_ ctx: SceneContext) -> AnyView {
-        AnyView(BreathingBloomView(paused: ctx.paused))
+        AnyView(BreathingBloomView(paused: ctx.paused, sleepTimer: ctx.sleepTimer))
     }
 }
 
@@ -203,23 +233,8 @@ struct AuroraScene: AmbientScene {
     }
 }
 
-#if DEBUG
-/// DEBUG-only A/B sibling: the original CPU `AuroraView` (Canvas striations). Registered next to
-/// the shipping Metal aurora so the two can be compared on a real device over a full timer run
-/// (the CLAUDE.md device gate). Retire `AuroraView.swift` once the shader clearly wins on look +
-/// power.
-struct AuroraCanvasScene: AmbientScene {
-    let id = "aurora-canvas"
-    let title = "Aurora (canvas)"
-    let mood = SceneMood.sleep
-    var usesMotion: Bool { true }
-
-    func makeBackdrop(_ ctx: SceneContext) -> AnyView {
-        AnyView(AuroraView(paused: ctx.paused, sleepTimer: ctx.sleepTimer,
-                           audioLevel: ctx.audioLevel, tilt: ctx.tilt))
-    }
-}
-#endif
+// (The CPU `AuroraView` A/B sibling was retired 2026-07-04 — the Metal aurora won the
+// on-device comparison; the canvas version read as dim and near-static.)
 
 /// "Embers": smoldering coals — a dark field of deep reds slowly churning on a gentle swirl.
 /// A Metal fragment shader (`EmbersShader.metal`), dark + hypnotic with slow motion (the first
@@ -274,6 +289,42 @@ struct StillWaterCanvasScene: AmbientScene {
         AnyView(StillWaterView(paused: ctx.paused, sleepTimer: ctx.sleepTimer, audioLevel: ctx.audioLevel))
     }
 }
+
+/// DEBUG-only A/B sibling: the **depth edition** of Still Water — the ocean generalization of the
+/// rain-glass depth recipe (RAIN-ON-GLASS-DEPTH-SPEC §2). Rides the shared `.layerEffect`
+/// `DepthBackdrop`: the near swell refracts a composited far world (sky + moon + hazy horizon) into a
+/// wave-distorted reflection — near-sharp swell, far-soft horizon — reactive via `DepthReactivity`
+/// (F1). Second consumer of the depth host (the trigger that justified building it). A/B against
+/// `StillWaterScene` on device; retire the flat one if the depth version wins (§10).
+struct StillWaterDepthScene: AmbientScene {
+    let id = "still-water-depth"
+    let title = "Still water (depth)"
+    let mood = SceneMood.sleep
+
+    func makeBackdrop(_ ctx: SceneContext) -> AnyView {
+        AnyView(StillWaterDepthView(paused: ctx.paused, sleepTimer: ctx.sleepTimer))
+    }
+}
+
+/// DEBUG-only A/B sibling: the STRUCTURAL audio-reactivity variant of the flat Metal Still Water.
+/// Same `stillWaterField` shader but `reactive: true`, so audio disturbs the wave FIELD (the moon
+/// reflection shimmers/breaks up with the bed) instead of a global brightness swell. A/B against
+/// `StillWaterScene` over a pre-sleep session with audio playing: does the structural response read
+/// better AND stay subtle enough not to wake you? Promote (make it the default + delete the shader's
+/// `reactive < 0.5` branch) once it wins on device. Passes `reduceMotion` so it falls to the calm
+/// branch under Reduce Motion. (Orthogonal to `StillWaterDepthScene`, which is the layer-lens depth
+/// A/B — this one is about audio response on the flat scene.)
+struct StillWaterReactiveScene: AmbientScene {
+    let id = "still-water-reactive"
+    let title = "Still water (reactive)"
+    let mood = SceneMood.sleep
+
+    func makeBackdrop(_ ctx: SceneContext) -> AnyView {
+        AnyView(StillWaterMetalView(paused: ctx.paused, sleepTimer: ctx.sleepTimer,
+                                    audioLevel: ctx.audioLevel, reactive: true,
+                                    reduceMotion: ctx.reduceMotion))
+    }
+}
 #endif
 
 /// "Deep space" (Sleep): a slow nebula of domain-warped FBM cloud over a parallax star field,
@@ -302,6 +353,24 @@ struct SandfallScene: AmbientScene {
     }
 }
 
+#if DEBUG
+/// DEBUG-only A/B sibling of `SandfallScene`: the Metal edition (`SandfallShader.metal`
+/// `sandField` via `SandfallMetalView`) — a procedural hourglass with FBM-granular sand in both
+/// bulbs, the top draining and the bottom mounding as the Pomodoro runs, and a turbulent falling
+/// column through the neck, instead of 14 stiff Canvas grains. Reduce Motion stills the fall.
+/// A/B against the Canvas Sandfall on device; promote once it wins.
+struct SandfallMetalScene: AmbientScene {
+    let id = "sandfall-metal"
+    let title = "Sandfall (Metal)"
+    let mood = SceneMood.focus
+
+    func makeBackdrop(_ ctx: SceneContext) -> AnyView {
+        AnyView(SandfallMetalView(paused: ctx.paused, pomodoro: ctx.pomodoro,
+                                  reduceMotion: ctx.reduceMotion))
+    }
+}
+#endif
+
 // MARK: - Registry
 
 /// Lists every scene and resolves a persisted selection id to a scene. Selection itself lives
@@ -312,13 +381,17 @@ enum SceneRegistry {
         var scenes: [any AmbientScene] = [NightSkyScene(), RainOnGlassScene()]
         #if DEBUG
         scenes.append(RainOnGlassDepthScene())     // A/B sibling, DEBUG builds only
-        scenes.append(AuroraCanvasScene())         // A/B vs the Metal aurora, DEBUG builds only
         scenes.append(StillWaterCanvasScene())     // A/B vs the Metal still water, DEBUG builds only
+        scenes.append(StillWaterDepthScene())      // depth A/B vs the flat Metal still water, DEBUG only
+        scenes.append(StillWaterReactiveScene())   // A/B: structural audio reactivity, DEBUG builds only
         scenes.append(EmbersCanvasScene())         // A/B vs the dark Metal embers, DEBUG builds only
+        scenes.append(CurrentMetalScene())         // A/B vs the Canvas Current (Focus), DEBUG builds only
+        scenes.append(TideMetalScene())            // A/B vs the Canvas Tide (Focus), DEBUG builds only
+        scenes.append(SandfallMetalScene())        // A/B vs the Canvas Sandfall (Focus), DEBUG builds only
         #endif
         scenes.append(contentsOf: [
             BreathingBloomScene(), AuroraScene(), EmbersScene(), StillWaterScene(), DeepSpaceScene(),
-            EnergyScene(), CurrentScene(), TideScene(), DeepWorkScene(), SandfallScene()
+            CurrentScene(), TideScene(), SandfallScene()
         ] as [any AmbientScene])
         return scenes
     }()

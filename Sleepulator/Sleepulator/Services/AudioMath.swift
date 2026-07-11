@@ -1,12 +1,23 @@
 import Foundation
 
 public struct AudioMath {
-    
+
+    /// Perceptual (audio) taper for the mixer's volume sliders: gain = position². A linear
+    /// position→gain map crams the useful bedtime range into the bottom fifth of the track;
+    /// squaring gives fine control at the low levels sleep mixes actually live at.
+    /// NOTE: applied where volumes are handed to the engines — persisted slider values are
+    /// unchanged, but any given position now plays quieter than before (the safe direction).
+    public static func perceptualGain(_ position: Double) -> Double {
+        let p = min(max(position, 0), 1)
+        return p * p
+    }
+
     public static func getCarrierAndBeat(for preset: String) -> (carrier: Float, beat: Float) {
         switch preset {
         case "theta": return (200.0, 6.0)
         case "alpha": return (220.0, 10.0)
-        case "smr":   return (220.0, 13.0) // sensorimotor rhythm — "calm-alert"
+        case "smr":   return (220.0, 10.0) // RETIRED → aliased to alpha so a legacy saved preset
+                                           // doesn't fall through to the delta default. Not offered.
         case "beta":  return (220.0, 16.0) // concentration band
         case "gamma": return (220.0, 40.0)
         default: return (180.0, 4.0) // delta

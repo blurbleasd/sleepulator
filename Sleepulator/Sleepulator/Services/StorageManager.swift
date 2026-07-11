@@ -16,14 +16,25 @@ final class StorageManager {
     /// corruption that was (or wasn't) recovered from the backup.
     enum LoadOutcome: Equatable { case missing, loaded, recovered, failed }
 
-    init() {
+    convenience init() {
         let fm = FileManager.default
-        let urls = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask)
-        let appSupport = urls.first!.appendingPathComponent("Sleepulator")
-        if !fm.fileExists(atPath: appSupport.path) {
-            try? fm.createDirectory(at: appSupport, withIntermediateDirectories: true, attributes: nil)
+        // Same rationale as AudioDownloader: never launch-crash on a missing Application Support
+        // URL — fall back to the temp dir (persistence degrades for the session, app still runs).
+        let base = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+        let appSupport = base.appendingPathComponent("Sleepulator")
+        self.init(directory: appSupport)
+    }
+
+    /// Seam initializer: point the store at an arbitrary directory. Production uses `init()`
+    /// (Application Support); unit tests pass a temp dir so they're hermetic and never touch — or
+    /// race — the real on-disk store.
+    init(directory: URL) {
+        let fm = FileManager.default
+        if !fm.fileExists(atPath: directory.path) {
+            try? fm.createDirectory(at: directory, withIntermediateDirectories: true, attributes: nil)
         }
-        self.appSupportURL = appSupport
+        self.appSupportURL = directory
     }
 
     private func fileURL(for filename: String) -> URL {
