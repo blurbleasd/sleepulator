@@ -484,7 +484,8 @@ struct SettingsView: View {
     
     /// Re-encode a backup section and confirm it decodes into the Codable type the target file
     /// expects. Returns the JSON bytes to write, or nil if the section is malformed/unexpected.
-    private nonisolated static func validatedFileData(key: String, value: Any) -> Data? {
+    /// `internal` (not private) so `BackupRoundTripTests` can exercise the validation gate.
+    nonisolated static func validatedFileData(key: String, value: Any) -> Data? {
         guard let data = try? JSONSerialization.data(withJSONObject: value, options: []) else { return nil }
         let decoder = JSONDecoder()
         let valid: Bool
@@ -502,6 +503,63 @@ struct SettingsView: View {
             valid = false
         }
         return valid ? data : nil
+    }
+
+    /// Keys whose UserDefaults value is a Data-encoded Codable blob, not a plain scalar. Data can't
+    /// go through JSON, so these expand to a nested JSON object on export and are re-encoded on
+    /// import. `extraLayers` was in NEITHER backup list until 2026-07 — the user's extra mixer noise
+    /// layers were silently dropped from every backup and lost on restore.
+    private nonisolated static let backupEncodedKeys: [String] = ["lastMix", "extraLayers"]
+
+    /// The UserDefaults side of an export: scalar settings + the Data-encoded blobs, ready to merge
+    /// into the backup dictionary. Pure + parameterized on `defaults` so it's unit-tested (the
+    /// shipping export calls this too, so the test covers the real path).
+    nonisolated static func backupUserDefaults(from defaults: UserDefaults) -> [String: Any] {
+        var out: [String: Any] = [:]
+        for key in backupScalarKeys {
+            if let v = defaults.object(forKey: key) { out[key] = v }
+        }
+        for key in backupEncodedKeys {
+            if let data = defaults.data(forKey: key),
+               let obj = try? JSONSerialization.jsonObject(with: data, options: .allowFragments) {
+                out[key] = obj
+            }
+        }
+        return out
+    }
+
+    /// The UserDefaults side of a restore: writes allowlisted scalars and re-encodes the Data blobs,
+    /// never writing anything outside the allowlist (a malformed or hostile section is skipped, not
+    /// written). File-backed keys are handled by the caller against StorageManager, so they're passed
+    /// over here without counting. Returns (restored, skipped) for the UserDefaults keys only.
+    nonisolated static func restoreUserDefaults(from dict: [String: Any], into defaults: UserDefaults) -> (restored: Int, skipped: Int) {
+        let allowed = Set(backupScalarKeys)
+        var restored = 0, skipped = 0
+        for (key, value) in dict {
+            if backupFileBacked[key] != nil {
+                continue                                       // handled against StorageManager by the caller
+            } else if backupEncodedKeys.contains(key) {
+                if let encoded = try? JSONSerialization.data(withJSONObject: value, options: []),
+                   decodesForRestore(key: key, data: encoded) {
+                    defaults.set(encoded, forKey: key); restored += 1
+                } else { skipped += 1 }
+            } else if allowed.contains(key) {
+                defaults.set(value, forKey: key); restored += 1
+            } else {
+                skipped += 1                                   // unknown key — never blind-write
+            }
+        }
+        return (restored, skipped)
+    }
+
+    /// Validate that a Data-encoded backup blob decodes into its expected type before restore.
+    private nonisolated static func decodesForRestore(key: String, data: Data) -> Bool {
+        let dec = JSONDecoder()
+        switch key {
+        case "lastMix":     return (try? dec.decode(SavedMix.self, from: data)) != nil
+        case "extraLayers": return (try? dec.decode([ExtraNoiseLayer].self, from: data)) != nil
+        default:            return false
+        }
     }
 
     /// User-facing result of a backup import, produced off the main thread.
@@ -530,32 +588,22 @@ struct SettingsView: View {
                                          didRestore: false)
                 }
 
-                let allowedScalars = Set(Self.backupScalarKeys)
                 var restored = 0
                 var skipped = 0
 
-                for (key, value) in dict {
-                    if let file = Self.backupFileBacked[key] {
-                        // Only write a collection that actually decodes into its expected
-                        // type — a malformed section is skipped, never written as garbage.
-                        if let validated = Self.validatedFileData(key: key, value: value) {
-                            await StorageManager.shared.writeRaw(validated, to: file)
-                            restored += 1
-                        } else { skipped += 1 }
-                    } else if key == "lastMix" {
-                        if let encoded = try? JSONSerialization.data(withJSONObject: value, options: []),
-                           (try? JSONDecoder().decode(SavedMix.self, from: encoded)) != nil {
-                            UserDefaults.standard.set(encoded, forKey: key)
-                            restored += 1
-                        } else { skipped += 1 }
-                    } else if allowedScalars.contains(key) {
-                        UserDefaults.standard.set(value, forKey: key)
+                // File-backed collections → StorageManager, each validated against its expected
+                // Codable type (a malformed section is skipped, never written as garbage).
+                for (key, file) in Self.backupFileBacked {
+                    guard let value = dict[key] else { continue }
+                    if let validated = Self.validatedFileData(key: key, value: value) {
+                        await StorageManager.shared.writeRaw(validated, to: file)
                         restored += 1
-                    } else {
-                        // Unknown key — never blind-write it into UserDefaults.
-                        skipped += 1
-                    }
+                    } else { skipped += 1 }
                 }
+                // Scalars + Data-encoded blobs (lastMix, extraLayers) → UserDefaults (allowlisted).
+                let ud = Self.restoreUserDefaults(from: dict, into: .standard)
+                restored += ud.restored
+                skipped += ud.skipped
 
                 let message = skipped > 0
                     ? "Imported \(restored) item(s); skipped \(skipped) unrecognized."
@@ -588,19 +636,8 @@ struct SettingsView: View {
 
     private static func buildExportDocument() async -> Result<JSONDocument, Error> {
         await Task.detached(priority: .userInitiated) { () -> Result<JSONDocument, Error> in
-            var backupDict: [String: Any] = [:]
-
-            // Scalar settings live in UserDefaults.
-            for key in Self.backupScalarKeys {
-                if let val = UserDefaults.standard.object(forKey: key) {
-                    backupDict[key] = val
-                }
-            }
-            // lastMix is stored as encoded Data in UserDefaults.
-            if let data = UserDefaults.standard.data(forKey: "lastMix"),
-               let obj = try? JSONSerialization.jsonObject(with: data, options: .allowFragments) {
-                backupDict["lastMix"] = obj
-            }
+            // Scalar settings + the Data-encoded blobs (lastMix, extraLayers) live in UserDefaults.
+            var backupDict = Self.backupUserDefaults(from: .standard)
 
             // Mixes, library, queue, and positions were migrated off UserDefaults into
             // StorageManager files — pull their raw JSON so the backup is actually complete.
