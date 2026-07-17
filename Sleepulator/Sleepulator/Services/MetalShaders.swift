@@ -20,9 +20,14 @@ enum MetalShaders {
     /// none of these, enumeration doesn't cover stitchables on this runtime (see the type doc). Keep
     /// roughly in sync as scenes are added; a name missing from here only means it isn't preflighted,
     /// never a crash.
+    // Must match the actual [[stitchable]] function names, or preflight cries wolf every launch and
+    // masks a real miss. These drifted once (embersField/deepSpaceField/energyField were checked but
+    // the functions are emberField/nebulaField, and Energy was a retired Canvas scene with no shader)
+    // — device log 2026-07-11 flagged the false MISSING. This is the full set of shipping stitchables.
     static let known: Set<String> = [
-        "auroraField", "embersField", "deepSpaceField", "stillWaterField", "energyField",
-        "rainGlassLens", "stillWaterLens",
+        "auroraField", "emberField", "nebulaField", "stillWaterField",   // Sleep .colorEffect scenes
+        "currentField", "tideField", "sandField",                        // Focus .colorEffect scenes
+        "rainGlassLens", "stillWaterLens",                               // depth .layerEffect lenses
     ]
 
     /// The default library's function names (loaded once, lazily). Empty when there's no Metal device.
