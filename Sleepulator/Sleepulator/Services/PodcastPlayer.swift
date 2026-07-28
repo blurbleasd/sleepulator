@@ -49,6 +49,10 @@ final class PodcastPlayer: NSObject {
     var onPlaybackNote: ((String?) -> Void)?
     var onTimeUpdate: ((Double, Double) -> Void)?
     var backgroundTick: (() -> Void)?
+    /// Fired when playback resumes (in-app tap, lock-screen play, or post-interruption). Lets the
+    /// owner react to a resume — e.g. cancel a sleep timer that's already in its ambient tail, whose
+    /// near-zero fade would otherwise leave the just-resumed podcast inaudible.
+    var onResume: (() -> Void)?
     
     private var currentUrl: String?
     private var currentId: String?
@@ -68,7 +72,16 @@ final class PodcastPlayer: NSObject {
     var skipInterval: Double = 15 {
         didSet { updateSkipPreferredIntervals() }
     }
+    /// The user-facing target level (perceptual podcast slider × master × mute). Holds ONLY the
+    /// user's intent — never the transient sleep-timer/Pomodoro fade, which is `fadeMult` below.
+    /// Keeping them separate is why a play/resume can't inherit a stale fade and go silent.
     private var currentVolume: Float = 1.0
+    /// The slow sleep-timer / Pomodoro fade, as a SEPARATE factor (0…1). Mirrors
+    /// `GenerativeAudioEngine.targetFadeMult`: the render level is `currentVolume * fadeInGain *
+    /// fadeMult`, so the fade rides on top of the user target instead of overwriting it. A resume
+    /// after (or during, once the tail is cancelled) a fade multiplies by an intact `currentVolume`
+    /// and is audible — the fix for "podcast plays but there's no sound."
+    private var fadeMult: Float = 1.0
     private var cachedPositions: [String: Double]?
     private var lastFlushTime = Date.distantPast
 
@@ -373,6 +386,8 @@ final class PodcastPlayer: NSObject {
         }
         pausedAt = nil
 
+        onResume?()                      // a resume is a "keep listening" signal — let the owner
+                                         // lift a sleep-timer tail whose fade would mute this play
         startFadeIn()                    // ease back in instead of snapping to full volume
         player.play()
         player.rate = playbackSpeed
@@ -399,11 +414,12 @@ final class PodcastPlayer: NSObject {
         updateNowPlaying(isPlaying: false)
     }
 
-    /// Apply the current target volume × fade-in envelope to the player and every active limiter
-    /// tap. The tap is PostEffects, which bypasses `AVPlayer.volume`, so volume must reach the
-    /// tap state; the `player.volume` set is the fallback for streams where the tap can't attach.
+    /// Apply the effective level — user target × fade-in envelope × sleep-timer fade — to the
+    /// player and every active limiter tap. The tap is PostEffects, which bypasses `AVPlayer.volume`,
+    /// so volume must reach the tap state; the `player.volume` set is the fallback for streams where
+    /// the tap can't attach.
     private func applyVolumeToStates() {
-        let v = currentVolume * fadeInGain
+        let v = currentVolume * fadeInGain * fadeMult
         player?.volume = v
         stateLock.lock()
         for state in activeLimiterStates { state.pointee.volume = v }
@@ -462,6 +478,13 @@ final class PodcastPlayer: NSObject {
     func setVolume(_ volume: Double) {
         currentVolume = Float(volume)
         applyVolumeToStates()            // honors any in-progress fade-in envelope
+    }
+
+    /// Set the sleep-timer / Pomodoro fade factor (0…1) as a level SEPARATE from the user target,
+    /// so the fade never overwrites `currentVolume`. Owned by AudioEngine's `syncAllVolumes`.
+    func setFade(_ multiplier: Float) {
+        fadeMult = multiplier
+        applyVolumeToStates()
     }
     
     @objc private func itemDidFinishPlaying() {
@@ -678,9 +701,9 @@ final class PodcastPlayer: NSObject {
                     state.pointee.enabled = p.nightLimiterEnabled ? 1.0 : 0.0
                     state.pointee.eqEnabled = p.sleepEQEnabled ? 1.0 : 0.0
                     state.pointee.eqIntensity = Float(p.sleepEQIntensity)
-                    // Respect an in-progress fade-in so a tap that attaches mid-fade (the async
-                    // track load) starts at the enveloped level, not full volume.
-                    state.pointee.volume = p.currentVolume * p.fadeInGain
+                    // Respect an in-progress fade-in AND the sleep-timer fade so a tap that attaches
+                    // mid-fade (the async track load) starts at the enveloped level, not full volume.
+                    state.pointee.volume = p.currentVolume * p.fadeInGain * p.fadeMult
                     p.stateLock.unlock()
                 }
             },

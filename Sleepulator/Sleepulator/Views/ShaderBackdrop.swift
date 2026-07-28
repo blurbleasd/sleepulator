@@ -93,10 +93,18 @@ struct ShaderBackdrop: View {
     var body: some View {
         GeometryReader { geo in
             let size = geo.size
-            // `paused:` on the schedule (not an if/else branch swap) keeps the view's identity
-            // stable across the freeze, so un-occluding can't reset any state.
-            TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: paused)) { tl in
-                field(size: size, now: paused ? nil : tl.date.timeIntervalSinceReferenceDate)
+            // Unconditional TimelineView in the else. The `paused:` schedule variant stops driving
+            // frames on device (ProMotion): scenes only redrew on external @Published churn and read
+            // static / choppy (device 2026-07-11 — Focus scenes only moved during a Pomodoro, Still
+            // Water read static). The SceneClock is @State, so it survives this if/else and the paused
+            // frame renders the frozen pose (never a t:0 birth-pose snap — the original reason to fear
+            // the swap; the clock, not the branch, owns the pose).
+            if paused {
+                field(size: size, now: nil)
+            } else {
+                TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { tl in
+                    field(size: size, now: tl.date.timeIntervalSinceReferenceDate)
+                }
             }
         }
         .ignoresSafeArea()
@@ -168,11 +176,15 @@ struct DepthBackdrop<FarWorld: View>: View {
     var body: some View {
         GeometryReader { geo in
             let size = geo.size
-            // `paused:` on the schedule (not an if/else branch swap) keeps the view's identity stable
-            // across the freeze, and renders one static pass at the frozen `SceneClock` pose — not a
-            // `t: 0` snap back to the birth pose (the bug this host was extracted to kill).
-            TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: paused)) { tl in
-                lensed(size: size, now: paused ? nil : tl.date.timeIntervalSinceReferenceDate)
+            // Unconditional TimelineView in the else — the `paused:` variant stops driving frames on
+            // device (ProMotion); see ShaderBackdrop. The SceneClock @State holds the frozen pose, so
+            // the paused static pass is still the frozen `SceneClock` pose, not a `t: 0` snap.
+            if paused {
+                lensed(size: size, now: nil)
+            } else {
+                TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { tl in
+                    lensed(size: size, now: tl.date.timeIntervalSinceReferenceDate)
+                }
             }
         }
         .ignoresSafeArea()

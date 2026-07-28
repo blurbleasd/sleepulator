@@ -28,10 +28,17 @@ struct CurrentMetalView: View {
     var body: some View {
         GeometryReader { geo in
             let size = geo.size
-            // `paused:` on the schedule (not an if/else swap) keeps view identity stable across the
-            // freeze, and renders one static pass at the frozen SceneClock pose.
-            TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: paused)) { tl in
-                field(size: size, now: paused ? nil : tl.date.timeIntervalSinceReferenceDate)
+            // Unconditional TimelineView in the else branch. The `paused:` schedule variant stops
+            // driving frames on device (ProMotion): the scene only redrew on external @Published
+            // churn (the Pomodoro's ~1Hz tick), so it froze when idle and lurched during a session
+            // (device 2026-07-11). The SceneClock is @State on this view, so it survives the if/else
+            // and the paused frame still renders the frozen pose (never a t:0 birth-pose snap).
+            if paused {
+                field(size: size, now: nil)
+            } else {
+                TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { tl in
+                    field(size: size, now: tl.date.timeIntervalSinceReferenceDate)
+                }
             }
         }
         .ignoresSafeArea()
