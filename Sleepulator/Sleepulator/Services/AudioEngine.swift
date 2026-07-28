@@ -372,7 +372,14 @@ final class AudioEngine: ObservableObject {
         // jump, when music starts/stops). The podcast isn't ducked: it's paused while music plays.
         genEngine.setMaster(masterMult * appleMusicDuck)
         genEngine.setFade(multiplier: fadeMultiplier)
-        podPlayer.setVolume(AudioMath.perceptualGain(podVolume) * masterMult * fadeMultiplier)
+        // Podcast: the user target (slider × master × mute) and the sleep-timer fade go in as TWO
+        // separate factors — mirroring the generative engine's master/fade split above. Folding the
+        // fade into the target (the old single `* fadeMultiplier`) meant a fade that reached ~0 left
+        // the podcast's stored volume at ~0, so the next play/resume — which only re-runs the
+        // fade-IN envelope, never the target — played silently. Keeping them separate lets a resume
+        // multiply by an intact target and be audible; the fade rides on top and self-restores.
+        podPlayer.setVolume(AudioMath.perceptualGain(podVolume) * masterMult)
+        podPlayer.setFade(Float(fadeMultiplier))
     }
     
     init() {
@@ -583,6 +590,17 @@ final class AudioEngine: ObservableObject {
         
         podPlayer.backgroundTick = { [weak self] in
             self?.sleepTimer.backgroundTick()
+        }
+
+        // A manual resume during the ambient tail means "I'm awake, keep the podcast going." The
+        // tail deliberately paused the podcast and is fading the bed toward ~0; without this, the
+        // resumed podcast would inherit that near-zero fade and play silently. Cancelling the timer
+        // restores the fade to full (cancelTimer → updateFadeMultFn(1.0)) so the podcast is audible.
+        // Gated on `inTail` so a normal pause/resume early in a timer leaves it running untouched.
+        podPlayer.onResume = { [weak self] in
+            guard let self, self.sleepTimer.inTail else { return }
+            Log.timer.notice("podcast resumed during ambient tail — cancelling sleep timer so it's audible")
+            self.sleepTimer.cancelTimer()
         }
 
         // Apple Music (Focus-only). Republish the system player's coarse state and yield the
