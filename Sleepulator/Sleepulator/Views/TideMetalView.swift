@@ -23,8 +23,14 @@ struct TideMetalView: View {
     var body: some View {
         GeometryReader { geo in
             let size = geo.size
-            TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: paused)) { tl in
-                field(size: size, now: paused ? nil : tl.date.timeIntervalSinceReferenceDate)
+            // Unconditional TimelineView — the `paused:` variant stops driving frames on device
+            // (ProMotion); see CurrentMetalView. SceneClock is @State so freeze holds its pose.
+            if paused {
+                field(size: size, now: nil)
+            } else {
+                TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { tl in
+                    field(size: size, now: tl.date.timeIntervalSinceReferenceDate)
+                }
             }
         }
         .ignoresSafeArea()
