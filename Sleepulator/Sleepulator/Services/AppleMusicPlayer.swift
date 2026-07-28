@@ -36,7 +36,10 @@ final class AppleMusicPlayer {
     var isPlaying: Bool { player.state.playbackStatus == .playing }
     /// True once a queue has been set — i.e. the user has chosen something to play at least once
     /// this session. Drives the UI's "pick music" CTA vs. an on/off toggle.
-    private(set) var hasSelection = false
+    /// `nonisolated(unsafe)`: read/written from the nonisolated transport methods (`play`/`resume`)
+    /// as well as the main actor. It's a plain flag toggled only by user-serialized transport
+    /// actions, so the unguarded access is benign — the annotation makes that explicit.
+    nonisolated(unsafe) private(set) var hasSelection = false
 
     init() {
         // `ApplicationMusicPlayer.state` and `.queue` are ObservableObjects; mirror their changes
@@ -109,23 +112,39 @@ final class AppleMusicPlayer {
 
     /// Set the queue to a playable item (Song / Album / Playlist) and start playback.
     /// The caller is responsible for having set `.mixWithOthers` + activated the session first.
-    func play<Item: PlayableMusicItem>(_ item: Item) async {
+    ///
+    /// `nonisolated` on purpose. This type is main-actor-isolated by the module default
+    /// (`SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`), but MusicKit's transport is NOT: the SDK
+    /// interface declares `MusicPlayer.play() async throws` with no actor isolation. `play()` does a
+    /// synchronous XPC round-trip to the music daemon internally, and when it was issued from a
+    /// main-actor context a slow/wedged daemon blocked the MAIN THREAD past the 10 s scene-update
+    /// watchdog → `0x8BADF00D` SIGKILL (the crash diagnostic: MusicKit → MediaPlayer → sync-XPC,
+    /// 0 % app CPU = waiting). Running the transport nonisolated moves that blocking call OFF the
+    /// main actor (verified: `ApplicationMusicPlayer` is not `@MainActor`), so it can never trip the
+    /// watchdog again. UI state hops back to main via `note(_:)`.
+    nonisolated func play<Item: PlayableMusicItem>(_ item: Item) async {
         do {
-            player.queue = [item]
+            ApplicationMusicPlayer.shared.queue = [item]
             hasSelection = true
-            try await player.play()
+            try await ApplicationMusicPlayer.shared.play()
         } catch {
-            onNote?("Couldn't start Apple Music: \(error.localizedDescription)")
+            await note("Couldn't start Apple Music: \(error.localizedDescription)")
         }
     }
 
     // MARK: - Transport
 
-    func resume() async {
+    /// Resume the existing queue. `nonisolated` for the same reason as `play(_:)` — keep MusicKit's
+    /// blocking transport off the main thread (this call path, via the lock-screen/toggle resume,
+    /// is the second watchdog-exposed trigger).
+    nonisolated func resume() async {
         guard hasSelection else { return }
-        do { try await player.play() }
-        catch { onNote?("Couldn't resume Apple Music.") }
+        do { try await ApplicationMusicPlayer.shared.play() }
+        catch { await note("Couldn't resume Apple Music.") }
     }
+
+    /// Deliver a UI note on the main actor from a nonisolated transport method.
+    @MainActor private func note(_ message: String) { onNote?(message) }
 
     func pause() { player.pause() }
 
