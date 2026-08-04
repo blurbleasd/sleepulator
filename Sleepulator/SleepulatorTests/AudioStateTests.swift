@@ -961,10 +961,20 @@ final class PomodoroProgressTests: XCTestCase {
 
         p.start()
         defer { p.stop() }
-        // ~0 at the boundary (arc starts empty, then eases in), tracking wall-clock after.
-        XCTAssertEqual(p.phaseElapsed(at: Date()), 0.0, accuracy: 0.05)
-        XCTAssertEqual(p.phaseElapsed(at: Date().addingTimeInterval(0.5)), 0.5, accuracy: 0.05)
-        XCTAssertEqual(p.phaseElapsed(at: Date().addingTimeInterval(120)), 120, accuracy: 0.1)
+        // Anchor to a reference taken AFTER start() returns, and assert on DELTAS from it.
+        // `start()` schedules a local notification + a Live Activity (both IPC) after capturing
+        // phaseEnd, so `phaseElapsed(at: Date())` is really "how long start()'s tail took" — a
+        // machine-load-dependent 60–80 ms here, which made the old absolute ±0.05 s assertion fail
+        // intermittently. The deltas below are exact arithmetic against the same phaseEnd, so they
+        // pin the real contract (the refill advances 1:1 with wall-clock) with no timing race.
+        let ref = Date()
+        let base = p.phaseElapsed(at: ref)
+        // Arc starts empty at the boundary — small, not exactly 0 (see above); a loose bound still
+        // catches a real regression (returning phaseTotal, a negative, or a wildly wrong origin).
+        XCTAssertGreaterThanOrEqual(base, 0)
+        XCTAssertLessThan(base, 1.0)
+        XCTAssertEqual(p.phaseElapsed(at: ref.addingTimeInterval(0.5)) - base, 0.5, accuracy: 1e-6)
+        XCTAssertEqual(p.phaseElapsed(at: ref.addingTimeInterval(120)) - base, 120, accuracy: 1e-6)
     }
 }
 
