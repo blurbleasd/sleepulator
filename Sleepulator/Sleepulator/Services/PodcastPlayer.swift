@@ -53,6 +53,13 @@ final class PodcastPlayer: NSObject {
     /// owner react to a resume — e.g. cancel a sleep timer that's already in its ambient tail, whose
     /// near-zero fade would otherwise leave the just-resumed podcast inaudible.
     var onResume: (() -> Void)?
+    /// Asked at the top of `resume()`. Return true to REDIRECT the resume: the owner loaded
+    /// something else instead (e.g. the queue head, when the loaded item is a finished episode the
+    /// sleep-aware hold already advanced past). This is the single choke point every resume path
+    /// funnels through — in-app resume, mini-player toggle, the lock-screen play/toggle commands,
+    /// and the post-interruption resume — so the "resumes a stale finished episode while the UI
+    /// shows the next one" divergence can't slip in via any of them.
+    var resumeOverrideFn: (() -> Bool)?
     
     private var currentUrl: String?
     private var currentId: String?
@@ -148,6 +155,10 @@ final class PodcastPlayer: NSObject {
     fileprivate let stateLock = NSLock()
     
     var hasPlayer: Bool { player?.currentItem != nil }
+    /// The id of the episode actually loaded in the AVPlayer — the ground truth the owner compares
+    /// against the queue head to detect display/audio divergence (sleep-aware hold, see
+    /// `resumeOverrideFn`). nil until the first `play()`.
+    var currentEpisodeId: String? { currentId }
 
     /// When true, `updateNowPlaying` is a no-op so MusicKit's `ApplicationMusicPlayer` can own the
     /// lock-screen transport + now-playing info while Apple Music is the active Focus source (one
@@ -369,6 +380,11 @@ final class PodcastPlayer: NSObject {
     @discardableResult
     func resume() -> Bool {
         guard let player = player else { return false }
+        // Give the owner first refusal: if the loaded item is a finished episode the queue has
+        // already advanced past (sleep-aware hold), the owner loads the real head instead of us
+        // replaying a stale tail under the wrong title. Returning true = handled (a fresh play()
+        // is underway), so remote commands still report success.
+        if resumeOverrideFn?() == true { return true }
         // Ensure the session is active before playing. After an interruption ended, the
         // generative branch may not have reactivated it (podcast-only mode), and a
         // lock-screen "play" would otherwise produce silence.
