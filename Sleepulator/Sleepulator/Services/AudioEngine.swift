@@ -461,8 +461,12 @@ final class AudioEngine: ObservableObject {
             self?.loadPodcast(url, id: id, resume: resume)
         }
         queueManager.pausePodcastFn = { [weak self] in
-            self?.podPlayer.pause()
-            self?.podTitle = "Queue finished"
+            guard let self else { return }
+            self.podPlayer.pause()
+            // Only claim "Queue finished" when it actually is. The sleep-aware hold also lands
+            // here (advanceQueue with suppressAutoPlay) with the next episode cued for morning —
+            // the old unconditional label lied about a non-empty queue all night.
+            if self.queueManager.queue.isEmpty { self.podTitle = "Queue finished" }
         }
         sleepTimer.stopAllFn = { [weak self] in
             self?.stopAll()
@@ -601,6 +605,29 @@ final class AudioEngine: ObservableObject {
             guard let self, self.sleepTimer.inTail else { return }
             Log.timer.notice("podcast resumed during ambient tail — cancelling sleep timer so it's audible")
             self.sleepTimer.cancelTimer()
+        }
+
+        // Resume redirect — the fix for "the shown track isn't the one playing." With the
+        // sleep-aware hold, an episode that finishes mid-timer advances the QUEUE (head = next,
+        // cued for morning) but the PLAYER keeps the finished item. Every resume path — in-app,
+        // mini-player, lock screen, post-interruption — would then replay the stale tail while the
+        // whole UI (queue, artwork, mini-player) shows the next episode. When the loaded episode is
+        // finished AND no longer the head, load the head instead. Deliberately narrow: an unfinished
+        // paused episode always resumes in place, and replaying a finished episode the user
+        // explicitly re-picked is untouched (playEpisode re-heads the queue, so ids match).
+        podPlayer.resumeOverrideFn = { [weak self] in
+            guard let self,
+                  let loadedId = self.podPlayer.currentEpisodeId,
+                  let head = self.queueManager.queue.first,
+                  head.id != loadedId,
+                  self.queueManager.finishedEpisodes.contains(loadedId) else { return false }
+            Log.audio.notice("resume redirected: loaded episode is finished + queue advanced (hold) — playing the cued head")
+            self.podTitle = head.title
+            // `resume: false` — this IS the auto-advance the hold deferred to morning, and
+            // `advanceQueue` starts a newly-cued track at 0 for the same reason (never inherit a
+            // stale/poisoned position from the map).
+            self.loadPodcast(head.audioUrl, id: head.id, resume: false)
+            return true
         }
 
         // Apple Music (Focus-only). Republish the system player's coarse state and yield the
@@ -881,7 +908,14 @@ final class AudioEngine: ObservableObject {
         // loaded), not only when it happens to be playing at this instant. saveLastMix runs from
         // pauseAll/stopAll, and a sleep-timer terminal stop pauses the player first — the old
         // `isPodPlaying` gate dropped the podcast from the snapshot, so Resume restored nothing.
-        let hasPodcast = hasLoadedEpisode && queueManager.queue.first != nil
+        let head = queueManager.queue.first
+        let hasPodcast = hasLoadedEpisode && head != nil
+        // The snapshot names the queue HEAD, so its position must belong to the head too. After a
+        // sleep-aware hold the loaded episode (finished, dropped from the queue) diverges from the
+        // cued head — pairing the head's URL with the LOADED episode's elapsed told "Resume Last
+        // Night" to start the next episode near the END of the previous one. When they diverge,
+        // store no position: the cued episode starts fresh, which is what "cued for morning" means.
+        let loadedIsHead = podPlayer.currentEpisodeId == head?.id
         let mix = SavedMix(
             name: "Last Night",
             noiseOn: noiseOn,
@@ -891,9 +925,9 @@ final class AudioEngine: ObservableObject {
             binVolume: binVolume,
             binauralPreset: binauralPreset,
             podVolume: podVolume,
-            podcastUrl: hasPodcast ? queueManager.queue.first?.audioUrl : nil,
-            podcastId: hasPodcast ? queueManager.queue.first?.id : nil,
-            podcastPosition: hasPodcast ? podcastElapsed : nil,
+            podcastUrl: hasPodcast ? head?.audioUrl : nil,
+            podcastId: hasPodcast ? head?.id : nil,
+            podcastPosition: hasPodcast && loadedIsHead ? podcastElapsed : nil,
             extraLayers: extraLayers.isEmpty ? nil : extraLayers
         )
         mixStore.saveLast(mix)
@@ -1066,6 +1100,20 @@ final class AudioEngine: ObservableObject {
 
     func loadPodcast(_ urlStr: String, id: String, resume: Bool = true, startAt: TimeInterval? = nil) {
         playbackNote = nil
+        // Resolve the title from the queue by id — the single point of truth for "what's loading."
+        // Callers that pre-set podTitle (queueManager.loadPodcastFn) agree with this; callers that
+        // didn't (resumeMix / the StartSleepulatorMix intent) used to pass a STALE podTitle into
+        // play(), putting last night's episode name on the lock screen while a different episode's
+        // audio played. Falls back to the existing podTitle for an episode not in the queue.
+        if let ep = queueManager.queue.first(where: { $0.id == id }) {
+            podTitle = ep.title
+        }
+        // A fresh load invalidates the previous episode's progress NOW. The observer only ticks
+        // during playback, so without this a snapshot taken between load and first tick (e.g.
+        // saveLastMix on backgrounding) would pair the new episode with the OLD one's elapsed.
+        playbackProgress.elapsed = 0
+        playbackProgress.duration = 0
+        playbackProgress.progress = 0
         let finalUrlStr = resolveAudioUrl(urlStr)
         podPlayer.play(url: finalUrlStr, id: id, title: podTitle, resume: resume, startAt: startAt)
     }
