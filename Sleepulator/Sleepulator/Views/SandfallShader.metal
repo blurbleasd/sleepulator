@@ -33,7 +33,7 @@ using namespace metal;
 
 namespace sf {
 
-constant int   LAYERS   = 4;      // depth planes of falling comets
+constant int   LAYERS   = 3;      // depth planes (v3.1: was 4 — see density note below)
 constant float EXPOSURE = 1.7;
 constant float3 BASE_TOP = float3(0.012, 0.018, 0.044);
 constant float3 BASE_BOT = float3(0.004, 0.006, 0.018);
@@ -79,29 +79,32 @@ half4 sandField(float2 pos, half4 color,
     // High frequency ACROSS x, low frequency down y ⇒ features stretched vertically.
     // Scrolls straight down (y·k − fall·k' = const ⇒ y grows with fall).
     float grain = fbm(float2(x * 44.0, y * 1.6 - fall * 2.4));
-    col += tint * pow(smoothstep(0.58, 0.97, grain), 2.0) * (0.06 + 0.16 * e);
+    col += tint * pow(smoothstep(0.58, 0.97, grain), 2.0) * (0.04 + 0.10 * e);
 
     // ---- comet layers ----------------------------------------------------------------
     for (int L = 0; L < LAYERS; L++) {
         float fl  = float(L);
-        float sc  = 9.0 + 8.0 * fl;                          // columns across the width
+        float sc  = 8.0 + 7.0 * fl;                          // columns across the width
         float cxi = floor(x * sc);
         float fx  = fract(x * sc);
         float h   = hash21(float2(cxi, fl * 17.0));
         // Sparse: not every column carries a comet, and the pattern differs per depth.
-        float gate = step(0.42, hash21(float2(cxi, fl * 29.0 + 3.0)));
+        // v3.1 density: 4 layers x (9+17+25+33) columns past a 58%-pass gate put ~49 comets
+        // on screen — striking but busy, and it fought the UI. 3 layers x (8+15+22) past a
+        // 34%-pass gate is ~15: the same boldness with air between the streaks.
+        float gate = step(0.66, hash21(float2(cxi, fl * 29.0 + 3.0)));
 
         float spd   = (0.50 + 0.80 * h) * (0.55 + 0.85 * e);
         float headY = fract(h * 7.31 + fall * spd * 2.2);    // travels down, wraps
 
         // Tail trails UPWARD from the head: td grows as we move above it.
         float td    = fract(headY - y);
-        float tail  = exp(-td * (7.0 + 5.0 * fl));           // nearer layers = longer tails
+        float tail  = exp(-td * (9.0 + 6.0 * fl));           // nearer layers = longer tails
 
         // Head: a tight gaussian on the signed wrapped distance, so it ends in light
         // rather than a sliced edge (the v1 defect, sim capture 2026-07-11).
         float hd    = fract(headY - y + 0.5) - 0.5;
-        float hw    = 0.010 + 0.006 * h;
+        float hw    = 0.008 + 0.005 * h;
         float head  = exp(-(hd * hd) / (hw * hw));
 
         // Narrow streak within the column — this is what makes it a falling line
