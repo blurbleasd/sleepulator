@@ -3,28 +3,40 @@
 using namespace metal;
 
 // ============================================================================
-// Sandfall (Focus) — energy-first. A downpour of falling light: per-column
-// comet streaks with trails, over a soft descending curtain.
+// Sandfall (Focus) — a vertical downpour of light: bright comet heads with long
+// tails, falling through a fine scrolling grain.
 // ----------------------------------------------------------------------------
-// Rewrite of the first energy-first attempt, which was BROKEN on device: its
-// mote layer hashed a quantized grid cell that shifted every frame, so the
-// sparkle field re-rolled ~26×/sec — flicker, not falling ("extremely choppy").
-// Lesson (device 2026-07-11): motion must be TRANSLATION — features that
-// visibly travel — never per-frame decorrelation of a random field.
+// v3 "bold" rewrite (2026-09-21). v2's faults, from sim capture + device use:
 //
-// Here every element translates smoothly at any frame rate:
-//   • background curtain: FBM streaks scrolling straight down,
-//   • comet layer ×3 depths: each column owns a bright head at
-//     `fract(seed + fall·speed)` with a tail above it — pure travel.
-//   energy (0…1) — work builds it with progress (faster, denser, brighter),
-//                   rest eases, idle sits mid.  tint — work/rest/idle colour.
-// `phase` is a SceneClock time (frozen under Reduce Motion / occlusion).
+//  1. IT DID NOT READ AS VERTICAL. The dominant element was a broad `fbm`
+//     curtain at (x·9, y·3) whose low y-frequency smeared it into soft
+//     horizontal-ish cloud — so the scene looked like Current and Tide instead
+//     of like falling. The curtain is now a fine, high-x-frequency grain
+//     (x·44, y·1.6) that is unambiguously elongated DOWN the screen, and it is
+//     dim support rather than the main event. The comets carry the scene.
+//  2. TONEMAP CRUSH. `col/(col + 0.85)` maps 1.0 → 0.54, so nothing could ever
+//     approach white — every scene sat in the same washed-out mid band.
+//     Replaced with an exposure curve (shared with Current/Tide v3).
+//  3. NO HEAD CONTRAST. The heads were a 0.5-weight gaussian over a lit
+//     background. Heads are now near-white and bright against a near-black
+//     field, with an exponential tail — an actual comet.
+//
+// Motion is translation at every frame rate: each column owns a head at
+// `fract(seed + fall·speed)` that travels down and wraps, with the tail sampled
+// relative to that head. Nothing is re-rolled per frame — the rule from the
+// 2026-07-11 device pass, where a per-frame hashed mote grid read as flicker.
+//
+//   energy (0…1) — work builds it (faster, denser, brighter), rest eases, idle
+//   mid.  tint — work/rest/idle colour.  `phase` is a SceneClock time (frozen
+//   under Reduce Motion / occlusion).
 // ============================================================================
 
 namespace sf {
 
-constant float3 BASE_TOP = float3(0.03, 0.05, 0.11);
-constant float3 BASE_BOT = float3(0.015, 0.02, 0.05);
+constant int   LAYERS   = 4;      // depth planes of falling comets
+constant float EXPOSURE = 1.7;
+constant float3 BASE_TOP = float3(0.012, 0.018, 0.044);
+constant float3 BASE_BOT = float3(0.004, 0.006, 0.018);
 
 inline float hash21(float2 p) {
     p = fract(p * float2(123.34, 345.45));
@@ -59,39 +71,59 @@ half4 sandField(float2 pos, half4 color,
     float x = uv.x, y = uv.y;
     float3 col = mix(BASE_TOP, BASE_BOT, y);
 
-    float e = clamp(energy, 0.0, 1.0);
-    float fall = phase * (0.22 + 0.30 * e);              // master descent rate
+    float e    = clamp(energy, 0.0, 1.0);
+    float fall = phase * (0.22 + 0.30 * e);        // master descent rate
+    float3 headCol = mix(tint, float3(1.0), 0.78); // heads read as light, tails carry hue
 
-    // Background curtain: soft streaks scrolling straight DOWN (feature at
-    // y·3 − fall·2 = const ⇒ y grows with fall). Smooth translation.
-    float streak = fbm(float2(x * 9.0, y * 3.0 - fall * 2.0));
-    col += tint * pow(smoothstep(0.55, 0.95, streak), 1.6) * (0.20 + 0.45 * e);
+    // ---- fine vertical grain --------------------------------------------------------
+    // High frequency ACROSS x, low frequency down y ⇒ features stretched vertically.
+    // Scrolls straight down (y·k − fall·k' = const ⇒ y grows with fall).
+    float grain = fbm(float2(x * 44.0, y * 1.6 - fall * 2.4));
+    col += tint * pow(smoothstep(0.58, 0.97, grain), 2.0) * (0.06 + 0.16 * e);
 
-    // Comet layer: three depths of per-column falling heads with tails above.
-    for (int L = 0; L < 3; L++) {
-        float sc  = 14.0 + 10.0 * float(L);              // columns across the width
+    // ---- comet layers ----------------------------------------------------------------
+    for (int L = 0; L < LAYERS; L++) {
+        float fl  = float(L);
+        float sc  = 9.0 + 8.0 * fl;                          // columns across the width
         float cxi = floor(x * sc);
         float fx  = fract(x * sc);
-        float h   = hash21(float2(cxi, float(L) * 17.0));
-        // Sparse: not every column carries a comet (varies per depth layer).
-        float gate = step(0.35, hash21(float2(cxi, float(L) * 29.0 + 3.0)));
-        float spd  = (0.55 + 0.75 * h) * (0.55 + 0.75 * e);
-        float headY = fract(h * 7.31 + fall * spd * 3.0);       // head travels down, wraps
-        float td    = fract(headY - y);                          // 0 at head → grows up the tail
-        float trail = pow(1.0 - td, 12.0);                       // comet tail above (shorter = airier)
-        // Soft glow around the head so the streak ends in light, not a hard cut edge
-        // (sim capture 2026-07-11: the bare fract() head read as a sliced-off bottom).
-        float hd    = fract(headY - y + 0.5) - 0.5;              // signed distance to the head
-        float headG = exp(-(hd * hd) / (0.02 * 0.02)) * 0.5;
-        float across = smoothstep(0.5, 0.05, abs(fx - 0.5));     // soft column profile
-        float depth  = 1.0 - 0.25 * float(L);                    // far layers dimmer
-        col += (tint + float3(0.10)) * (trail + headG) * across * gate * depth * (0.30 + 0.55 * e);
+        float h   = hash21(float2(cxi, fl * 17.0));
+        // Sparse: not every column carries a comet, and the pattern differs per depth.
+        float gate = step(0.42, hash21(float2(cxi, fl * 29.0 + 3.0)));
+
+        float spd   = (0.50 + 0.80 * h) * (0.55 + 0.85 * e);
+        float headY = fract(h * 7.31 + fall * spd * 2.2);    // travels down, wraps
+
+        // Tail trails UPWARD from the head: td grows as we move above it.
+        float td    = fract(headY - y);
+        float tail  = exp(-td * (7.0 + 5.0 * fl));           // nearer layers = longer tails
+
+        // Head: a tight gaussian on the signed wrapped distance, so it ends in light
+        // rather than a sliced edge (the v1 defect, sim capture 2026-07-11).
+        float hd    = fract(headY - y + 0.5) - 0.5;
+        float hw    = 0.010 + 0.006 * h;
+        float head  = exp(-(hd * hd) / (hw * hw));
+
+        // Narrow streak within the column — this is what makes it a falling line
+        // rather than a lit band.
+        float wx     = 0.16 + 0.10 * h;
+        float across = exp(-((fx - 0.5) * (fx - 0.5)) / (wx * wx));
+
+        float depth = 1.0 - 0.18 * fl;                       // far layers dimmer
+        float amt   = gate * across * depth * (0.45 + 0.75 * e);
+
+        col += tint    * tail * 0.55 * amt;
+        col += headCol * head * 2.30 * amt;
     }
 
-    // Ambient glow lifts with energy.
-    col += tint * 0.04 * e;
+    // Ambient lift with energy.
+    col += tint * 0.03 * e;
 
-    col = col / (col + 0.85);                             // filmic roll-off
+    // Vignette — edges to black so the fall reads as the subject.
+    float2 vp = (uv - 0.5) * float2(1.0, 1.22);
+    col *= 1.0 - 0.48 * dot(vp, vp);
+
+    col = 1.0 - exp(-max(col, 0.0) * EXPOSURE);
     col += (hash21(pos + fmod(phase, 64.0)) - 0.5) / 255.0;   // dither
     return half4(half3(saturate(col)), 1.0h);
 }
