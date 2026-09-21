@@ -36,7 +36,7 @@ namespace cur {
 
 // ---- tunables (edit + rebuild) ---------------------------------------------------
 constant int   STREAMS  = 6;      // fewer than v2's 7, but each one actually reads
-constant int   FBM_OCT  = 4;      // FBM detail for the fold — the battery knob
+constant int   FBM_OCT  = 3;      // FBM detail for the fold — the battery knob (was 4)
 constant float DRIFT    = 1.25;   // maps SceneClock phase → advection distance
 constant float SWAY     = 0.16;   // vertical undulation amplitude (× driveAmp)
 constant float EXPOSURE = 1.7;    // highlight drive for the exposure tonemap
@@ -68,6 +68,15 @@ inline float fbm(float2 p, int octaves) {
         amp *= 0.5;
     }
     return v;
+}
+
+/// Compact-support bump, a drop-in for `exp(-(d/w)^2)` without the transcendental. Pass d² and
+/// 1/r² with r = 1.6w, which matches the gaussian's mid-falloff; the compact support (exactly 0
+/// beyond r) is a bonus, since those gaussian tails were invisible yet cost a full `exp` each.
+/// Focus draws these several times per stream/layer per pixel, so this is the hot path.
+inline float bump(float d2, float invR2) {
+    float t = max(0.0, 1.0 - d2 * invR2);
+    return t * t;
 }
 
 } // namespace cur
@@ -123,8 +132,7 @@ half4 currentField(float2 pos, half4 color,
         float prate = 0.35 + 0.20 * speed;
         float xp    = fract(fract(sin(fi * 78.233) * 43758.5453) - t * prate);
         float pdist = fract(x - xp + 0.5) - 0.5;
-        float pw    = 0.18;                                  // long + symmetric
-        float pulse = exp(-(pdist * pdist) / (pw * pw));
+        float pulse = bump(pdist * pdist, 12.06);            // long + symmetric (r = 1.6 * 0.18)
 
         // Amplitudes are down accordingly: a long swell at the old peak would just be a
         // bright bar. The halo gets only a touch so the glow doesn't bloom into a blob.
@@ -132,10 +140,14 @@ half4 currentField(float2 pos, half4 color,
         float energyCore = glow + pulse * 1.30;
 
         // Thin core inside a soft halo — the structure v2 lacked entirely.
+        // Halo width reuses the `warp` we already sampled. v3 spent a THIRD fbm per stream —
+        // ~12 more hash lookups per stream per pixel — purely to breathe the halo thickness,
+        // an effect invisible at a glance and unaffordable six streams deep.
+        float d2   = d * d;
         float cw   = 0.0030 + 0.0035 * r2;
-        float hw   = 0.020 + 0.028 * fbm(float2(xl * 3.0 + fi, t * 0.15), 3);
-        float core = exp(-(d * d) / (cw * cw));
-        float halo = exp(-(d * d) / (hw * hw));
+        float hw   = 0.020 + 0.028 * warp;
+        float core = bump(d2, 1.0 / (2.56 * cw * cw));
+        float halo = bump(d2, 1.0 / (2.56 * hw * hw));
 
         // Streams are deliberately UNEQUAL in brightness → depth without a fog layer.
         float depth = mix(0.30, 1.0, r2);

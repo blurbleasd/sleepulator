@@ -27,7 +27,12 @@ struct SandfallMetalView: View {
             if paused {
                 field(size: size, now: nil)
             } else {
-                TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { tl in
+                // 60 fps, not 30. Focus scenes are fast by design (flowing streams, falling
+                // comets); on a 120 Hz ProMotion panel a 30 fps cap holds each frame for four
+                // refreshes, so fast features advance in visible jumps — the long-standing
+                // "focus savers are choppy" report. Sleep stays at 30: its drift is slow enough
+                // that the step is sub-pixel, and it runs all night on battery.
+                TimelineView(.animation(minimumInterval: 1.0 / 60.0)) { tl in
                     field(size: size, now: tl.date.timeIntervalSinceReferenceDate)
                 }
             }
@@ -46,7 +51,10 @@ struct SandfallMetalView: View {
         let energy = running ? (work ? 0.55 + 0.45 * prog : 0.40) : 0.50
         let sand = running ? (work ? Self.workSand : Self.restSand) : Self.idleSand
 
-        if let now { clock.tick(now: now, rate: reduceMotion ? 0 : 1) }
+        if let now {
+            clock.tick(now: now, rate: reduceMotion ? 0 : 1)
+            SceneDiagnostics.shared.frame(now: now)   // F3: Focus was never instrumented until now
+        }
         let phase = Float(clock.phase)
         return Rectangle()
             .fill(.black)

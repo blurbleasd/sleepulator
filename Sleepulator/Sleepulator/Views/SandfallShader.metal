@@ -54,8 +54,17 @@ inline float vnoise(float2 p) {
 }
 inline float fbm(float2 p) {
     float v = 0.0, amp = 0.5;
-    for (int i = 0; i < 4; i++) { v += amp * vnoise(p); p = p * 2.0 + float2(11.3, 7.7); amp *= 0.5; }
+    for (int i = 0; i < 3; i++) { v += amp * vnoise(p); p = p * 2.0 + float2(11.3, 7.7); amp *= 0.5; }
     return v;
+}
+
+/// Compact-support bump, a drop-in for `exp(-(d/w)^2)` without the transcendental. Pass d² and
+/// 1/r² with r = 1.6w, which matches the gaussian's mid-falloff; the compact support (exactly 0
+/// beyond r) is a bonus, since those gaussian tails were invisible yet cost a full `exp` each.
+/// Focus draws these several times per stream/layer per pixel, so this is the hot path.
+inline float bump(float d2, float invR2) {
+    float t = max(0.0, 1.0 - d2 * invR2);
+    return t * t;
 }
 
 } // namespace sf
@@ -105,12 +114,12 @@ half4 sandField(float2 pos, half4 color,
         // rather than a sliced edge (the v1 defect, sim capture 2026-07-11).
         float hd    = fract(headY - y + 0.5) - 0.5;
         float hw    = 0.008 + 0.005 * h;
-        float head  = exp(-(hd * hd) / (hw * hw));
+        float head  = bump(hd * hd, 1.0 / (2.56 * hw * hw));
 
         // Narrow streak within the column — this is what makes it a falling line
         // rather than a lit band.
         float wx     = 0.16 + 0.10 * h;
-        float across = exp(-((fx - 0.5) * (fx - 0.5)) / (wx * wx));
+        float across = bump((fx - 0.5) * (fx - 0.5), 1.0 / (2.56 * wx * wx));
 
         float depth = 1.0 - 0.18 * fl;                       // far layers dimmer
         float amt   = gate * across * depth * (0.45 + 0.75 * e);
