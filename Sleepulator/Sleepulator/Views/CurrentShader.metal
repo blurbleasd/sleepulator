@@ -113,16 +113,23 @@ half4 currentField(float2 pos, half4 color,
         float g    = fbm(float2(xl * 2.2, fi * 7.0), 3);
         float glow = pow(saturate(g * 1.45 - 0.22), 2.2);
 
-        // A bright pulse travels along each stream — the direction + energy cue. Signed
-        // wrapped distance with an asymmetric gaussian: soft short front, long tail behind
-        // (a raw fract() ramp put a hard cliff at the head — visible seams, 2026-07-11).
+        // A travelling brightness SWELL along each stream — the direction + energy cue.
+        //
+        // v3.2: this was an ASYMMETRIC gaussian (short bright front, long tail). On a thin
+        // filament that silhouette is a bulbous head dragging a tail — which reads,
+        // unmistakably and unfortunately, as a spermatozoon. Fixed by making the swell
+        // SYMMETRIC and long: there is no discrete head to read as a nucleus, so it reads
+        // as light running through a fibre instead of an organism swimming along it.
         float prate = 0.35 + 0.20 * speed;
         float xp    = fract(fract(sin(fi * 78.233) * 43758.5453) - t * prate);
         float pdist = fract(x - xp + 0.5) - 0.5;
-        float pw    = pdist > 0.0 ? 0.10 : 0.022;
+        float pw    = 0.18;                                  // long + symmetric
         float pulse = exp(-(pdist * pdist) / (pw * pw));
 
-        float energy = glow + pulse * 2.2;
+        // Amplitudes are down accordingly: a long swell at the old peak would just be a
+        // bright bar. The halo gets only a touch so the glow doesn't bloom into a blob.
+        float energyHalo = glow + pulse * 0.45;
+        float energyCore = glow + pulse * 1.30;
 
         // Thin core inside a soft halo — the structure v2 lacked entirely.
         float cw   = 0.0030 + 0.0035 * r2;
@@ -133,8 +140,8 @@ half4 currentField(float2 pos, half4 color,
         // Streams are deliberately UNEQUAL in brightness → depth without a fog layer.
         float depth = mix(0.30, 1.0, r2);
 
-        col += tint    * halo * 0.42 * energy * op * depth;
-        col += coreCol * core * 2.10 * energy * op * depth;
+        col += tint    * halo * 0.42 * energyHalo * op * depth;
+        col += coreCol * core * 2.10 * energyCore * op * depth;
     }
 
     // Faint floor glow the streams ride over.
