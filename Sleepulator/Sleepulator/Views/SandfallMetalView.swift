@@ -11,7 +11,6 @@ import SwiftUI
 struct SandfallMetalView: View {
     var paused: Bool = false
     let pomodoro: PomodoroService
-    var reduceMotion: Bool = false
 
     private static let workSand = SIMD3<Double>(0.82, 0.85, 0.93)  // cool pale
     private static let restSand = SIMD3<Double>(0.55, 0.80, 0.74)  // teal (ease)
@@ -52,7 +51,7 @@ struct SandfallMetalView: View {
         let sand = running ? (work ? Self.workSand : Self.restSand) : Self.idleSand
 
         if let now {
-            clock.tick(now: now, rate: reduceMotion ? 0 : 1)
+            clock.tick(now: now, rate: 1)
             SceneDiagnostics.shared.frame(now: now)   // F3: Focus was never instrumented until now
         }
         let phase = Float(clock.phase)

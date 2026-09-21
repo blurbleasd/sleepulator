@@ -27,8 +27,8 @@ using namespace metal;
 // 2026-07-11 device pass, where a per-frame hashed mote grid read as flicker.
 //
 //   energy (0…1) — work builds it (faster, denser, brighter), rest eases, idle
-//   mid.  tint — work/rest/idle colour.  `phase` is a SceneClock time (frozen
-//   under Reduce Motion / occlusion).
+//   mid.  tint — work/rest/idle colour.  `phase` is a SceneClock time, frozen by
+//   occlusion / the app's Ambient-motion toggle — NOT by Reduce Motion.
 // ============================================================================
 
 namespace sf {

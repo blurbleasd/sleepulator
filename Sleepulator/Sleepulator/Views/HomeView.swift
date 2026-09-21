@@ -45,6 +45,8 @@ struct HomeView: View {
         // low-luminance/Always-On), not just the night-dim veil.
         tiltSource.setActive(currentScene.usesMotion && !scenesFrozen && !reduceMotion)
         SceneDiagnostics.shared.activeScene = currentScene.id   // tag F3 render samples with the visible scene
+        SceneDiagnostics.shared.frozen = scenesFrozen
+        SceneDiagnostics.shared.reduceMotion = reduceMotion
     }
 
     /// Scenes (and CoreMotion) settle to a static frame whenever the screen is occluded by the
