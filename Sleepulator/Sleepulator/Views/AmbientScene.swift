@@ -223,20 +223,6 @@ struct EmbersScene: AmbientScene {
     }
 }
 
-#if DEBUG
-/// DEBUG-only A/B sibling: the original CPU `EmbersView` (drifting motes), for on-device
-/// comparison against the dark smoldering shader.
-struct EmbersCanvasScene: AmbientScene {
-    let id = "embers-canvas"
-    let title = "Embers (canvas)"
-    let mood = SceneMood.sleep
-
-    func makeBackdrop(_ ctx: SceneContext) -> AnyView {
-        AnyView(EmbersView(paused: ctx.paused, sleepTimer: ctx.sleepTimer, audioLevel: ctx.audioLevel))
-    }
-}
-#endif
-
 /// "Still water": a low moon over a dark pond, its reflected path shimmering on the surface with
 /// faint concentric ripples. Now a Metal fragment shader (`StillWaterShader.metal`) — a per-pixel
 /// FBM wave field with real specular glints, replacing the old wireframe ellipse rings.
@@ -251,19 +237,12 @@ struct StillWaterScene: AmbientScene {
 }
 
 #if DEBUG
-/// DEBUG-only A/B sibling: the original CPU `StillWaterView` (stroked ellipse rings), kept for
-/// on-device comparison against the Metal shader over a full timer run. Retire `StillWaterView.swift`
-/// once the shader clearly wins on look + power.
-struct StillWaterCanvasScene: AmbientScene {
-    let id = "still-water-canvas"
-    let title = "Still water (canvas)"
-    let mood = SceneMood.sleep
-
-    func makeBackdrop(_ ctx: SceneContext) -> AnyView {
-        AnyView(StillWaterView(paused: ctx.paused, sleepTimer: ctx.sleepTimer, audioLevel: ctx.audioLevel))
-    }
-}
-
+/// PARKED (2026-09-21) — deliberately NOT in `SceneRegistry`, so it no longer appears in the
+/// backdrop picker. Sim capture showed it rendering an essentially BLANK field: no moon, no
+/// horizon, no water, just the app's base colour. The code is kept rather than deleted because the
+/// depth lens is the stated visual-moat direction (RAIN-ON-GLASS-DEPTH-SPEC §2) — but a scene that
+/// draws nothing must not sit in the user's swipe list. Re-register once the blank render is fixed.
+///
 /// DEBUG-only A/B sibling: the **depth edition** of Still Water — the ocean generalization of the
 /// rain-glass depth recipe (RAIN-ON-GLASS-DEPTH-SPEC §2). Rides the shared `.layerEffect`
 /// `DepthBackdrop`: the near swell refracts a composited far world (sky + moon + hazy horizon) into a
@@ -277,26 +256,6 @@ struct StillWaterDepthScene: AmbientScene {
 
     func makeBackdrop(_ ctx: SceneContext) -> AnyView {
         AnyView(StillWaterDepthView(paused: ctx.paused, sleepTimer: ctx.sleepTimer))
-    }
-}
-
-/// DEBUG-only A/B sibling: the STRUCTURAL audio-reactivity variant of the flat Metal Still Water.
-/// Same `stillWaterField` shader but `reactive: true`, so audio disturbs the wave FIELD (the moon
-/// reflection shimmers/breaks up with the bed) instead of a global brightness swell. A/B against
-/// `StillWaterScene` over a pre-sleep session with audio playing: does the structural response read
-/// better AND stay subtle enough not to wake you? Promote (make it the default + delete the shader's
-/// `reactive < 0.5` branch) once it wins on device. Passes `reduceMotion` so it falls to the calm
-/// branch under Reduce Motion. (Orthogonal to `StillWaterDepthScene`, which is the layer-lens depth
-/// A/B — this one is about audio response on the flat scene.)
-struct StillWaterReactiveScene: AmbientScene {
-    let id = "still-water-reactive"
-    let title = "Still water (reactive)"
-    let mood = SceneMood.sleep
-
-    func makeBackdrop(_ ctx: SceneContext) -> AnyView {
-        AnyView(StillWaterMetalView(paused: ctx.paused, sleepTimer: ctx.sleepTimer,
-                                    audioLevel: ctx.audioLevel, reactive: true,
-                                    reduceMotion: ctx.reduceMotion))
     }
 }
 #endif
@@ -340,10 +299,6 @@ enum SceneRegistry {
         var scenes: [any AmbientScene] = [NightSkyScene(), RainOnGlassScene()]
         #if DEBUG
         scenes.append(RainOnGlassDepthScene())     // A/B sibling, DEBUG builds only
-        scenes.append(StillWaterCanvasScene())     // A/B vs the Metal still water, DEBUG builds only
-        scenes.append(StillWaterDepthScene())      // depth A/B vs the flat Metal still water, DEBUG only
-        scenes.append(StillWaterReactiveScene())   // A/B: structural audio reactivity, DEBUG builds only
-        scenes.append(EmbersCanvasScene())         // A/B vs the dark Metal embers, DEBUG builds only
         #endif
         scenes.append(contentsOf: [
             BreathingBloomScene(), AuroraScene(), EmbersScene(), StillWaterScene(), DeepSpaceScene(),

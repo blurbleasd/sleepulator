@@ -157,9 +157,17 @@ half4 stillWaterField(float2 pos, half4 color,
 
     // Stars in the sky, dimmed near the moon and as the night deepens.
     if (uv.y < HORIZON) {
-        float2 sg = floor(pos / 3.0);
-        float sh  = hash21(sg);
-        float star = step(0.992, sh) * smoothstep(0.0, 0.5, (HORIZON - uv.y) / HORIZON);
+        // ROUND stars — see the matching note in AuroraShader. A bare `step` on a cell hash
+        // lights the whole cell, drawing hard squares on a lattice; the radial falloff plus a
+        // jittered centre make them points. Threshold loosened to hold the count against the
+        // larger cell.
+        float2 sp  = pos / 4.0;
+        float2 sg  = floor(sp);
+        float2 sf  = fract(sp) - 0.5;
+        float  sh  = hash21(sg);
+        float2 soff = (float2(hash21(sg + 3.1), hash21(sg + 5.7)) - 0.5) * 0.7;
+        float  sd  = length(sf - soff);
+        float star = step(0.986, sh) * exp(-(sd * sd) / 0.04) * smoothstep(0.0, 0.5, (HORIZON - uv.y) / HORIZON);
         float tw   = 0.55 + 0.45 * sin(time * 1.7 + sh * 100.0);
         float nearMoon = smoothstep(0.0, 0.25, md);
         col += float3(0.85, 0.90, 1.0) * star * tw * 0.5 * (1.0 - 0.6 * p) * nearMoon;

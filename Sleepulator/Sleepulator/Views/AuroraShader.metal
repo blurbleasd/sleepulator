@@ -159,9 +159,20 @@ half4 auroraField(float2 pos, half4 color,
     // every star the same frequency and near-identical phase (the whole sky blinked in
     // unison). A third of the stars hold steady; the rest twinkle at their own rate.
     float lum = dot(col, float3(0.299, 0.587, 0.114));
-    float2 sg = floor(pos / 3.0);
-    float sh  = hash21(sg);
-    float star = step(0.992, sh) * smoothstep(0.05, 0.65, vY);
+    // ROUND stars. The cell hash only decides WHERE a star sits; a radial falloff inside the
+    // cell decides each pixel's brightness. `step(0.992, hash(cell))` on its own lit an entire
+    // 3-point cell uniformly, drawing a hard SQUARE — and because every star sat dead-centre in
+    // a cell, they formed a visible lattice of grey blocks across the sky (sim capture
+    // 2026-09-21). Jittering the centre inside the cell breaks that grid too. The threshold is
+    // loosened from .992 to .986 to hold the star COUNT roughly constant against the larger cell
+    // (density per unit area scales with cell², 3²→4²).
+    float2 sp  = pos / 4.0;
+    float2 sg  = floor(sp);
+    float2 sf  = fract(sp) - 0.5;
+    float  sh  = hash21(sg);
+    float2 soff = (float2(hash21(sg + 3.1), hash21(sg + 5.7)) - 0.5) * 0.7;
+    float  sd  = length(sf - soff);
+    float star = step(0.986, sh) * exp(-(sd * sd) / 0.04) * smoothstep(0.05, 0.65, vY);
     float ph     = hash21(sg + 19.7) * 6.28318530718;    // full 0..2π phase spread
     float fr     = 0.5 + 1.6 * hash21(sg + 47.3);        // per-star rate, 0.5..2.1 rad/s
     float steady = step(hash21(sg + 71.1), 0.35);        // ~35% don't twinkle at all
