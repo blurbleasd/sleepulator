@@ -109,28 +109,18 @@ struct NightFade<Content: View>: View {
 // is now dead code, safe to delete in a cleanup pass.)
 
 /// "Current" (Focus): cool streams that quicken/brighten through a work interval and ease on a
-/// break — momentum without flicker.
+/// break — momentum without flicker. A domain-warped FBM flow-field shader
+/// (`CurrentShader.metal` `currentField` via `CurrentMetalView`), driven by the shared
+/// `FocusDrivers` mapping. Reduce Motion feeds the flow clock rate 0 → static field.
+///
+/// Promoted 2026-09-21: this WAS a DEBUG-only "(Metal)" A/B sibling sitting next to a Canvas
+/// `CurrentScene` that owned the "current" id — which is the id `sceneFocus` defaults to. So the
+/// default Focus backdrop was the weak Canvas original, and the Metal rewrite was an extra list
+/// entry most users never selected (and that a Release build stripped entirely). Keeping the
+/// plain "current" id means an existing preference lands here with no migration.
 struct CurrentScene: AmbientScene {
     let id = "current"
     let title = "Current"
-    let mood = SceneMood.focus
-
-    func makeBackdrop(_ ctx: SceneContext) -> AnyView {
-        AnyView(CurrentView(paused: ctx.paused, pomodoro: ctx.pomodoro))
-    }
-}
-
-#if DEBUG
-/// DEBUG-only A/B sibling of `CurrentScene`: the Metal edition (a domain-warped FBM flow-field
-/// shader — CurrentShader.metal `currentField` via `CurrentMetalView`, driven by the shared
-/// `FocusDrivers` mapping so it reads the Pomodoro identically to the Canvas Current). Registered
-/// alongside the Canvas scene so the two can be compared on a real device over a full, *unoccluded*
-/// Focus session (look + thermal + battery — Focus never freezes like the Sleep scenes do, so this
-/// is the real power test). Reduce Motion feeds the flow clock rate 0 → static field. Retire
-/// `CurrentScene` once this clearly wins; take the thermal verdict from a Release/Profile build.
-struct CurrentMetalScene: AmbientScene {
-    let id = "current-metal"
-    let title = "Current (Metal)"
     let mood = SceneMood.focus
 
     func makeBackdrop(_ ctx: SceneContext) -> AnyView {
@@ -138,29 +128,14 @@ struct CurrentMetalScene: AmbientScene {
                                  reduceMotion: ctx.reduceMotion))
     }
 }
-#endif
 
-/// "Tide" (Focus): a calm cool level that rises across a work interval and recedes on a break —
-/// an ambient, glanceable progress cue.
+/// "Tide" (Focus): rising, pulsing bands whose energy builds across a work interval and eases on
+/// a break (`TideShader.metal` `tideField` via `TideMetalView`) — an FBM-modulated surge with a
+/// crisp crest and a counter-swell, instead of the flat Canvas fill it replaced. Reduce Motion
+/// stills the surface. Promoted 2026-09-21 out of its DEBUG A/B slot — see `CurrentScene`.
 struct TideScene: AmbientScene {
     let id = "tide"
     let title = "Tide"
-    let mood = SceneMood.focus
-
-    func makeBackdrop(_ ctx: SceneContext) -> AnyView {
-        AnyView(TideView(paused: ctx.paused, pomodoro: ctx.pomodoro))
-    }
-}
-
-#if DEBUG
-/// DEBUG-only A/B sibling of `TideScene`: the Metal edition (`TideShader.metal` `tideField` via
-/// `TideMetalView`) — a per-pixel water level whose height tracks the Pomodoro, with an FBM-
-/// modulated surface, depth shading, a crisp waterline and specular glints, instead of the flat
-/// Canvas fill. Reduce Motion stills the surface. A/B against the Canvas Tide on device; promote
-/// once it wins. (Deep work retired 2026-07-06 — invisible-by-design, a weak concept.)
-struct TideMetalScene: AmbientScene {
-    let id = "tide-metal"
-    let title = "Tide (Metal)"
     let mood = SceneMood.focus
 
     func makeBackdrop(_ ctx: SceneContext) -> AnyView {
@@ -168,7 +143,6 @@ struct TideMetalScene: AmbientScene {
                               reduceMotion: ctx.reduceMotion))
     }
 }
-#endif
 
 /// "Rain on glass": a misted window with soft lights behind and droplets sliding down the
 /// glass. Ambient (not time-reactive); pairs naturally with the rain sound.
@@ -341,27 +315,13 @@ struct DeepSpaceScene: AmbientScene {
     }
 }
 
-/// "Sandfall" (Focus): an abstract hourglass whose sand level tracks the Pomodoro — a tactile,
-/// numberless read on how far through the current interval you are.
+/// "Sandfall" (Focus): per-column comet streaks falling through a descending FBM curtain, whose
+/// intensity builds across a work interval (`SandfallShader.metal` `sandField` via
+/// `SandfallMetalView`) — replacing the 14 stiff Canvas grains. Reduce Motion stills the fall.
+/// Promoted 2026-09-21 out of its DEBUG A/B slot — see `CurrentScene`.
 struct SandfallScene: AmbientScene {
     let id = "sandfall"
     let title = "Sandfall"
-    let mood = SceneMood.focus
-
-    func makeBackdrop(_ ctx: SceneContext) -> AnyView {
-        AnyView(SandfallView(paused: ctx.paused, pomodoro: ctx.pomodoro))
-    }
-}
-
-#if DEBUG
-/// DEBUG-only A/B sibling of `SandfallScene`: the Metal edition (`SandfallShader.metal`
-/// `sandField` via `SandfallMetalView`) — a procedural hourglass with FBM-granular sand in both
-/// bulbs, the top draining and the bottom mounding as the Pomodoro runs, and a turbulent falling
-/// column through the neck, instead of 14 stiff Canvas grains. Reduce Motion stills the fall.
-/// A/B against the Canvas Sandfall on device; promote once it wins.
-struct SandfallMetalScene: AmbientScene {
-    let id = "sandfall-metal"
-    let title = "Sandfall (Metal)"
     let mood = SceneMood.focus
 
     func makeBackdrop(_ ctx: SceneContext) -> AnyView {
@@ -369,7 +329,6 @@ struct SandfallMetalScene: AmbientScene {
                                   reduceMotion: ctx.reduceMotion))
     }
 }
-#endif
 
 // MARK: - Registry
 
@@ -385,9 +344,6 @@ enum SceneRegistry {
         scenes.append(StillWaterDepthScene())      // depth A/B vs the flat Metal still water, DEBUG only
         scenes.append(StillWaterReactiveScene())   // A/B: structural audio reactivity, DEBUG builds only
         scenes.append(EmbersCanvasScene())         // A/B vs the dark Metal embers, DEBUG builds only
-        scenes.append(CurrentMetalScene())         // A/B vs the Canvas Current (Focus), DEBUG builds only
-        scenes.append(TideMetalScene())            // A/B vs the Canvas Tide (Focus), DEBUG builds only
-        scenes.append(SandfallMetalScene())        // A/B vs the Canvas Sandfall (Focus), DEBUG builds only
         #endif
         scenes.append(contentsOf: [
             BreathingBloomScene(), AuroraScene(), EmbersScene(), StillWaterScene(), DeepSpaceScene(),
@@ -403,6 +359,14 @@ enum SceneRegistry {
     /// Resolve a selection id to a scene, falling back to the mood's first registered scene.
     static func scene(id: String, mood: SceneMood) -> any AmbientScene {
         let candidates = scenes(for: mood)
-        return candidates.first(where: { $0.id == id }) ?? candidates.first ?? NightSkyScene()
+        if let exact = candidates.first(where: { $0.id == id }) { return exact }
+        // The Focus Metal scenes were promoted onto their plain ids (2026-09-21), so a preference
+        // saved while A/B-testing ("current-metal") should land on the promoted scene rather than
+        // silently falling back to whatever happens to be first.
+        if id.hasSuffix("-metal"),
+           let promoted = candidates.first(where: { $0.id == String(id.dropLast("-metal".count)) }) {
+            return promoted
+        }
+        return candidates.first ?? NightSkyScene()
     }
 }
