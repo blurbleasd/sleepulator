@@ -616,17 +616,32 @@ final class AudioEngine: ObservableObject {
         // paused episode always resumes in place, and replaying a finished episode the user
         // explicitly re-picked is untouched (playEpisode re-heads the queue, so ids match).
         podPlayer.resumeOverrideFn = { [weak self] in
-            guard let self,
-                  let loadedId = self.podPlayer.currentEpisodeId,
-                  let head = self.queueManager.queue.first,
-                  head.id != loadedId,
-                  self.queueManager.finishedEpisodes.contains(loadedId) else { return false }
-            Log.audio.notice("resume redirected: loaded episode is finished + queue advanced (hold) — playing the cued head")
-            self.podTitle = head.title
-            // `resume: false` — this IS the auto-advance the hold deferred to morning, and
-            // `advanceQueue` starts a newly-cued track at 0 for the same reason (never inherit a
-            // stale/poisoned position from the map).
-            self.loadPodcast(head.audioUrl, id: head.id, resume: false)
+            // Trigger on the PLAYER's own "this item is spent" flag rather than on a queue
+            // comparison. The previous version required `head.id != loadedId`, which missed the
+            // end-of-episode sleep timer entirely: that path calls stopAll() and returns WITHOUT
+            // advancing the queue, so the finished episode stays BOTH loaded and at the head —
+            // and every morning resume replayed its last ~30s (adaptive rewind) under its own
+            // stale title. That is the "tracks repeating / position wrong" report.
+            guard let self, self.podPlayer.didPlayToEnd else { return false }
+            let loadedId = self.podPlayer.currentEpisodeId
+            // Drop the spent episode if the queue still has it at the head (the end-of-episode
+            // case); the hold case already removed it.
+            if let loadedId, self.queueManager.queue.first?.id == loadedId {
+                self.queueManager.advanceQueue(finishedEpId: loadedId, suppressAutoPlay: true)
+            }
+            if let head = self.queueManager.queue.first {
+                Log.audio.notice("resume redirected: loaded episode is spent — playing the cued head instead of replaying its tail")
+                self.podTitle = head.title
+                // `resume: false` — this IS the auto-advance that was deferred, and a newly-cued
+                // track starts at 0 (never inherit a stale/poisoned position from the map).
+                self.loadPodcast(head.audioUrl, id: head.id, resume: false)
+            } else {
+                // Nothing cued. Replaying from the START is a sane answer to "play"; replaying
+                // the last 30 seconds of an episode you already finished is not.
+                Log.audio.notice("resume on a spent episode with an empty queue — restarting it from 0")
+                self.podPlayer.seekTo(seconds: 0)
+                self.podPlayer.resume()
+            }
             return true
         }
 
@@ -915,7 +930,16 @@ final class AudioEngine: ObservableObject {
         // cued head — pairing the head's URL with the LOADED episode's elapsed told "Resume Last
         // Night" to start the next episode near the END of the previous one. When they diverge,
         // store no position: the cued episode starts fresh, which is what "cued for morning" means.
+        // Read the position from the LIVE player, not the 1 Hz `podcastElapsed` UI slice: that
+        // slice is 0 in the window between a load and its first observer tick, and a snapshot
+        // taken there (backgrounding right after starting an episode) would tell Resume Last
+        // Night to restart from the beginning. Anything under 5 s is stored as nil so the
+        // saved-position map wins instead — a stored 0 forces a seek to 0 and loses the real spot.
+        // Also require the loaded episode to BE the head it's being filed under (a hold-advanced
+        // night diverges), else the next episode inherits the previous one's position.
         let loadedIsHead = podPlayer.currentEpisodeId == head?.id
+        let livePosition = podPlayer.currentPositionSeconds ?? 0
+        let position: Double? = (loadedIsHead && livePosition > 5) ? livePosition : nil
         let mix = SavedMix(
             name: "Last Night",
             noiseOn: noiseOn,
@@ -927,7 +951,7 @@ final class AudioEngine: ObservableObject {
             podVolume: podVolume,
             podcastUrl: hasPodcast ? head?.audioUrl : nil,
             podcastId: hasPodcast ? head?.id : nil,
-            podcastPosition: hasPodcast && loadedIsHead ? podcastElapsed : nil,
+            podcastPosition: hasPodcast ? position : nil,
             extraLayers: extraLayers.isEmpty ? nil : extraLayers
         )
         mixStore.saveLast(mix)

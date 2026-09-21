@@ -12,7 +12,15 @@ struct LimiterState {
     var attackCoef: Float
     var releaseCoef: Float
     var enabled: Float
+    /// The SMOOTHED, currently-applied level. Owned by the RENDER THREAD, which eases it toward
+    /// `volTarget` every sample. Starting it at 0 is what produces the play/resume fade-in — no
+    /// main-queue timer involved, so a throttled/suspended app can't strand it below target.
     var volume: Float
+    /// Where `volume` is heading: user target × sleep-timer fade. Written from the main thread.
+    var volTarget: Float
+    /// Per-sample one-pole coefficient for that ease (recomputed from the real sample rate in
+    /// `prepare()`; ~0.36 s to full).
+    var volCoef: Float
     // Sleep EQ: gentle fixed shelves (treble roll-off + bass trim) for low-volume
     // voice comfort. Shelf gains are constants in process(); the one-pole corner
     // coefficients are derived from the real sample rate in prepare().
@@ -84,8 +92,9 @@ final class PodcastPlayer: NSObject {
     /// Keeping them separate is why a play/resume can't inherit a stale fade and go silent.
     private var currentVolume: Float = 1.0
     /// The slow sleep-timer / Pomodoro fade, as a SEPARATE factor (0…1). Mirrors
-    /// `GenerativeAudioEngine.targetFadeMult`: the render level is `currentVolume * fadeInGain *
-    /// fadeMult`, so the fade rides on top of the user target instead of overwriting it. A resume
+    /// `GenerativeAudioEngine.targetFadeMult`: the render target is `currentVolume * fadeMult`
+    /// (the tap eases toward it), so the fade rides on top of the user target instead of
+    /// overwriting it. A resume
     /// after (or during, once the tail is cancelled) a fade multiplies by an intact `currentVolume`
     /// and is audible — the fix for "podcast plays but there's no sound."
     private var fadeMult: Float = 1.0
@@ -94,11 +103,12 @@ final class PodcastPlayer: NSObject {
 
     /// When playback was last paused/stopped — drives the adaptive rewind on the next resume.
     private var pausedAt: Date?
-    /// Short fade-in envelope (0→1) applied on play/resume so audio eases in instead of
-    /// snapping to full volume — gentler at night. Multiplied into the effective volume; the
-    /// limiter tap reads the product via `applyVolumeToStates()`.
-    private var fadeInGain: Float = 1.0
-    private var fadeTimer: DispatchSourceTimer?
+    /// True once the loaded item played through to its end — i.e. it is SPENT. Resuming a spent
+    /// item replays its last seconds (adaptive rewind) under a stale title, which is the
+    /// "tracks repeating / wrong track" bug: the end-of-episode sleep timer stops WITHOUT
+    /// advancing the queue, so the finished episode stays both loaded and at the queue head.
+    /// Cleared by a fresh `play()` and by any explicit seek (scrubbing back un-spends it).
+    private(set) var didPlayToEnd = false
 
     /// How far to rewind on resume given how long playback was paused. The longer the gap, the
     /// further back — so a quick pause barely moves, but nodding off and coming back recovers
@@ -159,6 +169,15 @@ final class PodcastPlayer: NSObject {
     /// against the queue head to detect display/audio divergence (sleep-aware hold, see
     /// `resumeOverrideFn`). nil until the first `play()`.
     var currentEpisodeId: String? { currentId }
+    /// The player's ACTUAL position, for the "Last Night" snapshot. Reading the live player beats
+    /// the 1 Hz `PlaybackProgress` slice, which can still be 0 in the window between a load and
+    /// its first observer tick — a snapshot taken there (backgrounding right after starting)
+    /// would otherwise tell Resume Last Night to restart the episode from the beginning.
+    var currentPositionSeconds: Double? {
+        guard let t = player?.currentTime() else { return nil }
+        let secs = CMTimeGetSeconds(t)
+        return secs.isFinite && secs >= 0 ? secs : nil
+    }
 
     /// When true, `updateNowPlaying` is a no-op so MusicKit's `ApplicationMusicPlayer` can own the
     /// lock-screen transport + now-playing info while Apple Music is the active Focus source (one
@@ -183,7 +202,6 @@ final class PodcastPlayer: NSObject {
             player?.removeTimeObserver(observer)
         }
         currentItem?.removeObserver(self, forKeyPath: "status")
-        fadeTimer?.cancel()
         stallWatchdog?.cancel()
         // Cancel any in-flight tap/track loads so they don't outlive this instance.
         preloadTapTask?.cancel()
@@ -268,6 +286,7 @@ final class PodcastPlayer: NSObject {
         currentId = id
         currentTitle = title
         hasFiredNearEnd = false
+        didPlayToEnd = false             // a fresh item is not spent
         cancelStallWatchdog()            // a fresh item — any pending stall belongs to the old one
         onPlaybackNote?(nil)             // clear a stale "stream lost"/"buffering" note on load
         isLoadingItem = true             // block position writes until the swap + resume-seek finish
@@ -356,7 +375,7 @@ final class PodcastPlayer: NSObject {
             self.isLoadingItem = false
 
             pausedAt = nil                   // a fresh load isn't a "resume after pause"
-            startFadeIn()                    // ease in from silence (applies saved volume as the target)
+            beginFadeIn()                    // ease in from silence, driven by the render thread
             player?.play()
             player?.rate = playbackSpeed
             onPlaybackStateChanged?(true)
@@ -404,7 +423,7 @@ final class PodcastPlayer: NSObject {
 
         onResume?()                      // a resume is a "keep listening" signal — let the owner
                                          // lift a sleep-timer tail whose fade would mute this play
-        startFadeIn()                    // ease back in instead of snapping to full volume
+        beginFadeIn()                    // ease back in instead of snapping to full volume
         player.play()
         player.rate = playbackSpeed
         onPlaybackStateChanged?(true)
@@ -430,45 +449,42 @@ final class PodcastPlayer: NSObject {
         updateNowPlaying(isPlaying: false)
     }
 
-    /// Apply the effective level — user target × fade-in envelope × sleep-timer fade — to the
-    /// player and every active limiter tap. The tap is PostEffects, which bypasses `AVPlayer.volume`,
-    /// so volume must reach the tap state; the `player.volume` set is the fallback for streams where
-    /// the tap can't attach.
+    /// Publish the TARGET level — user target × sleep-timer fade — to the player and every active
+    /// limiter tap. The tap is PostEffects, which bypasses `AVPlayer.volume`, so the target must
+    /// reach the tap state (the render thread eases `volume` toward it); the `player.volume` set is
+    /// the fallback for streams where the tap can't attach, and is applied WITHOUT a fade because
+    /// AVPlayer gives us no per-sample hook — a tiny snap beats the risk of silence.
     private func applyVolumeToStates() {
-        let v = currentVolume * fadeInGain * fadeMult
+        let v = currentVolume * fadeMult
         player?.volume = v
         stateLock.lock()
-        for state in activeLimiterStates { state.pointee.volume = v }
+        for state in activeLimiterStates { state.pointee.volTarget = v }
         stateLock.unlock()
     }
 
-    /// Ramp `fadeInGain` 0→1 over ~0.5 s on the main queue. Cheap and self-cancelling; the
-    /// final state is always the correct full volume even if interrupted.
-    private func startFadeIn() {
-        fadeTimer?.cancel()
-        fadeInGain = 0.0
-        applyVolumeToStates()
-        let t = DispatchSource.makeTimerSource(queue: .main)
-        t.schedule(deadline: .now() + 0.02, repeating: 0.02)
-        t.setEventHandler { [weak self] in
-            guard let self = self else { return }
-            self.fadeInGain = min(1.0, self.fadeInGain + 0.04)   // ~25 steps × 20 ms ≈ 0.5 s
-            self.applyVolumeToStates()
-            if self.fadeInGain >= 1.0 {
-                self.fadeTimer?.cancel()
-                self.fadeTimer = nil
-            }
-        }
-        t.resume()
-        fadeTimer = t
+    /// Ease in from silence on play/resume by zeroing the tap's SMOOTHED level and letting the
+    /// render thread ramp it back to `volTarget` per sample (~0.36 s).
+    ///
+    /// This used to be a `fadeInGain` ramped by a `DispatchSourceTimer` on the MAIN queue, which
+    /// was a silent-audio hazard in this app's core case: after the sleep timer ends, audio stops
+    /// and iOS suspends the app; the next play often arrives from the lock screen, where main-queue
+    /// timers can be throttled or never complete — leaving the gain stranded at 0 and the podcast
+    /// playing inaudibly ("volume muting on next use after the timer runs out"). The audio thread
+    /// is alive whenever audio renders, so driving the fade there cannot be starved.
+    private func beginFadeIn() {
+        applyVolumeToStates()            // make sure the target is current first
+        stateLock.lock()
+        for state in activeLimiterStates { state.pointee.volume = 0 }
+        stateLock.unlock()
     }
-    
+
     func seek(seconds: TimeInterval) {
         guard let player = player else { return }
         // An explicit seek is the user's chosen position. Clear pausedAt so the next resume()
         // doesn't apply adaptiveRewind and pull them away from where they just seeked (the
         // "I skipped/scrubbed but playback resumed somewhere else" bug).
         pausedAt = nil
+        didPlayToEnd = false   // scrubbing back un-spends a finished item
         // Clamp so skip-back near the start reliably lands at 0:00 instead of a negative time.
         let target = max(0, CMTimeGetSeconds(player.currentTime()) + seconds)
         player.seek(to: CMTime(seconds: target, preferredTimescale: 1000), toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] _ in
@@ -479,6 +495,7 @@ final class PodcastPlayer: NSObject {
     func seekTo(seconds: TimeInterval) {
         guard let player = player else { return }
         pausedAt = nil   // explicit seek wins; don't let the next resume() rewind away from it
+        didPlayToEnd = false   // scrubbing back un-spends a finished item
         player.seek(to: CMTime(seconds: max(0, seconds), preferredTimescale: 1000), toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] _ in
             self?.updateNowPlaying(isPlaying: player.timeControlStatus == .playing)
         }
@@ -505,6 +522,7 @@ final class PodcastPlayer: NSObject {
     
     @objc private func itemDidFinishPlaying() {
         cancelStallWatchdog()
+        didPlayToEnd = true              // spent — a later resume must not replay its tail
         let finishedId = currentId
         if let id = finishedId {
             cachedPositions?.removeValue(forKey: id)
@@ -700,7 +718,7 @@ final class PodcastPlayer: NSObject {
             clientInfo: UnsafeMutableRawPointer(Unmanaged.passUnretained(self).toOpaque()),
             init: { tap, clientInfo, tapStorageOut in
                 let state = UnsafeMutablePointer<LimiterState>.allocate(capacity: 1)
-                state.initialize(to: LimiterState(gain: 1.0, ceiling: 0.71, attackCoef: 0.01, releaseCoef: 0.0005, enabled: 1.0, volume: 1.0, eqEnabled: 0.0, eqIntensity: 1.0, sampleRate: 48000, aHigh: 0.4076, aLow: 0.0207, lpHighL: 0, lpHighR: 0, lpLowL: 0, lpLowR: 0, player: nil))
+                state.initialize(to: LimiterState(gain: 1.0, ceiling: 0.71, attackCoef: 0.01, releaseCoef: 0.0005, enabled: 1.0, volume: 0.0, volTarget: 1.0, volCoef: 0.000174, eqEnabled: 0.0, eqIntensity: 1.0, sampleRate: 48000, aHigh: 0.4076, aLow: 0.0207, lpHighL: 0, lpHighR: 0, lpLowL: 0, lpLowR: 0, player: nil))
                 tapStorageOut.pointee = UnsafeMutableRawPointer(state)
 
                 if let clientInfo = clientInfo {
@@ -719,7 +737,8 @@ final class PodcastPlayer: NSObject {
                     state.pointee.eqIntensity = Float(p.sleepEQIntensity)
                     // Respect an in-progress fade-in AND the sleep-timer fade so a tap that attaches
                     // mid-fade (the async track load) starts at the enveloped level, not full volume.
-                    state.pointee.volume = p.currentVolume * p.fadeInGain * p.fadeMult
+                    state.pointee.volTarget = p.currentVolume * p.fadeMult
+                    state.pointee.volume = 0   // a tap attaching mid-load eases in like any other start
                     p.stateLock.unlock()
                 }
             },
@@ -750,6 +769,10 @@ final class PodcastPlayer: NSObject {
                 state.pointee.sampleRate = sr
                 state.pointee.aHigh = 1 - exp(-twoPi * 4000 / sr)
                 state.pointee.aLow  = 1 - exp(-twoPi * 160 / sr)
+                // Volume ease: one-pole, ~0.12 s time constant → ~0.36 s to full. This IS the
+                // play/resume fade-in, run on the render thread so no main-queue stall can leave
+                // it stranded below target (see `beginFadeIn`).
+                state.pointee.volCoef = 1 - exp(-1 / (0.12 * sr))
             },
             unprepare: { tap in },
             process: { tap, numberFrames, flags, bufferListInOut, numberFramesOut, flagsOut in
@@ -765,7 +788,11 @@ final class PodcastPlayer: NSObject {
                 let eqOn = state.pointee.eqEnabled != 0.0
                 let aHigh = state.pointee.aHigh
                 let aLow = state.pointee.aLow
-                let vol = state.pointee.volume
+                // Eased per sample below (hoisted into locals, written back after the loop) —
+                // this IS the fade-in, and it doubles as declick for slider / mute changes.
+                var vol = state.pointee.volume
+                let volTarget = state.pointee.volTarget
+                let volCoef = state.pointee.volCoef
                 // Shelf "keep" fractions scale with the intensity slider: at 1.0 they equal
                 // the original fixed shelves (0.5 treble / 0.6 bass); 0 = bypass, 2 = aggressive.
                 let eqIntensity = state.pointee.eqIntensity
@@ -794,6 +821,7 @@ final class PodcastPlayer: NSObject {
                 let stride1 = isInterleaved ? 2 : 1
                 
                 for f in 0..<frames {
+                    vol += (volTarget - vol) * volCoef
                     var valL = ch0[f * stride0]
                     var valR = isStereo ? ch1![f * stride1] : valL
 
@@ -835,6 +863,8 @@ final class PodcastPlayer: NSObject {
                     ch0[f * stride0] = valL
                     if isStereo { ch1![f * stride1] = valR }
                 }
+                // Snap once settled so the exponential tail can't idle in denormals.
+                state.pointee.volume = abs(volTarget - vol) < 1e-6 ? volTarget : vol
             }
         )
         
