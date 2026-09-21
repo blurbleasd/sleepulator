@@ -28,7 +28,8 @@ using namespace metal;
 // frame — the standing rule from the 2026-07-11 device pass.
 //
 // Swift owns the live values (shared FocusDrivers mapping):
-//   flow — SceneClock phase (Reduce Motion feeds rate 0 → frozen field)
+//   flow — SceneClock phase (frozen by occlusion / the app's Ambient-motion toggle via
+//          `paused`; NOT by Reduce Motion — see the note in CurrentMetalView)
 //   driveOp — stream opacity · driveAmp — vertical sway · tint — work/rest/idle
 // ============================================================================
 

@@ -18,6 +18,12 @@ final class SceneDiagnostics {
     /// depth-vs-flat A/B is attributable in the log.
     var activeScene: String = "—"
 
+    /// Whether the scene is currently frozen, and why — logged alongside fps so a "the scene
+    /// isn't moving" report is answerable from the trail instead of guessed at. (A frozen scene
+    /// renders no frames, so fps alone can't distinguish "frozen" from "slow".)
+    var frozen = false
+    var reduceMotion = false
+
     /// Seconds of rendering between summary lines. 30 s → 2 lines/min while animating: enough to catch
     /// a thermal ramp, not enough to bloat the overnight trail.
     private let interval: TimeInterval = 30
@@ -46,7 +52,7 @@ final class SceneDiagnostics {
         let level = UIDevice.current.batteryLevel
         let battery = level >= 0 ? Int((level * 100).rounded()) : -1
         let fpsStr = String(format: "%.1f", fps)
-        Log.scene.info("scene=\(self.activeScene, privacy: .public) fps=\(fpsStr, privacy: .public) thermal=\(thermal, privacy: .public) battery=\(battery, privacy: .public)%")
+        Log.scene.info("scene=\(self.activeScene, privacy: .public) fps=\(fpsStr, privacy: .public) thermal=\(thermal, privacy: .public) battery=\(battery, privacy: .public)% frozen=\(self.frozen, privacy: .public) reduceMotion=\(self.reduceMotion, privacy: .public)")
     }
 
     private static func thermalName(_ s: ProcessInfo.ThermalState) -> String {

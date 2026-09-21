@@ -12,7 +12,6 @@ import SwiftUI
 struct TideMetalView: View {
     var paused: Bool = false
     let pomodoro: PomodoroService
-    var reduceMotion: Bool = false
 
     private static let workTint = SIMD3<Double>(0.34, 0.60, 0.95)  // cool blue
     private static let restTint = SIMD3<Double>(0.30, 0.72, 0.66)  // teal (ease)
@@ -53,7 +52,7 @@ struct TideMetalView: View {
         let tint = running ? (work ? Self.workTint : Self.restTint) : Self.idleTint
 
         if let now {
-            clock.tick(now: now, rate: reduceMotion ? 0 : 1)
+            clock.tick(now: now, rate: 1)
             SceneDiagnostics.shared.frame(now: now)   // F3: Focus was never instrumented until now
         }
         let phase = Float(clock.phase)

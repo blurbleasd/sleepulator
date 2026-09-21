@@ -124,8 +124,7 @@ struct CurrentScene: AmbientScene {
     let mood = SceneMood.focus
 
     func makeBackdrop(_ ctx: SceneContext) -> AnyView {
-        AnyView(CurrentMetalView(paused: ctx.paused, pomodoro: ctx.pomodoro,
-                                 reduceMotion: ctx.reduceMotion))
+        AnyView(CurrentMetalView(paused: ctx.paused, pomodoro: ctx.pomodoro))
     }
 }
 
@@ -139,8 +138,7 @@ struct TideScene: AmbientScene {
     let mood = SceneMood.focus
 
     func makeBackdrop(_ ctx: SceneContext) -> AnyView {
-        AnyView(TideMetalView(paused: ctx.paused, pomodoro: ctx.pomodoro,
-                              reduceMotion: ctx.reduceMotion))
+        AnyView(TideMetalView(paused: ctx.paused, pomodoro: ctx.pomodoro))
     }
 }
 
@@ -284,8 +282,7 @@ struct SandfallScene: AmbientScene {
     let mood = SceneMood.focus
 
     func makeBackdrop(_ ctx: SceneContext) -> AnyView {
-        AnyView(SandfallMetalView(paused: ctx.paused, pomodoro: ctx.pomodoro,
-                                  reduceMotion: ctx.reduceMotion))
+        AnyView(SandfallMetalView(paused: ctx.paused, pomodoro: ctx.pomodoro))
     }
 }
 

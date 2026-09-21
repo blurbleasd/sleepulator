@@ -18,8 +18,6 @@ struct CurrentMetalView: View {
     var paused: Bool = false
     /// Read live (not observed) so phase/progress drive the look.
     let pomodoro: PomodoroService
-    /// When true, feed the flow clock rate 0 so the field is static (Reduce Motion).
-    var reduceMotion: Bool = false
 
     /// Integrates `driveSpeed` into a flow phase (rate, not absolute-time × speed — see
     /// `CurrentView`/`SceneClock`). Random start so the streams open at a fresh pose each appearance.
@@ -55,8 +53,18 @@ struct CurrentMetalView: View {
         let look = FocusDrivers.look(isRunning: pomodoro.isRunning,
                                      isWork: pomodoro.phase == .work,
                                      progress: pomodoro.progress)
-        // Reduce Motion → rate 0 → the flow phase holds still (static field, no advection).
-        let rate = reduceMotion ? 0 : look.speed
+        // NOTE: the clock rate is deliberately NOT gated on Reduce Motion. It used to be
+        // (`rate: reduceMotion ? 0 : …`), which froze the scene's phase outright whenever iOS
+        // Reduce Motion was on — the long-standing "Focus savers are choppy / Current is fully
+        // static" report. With the phase frozen, the only thing still changing was the
+        // Pomodoro-driven `energy`/look, so Tide and Sandfall stepped once per second and
+        // Current (whose look barely varies) looked dead. Sleep never had this because
+        // ShaderBackdrop's rate has no Reduce Motion term.
+        //
+        // Per SCREENSAVER-LIBRARY-SPEC §5 Reduce Motion gates PARALLAX only; the app-level
+        // "Ambient motion" toggle (Settings ▸ Display) is the control for holding a scene still,
+        // and it already reaches every scene through `paused`.
+        let rate = look.speed
         if let now {
             clock.tick(now: now, rate: rate)
             SceneDiagnostics.shared.frame(now: now)   // F3: Focus was never instrumented until now

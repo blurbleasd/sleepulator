@@ -21,8 +21,8 @@ using namespace metal;
 // and the whole image sat in one washed-out mid band. Now an exposure curve.
 //
 //   energy (0…1) — work builds it with progress, rest eases, idle sits mid.
-//   tint — work/rest/idle colour.  `phase` is a SceneClock time (frozen under
-//   Reduce Motion / occlusion).
+//   tint — work/rest/idle colour.  `phase` is a SceneClock time, frozen by occlusion /
+//   the app's Ambient-motion toggle — NOT by Reduce Motion (see TideMetalView).
 // ============================================================================
 
 namespace tide {
