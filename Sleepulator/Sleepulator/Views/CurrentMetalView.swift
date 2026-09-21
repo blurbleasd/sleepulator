@@ -36,7 +36,12 @@ struct CurrentMetalView: View {
             if paused {
                 field(size: size, now: nil)
             } else {
-                TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { tl in
+                // 60 fps, not 30. Focus scenes are fast by design (flowing streams, falling
+                // comets); on a 120 Hz ProMotion panel a 30 fps cap holds each frame for four
+                // refreshes, so fast features advance in visible jumps — the long-standing
+                // "focus savers are choppy" report. Sleep stays at 30: its drift is slow enough
+                // that the step is sub-pixel, and it runs all night on battery.
+                TimelineView(.animation(minimumInterval: 1.0 / 60.0)) { tl in
                     field(size: size, now: tl.date.timeIntervalSinceReferenceDate)
                 }
             }
@@ -52,7 +57,10 @@ struct CurrentMetalView: View {
                                      progress: pomodoro.progress)
         // Reduce Motion → rate 0 → the flow phase holds still (static field, no advection).
         let rate = reduceMotion ? 0 : look.speed
-        if let now { clock.tick(now: now, rate: rate) }
+        if let now {
+            clock.tick(now: now, rate: rate)
+            SceneDiagnostics.shared.frame(now: now)   // F3: Focus was never instrumented until now
+        }
         let flow = Float(clock.phase)
         return Rectangle()
             .fill(.black)

@@ -48,8 +48,17 @@ inline float vnoise(float2 p) {
 }
 inline float fbm(float2 p) {
     float v = 0.0, amp = 0.5;
-    for (int i = 0; i < 4; i++) { v += amp * vnoise(p); p = p * 2.0 + float2(11.3, 7.7); amp *= 0.5; }
+    for (int i = 0; i < 3; i++) { v += amp * vnoise(p); p = p * 2.0 + float2(11.3, 7.7); amp *= 0.5; }
     return v;
+}
+
+/// Compact-support bump, a drop-in for `exp(-(d/w)^2)` without the transcendental. Pass d² and
+/// 1/r² with r = 1.6w, which matches the gaussian's mid-falloff; the compact support (exactly 0
+/// beyond r) is a bonus, since those gaussian tails were invisible yet cost a full `exp` each.
+/// Focus draws these several times per stream/layer per pixel, so this is the hot path.
+inline float bump(float d2, float invR2) {
+    float t = max(0.0, 1.0 - d2 * invR2);
+    return t * t;
 }
 
 } // namespace tide
@@ -102,12 +111,13 @@ half4 tideField(float2 pos, half4 color,
     // ---- crest -----------------------------------------------------------------------
     // A thin near-white waterline — the crisp structure v2 never had. Glints ride the
     // surface in its own moving frame so they travel with it.
-    float crest = exp(-(below * below) / (0.0032 * 0.0032));
+    float below2 = below * below;
+    float crest = bump(below2, 1.0 / (2.56 * 0.0032 * 0.0032));
     float glint = pow(fbm(float2(x * 9.0 - phase * 0.5, phase * 0.4)), 3.0);
     col += mix(tint, float3(1.0), 0.80) * crest * (1.5 + 1.9 * e) * (0.55 + 0.9 * glint);
 
     // A wider, dimmer shoulder just under the crest gives the surface thickness.
-    float shoulder = exp(-(below * below) / (0.022 * 0.022));
+    float shoulder = bump(below2, 1.0 / (2.56 * 0.022 * 0.022));
     col += tint * shoulder * (0.30 + 0.45 * e);
 
     // ---- spill above the waterline ---------------------------------------------------
