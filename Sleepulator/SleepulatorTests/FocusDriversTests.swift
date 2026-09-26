@@ -94,4 +94,42 @@ final class FocusDriversTests: XCTestCase {
         XCTAssertNotEqual(FocusDrivers.workTint, FocusDrivers.idleTint)
         XCTAssertNotEqual(FocusDrivers.restTint, FocusDrivers.idleTint)
     }
+
+    // MARK: fill — the POSITIONAL progress cue the Focus scenes read.
+    // These matter because the whole point of `fill` is that it is the one channel the eye can
+    // read absolutely. If it ever stops spanning its full 0…1 range, the scenes silently go back
+    // to being decoration (the "they don't speak to focus" failure).
+
+    func testFillIsNilWhenIdleSoNoSessionIsImplied() {
+        XCTAssertNil(FocusDrivers.fill(isRunning: false, isWork: true, progress: 0.5))
+        XCTAssertNil(FocusDrivers.fill(isRunning: false, isWork: false, progress: 0.0))
+    }
+
+    func testWorkFillsAcrossTheWholeRange() {
+        XCTAssertEqual(FocusDrivers.fill(isRunning: true, isWork: true, progress: 0.0)!, 0.0, accuracy: acc)
+        XCTAssertEqual(FocusDrivers.fill(isRunning: true, isWork: true, progress: 0.5)!, 0.5, accuracy: acc)
+        XCTAssertEqual(FocusDrivers.fill(isRunning: true, isWork: true, progress: 1.0)!, 1.0, accuracy: acc)
+    }
+
+    func testBreakDrainsBackSoTheDirectionReadsTheIntervalKind() {
+        XCTAssertEqual(FocusDrivers.fill(isRunning: true, isWork: false, progress: 0.0)!, 1.0, accuracy: acc)
+        XCTAssertEqual(FocusDrivers.fill(isRunning: true, isWork: false, progress: 0.25)!, 0.75, accuracy: acc)
+        XCTAssertEqual(FocusDrivers.fill(isRunning: true, isWork: false, progress: 1.0)!, 0.0, accuracy: acc)
+    }
+
+    func testFillClampsOutOfRangeProgress() {
+        XCTAssertEqual(FocusDrivers.fill(isRunning: true, isWork: true, progress: -3)!, 0.0, accuracy: acc)
+        XCTAssertEqual(FocusDrivers.fill(isRunning: true, isWork: true, progress: 9)!, 1.0, accuracy: acc)
+        XCTAssertEqual(FocusDrivers.fill(isRunning: true, isWork: false, progress: 9)!, 0.0, accuracy: acc)
+    }
+
+    func testFillIsMonotonicAcrossAWorkInterval() {
+        var last = -1.0
+        for step in 0...20 {
+            let v = FocusDrivers.fill(isRunning: true, isWork: true, progress: Double(step) / 20)!
+            XCTAssertGreaterThan(v, last, "fill must rise monotonically through a work interval")
+            last = v
+        }
+    }
+
 }

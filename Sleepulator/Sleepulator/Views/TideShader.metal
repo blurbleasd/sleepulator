@@ -67,7 +67,7 @@ inline float bump(float d2, float invR2) {
 [[ stitchable ]]
 half4 tideField(float2 pos, half4 color,
                 float phase, float2 size,
-                float energy, float3 tint) {
+                float level, float energy, float3 tint) {
     using namespace tide;
 
     float2 uv = pos / size;
@@ -77,18 +77,21 @@ half4 tideField(float2 pos, half4 color,
     float e = clamp(energy, 0.0, 1.0);
 
     // ---- the waterline -------------------------------------------------------------
-    // Height tracks energy, so a work interval visibly fills the field. uv-y grows
-    // downward, so a HIGHER level is a SMALLER y.
-    float level = 0.28 + 0.34 * e;
-    float yl    = 1.0 - level;
+    // `level` (0…1) is computed Swift-side from the Pomodoro and spans 8%…92% of the field: the
+    // waterline's HEIGHT is the interval's progress, which is the whole point of the scene. uv-y
+    // grows downward, so a higher level is a smaller y.
+    float yl = 1.0 - clamp(level, 0.0, 1.0);
 
     // Travelling surface shape: two counter-moving sines plus a slow fbm roll. All are
     // functions of (x ± phase), i.e. pure translation — features slide along the
     // surface rather than boiling in place (the 2026-07-11 device rule).
+    // Amplitudes are deliberately SMALL (was 0.013/0.006/0.030, i.e. +/-~5% of the field). The
+    // wave is texture on the reading, not a competitor to it: at +/-~1.4% it can never obscure
+    // where the line actually sits.
     float wave = 0.0;
-    wave += sin((x * 3.1 + phase * 0.33) * 6.28318530718) * 0.013;
-    wave += sin((x * 6.7 - phase * 0.21) * 6.28318530718) * 0.006;
-    wave += (fbm(float2(x * 2.4, phase * 0.16)) - 0.5) * 0.030;
+    wave += sin((x * 3.1 + phase * 0.33) * 6.28318530718) * 0.005;
+    wave += sin((x * 6.7 - phase * 0.21) * 6.28318530718) * 0.003;
+    wave += (fbm(float2(x * 2.4, phase * 0.16)) - 0.5) * 0.011;
     float surf  = yl + wave;
     float below = y - surf;                       // > 0 under water
 

@@ -3,40 +3,39 @@
 using namespace metal;
 
 // ============================================================================
-// Sandfall (Focus) — a vertical downpour of light: bright comet heads with long
-// tails, falling through a fine scrolling grain.
+// Sandfall (Focus) — an hourglass. The bottom bulb's fill IS the interval.
 // ----------------------------------------------------------------------------
-// v3 "bold" rewrite (2026-09-21). v2's faults, from sim capture + device use:
+// v4 (2026-09-26): back to the hourglass, because it is the one genuinely
+// time-meaningful metaphor in the app — "how full is the bottom bulb" answers
+// "how far through am I" with no numbers and no learning.
 //
-//  1. IT DID NOT READ AS VERTICAL. The dominant element was a broad `fbm`
-//     curtain at (x·9, y·3) whose low y-frequency smeared it into soft
-//     horizontal-ish cloud — so the scene looked like Current and Tide instead
-//     of like falling. The curtain is now a fine, high-x-frequency grain
-//     (x·44, y·1.6) that is unambiguously elongated DOWN the screen, and it is
-//     dim support rather than the main event. The comets carry the scene.
-//  2. TONEMAP CRUSH. `col/(col + 0.85)` maps 1.0 → 0.54, so nothing could ever
-//     approach white — every scene sat in the same washed-out mid band.
-//     Replaced with an exposure curve (shared with Current/Tide v3).
-//  3. NO HEAD CONTRAST. The heads were a 0.5-weight gaussian over a lit
-//     background. Heads are now near-white and bright against a near-black
-//     field, with an exponential tail — an actual comet.
+// v3 turned this into a comet downpour. It looked better than the 14 stiff
+// Canvas grains it replaced, but it was semantically empty: progress rode only
+// on comet speed / density / brightness. Those are RELATIVE channels — with no
+// reference you cannot read 60% from 80% — so the scene never actually said
+// anything about the session ("they don't speak to focus"). Progress now rides
+// the one absolute channel the eye reads instantly: POSITION. Two sand surfaces,
+// travelling ~40% of the field each, in opposite directions.
 //
-// Motion is translation at every frame rate: each column owns a head at
-// `fract(seed + fall·speed)` that travels down and wraps, with the tail sampled
-// relative to that head. Nothing is re-rolled per frame — the rule from the
-// 2026-07-11 device pass, where a per-frame hashed mote grid read as flicker.
-//
-//   energy (0…1) — work builds it (faster, denser, brighter), rest eases, idle
-//   mid.  tint — work/rest/idle colour.  `phase` is a SceneClock time, frozen by
-//   occlusion / the app's Ambient-motion toggle — NOT by Reduce Motion.
+//   fill (0…1) — drained fraction, computed Swift-side (FocusDrivers.fill):
+//                a work interval runs 0→1, a break runs it back 1→0.
+//   energy     — shading only now (brightness / grain), never the reading.
+//   `phase` is a SceneClock time, frozen by occlusion / the Ambient-motion
+//   toggle — NOT by Reduce Motion.
 // ============================================================================
 
 namespace sf {
 
-constant int   LAYERS   = 3;      // depth planes (v3.1: was 4 — see density note below)
 constant float EXPOSURE = 1.7;
 constant float3 BASE_TOP = float3(0.012, 0.018, 0.044);
 constant float3 BASE_BOT = float3(0.004, 0.006, 0.018);
+
+// Hourglass geometry, in uv (y: 0 top → 1 bottom). The neck sits at y = 0.5.
+constant float NECK_Y   = 0.5;
+constant float NECK_HW  = 0.045;   // half-width at the neck
+constant float BULB_HW  = 0.34;    // half-width at the extremes
+constant float TOP_Y    = 0.10;    // top of the upper bulb
+constant float BOT_Y    = 0.90;    // bottom of the lower bulb
 
 inline float hash21(float2 p) {
     p = fract(p * float2(123.34, 345.45));
@@ -58,13 +57,20 @@ inline float fbm(float2 p) {
     return v;
 }
 
-/// Compact-support bump, a drop-in for `exp(-(d/w)^2)` without the transcendental. Pass d² and
-/// 1/r² with r = 1.6w, which matches the gaussian's mid-falloff; the compact support (exactly 0
-/// beyond r) is a bonus, since those gaussian tails were invisible yet cost a full `exp` each.
-/// Focus draws these several times per stream/layer per pixel, so this is the hot path.
+/// Compact-support bump — a cheap stand-in for `exp(-(d/w)^2)`; pass d² and 1/r² with r = 1.6w.
 inline float bump(float d2, float invR2) {
     float t = max(0.0, 1.0 - d2 * invR2);
     return t * t;
+}
+
+/// Half-width of the hourglass silhouette at height `y`: widest at the two ends, pinched to
+/// `NECK_HW` at the neck. The exponent makes the taper funnel-like rather than conical.
+inline float silhouette(float y) {
+    float d = clamp(abs(y - NECK_Y) / NECK_Y, 0.0, 1.0);
+    // Exponent < 1 bulges the walls out near the neck, so the bulbs read as rounded glass.
+    // At 1.45 the taper was straight-sided and the silhouette looked like a funnel, not an
+    // hourglass — and the shape is the whole metaphor.
+    return NECK_HW + (BULB_HW - NECK_HW) * pow(d, 0.62);
 }
 
 } // namespace sf
@@ -73,65 +79,76 @@ inline float bump(float d2, float invR2) {
 [[ stitchable ]]
 half4 sandField(float2 pos, half4 color,
                 float phase, float2 size,
-                float energy, float3 tint) {
+                float fill, float energy, float3 tint) {
     using namespace sf;
 
     float2 uv = pos / size;
     float x = uv.x, y = uv.y;
     float3 col = mix(BASE_TOP, BASE_BOT, y);
 
-    float e    = clamp(energy, 0.0, 1.0);
-    float fall = phase * (0.22 + 0.30 * e);        // master descent rate
-    float3 headCol = mix(tint, float3(1.0), 0.78); // heads read as light, tails carry hue
+    float e = clamp(energy, 0.0, 1.0);
+    float f = clamp(fill, 0.0, 1.0);
+    float3 sandCol = mix(tint, float3(1.0), 0.45);   // sand reads warm-bright against the glass
 
-    // ---- fine vertical grain --------------------------------------------------------
-    // High frequency ACROSS x, low frequency down y ⇒ features stretched vertically.
-    // Scrolls straight down (y·k − fall·k' = const ⇒ y grows with fall).
-    float grain = fbm(float2(x * 44.0, y * 1.6 - fall * 2.4));
-    col += tint * pow(smoothstep(0.58, 0.97, grain), 2.0) * (0.04 + 0.10 * e);
+    float hw   = silhouette(y);
+    float dx   = abs(x - 0.5);
+    // Soft edge in uv-x; ~1.5 px at this scale, so the glass has a clean rim without aliasing.
+    // Ascending smoothstep then inverted. A DESCENDING smoothstep (edge0 > edge1) is undefined
+    // in Metal — it happened to work for the soft x-edge but silently did nothing for the body
+    // clip below, which is why the silhouette ran off the screen as two long diagonals.
+    float inside = 1.0 - smoothstep(hw - 0.006, hw, dx);
+    // Clip EVERYTHING to the glass's vertical extent. Without this the silhouette keeps being
+    // evaluated above TOP_Y and below BOT_Y, and the rim term runs off as two long diagonals
+    // across the whole screen (sim capture 2026-09-26).
+    float inBody = step(TOP_Y, y) * step(y, BOT_Y);
 
-    // ---- comet layers ----------------------------------------------------------------
-    for (int L = 0; L < LAYERS; L++) {
-        float fl  = float(L);
-        float sc  = 8.0 + 7.0 * fl;                          // columns across the width
-        float cxi = floor(x * sc);
-        float fx  = fract(x * sc);
-        float h   = hash21(float2(cxi, fl * 17.0));
-        // Sparse: not every column carries a comet, and the pattern differs per depth.
-        // v3.1 density: 4 layers x (9+17+25+33) columns past a 58%-pass gate put ~49 comets
-        // on screen — striking but busy, and it fought the UI. 3 layers x (8+15+22) past a
-        // 34%-pass gate is ~15: the same boldness with air between the streaks.
-        float gate = step(0.66, hash21(float2(cxi, fl * 29.0 + 3.0)));
+    // ---- the two sand surfaces — THE reading -----------------------------------------
+    // Upper bulb drains: its surface descends from TOP_Y to the neck as f: 0 → 1.
+    // Lower bulb mounds: its surface rises from BOT_Y to the neck over the same span.
+    // Each travels ~40% of the field, so the pair is legible at a glance from across a desk.
+    float topSurf = mix(TOP_Y, NECK_Y, f);
+    float botSurf = mix(BOT_Y, NECK_Y, f);
 
-        float spd   = (0.50 + 0.80 * h) * (0.55 + 0.85 * e);
-        float headY = fract(h * 7.31 + fall * spd * 2.2);    // travels down, wraps
+    // Sand bodies, clipped to the silhouette.
+    // Both are ASCENDING edges: sand lies BELOW its surface (larger y). The bottom one was
+    // written descending, which piled the mound above its own surface — the lower bulb read as
+    // empty with a lit band floating over it.
+    float topSand = smoothstep(topSurf - 0.004, topSurf + 0.004, y) * step(y, NECK_Y);
+    float botSand = smoothstep(botSurf - 0.004, botSurf + 0.004, y) * step(NECK_Y, y);
+    float sand    = (topSand + botSand) * inside * inBody;
 
-        // Tail trails UPWARD from the head: td grows as we move above it.
-        float td    = fract(headY - y);
-        float tail  = exp(-td * (9.0 + 6.0 * fl));           // nearer layers = longer tails
+    // Granular texture, scrolling slowly so the mass reads as material rather than paint. The
+    // top body settles downward; the mound below creeps up.
+    float grain = fbm(float2(x * 38.0, y * 26.0 - phase * 0.35));
+    col += sandCol * sand * (0.26 + 0.30 * e) * (0.72 + 0.55 * grain);
 
-        // Head: a tight gaussian on the signed wrapped distance, so it ends in light
-        // rather than a sliced edge (the v1 defect, sim capture 2026-07-11).
-        float hd    = fract(headY - y + 0.5) - 0.5;
-        float hw    = 0.008 + 0.005 * h;
-        float head  = bump(hd * hd, 1.0 / (2.56 * hw * hw));
+    // Bright meniscus on each surface — the crisp line the eye actually locks onto.
+    float dTop = (y - topSurf);
+    float dBot = (y - botSurf);
+    float mTop = bump(dTop * dTop, 1.0 / (2.56 * 0.0035 * 0.0035)) * step(y, NECK_Y + 0.02);
+    float mBot = bump(dBot * dBot, 1.0 / (2.56 * 0.0035 * 0.0035)) * step(NECK_Y - 0.02, y);
+    col += mix(tint, float3(1.0), 0.85) * (mTop + mBot) * inside * inBody * (0.75 + 0.65 * e);
 
-        // Narrow streak within the column — this is what makes it a falling line
-        // rather than a lit band.
-        float wx     = 0.16 + 0.10 * h;
-        float across = bump((fx - 0.5) * (fx - 0.5), 1.0 / (2.56 * wx * wx));
+    // ---- the falling stream ------------------------------------------------------------
+    // A thin column from the neck down to the mound, only while there is sand left to fall.
+    float running = step(0.001, f) * step(f, 0.999);
+    float inStream = step(NECK_Y, y) * step(y, botSurf);
+    float streamX  = bump((x - 0.5) * (x - 0.5), 1.0 / (2.56 * 0.010 * 0.010));
+    // Pure translation: the speckle travels DOWN the column (y·k − phase·k' = const).
+    float speckle  = fbm(float2(x * 60.0, y * 30.0 - phase * 3.2));
+    col += sandCol * streamX * inStream * running * inBody * (0.55 + 0.75 * e) * (0.55 + 0.75 * speckle);
 
-        float depth = 1.0 - 0.18 * fl;                       // far layers dimmer
-        float amt   = gate * across * depth * (0.45 + 0.75 * e);
+    // Splash where the stream lands on the mound.
+    float land = bump((y - botSurf) * (y - botSurf), 1.0 / (2.56 * 0.02 * 0.02))
+               * bump((x - 0.5) * (x - 0.5), 1.0 / (2.56 * 0.05 * 0.05));
+    col += sandCol * land * running * inBody * (0.35 + 0.5 * e);
 
-        col += tint    * tail * 0.55 * amt;
-        col += headCol * head * 2.30 * amt;
-    }
+    // ---- the glass ----------------------------------------------------------------------
+    // A faint rim so the silhouette is legible even where there is no sand behind it.
+    float rim = bump((dx - hw) * (dx - hw), 1.0 / (2.56 * 0.004 * 0.004));
+    col += tint * rim * 0.22 * inBody;
 
-    // Ambient lift with energy.
-    col += tint * 0.03 * e;
-
-    // Vignette — edges to black so the fall reads as the subject.
+    // Vignette — edges to black so the hourglass reads as the subject.
     float2 vp = (uv - 0.5) * float2(1.0, 1.22);
     col *= 1.0 - 0.48 * dot(vp, vp);
 
