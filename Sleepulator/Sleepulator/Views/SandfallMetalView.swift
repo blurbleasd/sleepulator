@@ -48,6 +48,11 @@ struct SandfallMetalView: View {
         // Energy-first: the Pomodoro drives the downpour's INTENSITY (work builds + brightens; break
         // eases; idle mid), not a slow hourglass level.
         let energy = running ? (work ? 0.55 + 0.45 * prog : 0.40) : 0.50
+        // THE reading: how far the hourglass has drained. v3 made this scene a comet downpour —
+        // bolder, but it threw away the one genuinely time-meaningful metaphor in the app, where
+        // "how full is the bottom bulb" IS the answer. `fill` 0→1 across a work interval drains
+        // the top bulb into the bottom; a break runs it back.
+        let fill = FocusDrivers.fill(isRunning: running, isWork: work, progress: prog) ?? 0.0
         let sand = running ? (work ? Self.workSand : Self.restSand) : Self.idleSand
 
         if let now {
@@ -61,6 +66,7 @@ struct SandfallMetalView: View {
                 ShaderLibrary.sandField(
                     .float(phase),
                     .float2(size),
+                    .float(Float(fill)),
                     .float(Float(energy)),
                     .float3(Float(sand.x), Float(sand.y), Float(sand.z))
                 )

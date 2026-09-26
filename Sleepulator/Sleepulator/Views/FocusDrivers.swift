@@ -36,6 +36,25 @@ enum FocusDrivers {
         var color: Color { Color(red: tint.x, green: tint.y, blue: tint.z) }
     }
 
+    /// Where the scene's POSITIONAL progress cue should sit: 0 = start of the travel, 1 = end;
+    /// `nil` when there's no session and the scene should show no reading at all.
+    ///
+    /// This exists because the Focus scenes used to encode the Pomodoro almost entirely in
+    /// *intensity* and *rate* — opacity, sway, brightness, fall speed, comet density. Those are
+    /// RELATIVE channels: with no side-by-side reference the eye cannot tell 60 % bright from
+    /// 80 %, so the scenes never actually told you anything about the session ("they don't speak
+    /// to focus"). Position and extent are absolute and readable at a glance, so progress now
+    /// rides one positional channel per scene — the waterline's height, the hourglass's fill,
+    /// the front's x — and intensity is demoted to mere shading.
+    ///
+    /// A work interval FILLS (0 → 1); a break DRAINS it back (1 → 0), so a glance says both how
+    /// far through you are and which kind of interval you're in. Pure, so it's unit-tested.
+    static func fill(isRunning: Bool, isWork: Bool, progress: Double) -> Double? {
+        guard isRunning else { return nil }
+        let p = min(max(progress, 0), 1)
+        return isWork ? p : 1 - p
+    }
+
     /// Map raw Pomodoro state to the scene look. `progress` is clamped 0…1 defensively.
     static func look(isRunning: Bool, isWork: Bool, progress: Double) -> Look {
         let p = min(max(progress, 0), 1)

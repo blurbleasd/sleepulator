@@ -86,7 +86,7 @@ inline float bump(float d2, float invR2) {
 [[ stitchable ]]
 half4 currentField(float2 pos, half4 color,
                    float flow, float2 size,
-                   float driveOp, float driveAmp, float3 tint) {
+                   float driveOp, float driveAmp, float front, float3 tint) {
     using namespace cur;
 
     float2 uv = pos / size;
@@ -155,6 +155,24 @@ half4 currentField(float2 pos, half4 color,
 
         col += tint    * halo * 0.42 * energyHalo * op * depth;
         col += coreCol * core * 2.10 * energyCore * op * depth;
+    }
+
+    // ---- the front — THE reading -------------------------------------------------------
+    // A vertical wavefront at x = `front`, i.e. exactly the interval's progress. It crosses the
+    // field once per work interval (and runs back over a break), so a glance reads position, not
+    // brightness. `front < 0` means no session: draw nothing rather than park it at the edge.
+    if (front >= 0.0) {
+        float fd  = x - clamp(front, 0.0, 1.0);
+        float fd2 = fd * fd;
+        // A soft leading swell with a tight bright edge riding it — visible against the
+        // filaments without washing them out.
+        // Tapered vertically and much softer than the first cut, which drew a hard full-height
+        // bar that read as a seam or a rendering glitch rather than a wavefront.
+        float taper = smoothstep(0.0, 0.22, y) * smoothstep(1.0, 0.78, y);
+        float wide = bump(fd2, 1.0 / (2.56 * 0.11 * 0.11));
+        float edge = bump(fd2, 1.0 / (2.56 * 0.013 * 0.013));
+        col += tint                         * wide * 0.22 * op * taper;
+        col += mix(tint, float3(1.0), 0.75) * edge * 0.30 * op * taper;
     }
 
     // Faint floor glow the streams ride over.

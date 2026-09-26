@@ -49,6 +49,13 @@ struct TideMetalView: View {
         // Energy-first: the Pomodoro drives INTENSITY (a work sprint builds + brightens the surge;
         // a break eases; idle sits mid), not a slow rising level.
         let energy = running ? (work ? 0.55 + 0.45 * prog : 0.40) : 0.50
+        // THE reading: the waterline's height IS the interval. It spans 8%…92% of the field, so a
+        // glance answers "how far through am I". It used to be `0.28 + 0.34 * energy`, which
+        // travelled just 0.467…0.62 — about 15% of the screen across a whole 25-minute interval,
+        // while the surface wave bobbed +/-5%. Two-thirds of the signal was drowned by its own
+        // decoration, which is why the scene said nothing about the session.
+        let level = FocusDrivers.fill(isRunning: running, isWork: work, progress: prog)
+            .map { 0.08 + 0.84 * $0 } ?? 0.26   // idle: a low resting tide, no reading implied
         let tint = running ? (work ? Self.workTint : Self.restTint) : Self.idleTint
 
         if let now {
@@ -62,6 +69,7 @@ struct TideMetalView: View {
                 ShaderLibrary.tideField(
                     .float(phase),
                     .float2(size),
+                    .float(Float(level)),
                     .float(Float(energy)),
                     .float3(Float(tint.x), Float(tint.y), Float(tint.z))
                 )

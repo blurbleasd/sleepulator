@@ -64,6 +64,14 @@ struct CurrentMetalView: View {
         // Per SCREENSAVER-LIBRARY-SPEC §5 Reduce Motion gates PARALLAX only; the app-level
         // "Ambient motion" toggle (Settings ▸ Display) is the control for holding a scene still,
         // and it already reaches every scene through `paused`.
+        // THE reading: a luminous front whose x IS the interval's progress — it crosses the field
+        // exactly once per work interval and runs back across a break. -1 hides it (idle), so the
+        // scene never implies a session that isn't running. Everything else here (op/amp/speed) is
+        // intensity and rate, which the eye cannot read absolutely — that is why this scene used
+        // to say nothing about the session.
+        let front = FocusDrivers.fill(isRunning: pomodoro.isRunning,
+                                      isWork: pomodoro.phase == .work,
+                                      progress: pomodoro.progress) ?? -1
         let rate = look.speed
         if let now {
             clock.tick(now: now, rate: rate)
@@ -78,6 +86,7 @@ struct CurrentMetalView: View {
                     .float2(size),
                     .float(Float(look.op)),
                     .float(Float(look.amp)),
+                    .float(Float(front)),
                     .float3(Float(look.tint.x), Float(look.tint.y), Float(look.tint.z))
                 )
             )
