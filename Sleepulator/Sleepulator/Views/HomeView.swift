@@ -301,10 +301,16 @@ struct HomeView: View {
             sleepTimerActive: audio.sleepTimer.timerRemaining > 0,
             sleepSoundsPlaying: !audio.focusMode && audio.isAnythingPlaying,
             pomodoroRunning: pomodoroRunning)
-        if let warning {
-            modeSwitchRequest = PendingModeSwitch(toFocus: focus, warning: warning)
+        guard let warning else { applyMode(focus); return }
+        let request = PendingModeSwitch(toFocus: focus, warning: warning)
+        if showMix {
+            // The half-height mixer leaves the switch tappable, but a confirm can't present over
+            // the sheet (it silently failed and left the request stuck, holding the screensaver
+            // off). Close the mixer, then ask.
+            afterMixSheet = { modeSwitchRequest = request }
+            showMix = false
         } else {
-            applyMode(focus)
+            modeSwitchRequest = request
         }
     }
 
