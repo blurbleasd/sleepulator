@@ -113,9 +113,11 @@ struct HomeView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.6, execute: work)
     }
 
-    /// A session worth handing the screen to the scene: any audio (Apple Music isn't part of
-    /// `isAnythingPlaying`), or a Pomodoro running silently.
-    private var sessionActive: Bool { audio.isAnythingPlaying || audio.appleMusicOn || pomodoroRunning }
+    private var sessionActive: Bool {
+        HomeScreensaverPolicy.sessionActive(audioPlaying: audio.isAnythingPlaying,
+                                            appleMusicOn: audio.appleMusicOn,
+                                            pomodoroRunning: pomodoroRunning)
+    }
     private var assistiveTechRunning: Bool { voiceOverOn || switchControlOn }
     private var presentingFromHome: Bool { showMix || showTimerActionSheet || showBreathing || showOnRamp }
     private var mayFade: Bool {
@@ -124,11 +126,8 @@ struct HomeView: View {
                                       presenting: presentingFromHome)
     }
 
-    /// How far the tab bar's disappearance has moved each safe-area edge (bottom on iPhone, top on
-    /// iPad's top tab bar); zero whenever the chrome is showing.
     private var chromeLift: EdgeInsets {
-        EdgeInsets(top: max(0, anchoredInsets.top - liveInsets.top), leading: 0,
-                   bottom: max(0, anchoredInsets.bottom - liveInsets.bottom), trailing: 0)
+        HomeScreensaverPolicy.chromeLift(anchored: anchoredInsets, live: liveInsets)
     }
 
     private func scheduleIdleFade() {

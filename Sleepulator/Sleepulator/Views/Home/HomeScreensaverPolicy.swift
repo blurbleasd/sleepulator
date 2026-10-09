@@ -1,4 +1,4 @@
-import Foundation
+import SwiftUI
 
 /// When the Home chrome may fade to the bare backdrop (the ambient screensaver). Pure, so the rules
 /// are unit-tested: the screensaver hides every control *and* the tab bar, so getting it wrong
@@ -18,5 +18,20 @@ enum HomeScreensaverPolicy {
     ///     so dismissing it used to land on a blank screen.
     static func mayFade(sessionActive: Bool, assistiveTechRunning: Bool, presenting: Bool) -> Bool {
         sessionActive && !assistiveTechRunning && !presenting
+    }
+
+    /// A session worth handing the screen to the scene: any engine audio, Apple Music (a separate
+    /// system player, deliberately outside `isAnythingPlaying`), or a Pomodoro running silently —
+    /// a good Focus scene encodes its progress.
+    static func sessionActive(audioPlaying: Bool, appleMusicOn: Bool, pomodoroRunning: Bool) -> Bool {
+        audioPlaying || appleMusicOn || pomodoroRunning
+    }
+
+    /// How far hiding the tab bar moved each safe-area edge (bottom on iPhone, top on iPad's top
+    /// tab bar). Padded back onto the controls so they hold position while the chrome fades.
+    /// `anchored` is the inset measured while the tab bar showed; zero whenever it shows again.
+    static func chromeLift(anchored: EdgeInsets, live: EdgeInsets) -> EdgeInsets {
+        EdgeInsets(top: max(0, anchored.top - live.top), leading: 0,
+                   bottom: max(0, anchored.bottom - live.bottom), trailing: 0)
     }
 }

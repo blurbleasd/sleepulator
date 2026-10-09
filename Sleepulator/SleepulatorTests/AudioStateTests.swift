@@ -1,4 +1,5 @@
 import XCTest
+import SwiftUI
 @testable import Sleepulator
 
 @MainActor
@@ -1036,5 +1037,31 @@ final class HomeScreensaverPolicyTests: XCTestCase {
     func testSleepFadesFasterThanFocus() {
         XCTAssertLessThan(HomeScreensaverPolicy.idleDelay(focusMode: false),
                           HomeScreensaverPolicy.idleDelay(focusMode: true))
+    }
+
+    func testAnySourceCountsAsASession() {
+        XCTAssertFalse(HomeScreensaverPolicy.sessionActive(audioPlaying: false, appleMusicOn: false, pomodoroRunning: false))
+        XCTAssertTrue(HomeScreensaverPolicy.sessionActive(audioPlaying: true, appleMusicOn: false, pomodoroRunning: false))
+        // Apple Music sits outside `isAnythingPlaying`, and a silent Pomodoro has no audio at all —
+        // both are still a session the scene can take over.
+        XCTAssertTrue(HomeScreensaverPolicy.sessionActive(audioPlaying: false, appleMusicOn: true, pomodoroRunning: false))
+        XCTAssertTrue(HomeScreensaverPolicy.sessionActive(audioPlaying: false, appleMusicOn: false, pomodoroRunning: true))
+    }
+
+    func testChromeLiftRestoresWhatTheHiddenTabBarTookAway() {
+        // iPhone: hiding the tab bar shrinks the bottom inset 83 → 34; the controls get 49 back.
+        let shown = EdgeInsets(top: 62, leading: 0, bottom: 83, trailing: 0)
+        let hidden = EdgeInsets(top: 62, leading: 0, bottom: 34, trailing: 0)
+        let lift = HomeScreensaverPolicy.chromeLift(anchored: shown, live: hidden)
+        XCTAssertEqual(lift.bottom, 49)
+        XCTAssertEqual(lift.top, 0)
+    }
+
+    func testChromeLiftIsZeroWhileChromeShowsAndNeverNegative() {
+        let shown = EdgeInsets(top: 62, leading: 0, bottom: 83, trailing: 0)
+        XCTAssertEqual(HomeScreensaverPolicy.chromeLift(anchored: shown, live: shown), EdgeInsets())
+        // Live inset larger than the anchor (e.g. a stale anchor after rotation): clamp, don't pull up.
+        let taller = EdgeInsets(top: 80, leading: 0, bottom: 100, trailing: 0)
+        XCTAssertEqual(HomeScreensaverPolicy.chromeLift(anchored: shown, live: taller), EdgeInsets())
     }
 }
