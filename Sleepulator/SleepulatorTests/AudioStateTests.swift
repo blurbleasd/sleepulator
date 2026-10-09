@@ -1510,3 +1510,20 @@ final class NightRingMathTests: XCTestCase {
         XCTAssertEqual(NightLine.timerText(remaining: 600, inTail: true, endOfEpisode: false, playing: true, lengthMinutes: 0), "Sounds easing out")
     }
 }
+
+/// Screens keep exactly the room the floating mini-player covers.
+final class MiniPlayerClearanceTests: XCTestCase {
+    func testClearsTheBarPlusAGap() {
+        // Safe bottom at 792, bar top at 695 → 97 covered + 12 gap.
+        XCTAssertEqual(MiniPlayerClearanceMath.clearance(safeBottom: 792, miniTop: 695), 109)
+    }
+
+    func testNoBarNoRoom() {
+        XCTAssertEqual(MiniPlayerClearanceMath.clearance(safeBottom: 792, miniTop: nil), 0)
+        XCTAssertEqual(MiniPlayerClearanceMath.clearance(safeBottom: 0, miniTop: 695), 0)   // not measured yet
+    }
+
+    func testBarBelowTheEdgeNeedsNothingExtra() {
+        XCTAssertEqual(MiniPlayerClearanceMath.clearance(safeBottom: 600, miniTop: 700), 0)
+    }
+}

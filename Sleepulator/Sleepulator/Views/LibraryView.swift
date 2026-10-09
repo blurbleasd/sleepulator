@@ -135,10 +135,12 @@ struct LibraryView: View {
                             .multilineTextAlignment(.center)
                             .padding(.horizontal, 44)
                     }
-                    .padding(.bottom, 60)
+                    .frame(maxHeight: .infinity)
                     .allowsHitTesting(false)
                 }
             }
+            // Room for the floating mini-player (the empty state used to sit under it).
+            .miniPlayerClearance()
             .navigationTitle("Podcasts")
             .navigationBarTitleDisplayMode(.large)
             .toolbar {

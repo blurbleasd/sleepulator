@@ -89,7 +89,7 @@ struct PodcastDetailView: View {
                     }
                     .listStyle(.plain)
                     .scrollContentBackground(.hidden)
-                    .contentMargins(.bottom, 80, for: .scrollContent)   // clear the floating mini-player
+                    .miniPlayerClearance()   // clear the floating mini-player, measured
                 }
             }
         }

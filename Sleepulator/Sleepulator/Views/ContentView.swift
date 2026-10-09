@@ -21,6 +21,8 @@ struct ContentView: View {
     /// Bumped on every mini-player tap — touching the mini-player is Home interaction too, so it
     /// pushes the screensaver countdown back.
     @State private var miniPlayerTouches = 0
+    /// The mini-player bar's top edge (global Y), measured; each tab reserves room below it.
+    @State private var miniPlayerTop: CGFloat?
 
     var pal: Palette { Palette(bedtime: bedtimeMode) }
 
@@ -36,8 +38,9 @@ struct ContentView: View {
     // On Sleep Home the mini-player shows only while a podcast is actually playing: idle, its
     // "Up next" bar put a second play button beside the orb, meaning something different. It
     // stays everywhere else (Podcasts, Settings, Focus), and the mixer's Podcast row is unchanged.
+    private var miniPlayerShownOnHome: Bool { audio.focusMode || audio.isPodPlaying }
     private var miniPlayerHidden: Bool {
-        homeScreensaver || (selectedTab == 0 && !audio.focusMode && !audio.isPodPlaying)
+        homeScreensaver || (selectedTab == 0 && !miniPlayerShownOnHome)
     }
 
     // App-wide night-dim: ~60s into a sleep session, drop a black veil over the whole app
@@ -93,6 +96,9 @@ struct ContentView: View {
             TabView(selection: $selectedTab) {
                 HomeView(audio: audio, mixStore: audio.mixStore, selectedTab: $selectedTab,
                          nowPlayingPresented: showNowPlaying, miniPlayerTouches: miniPlayerTouches)
+                    // Home reserves the bar's room only when the bar shows on Home (not on Sleep
+                    // Home at rest). The screensaver fade doesn't count: HomeView freezes it.
+                    .environment(\.miniPlayerTop, miniPlayerShownOnHome ? miniPlayerTop : nil)
                     .tabItem {
                         // Reflect the active mode — a cyan "Sleep/moon" tab while focusing
                         // was disorienting (the tab contradicted the screen).
@@ -105,12 +111,14 @@ struct ContentView: View {
                     .toolbar(homeScreensaver ? .hidden : .visible, for: .tabBar)
                 
                 LibraryView(audio: audio, queue: audio.queueManager, connectivity: audio.connectivity)
+                    .environment(\.miniPlayerTop, miniPlayerTop)
                     .tabItem {
                         Label("Podcasts", systemImage: "music.note.list")
                     }
                     .tag(1)
                 
                 SettingsView(audio: audio, queue: audio.queueManager, settings: audio.settings)
+                    .environment(\.miniPlayerTop, miniPlayerTop)
                     .tabItem {
                         Label("Settings", systemImage: "gear")
                     }
@@ -124,6 +132,9 @@ struct ContentView: View {
             MiniPlayerView(audio: audio, progress: audio.playbackProgress, queue: audio.queueManager,
                            selectedTab: $selectedTab, showNowPlaying: $showNowPlaying)
                 .simultaneousGesture(TapGesture().onEnded { miniPlayerTouches &+= 1 })
+                .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).minY } action: { top in
+                    miniPlayerTop = top
+                }
                 .opacity(miniPlayerHidden ? 0 : 1)
                 .allowsHitTesting(!miniPlayerHidden)
                 .accessibilityHidden(miniPlayerHidden)

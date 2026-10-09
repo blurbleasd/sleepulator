@@ -407,11 +407,12 @@ struct SettingsView: View {
                         .padding(.top, 4)
                         .accessibilityElement(children: .combine)
                         .accessibilityLabel(AppInfo.accessibilitySummary)
-
-                        Spacer().frame(height: 80) // 80 is the miniPlayerInset
                     }
                     .padding(.top, 20)
+                    .padding(.bottom, UI.lg)
                 }
+                // Room for the floating mini-player, measured (was a fixed 80 pt spacer).
+                .miniPlayerClearance()
             }
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.large)

@@ -311,6 +311,33 @@ struct HomeView: View {
         else { withAnimation(.easeInOut(duration: 0.2)) { audio.focusMode = focus } }
     }
 
+    private var buildMixButton: some View {
+        Button(action: {
+            if !hasCompletedFirstRun { hasCompletedFirstRun = true }
+            showMix = true
+        }) {
+            HStack(spacing: 7) {
+                Image(systemName: "slider.horizontal.3")
+                Text("Build mix").font(.subheadline.weight(.semibold))
+            }
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
+            .foregroundColor(pal.text)
+            .padding(.horizontal, 22).padding(.vertical, 13)
+            .background(Capsule().fill(pal.text.opacity(0.10)))
+            .overlay(Capsule().stroke(pal.accent.opacity(0.28), lineWidth: 0.5))
+        }
+        .frame(minHeight: 44)
+    }
+
+    private var focusSessionButton: some View {
+        SessionButton(sleepTimer: audio.sleepTimer,
+                      pomodoro: audio.pomodoro,
+                      focusMode: audio.focusMode,
+                      pal: pal,
+                      onSleepTap: { showTimerActionSheet = true })
+    }
+
     var body: some View {
         ZStack {
             RadialGradient(
@@ -434,40 +461,25 @@ struct HomeView: View {
                 Spacer()
 
                 VStack(spacing: 6) {
-                    HStack(spacing: 10) {
-                        Button(action: {
-                            if !hasCompletedFirstRun { hasCompletedFirstRun = true }
-                            showMix = true
-                        }) {
-                            HStack(spacing: 7) {
-                                Image(systemName: "slider.horizontal.3")
-                                Text("Build mix").font(.subheadline.weight(.semibold))
-                            }
-                            .foregroundColor(pal.text)
-                            .padding(.horizontal, 22).padding(.vertical, 13)
-                            .background(Capsule().fill(pal.text.opacity(0.10)))
-                            .overlay(Capsule().stroke(pal.accent.opacity(0.28), lineWidth: 0.5))
+                    if audio.focusMode {
+                        // Side by side when they fit; stacked at large text sizes, where the row
+                        // used to wrap "Build / mix" and run off the screen edge.
+                        ViewThatFits(in: .horizontal) {
+                            HStack(spacing: 10) { buildMixButton; focusSessionButton }
+                            VStack(spacing: 6) { buildMixButton; focusSessionButton }
                         }
-                        .frame(minHeight: 44)
-
-                        // Sleep's timer lives on the orb's ring now; Focus keeps its session control.
-                        if audio.focusMode {
-                            SessionButton(sleepTimer: audio.sleepTimer,
-                                          pomodoro: audio.pomodoro,
-                                          focusMode: audio.focusMode,
-                                          pal: pal,
-                                          onSleepTap: { showTimerActionSheet = true })
-                        }
+                    } else {
+                        // Sleep's timer lives on the orb's ring, so Build mix stands alone.
+                        buildMixButton
                     }
                 }
                 .frame(maxWidth: .infinity)
                 .anchorPreference(key: CoachmarkAnchorKey.self, value: .bounds) { [.mixRow: $0] }
-                // The mini-player floats over the bottom in EVERY state (it shows an idle
-                // "Nothing playing" bar when nothing's loaded), so the controls need this inset
-                // even with no episode — the old `: 22` let the always-present bar cover the
-                // "Build mix" button. A constant also stops the row jumping when a podcast
-                // loads/unloads. Tune by eye on device.
-                .padding(.bottom, 112)
+                // Clear of the floating mini-player by its measured height, when it shows on Home
+                // (Focus, or a podcast playing). Frozen through the screensaver, which hides the
+                // tab bar under the controls (chromeLift holds their position then).
+                .padding(.bottom, 16)
+                .miniPlayerClearance(frozen: audio.ambientScreensaver)
             }
             // First-run coachmark: a single dismissible card pointing down at "Build mix" so a new
             // user discovers the layering. It fills the band between the orb's disc and the Build

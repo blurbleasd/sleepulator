@@ -30,9 +30,13 @@ struct MiniPlayerView: View {
                 idleBar
             }
         }
+        // A real material under the dusk tint: at 85% flat fill, the rows scrolling beneath
+        // ghosted through and overprinted the subtitle. Reduce Transparency is honoured by the
+        // material itself.
         .background(
             RoundedRectangle(cornerRadius: 16)
-                .fill(pal.bg.opacity(0.85))
+                .fill(.ultraThinMaterial)
+                .overlay(RoundedRectangle(cornerRadius: 16).fill(pal.bg.opacity(0.7)))
                 .shadow(color: .black.opacity(0.3), radius: 10, x: 0, y: -5)
         )
         .overlay(
@@ -40,6 +44,9 @@ struct MiniPlayerView: View {
                 .stroke(pal.text.opacity(0.1), lineWidth: 1)
         )
         .padding(.horizontal)
+        // A compact bar: past accessibility size 2 it grew to a third of the screen and covered
+        // Home's controls. Long-press shows the Large Content Viewer for anything clipped.
+        .dynamicTypeSize(...DynamicTypeSize.accessibility2)
         .padding(.bottom, 80) // float above the tab bar
         .sheet(isPresented: $showNowPlaying) {
             NowPlayingSheet(audio: audio, queue: audio.queueManager, progress: progress, isPresented: $showNowPlaying, pal: pal)
