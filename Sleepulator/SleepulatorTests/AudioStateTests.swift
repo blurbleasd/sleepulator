@@ -764,6 +764,42 @@ final class FirstRunDefaultMixTests: XCTestCase {
     }
 }
 
+// Regression for the 47-test SIGABRT on the iOS 26.3 simulator. Under SWIFT_DEFAULT_ACTOR_ISOLATION
+// = MainActor a class WITHOUT an explicit deinit gets an implicit main-actor-*isolated* one, and on
+// the iOS 18.4–26.3 Swift runtimes that path aborts ("pointer being freed was not allocated", in
+// TaskLocal::StopLookupScope — swiftlang/swift 29245e4) when it runs synchronously on the main
+// thread while a task-local is bound outside any Task. XCTest binds one around every sync test, so
+// every AudioEngine teardown crashed. The engine's subtree, SceneClock and StorageManager opt out
+// with `nonisolated deinit {}`; this binds its own task-local so the trigger doesn't depend on
+// XCTest internals. A fixed runtime (26.4+) passes regardless — run it on a 26.3 sim to exercise it.
+private enum DeinitProbe {
+    @TaskLocal static var value = 0
+}
+
+@MainActor
+final class IsolatedDeinitRuntimeBugTests: XCTestCase {
+    func testTeardownInsideSyncTaskLocalBindingDoesNotAbort() {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("IsolatedDeinit-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        weak var weakEngine: AudioEngine?
+        weak var weakClock: SceneClock?
+        weak var weakStore: StorageManager?
+        DeinitProbe.$value.withValue(1) {
+            let engine = AudioEngine()
+            let clock = SceneClock()
+            let store = StorageManager(directory: dir)
+            weakEngine = engine
+            weakClock = clock
+            weakStore = store
+        }   // all released here, still inside the binding — the crashing path pre-fix
+        XCTAssertNil(weakEngine, "engine must be freed inside the binding or this test proves nothing")
+        XCTAssertNil(weakClock, "clock must be freed inside the binding or this test proves nothing")
+        XCTAssertNil(weakStore, "store must be freed inside the binding or this test proves nothing")
+    }
+}
+
 // Episode/Podcast identity is the id only. A custom == with a synthesized hash(into:) over all
 // fields would break the Hashable contract (equal values, unequal hashes) — corrupting Set/dict use.
 final class ModelIdentityTests: XCTestCase {
