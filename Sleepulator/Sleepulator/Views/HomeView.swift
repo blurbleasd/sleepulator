@@ -175,10 +175,9 @@ struct HomeView: View {
 
     // The currently-playing layers, shown as pills under the orb.
     private var activeLayers: [String] {
-        let binLabels = ["delta": "Deep", "theta": "Drift", "alpha": "Relax", "beta": "Concentrate", "gamma": "Focus"]
         var p: [String] = []
-        if audio.noiseOn { p.append(audio.noiseType.capitalized) }
-        if audio.binauralOn { p.append(binLabels[audio.binauralPreset] ?? audio.binauralPreset.capitalized) }
+        if audio.noiseOn { p.append(SoundNames.noise(audio.noiseType)) }
+        if audio.binauralOn { p.append(SoundNames.binaural(audio.binauralPreset)) }
         if audio.isPodPlaying { p.append("Podcast") }
         return p
     }
@@ -188,8 +187,8 @@ struct HomeView: View {
 
     private func statusText() -> String {
         var parts: [String] = []
-        if audio.noiseOn { parts.append(audio.noiseType.capitalized) }
-        if audio.binauralOn { parts.append(audio.binauralPreset.capitalized) }
+        if audio.noiseOn { parts.append(SoundNames.noise(audio.noiseType)) }
+        if audio.binauralOn { parts.append(SoundNames.binaural(audio.binauralPreset)) }
         if audio.isPodPlaying { parts.append("Podcast") }
         
         let layers = parts.isEmpty ? "All paused" : parts.joined(separator: " + ")
@@ -215,11 +214,11 @@ struct HomeView: View {
     // so mirror that snap here instead of echoing a stale Sleep mix's sound names in Focus.
     private func resumeDisplayName(noise: String) -> String {
         let palette = audio.focusMode ? AudioEngine.focusNoises : AudioEngine.sleepNoises
-        return (palette.contains(noise) ? noise : (palette.first ?? noise)).capitalized
+        return SoundNames.noise(palette.contains(noise) ? noise : (palette.first ?? noise))
     }
     private func resumeDisplayName(binaural: String) -> String {
         let palette = audio.focusMode ? AudioEngine.focusBinaurals : AudioEngine.sleepBinaurals
-        return (palette.contains(binaural) ? binaural : (palette.first ?? binaural)).capitalized
+        return SoundNames.binaural(palette.contains(binaural) ? binaural : (palette.first ?? binaural))
     }
 
     /// How beginning playback from rest would go: resume the last mix, the first-run layered bed,
@@ -375,7 +374,8 @@ struct HomeView: View {
                         // faded to the screensaver (opacity 0 below) OR the screen is occluded/
                         // backgrounded/low-luminance. Stops the all-night invisible blur composite.
                         OrbButton(audio: audio, pal: pal, tap: heroTap,
-                                  paused: audio.ambientScreensaver || scenesFrozen)
+                                  paused: audio.ambientScreensaver || scenesFrozen,
+                                  idleStatus: statusText())
                             .anchorPreference(key: CoachmarkAnchorKey.self, value: .bounds) { [.orb: $0] }
 
                         SleepStatusLine(base: statusText(),

@@ -8,6 +8,17 @@ struct SessionButton: View {
     let pal: Palette
     let onSleepTap: () -> Void
 
+    private var spokenLabel: String {
+        if focusMode {
+            return pomodoro.isRunning
+                ? "Stop focus session, \(Int(pomodoro.remaining / 60)) minutes left"
+                : "Start focus session"
+        }
+        return sleepTimer.timerRemaining > 0
+            ? "Sleep timer, \(Int(sleepTimer.timerRemaining / 60)) minutes left"
+            : "Sleep timer"
+    }
+
     var body: some View {
         Button(action: {
             if focusMode {
@@ -30,6 +41,8 @@ struct SessionButton: View {
             .padding(.horizontal, 16).padding(.vertical, 13)
         }
         .frame(minHeight: 44)
+        // Spoken in words: "29m" reads as "29 meters".
+        .accessibilityLabel(spokenLabel)
     }
 }
 

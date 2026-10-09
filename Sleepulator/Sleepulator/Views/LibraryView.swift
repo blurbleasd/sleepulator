@@ -147,6 +147,7 @@ struct LibraryView: View {
                         Image(systemName: "plus")
                             .foregroundColor(pal.accent)
                     }
+                    .accessibilityLabel("Add podcast")
                 }
                 ToolbarItem(placement: .navigationBarLeading) {
                     Button("Import OPML") { opmlImporting = true }
@@ -158,8 +159,11 @@ struct LibraryView: View {
                 if let podcast = podcasts.first(where: { $0.id == podcastId }) {
                     PodcastDetailView(podcast: podcast, audio: audio, connectivity: connectivity, libraryPodcasts: $podcasts)
                 } else {
-                    Text("Podcast not found")
-                        .foregroundColor(pal.dim)
+                    // Removed (or lost in a restore) while you were away: say so and point home.
+                    ContentUnavailableView("Not in your library",
+                                           systemImage: "antenna.radiowaves.left.and.right.slash",
+                                           description: Text("This show may have been removed. Go back to see your podcasts."))
+                        .foregroundStyle(pal.dim)
                 }
             }
             .onAppear {
@@ -277,7 +281,11 @@ struct LibraryView: View {
                 Log.network.error("Feed parse error: \(error.localizedDescription, privacy: .public)")
                 DispatchQueue.main.async {
                     self.isLoading = false
-                    self.errorMessage = error.localizedDescription
+                    // Plain recovery copy, not the raw system error (logged above).
+                    let offline = (error as? URLError)?.code == .notConnectedToInternet
+                    self.errorMessage = offline
+                        ? "You're offline. Connect and try again."
+                        : "Couldn't load that feed. Check it's a podcast RSS link and try again."
                 }
             }
         }
@@ -364,9 +372,12 @@ struct AddPodcastSheet: View {
                     .onDisappear { searchTask?.cancel() }
                 
                 if let err = errorMessage {
-                    Text(err)
-                        .font(.caption)
-                        .foregroundColor(.red)
+                    // Palette amber + a warning glyph (Home's playback note does the same): system
+                    // red is the loudest colour in the app at night, and colour alone isn't the message.
+                    Label(err, systemImage: "exclamationmark.triangle.fill")
+                        .font(.footnote)
+                        .foregroundColor(pal.accent)
+                        .fixedSize(horizontal: false, vertical: true)
                         .padding(.horizontal, 24)
                 }
                 

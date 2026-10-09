@@ -1,5 +1,16 @@
 import SwiftUI
 
+/// The timer sheet's one line of consequence copy. Pure so the tests can pin it to the real fade
+/// (AudioMath.getFadeMultiplier: the last 600 s; the ambient tail eases down from there).
+enum TimerCopy {
+    static func consequence(minutes: Int, tailMinutes: Int) -> String {
+        if tailMinutes > 0 {
+            return "The podcast stops at \(minutes) min. Your sounds ease out over \(tailMinutes) more."
+        }
+        return minutes > 10 ? "Fades out over the last 10 min, then stops." : "Fades out gently, then stops."
+    }
+}
+
 struct TimerSelectionSheet: View {
     @ObservedObject var audio: AudioEngine
     @Binding var isPresented: Bool
@@ -19,7 +30,7 @@ struct TimerSelectionSheet: View {
 
     var body: some View {
         VStack(spacing: UI.xl) {
-            Text("Sleep Timer")
+            Text("Sleep timer")
                 .font(.title2.bold())
                 .foregroundColor(pal.text)
 
@@ -37,6 +48,17 @@ struct TimerSelectionSheet: View {
             }
             .accessibilityElement(children: .combine)
             .accessibilityLabel("\(Int(timerMinutes)) minutes")
+
+            // What actually happens at the end, said once. The Live Activity already promised
+            // "Audio fades out, then stops"; the sheet where you commit said nothing.
+            Text(TimerCopy.consequence(minutes: Int(timerMinutes),
+                                       tailMinutes: audio.hasLoadedEpisode ? ambientTailMinutes : 0))
+                .font(.footnote)
+                .foregroundColor(pal.dim)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, UI.xxl)
+                .padding(.top, -UI.md)
 
             // Presets *select* a duration (they no longer fire-and-dismiss); nudging the slider
             // after is one coherent flow ending in a single Start button.
@@ -67,6 +89,7 @@ struct TimerSelectionSheet: View {
                             }
                     }
                     .frame(minWidth: 44, minHeight: 44)
+                    .accessibilityLabel("\(mins) minutes")
                     .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
                 }
             }
@@ -79,7 +102,7 @@ struct TimerSelectionSheet: View {
             // episode's end) the podcast stops and the noise bed keeps fading for this span.
             if audio.hasLoadedEpisode {
                 VStack(spacing: 8) {
-                    Text("Then ambient only for…")
+                    Text("Keep sounds going after the podcast stops")
                         .font(.caption)
                         .foregroundColor(pal.dim)
                     HStack(spacing: UI.sm) {
@@ -106,7 +129,7 @@ struct TimerSelectionSheet: View {
                                     }
                             }
                             .frame(minWidth: 44, minHeight: 44)
-                            .accessibilityLabel(mins == 0 ? "No ambient tail" : "Ambient continues \(mins) minutes after the podcast stops")
+                            .accessibilityLabel(mins == 0 ? "Stop sounds with the podcast" : "Sounds continue \(mins) minutes after the podcast stops")
                             .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
                         }
                     }

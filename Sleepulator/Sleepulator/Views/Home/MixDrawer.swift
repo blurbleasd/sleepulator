@@ -67,6 +67,8 @@ struct MixDrawer: View {
         // No opaque fill here — the sheet's presentationBackground (a translucent dusk tint) lets
         // the home scene show through so the glass rows refract living content.
         .preferredColorScheme(.dark)
+        // At rest, show the sounds Play would resume (Home's "Resume · …" line), not stale picks.
+        .onAppear { if let last = mixStore.lastMix { audio.stageForEditing(last) } }
         // "Name your mix" + a text field is self-evident — no explanatory message line.
         .alert("Name your mix", isPresented: $showNameDialog) {
             TextField("Mix name", text: $draftName)

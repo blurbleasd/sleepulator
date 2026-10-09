@@ -120,7 +120,7 @@ struct MixPanel: View {
                 volume: $audio.binVolume,
                 pal: pal,
                 options: audio.focusMode ? ["alpha", "beta", "gamma"] : ["delta", "theta"],
-                optionLabels: ["delta":"Deep","theta":"Drift","alpha":"Relax","beta":"Concentrate","gamma":"Focus"],
+                optionLabels: SoundNames.binauralLabels,
                 selection: $audio.binauralPreset
             )
             .glassPanel(pal)

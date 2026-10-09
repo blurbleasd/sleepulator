@@ -9,8 +9,8 @@ struct SavedMixesList: View {
 
     private func mixSummary(_ p: SoundPreset) -> String {
         var parts: [String] = []
-        if p.noiseOn { parts.append(p.noiseType.capitalized) }
-        if p.binauralOn { parts.append(p.binauralPreset.capitalized) }
+        if p.noiseOn { parts.append(SoundNames.noise(p.noiseType)) }
+        if p.binauralOn { parts.append(SoundNames.binaural(p.binauralPreset)) }
         return parts.isEmpty ? "Silent" : parts.joined(separator: " + ")
     }
 

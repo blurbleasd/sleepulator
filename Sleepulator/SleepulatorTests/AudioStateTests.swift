@@ -1431,3 +1431,20 @@ final class SessionGuardsTests: XCTestCase {
         XCTAssertEqual(SessionGuards.timerCommitTitle(playing: true, timerActive: true), "Restart timer")
     }
 }
+
+/// One name per sound, and timer copy that matches the real fade (the last 600 s).
+final class ClarityCopyTests: XCTestCase {
+    func testBinauralPresetsUseOneName() {
+        XCTAssertEqual(SoundNames.binaural("delta"), "Deep")
+        XCTAssertEqual(SoundNames.binaural("theta"), "Drift")
+        XCTAssertEqual(SoundNames.binaural("gamma"), "Focus")
+        XCTAssertEqual(SoundNames.binaural("smr"), "Smr")   // unknown: capitalized, never blank
+    }
+
+    func testTimerConsequenceMatchesTheFade() {
+        XCTAssertEqual(TimerCopy.consequence(minutes: 30, tailMinutes: 0), "Fades out over the last 10 min, then stops.")
+        XCTAssertEqual(TimerCopy.consequence(minutes: 5, tailMinutes: 0), "Fades out gently, then stops.")
+        XCTAssertEqual(TimerCopy.consequence(minutes: 30, tailMinutes: 15),
+                       "The podcast stops at 30 min. Your sounds ease out over 15 more.")
+    }
+}

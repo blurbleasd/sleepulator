@@ -993,17 +993,36 @@ final class AudioEngine: ObservableObject {
         }
     }
     
+    /// Load a snapshot's sound picks (types and levels, never on/off) into the idle mixer, so
+    /// opening Build mix at rest shows what Play would resume. Home's "Resume · Brown" and a mixer
+    /// row reading "Green" used to disagree. Only sounds in the current mode's palette are taken:
+    /// the mixer is mode-scoped, and a cross-mode pick stays as it is.
+    func stageForEditing(_ mix: SavedMix) {
+        guard !isAnythingPlaying else { return }
+        let noises = focusMode ? Self.focusNoises : Self.sleepNoises
+        let binaurals = focusMode ? Self.focusBinaurals : Self.sleepBinaurals
+        let noise = NoiseType.migrate(mix.noiseType)
+        if noises.contains(noise) {
+            if noiseType != noise { noiseType = noise }
+            if noiseVolume != mix.noiseVolume { noiseVolume = mix.noiseVolume }
+        }
+        if binaurals.contains(mix.binauralPreset) {
+            if binauralPreset != mix.binauralPreset { binauralPreset = mix.binauralPreset }
+            if binVolume != mix.binVolume { binVolume = mix.binVolume }
+        }
+    }
+
     // MARK: Saved sound presets (reusable recipes — no podcast)
 
-    /// A recipe-derived default name for the current soundscape ("Brown + Delta"), used to
+    /// A recipe-derived default name for the current soundscape ("Brown + Deep"), used to
     /// prefill the name-it prompt. Never the podcast title — a preset is about the sounds.
     func defaultPresetName() -> String {
         var parts: [String] = []
         if noiseOn {
-            parts.append(noiseType.capitalized)
-            parts.append(contentsOf: extraLayers.map { $0.type.capitalized })
+            parts.append(SoundNames.noise(noiseType))
+            parts.append(contentsOf: extraLayers.map { SoundNames.noise($0.type) })
         }
-        if binauralOn { parts.append(binauralPreset.capitalized) }
+        if binauralOn { parts.append(SoundNames.binaural(binauralPreset)) }
         return parts.isEmpty ? "My Mix" : parts.joined(separator: " + ")
     }
 
