@@ -27,14 +27,29 @@ struct SceneSelector: View {
                             selectedId = scene.id
                             UIImpactFeedbackGenerator(style: .light).impactOccurred()
                         } label: {
+                            // The same ember as every other single-select chip (ChipRow): cream
+                            // label on a dim accent tint with a top-lit rim.
                             Text(scene.title)
                                 .font(.caption.weight(.semibold))
                                 .padding(.horizontal, 14).padding(.vertical, 8)
-                                .background(Capsule().fill(on ? pal.accent.opacity(0.18) : pal.text.opacity(0.06)))
-                                .overlay(Capsule().stroke(on ? pal.accent.opacity(0.55) : .clear, lineWidth: 1))
-                                .foregroundColor(on ? pal.accent : pal.dim)
+                                .foregroundColor(on ? pal.text : pal.dim)
+                                .background {
+                                    if on {
+                                        Capsule().fill(pal.accent.opacity(0.18))
+                                            .overlay(Capsule().strokeBorder(
+                                                LinearGradient(colors: [pal.accent.opacity(0.7), pal.accent.opacity(0.15)],
+                                                               startPoint: .top, endPoint: .bottom),
+                                                lineWidth: 1))
+                                    } else {
+                                        Capsule().fill(pal.text.opacity(0.08))
+                                    }
+                                }
+                                // 44 pt tall to tap (the chip itself stays compact; was 29 pt).
+                                .frame(minHeight: 44)
+                                .contentShape(Rectangle())
                         }
-                        .accessibilityLabel("\(scene.title) backdrop\(on ? ", selected" : "")")
+                        .accessibilityLabel("\(scene.title) backdrop")
+                        .accessibilityAddTraits(on ? .isSelected : [])
                     }
                 }
                 .padding(.horizontal, 20)

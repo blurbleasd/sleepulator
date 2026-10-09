@@ -11,6 +11,9 @@ struct MixDrawer: View {
     /// Called when the user taps the podcast layer with no episode loaded — closes the drawer
     /// and routes to the Podcasts tab.
     var onPickEpisode: () -> Void = {}
+    /// Sleep only: hand off to the breathing exercise (Home presents it once this sheet closes).
+    /// It moved here from under Build mix, so Home's bottom row is one control.
+    var onBreathing: (() -> Void)? = nil
     @AppStorage("sceneSleep") private var sleepSceneId = "night-sky"
     @AppStorage("sceneFocus") private var focusSceneId = "current"
     @State private var showNameDialog = false
@@ -35,6 +38,30 @@ struct MixDrawer: View {
 
                 HomeBottomBar(audio: audio, pal: pal)
                     .padding(.top, UI.xs)
+
+                if !audio.focusMode, let onBreathing {
+                    Button(action: onBreathing) {
+                        HStack(spacing: UI.md) {
+                            Image(systemName: "wind")
+                                .frame(minWidth: 30)
+                                .foregroundColor(pal.dim)
+                                .font(.title3)
+                            Text("Breathing exercise")
+                                .font(.system(.headline, design: .rounded))
+                                .foregroundColor(pal.dim)
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.footnote.weight(.semibold))
+                                .foregroundColor(pal.dim.opacity(0.7))
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .frame(minHeight: 44)
+                    .glassPanel(pal)
+                    .padding(.horizontal, 20)
+                    .accessibilityHint("Opens a guided breathing wind-down")
+                }
 
                 if canSaveMix {
                     Button(action: {
@@ -67,6 +94,8 @@ struct MixDrawer: View {
         // No opaque fill here — the sheet's presentationBackground (a translucent dusk tint) lets
         // the home scene show through so the glass rows refract living content.
         .preferredColorScheme(.dark)
+        // At rest, show the sounds Play would resume (Home's "Resume · …" line), not stale picks.
+        .onAppear { if let last = mixStore.lastMix { audio.stageForEditing(last) } }
         // "Name your mix" + a text field is self-evident — no explanatory message line.
         .alert("Name your mix", isPresented: $showNameDialog) {
             TextField("Mix name", text: $draftName)

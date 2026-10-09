@@ -120,7 +120,7 @@ struct MixPanel: View {
                 volume: $audio.binVolume,
                 pal: pal,
                 options: audio.focusMode ? ["alpha", "beta", "gamma"] : ["delta", "theta"],
-                optionLabels: ["delta":"Deep","theta":"Drift","alpha":"Relax","beta":"Concentrate","gamma":"Focus"],
+                optionLabels: SoundNames.binauralLabels,
                 selection: $audio.binauralPreset
             )
             .glassPanel(pal)
@@ -165,7 +165,8 @@ struct AppleMusicMixRow: View {
                     Image(systemName: "magnifyingglass")
                         .font(.footnote.weight(.semibold))
                         .foregroundColor(pal.accent)
-                        .frame(width: 36, height: 36)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Change Apple Music selection")

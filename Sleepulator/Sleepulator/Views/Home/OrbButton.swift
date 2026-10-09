@@ -19,6 +19,8 @@ struct OrbButton: View {
     /// True when the orb isn't visibly animating — the chrome has faded to the ambient
     /// screensaver, or the screen is occluded/backgrounded. Freezes the breath loop in place.
     var paused: Bool = false
+    /// What Play would bring back ("Resume · Brown"), spoken as the idle hint.
+    var idleStatus: String = ""
 
     @AppStorage("bedtimeMode") private var bedtimeMode = false
     @State private var pressed = false
@@ -49,6 +51,8 @@ struct OrbButton: View {
             .onChanged { _ in pressed = true }
             .onEnded { _ in pressed = false })
         .accessibilityLabel(audio.isAnythingPlaying ? "Pause all audio" : "Play")
+        // At rest, say what Play brings back ("Resume · Brown"), as the status line does.
+        .accessibilityHint(audio.isAnythingPlaying ? "" : idleStatus)
     }
 
     @ViewBuilder

@@ -275,6 +275,52 @@ this section is where you do it. Do it in a dark room at your real bedtime brigh
    — all still), CoreMotion stops (Energy Log: no motion updates), tilt parallax gone. Back ON → the
    scene resumes from its frozen pose, no pop. The toggle survives Backup → Restore.
 
+### M. Night ring + session guards (added 2026-10-09, simulator-checked only)
+1. **The ring sets the night.** Sleep Home at rest: drag the ring's handle clockwise from 12 to
+   ~45. ✅ Light haptic ticks on the quarter hours, a big "45 min" readout inside the orb while
+   dragging, the line reads "Resume · … · 45m". Drag back to 12 → "All night". A drag that starts
+   away from the handle (or a left/right scene swipe across the ring) changes nothing.
+2. **Play honours it — from every start.** Ring at 45, then start a Sleep session from rest each
+   way: ▶, a mixer switch, a podcast (Podcasts tab / mini-player), lock-screen or AirPods play, the
+   Siri "Start my mix" shortcut, the resume widget. ✅ Each starts a 45-min timer (Live Activity
+   appears); the arc shrinks over the night. Pause and resume → the countdown carries on (not
+   restarted). A phone call mid-session → the same countdown resumes. Ring on All night → plays with
+   no timer. Focus never starts one. With the breathing on-ramp on, the timer starts when the mix
+   does, not during the minute of breathing.
+3. **Drag mid-night.** While playing, drag to 20 → timer restarts at 20; drag to 12 → timer off.
+   In the last 2 minutes and in the ambient tail the ring is locked (handle dims); "+15m" works.
+4. **Mode switch asks first.** With sounds playing or a timer running, tap Focus (also with the
+   Build-mix half-sheet open: it closes, then asks). ✅ "Switch to Focus?" pointing at the switch;
+   tap outside → nothing changed. Confirm → Focus, timer gone. Focus → Sleep only asks over a
+   running Pomodoro. The switch sits at half opacity during a sleep session.
+5. **Veil only over sound.** Start a timer, then pause. ✅ The 60 s night veil does not drop over
+   silence; resume → it drops a minute later. Waking the veil ramps up over ~1.6 s, not a flash.
+6. **Dark launch.** Cold-launch at night. ✅ No white flash before Home (warm near-black launch).
+7. **VoiceOver.** The ring is "Night length, 45 minutes", swipe up/down adjusts in 5s; the on-ramp
+   close button says "Close without starting your mix" (and doesn't start it).
+8. **Ring drag keeps the controls awake.** Mid-night (sounds playing): tap to wake, then drag the
+   ring slowly for 5+ s. ✅ The controls don't fade under the finger; ~3 s after release they do.
+   Inside the last 10 minutes the ring is locked (handle dims); a drag that ends where it began
+   doesn't restart the timer (no Live Activity flicker, no volume change).
+9. **Timer sheet ↔ ring.** With nothing playing, sheet "Play & start timer" (with and without the
+   on-ramp) starts the mix and sets the ring to that length; "Play all night" stops tonight's
+   countdown and leaves the ring on All night (tomorrow plays all night too until a length is set);
+   the sheet opens on the ring's length. Long-press the orb → "Timer options".
+10. **Mini-player on Sleep Home.** At rest with only a queue ("Up next"), no bar on Sleep Home; load an
+   episode → the bar appears and Home's controls rise to clear it; pause/play the podcast → nothing
+   moves. Focus Home, Podcasts and Settings always show it, and nothing sits under it at the
+   largest text size.
+11. **Focus colours everywhere.** In Focus, the tab bar, mini-player, Now Playing, Podcasts and
+   Settings are cyan, not amber.
+12. **Veil after a restart.** While playing, restart the timer from the sheet or the ring. ✅ The
+   night veil still drops ~60 s later.
+13. **Dark launch on upgrade too.** Check M.6 on a fresh install AND on an in-place upgrade (iOS
+   caches launch screens; an upgrade can show the old white one once).
+14. **"The sleep timer moved" note (upgraders only).** Install over a build from before the ring
+   (first run already done). ✅ Sleep Home shows the note once, below the night line, never over
+   the ring or the line; "Got it", dragging the ring, or opening timer options retires it for good.
+   A fresh install sees only the first-run card, never this note.
+
 ---
 
 ## Quick release checklist

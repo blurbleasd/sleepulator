@@ -1379,9 +1379,432 @@ final class CoachmarkLayoutTests: XCTestCase {
         XCTAssertEqual(room.top + room.height, 384 - CoachmarkLayout.clearance)
     }
 
+    func testRoomClearsTheNightRingWhenAsked() {
+        // The tip's copy says to drag the ring, so on Sleep it must start below the ring, not the disc.
+        let room = CoachmarkLayout.room(orb: orb, mixRowTop: 420, clearRadius: 111)
+        XCTAssertEqual(room.top, orb.midY + 111 + CoachmarkLayout.clearance)
+        XCTAssertEqual(room.top + room.height, 420 - CoachmarkLayout.clearance)
+    }
+
+    func testRoomStartsBelowTheNightLine() {
+        let room = CoachmarkLayout.room(belowY: 560, mixRowTop: 730)
+        XCTAssertEqual(room.top, 560 + CoachmarkLayout.clearance)
+        XCTAssertEqual(room.top + room.height, 730 - CoachmarkLayout.clearance)
+        XCTAssertEqual(CoachmarkLayout.room(belowY: 760, mixRowTop: 730).height, 0)
+    }
+
     func testRoomIsEmptyNotNegativeWhenTheRowCrowdsTheOrb() {
         // Large text on a small phone can push the row up against the disc: the card gets no
         // room (and shows nothing) instead of a negative height.
         XCTAssertEqual(CoachmarkLayout.room(orb: orb, mixRowTop: 280).height, 0)
+    }
+}
+
+/// The moments one half-asleep tap could cost the night: a mode switch over a live session, a
+/// timer committed over silence, the veil dropping over a quiet room.
+final class SessionGuardsTests: XCTestCase {
+    func testSwitchingToFocusOverASleepTimerAsksFirst() {
+        let w = SessionGuards.modeSwitchWarning(toFocus: true, sleepTimerActive: true,
+                                                sleepSoundsPlaying: true, pomodoroRunning: false)
+        XCTAssertEqual(w?.confirm, "Switch to Focus")
+        XCTAssertTrue(w?.message.contains("sleep timer") ?? false)
+    }
+
+    func testSwitchingToFocusOverPlayingSleepSoundsAsksFirst() {
+        // No timer, but a stray 2am tap would still swap the bed and drop the limiter.
+        let w = SessionGuards.modeSwitchWarning(toFocus: true, sleepTimerActive: false,
+                                                sleepSoundsPlaying: true, pomodoroRunning: false)
+        XCTAssertNotNil(w)
+        XCTAssertFalse(w?.message.contains("timer") ?? true)
+    }
+
+    func testSwitchToFocusOverASilentCountdownStillAsks() {
+        let w = SessionGuards.modeSwitchWarning(toFocus: true, sleepTimerActive: true,
+                                                sleepSoundsPlaying: false, pomodoroRunning: false)
+        XCTAssertEqual(w?.message, "Your sleep timer stops and your sounds change to the Focus set.")
+    }
+
+    func testIdleSwitchToFocusIsImmediate() {
+        XCTAssertNil(SessionGuards.modeSwitchWarning(toFocus: true, sleepTimerActive: false,
+                                                     sleepSoundsPlaying: false, pomodoroRunning: false))
+    }
+
+    func testSwitchingToSleepOnlyAsksOverARunningPomodoro() {
+        XCTAssertNotNil(SessionGuards.modeSwitchWarning(toFocus: false, sleepTimerActive: false,
+                                                        sleepSoundsPlaying: false, pomodoroRunning: true))
+        XCTAssertNil(SessionGuards.modeSwitchWarning(toFocus: false, sleepTimerActive: false,
+                                                     sleepSoundsPlaying: false, pomodoroRunning: false))
+    }
+
+    func testVeilNeverDropsOverSilence() {
+        XCTAssertFalse(SessionGuards.mayNightDim(autoNightDim: true, focusMode: false, timerActive: true, playing: false))
+        XCTAssertTrue(SessionGuards.mayNightDim(autoNightDim: true, focusMode: false, timerActive: true, playing: true))
+        XCTAssertFalse(SessionGuards.mayNightDim(autoNightDim: true, focusMode: true, timerActive: true, playing: true))
+        XCTAssertFalse(SessionGuards.mayNightDim(autoNightDim: false, focusMode: false, timerActive: true, playing: true))
+        XCTAssertFalse(SessionGuards.mayNightDim(autoNightDim: true, focusMode: false, timerActive: false, playing: true))
+    }
+
+    func testTimerCommitStartsTheMixWhenNothingPlays() {
+        XCTAssertEqual(SessionGuards.timerCommitTitle(playing: false, timerActive: false), "Play & start timer")
+        XCTAssertEqual(SessionGuards.timerCommitTitle(playing: false, timerActive: true), "Play & start timer")
+        XCTAssertEqual(SessionGuards.timerCommitTitle(playing: true, timerActive: false), "Start timer")
+        XCTAssertEqual(SessionGuards.timerCommitTitle(playing: true, timerActive: true), "Restart timer")
+    }
+}
+
+/// One name per sound, and timer copy that matches the real fade (the last 600 s).
+final class ClarityCopyTests: XCTestCase {
+    func testBinauralPresetsUseOneName() {
+        XCTAssertEqual(SoundNames.binaural("delta"), "Deep")
+        XCTAssertEqual(SoundNames.binaural("theta"), "Drift")
+        XCTAssertEqual(SoundNames.binaural("gamma"), "Focus")
+        XCTAssertEqual(SoundNames.binaural("smr"), "Smr")   // unknown: capitalized, never blank
+    }
+
+    func testTimerConsequenceMatchesTheFade() {
+        XCTAssertEqual(TimerCopy.consequence(minutes: 30, tailMinutes: 0), "Fades out over the last 10 min, then stops.")
+        XCTAssertEqual(TimerCopy.consequence(minutes: 5, tailMinutes: 0), "Fades out gently, then stops.")
+        XCTAssertEqual(TimerCopy.consequence(minutes: 30, tailMinutes: 15),
+                       "The podcast stops at 30 min. Your sounds carry on softly for 15 more.")
+    }
+
+    func testTimerCopyAtTheFadeBoundary() {
+        XCTAssertEqual(TimerCopy.consequence(minutes: 10, tailMinutes: 0), "Fades out gently, then stops.")
+        XCTAssertEqual(TimerCopy.consequence(minutes: 15, tailMinutes: 0), "Fades out over the last 10 min, then stops.")
+    }
+}
+
+/// The night ring: a 120-minute dial from 12 o'clock, snapping to 5, 0 = All night.
+final class NightRingMathTests: XCTestCase {
+    func testAngleMapsToSnappedMinutes() {
+        XCTAssertEqual(NightRingMath.minutes(forAngle: 0), 0)
+        XCTAssertEqual(NightRingMath.minutes(forAngle: .pi / 2), 30)          // 3 o'clock
+        XCTAssertEqual(NightRingMath.minutes(forAngle: .pi), 60)              // 6 o'clock
+        XCTAssertEqual(NightRingMath.minutes(forAngle: 2 * .pi * 0.01), 0)    // 1.2 min → All night
+        XCTAssertEqual(NightRingMath.minutes(forAngle: 2 * .pi * 0.99), 120)
+    }
+
+    func testAngleIsClockwiseFromTwelve() {
+        let c = CGPoint(x: 100, y: 100)
+        XCTAssertEqual(NightRingMath.angle(of: CGPoint(x: 100, y: 0), center: c), 0, accuracy: 1e-9)
+        XCTAssertEqual(NightRingMath.angle(of: CGPoint(x: 200, y: 100), center: c), .pi / 2, accuracy: 1e-9)
+        XCTAssertEqual(NightRingMath.angle(of: CGPoint(x: 0, y: 100), center: c), 3 * .pi / 2, accuracy: 1e-9)
+    }
+
+    func testDragNeverWrapsAcrossTwelve() {
+        XCTAssertEqual(NightRingMath.continuous(previous: 115, raw: 5), 120)
+        XCTAssertEqual(NightRingMath.continuous(previous: 5, raw: 115), 0)
+        XCTAssertEqual(NightRingMath.continuous(previous: 40, raw: 45), 45)
+    }
+
+    func testReleaseAtRestOnlySetsTheLength() {
+        XCTAssertEqual(NightRingMath.commit(minutes: 45, playing: false, timerActive: false), .none)
+        XCTAssertEqual(NightRingMath.commit(minutes: 45, playing: true, timerActive: false), .start(45))
+        XCTAssertEqual(NightRingMath.commit(minutes: 45, playing: false, timerActive: true), .start(45))
+        XCTAssertEqual(NightRingMath.commit(minutes: 0, playing: true, timerActive: true), .cancel)
+        XCTAssertEqual(NightRingMath.commit(minutes: 0, playing: true, timerActive: false), .none)
+    }
+
+    func testRingLocksOnceTheNightIsFading() {
+        // A restart inside the 600 s fade would snap a fading bed back up to full volume.
+        XCTAssertTrue(NightRingMath.locked(remaining: 90, inTail: false, endOfEpisode: false))
+        XCTAssertTrue(NightRingMath.locked(remaining: 500, inTail: false, endOfEpisode: false))
+        XCTAssertTrue(NightRingMath.locked(remaining: 600, inTail: false, endOfEpisode: false))
+        XCTAssertFalse(NightRingMath.locked(remaining: 601, inTail: false, endOfEpisode: false))
+        XCTAssertTrue(NightRingMath.locked(remaining: 900, inTail: true, endOfEpisode: false))
+        XCTAssertTrue(NightRingMath.locked(remaining: 300, inTail: false, endOfEpisode: true))   // EOE fades too
+        XCTAssertFalse(NightRingMath.locked(remaining: 0, inTail: false, endOfEpisode: false))
+    }
+
+    func testVoiceOverStepsStayOnTheDial() {
+        XCTAssertEqual(NightRingMath.adjusted(0, up: true), 5)
+        XCTAssertEqual(NightRingMath.adjusted(5, up: false), 0)
+        XCTAssertEqual(NightRingMath.adjusted(0, up: false), 0)
+        XCTAssertEqual(NightRingMath.adjusted(120, up: true), 120)
+        XCTAssertEqual(NightRingMath.adjusted(115, up: true), 120)
+    }
+
+    func testVoiceOverStepsSnapToTheGrid() {
+        XCTAssertEqual(NightRingMath.adjusted(43, up: true), 45)    // not 48
+        XCTAssertEqual(NightRingMath.adjusted(43, up: false), 40)
+        XCTAssertEqual(NightRingMath.adjusted(45, up: false), 40)
+    }
+
+    func testVoiceOverIncrementNeverShortensALongNight() {
+        // An end-of-episode timer with 150 min left: "up" used to clamp it to 120.
+        XCTAssertEqual(NightRingMath.adjusted(150, up: true), 150)
+        XCTAssertEqual(NightRingMath.adjusted(150, up: false), 145)
+    }
+
+    func testStoredLengthStaysOnTheDialAndSane() {
+        XCTAssertEqual(NightRingMath.storable(145), 120)
+        XCTAssertEqual(NightRingMath.storable(-5), 0)
+        XCTAssertEqual(NightRingMath.sanitized(1e300), 120)       // a hand-edited backup can't trap Int()
+        XCTAssertEqual(NightRingMath.sanitized(.infinity), 0)
+        XCTAssertEqual(NightRingMath.sanitized(.nan), 0)
+        XCTAssertEqual(NightRingMath.sanitized(45), 45)
+    }
+
+    func testFractionPinsPastTheDial() {
+        XCTAssertEqual(NightRingMath.fraction(forMinutes: 60), 0.5, accuracy: 1e-9)
+        XCTAssertEqual(NightRingMath.fraction(forMinutes: 180), 1)
+        XCTAssertEqual(NightRingMath.fraction(forMinutes: -3), 0)
+    }
+
+    func testAngleWrapsBothWays() {
+        XCTAssertEqual(NightRingMath.minutes(forAngle: -.pi / 2), 90)
+        XCTAssertEqual(NightRingMath.minutes(forAngle: 2 * .pi + .pi / 2), 30)
+        XCTAssertEqual(NightRingMath.spoken(minutes: 0), "All night")
+        XCTAssertEqual(NightRingMath.spoken(minutes: 45), "45 minutes")
+    }
+
+    func testOvershootPastEitherEndStaysPinned() {
+        // Counter-clockwise past All night used to jump to 85; clockwise past 120 to 35.
+        XCTAssertEqual(NightRingMath.continuous(previous: 0, raw: 85), 0)
+        XCTAssertEqual(NightRingMath.continuous(previous: 120, raw: 35), 120)
+        // …and comes back once the finger returns to the near half of the dial.
+        XCTAssertEqual(NightRingMath.continuous(previous: 0, raw: 20), 20)
+        XCTAssertEqual(NightRingMath.continuous(previous: 120, raw: 100), 100)
+    }
+
+    func testPlayHonoursTheRing() {
+        XCTAssertEqual(SessionGuards.timerOnPlay(focusMode: false, lengthMinutes: 45, timerActive: false), 45)
+        XCTAssertNil(SessionGuards.timerOnPlay(focusMode: false, lengthMinutes: 0, timerActive: false))    // All night
+        XCTAssertNil(SessionGuards.timerOnPlay(focusMode: false, lengthMinutes: 45, timerActive: true))    // resume keeps it
+        XCTAssertNil(SessionGuards.timerOnPlay(focusMode: true, lengthMinutes: 45, timerActive: false))    // Focus has the Pomodoro
+    }
+
+    func testPlayTimesOnlyFromFiveMinutes() {
+        XCTAssertNil(SessionGuards.timerOnPlay(focusMode: false, lengthMinutes: 4.9, timerActive: false))
+        XCTAssertEqual(SessionGuards.timerOnPlay(focusMode: false, lengthMinutes: 5, timerActive: false), 5)
+        XCTAssertEqual(SessionGuards.timerOnPlay(focusMode: false, lengthMinutes: 1e300, timerActive: false), 120)
+    }
+
+    func testNightLineIsSpokenInMinutes() {
+        XCTAssertEqual(NightLine.spoken("45m"), "45 minutes")
+        XCTAssertEqual(NightLine.spoken("38m left"), "38 minutes left")
+        XCTAssertEqual(NightLine.spoken("All night"), "All night")
+        XCTAssertEqual(NightLine.spoken("Ends with the episode"), "Ends with the episode")
+    }
+
+    func testNightLineSaysTheNightPlainly() {
+        XCTAssertEqual(NightLine.timerText(remaining: 0, inTail: false, endOfEpisode: false, playing: false, lengthMinutes: 45), "45m")
+        XCTAssertEqual(NightLine.timerText(remaining: 0, inTail: false, endOfEpisode: false, playing: false, lengthMinutes: 0), "All night")
+        XCTAssertEqual(NightLine.timerText(remaining: 0, inTail: false, endOfEpisode: false, playing: true, lengthMinutes: 45), "All night")
+        XCTAssertEqual(NightLine.timerText(remaining: 61, inTail: false, endOfEpisode: false, playing: true, lengthMinutes: 45), "2m left")
+        XCTAssertEqual(NightLine.timerText(remaining: 600, inTail: false, endOfEpisode: true, playing: true, lengthMinutes: 0), "Ends with the episode")
+        XCTAssertEqual(NightLine.timerText(remaining: 600, inTail: true, endOfEpisode: false, playing: true, lengthMinutes: 0), "Sounds easing out")
+    }
+}
+
+/// Screens keep exactly the room the floating mini-player covers.
+final class MiniPlayerClearanceTests: XCTestCase {
+    func testClearsTheBarPlusAGap() {
+        // Safe bottom at 792, bar top at 695 → 97 covered + 12 gap.
+        XCTAssertEqual(MiniPlayerClearanceMath.clearance(safeBottom: 792, miniTop: 695), 109)
+    }
+
+    func testNoBarNoRoom() {
+        XCTAssertEqual(MiniPlayerClearanceMath.clearance(safeBottom: 792, miniTop: nil), 0)
+        XCTAssertEqual(MiniPlayerClearanceMath.clearance(safeBottom: 0, miniTop: 695), 0)   // not measured yet
+    }
+
+    func testBarBelowTheEdgeNeedsNothingExtra() {
+        XCTAssertEqual(MiniPlayerClearanceMath.clearance(safeBottom: 600, miniTop: 700), 0)
+    }
+}
+
+
+/// What the mode-switch confirm promises ("your sleep timer stops", "your focus session ends") is
+/// done by AudioEngine.focusMode's didSet — and the palettes off Home read the key it writes.
+@MainActor
+final class ModeSwitchConsequenceTests: XCTestCase {
+    private final class NoopBackstop: SleepTimerBackstopScheduling {
+        func schedule(after seconds: TimeInterval) {}
+        func cancel() {}
+    }
+
+    func testSwitchingToFocusCancelsTheSleepTimer() {
+        let e = AudioEngine(); e.focusMode = false
+        e.sleepTimer.backstop = NoopBackstop()
+        e.sleepTimer.startSleepTimer(minutes: 45)
+        XCTAssertGreaterThan(e.sleepTimer.timerRemaining, 0)
+        e.focusMode = true
+        XCTAssertEqual(e.sleepTimer.timerRemaining, 0)
+        e.focusMode = false
+    }
+
+    func testSwitchingToSleepStopsThePomodoro() {
+        let e = AudioEngine(); e.focusMode = true
+        e.pomodoro.start()
+        XCTAssertTrue(e.pomodoro.isRunning)
+        e.focusMode = false
+        XCTAssertFalse(e.pomodoro.isRunning)
+    }
+
+    func testFocusModeIsPersistedUnderTheKeyThePalettesRead() {
+        let e = AudioEngine()
+        e.focusMode = true
+        XCTAssertTrue(UserDefaults.standard.bool(forKey: "focusMode"))
+        XCTAssertFalse(Palette(focusMode: true).warm)
+        e.focusMode = false
+        XCTAssertFalse(UserDefaults.standard.bool(forKey: "focusMode"))
+        XCTAssertTrue(Palette(focusMode: false).warm)
+    }
+}
+
+/// Default preset names use the mixer's words ("Deep", not "Delta").
+@MainActor
+final class PresetNamingTests: XCTestCase {
+    func testDefaultPresetNameUsesTheMixerVocabulary() {
+        let e = AudioEngine(); e.focusMode = false; e.extraLayers = []
+        e.noiseType = "brown"; e.binauralPreset = "delta"
+        e.noiseOn = true; e.binauralOn = true
+        defer { e.noiseOn = false; e.binauralOn = false; e.extraLayers = [] }
+        XCTAssertEqual(e.defaultPresetName(), "Brown + Deep")
+        e.extraLayers = [ExtraNoiseLayer(id: "x", type: "rain", volume: 0.5, muted: nil)]
+        XCTAssertEqual(e.defaultPresetName(), "Brown + Rain + Deep")
+        e.noiseOn = false
+        XCTAssertEqual(e.defaultPresetName(), "Deep")
+        e.binauralOn = false
+        XCTAssertEqual(e.defaultPresetName(), "My Mix")
+    }
+
+    func testFocusPresetNamesMatchTheChips() {
+        let e = AudioEngine(); e.focusMode = true; e.extraLayers = []
+        e.noiseType = "white"; e.binauralPreset = "beta"
+        e.noiseOn = true; e.binauralOn = true
+        defer { e.noiseOn = false; e.binauralOn = false; e.focusMode = false }
+        XCTAssertEqual(e.defaultPresetName(), "White + Concentrate")
+    }
+}
+
+/// Opening Build mix at rest shows what Play would resume.
+@MainActor
+final class StageForEditingTests: XCTestCase {
+    private func mix(_ noise: String, _ bin: String) -> SavedMix {
+        SavedMix(name: "Last Night", noiseOn: true, noiseVolume: 0.61, noiseType: noise,
+                 binauralOn: true, binVolume: 0.27, binauralPreset: bin,
+                 podVolume: 0.7, podcastUrl: nil, podcastId: nil)
+    }
+
+    func testStagesInPalettePicksAtRestWithoutPlaying() {
+        let e = AudioEngine(); e.focusMode = false
+        e.noiseOn = false; e.binauralOn = false
+        e.noiseType = "green"; e.binauralPreset = "delta"
+        e.stageForEditing(mix("brown", "theta"))
+        XCTAssertEqual(e.noiseType, "brown"); XCTAssertEqual(e.noiseVolume, 0.61, accuracy: 1e-9)
+        XCTAssertEqual(e.binauralPreset, "theta"); XCTAssertEqual(e.binVolume, 0.27, accuracy: 1e-9)
+        XCTAssertFalse(e.isAnythingPlaying)                       // never turns anything on
+    }
+
+    func testNeverTouchesALiveMix() {
+        let e = AudioEngine(); e.focusMode = false
+        e.noiseType = "rain"; e.noiseOn = true
+        defer { e.noiseOn = false }
+        e.stageForEditing(mix("brown", "theta"))
+        XCTAssertEqual(e.noiseType, "rain")
+    }
+
+    func testCrossModePicksStayPut() {
+        let e = AudioEngine(); e.focusMode = true
+        e.noiseOn = false; e.binauralOn = false
+        let (n, b) = (e.noiseType, e.binauralPreset)
+        e.stageForEditing(mix("ocean", "delta"))                  // Sleep-only picks
+        XCTAssertEqual(e.noiseType, n); XCTAssertEqual(e.binauralPreset, b)
+        e.focusMode = false
+    }
+}
+
+/// Every way of starting a Sleep session from rest honours the night ring (it used to be the orb
+/// only): the engine starts the timer on the idle → playing edge.
+@MainActor
+final class NightTimerSessionStartTests: XCTestCase {
+    private final class NoopBackstop: SleepTimerBackstopScheduling {
+        func schedule(after seconds: TimeInterval) {}
+        func cancel() {}
+    }
+
+    private func engine(length: Double, focus: Bool = false) -> AudioEngine {
+        let e = AudioEngine()
+        e.sleepTimer.backstop = NoopBackstop()
+        e.nightLengthProvider = { length }
+        e.focusMode = focus
+        return e
+    }
+
+    private func tearDownEngine(_ e: AudioEngine) {
+        e.noiseOn = false; e.binauralOn = false; e.isPodPlaying = false
+        e.sleepTimer.cancelTimer()
+        e.focusMode = false
+    }
+
+    func testASleepSessionFromRestStartsTheNightTimer() {
+        let e = engine(length: 30)
+        defer { tearDownEngine(e) }
+        e.noiseOn = true                                       // a mixer switch, not the orb
+        XCTAssertEqual(e.sleepTimer.timerRemaining, 30 * 60, accuracy: 2)
+    }
+
+    func testAPodcastStartCountsToo() {
+        let e = engine(length: 20)
+        defer { tearDownEngine(e) }
+        e.isPodPlaying = true                                  // lock screen / AirPods / Podcasts tab
+        XCTAssertEqual(e.sleepTimer.timerRemaining, 20 * 60, accuracy: 2)
+    }
+
+    func testFocusNeverTimesAndAllNightStartsNothing() {
+        let f = engine(length: 30, focus: true)
+        defer { tearDownEngine(f) }
+        f.noiseOn = true
+        XCTAssertEqual(f.sleepTimer.timerRemaining, 0)
+
+        let a = engine(length: 0)
+        defer { tearDownEngine(a) }
+        a.noiseOn = true
+        XCTAssertEqual(a.sleepTimer.timerRemaining, 0)
+    }
+
+    func testAddingALayerMidSessionDoesNotRestartTheNight() {
+        var length = 30.0
+        let e = engine(length: 30)
+        e.nightLengthProvider = { length }
+        defer { tearDownEngine(e) }
+        e.noiseOn = true
+        length = 60
+        e.binauralOn = true                                    // already playing: not a new session
+        XCTAssertEqual(e.sleepTimer.timerRemaining, 30 * 60, accuracy: 2)
+    }
+
+    func testResumingAfterAPauseKeepsTheRunningCountdown() {
+        var length = 30.0
+        let e = engine(length: 30)
+        e.nightLengthProvider = { length }
+        defer { tearDownEngine(e) }
+        e.noiseOn = true
+        e.noiseOn = false                                      // paused (the countdown keeps going)
+        length = 60
+        e.noiseOn = true                                       // resume, or a podcast stall ending
+        XCTAssertEqual(e.sleepTimer.timerRemaining, 30 * 60, accuracy: 2)
+    }
+}
+
+/// Which Home tip shows: the first-run card for new users, the "timer moved" note once for people
+/// who used the app before the night ring, nothing in Focus.
+final class CoachmarkContentTests: XCTestCase {
+    func testNewUsersGetTheFirstRunCardOnly() {
+        XCTAssertEqual(CoachmarkContent.current(focusMode: false, hasCompletedFirstRun: false, hasSeenNightRingTip: false), .firstRun)
+        // Retiring it retires the note too (HomeView.retireFirstRunTip sets both).
+        XCTAssertNil(CoachmarkContent.current(focusMode: false, hasCompletedFirstRun: true, hasSeenNightRingTip: true))
+    }
+
+    func testUpgradersSeeTheNightRingNoteOnce() {
+        XCTAssertEqual(CoachmarkContent.current(focusMode: false, hasCompletedFirstRun: true, hasSeenNightRingTip: false), .nightRing)
+        XCTAssertFalse(CoachmarkContent.nightRing.pointsDown)       // it's about the ring above, not Build mix
+    }
+
+    func testNoTipsInFocus() {
+        XCTAssertNil(CoachmarkContent.current(focusMode: true, hasCompletedFirstRun: false, hasSeenNightRingTip: false))
+        XCTAssertNil(CoachmarkContent.current(focusMode: true, hasCompletedFirstRun: true, hasSeenNightRingTip: false))
     }
 }

@@ -131,7 +131,9 @@ private struct TimerControlButtons: View {
                 .tint(arferGold)
             }
             Button(intent: StopSleepTimerIntent()) {
-                Label("Stop", systemImage: "stop.fill")
+                // Ends the whole session (StopSleepTimerIntent stops every sound), not just the
+                // countdown, so the label says what goes quiet.
+                Label("Stop audio", systemImage: "stop.fill")
                     .font(.caption.weight(.semibold))
                     .frame(maxWidth: .infinity)
             }

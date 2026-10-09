@@ -274,9 +274,27 @@ final class AudioEngine: ObservableObject {
     private var lastActiveSnapshot: (noise: Bool, bin: Bool, pod: Bool) = (false, false, false)
     private var isMasterPauseTransition = false
     
-    @Published var noiseOn = false { didSet { syncGenEngine(); if !isMasterPauseTransition { lastActiveSnapshot.noise = noiseOn } } }
-    @Published var binauralOn = false { didSet { syncGenEngine(); if !isMasterPauseTransition { lastActiveSnapshot.bin = binauralOn } } }
-    @Published var isPodPlaying = false { didSet { syncGenEngine(); if !isMasterPauseTransition { lastActiveSnapshot.pod = isPodPlaying } } }
+    @Published var noiseOn = false { didSet { syncGenEngine(); if !isMasterPauseTransition { lastActiveSnapshot.noise = noiseOn }; noteSessionStart(wasPlaying: oldValue || binauralOn || isPodPlaying) } }
+    @Published var binauralOn = false { didSet { syncGenEngine(); if !isMasterPauseTransition { lastActiveSnapshot.bin = binauralOn }; noteSessionStart(wasPlaying: noiseOn || oldValue || isPodPlaying) } }
+    @Published var isPodPlaying = false { didSet { syncGenEngine(); if !isMasterPauseTransition { lastActiveSnapshot.pod = isPodPlaying }; noteSessionStart(wasPlaying: noiseOn || binauralOn || oldValue) } }
+
+    /// The Home night ring's remembered length in minutes (0 = All night), read when a session
+    /// starts. Injectable so tests don't depend on what the simulator's defaults hold.
+    var nightLengthProvider: () -> Double = { UserDefaults.standard.double(forKey: "nightLengthMinutes") }
+
+    /// A Sleep session starting from rest honours the night ring however it was started: the orb,
+    /// the mixer's switches, a podcast, the lock screen or AirPods, Siri, the resume widget. (It
+    /// used to be the orb alone, so the other paths quietly played all night under a ring that
+    /// said "45m".) Nothing in Focus (the Pomodoro is its timer), for All night, or when a
+    /// countdown is already running: resuming after a pause, an interruption or a podcast stall
+    /// keeps the night you set. Main thread only (property didSets); never the render thread.
+    private func noteSessionStart(wasPlaying: Bool) {
+        guard !wasPlaying, isAnythingPlaying else { return }
+        if let m = SessionGuards.timerOnPlay(focusMode: focusMode, lengthMinutes: nightLengthProvider(),
+                                             timerActive: sleepTimer.timerRemaining > 0) {
+            sleepTimer.startSleepTimer(minutes: m)
+        }
+    }
     var isAnythingPlaying: Bool { isPodPlaying || noiseOn || binauralOn }
 
     // MARK: Apple Music (Focus-only parallel source)
@@ -437,7 +455,7 @@ final class AudioEngine: ObservableObject {
         // No child objectWillChange is forwarded into the engine (Phase 3 completes this).
         // Forwarding makes ANY child publish invalidate every view holding `audio`. Each child's
         // reactive consumers observe the child directly instead:
-        //   - sleepTimer / pomodoro (~1/sec): SessionButton, SleepStatusLine, BumpTimerButton in
+        //   - sleepTimer / pomodoro (~1/sec): SessionButton, NightRing, NightLine, BumpTimerButton in
         //     HomeView; FocusHero / FocusSessionReadout / CycleDots; NightDarken in AmbientScene.
         //     ContentView drives its night-dim off `sleepTimer.$timerRemaining` via onReceive.
         //   - playbackProgress (~1/sec): MiniPlayerView + NowPlayingSheet (Phase 1).
@@ -993,17 +1011,36 @@ final class AudioEngine: ObservableObject {
         }
     }
     
+    /// Load a snapshot's sound picks (types and levels, never on/off) into the idle mixer, so
+    /// opening Build mix at rest shows what Play would resume. Home's "Resume · Brown" and a mixer
+    /// row reading "Green" used to disagree. Only sounds in the current mode's palette are taken:
+    /// the mixer is mode-scoped, and a cross-mode pick stays as it is.
+    func stageForEditing(_ mix: SavedMix) {
+        guard !isAnythingPlaying else { return }
+        let noises = focusMode ? Self.focusNoises : Self.sleepNoises
+        let binaurals = focusMode ? Self.focusBinaurals : Self.sleepBinaurals
+        let noise = NoiseType.migrate(mix.noiseType)
+        if noises.contains(noise) {
+            if noiseType != noise { noiseType = noise }
+            if noiseVolume != mix.noiseVolume { noiseVolume = mix.noiseVolume }
+        }
+        if binaurals.contains(mix.binauralPreset) {
+            if binauralPreset != mix.binauralPreset { binauralPreset = mix.binauralPreset }
+            if binVolume != mix.binVolume { binVolume = mix.binVolume }
+        }
+    }
+
     // MARK: Saved sound presets (reusable recipes — no podcast)
 
-    /// A recipe-derived default name for the current soundscape ("Brown + Delta"), used to
+    /// A recipe-derived default name for the current soundscape ("Brown + Deep"), used to
     /// prefill the name-it prompt. Never the podcast title — a preset is about the sounds.
     func defaultPresetName() -> String {
         var parts: [String] = []
         if noiseOn {
-            parts.append(noiseType.capitalized)
-            parts.append(contentsOf: extraLayers.map { $0.type.capitalized })
+            parts.append(SoundNames.noise(noiseType))
+            parts.append(contentsOf: extraLayers.map { SoundNames.noise($0.type) })
         }
-        if binauralOn { parts.append(binauralPreset.capitalized) }
+        if binauralOn { parts.append(SoundNames.binaural(binauralPreset)) }
         return parts.isEmpty ? "My Mix" : parts.joined(separator: " + ")
     }
 

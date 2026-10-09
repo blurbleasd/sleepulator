@@ -45,14 +45,6 @@ enum Theme {
     static let text     = Color(red: 0.95, green: 0.89, blue: 0.82) // warm cream
     static let textDim  = Color(red: 0.72, green: 0.60, blue: 0.46) // warm muted
 
-    // Bedtime (dimmer) — true OLED black so pixels switch off when the screen is left
-    // on overnight (real battery + zero light emission); only the small warm controls stay lit.
-    static let bedGold  = Color(red: 0.78, green: 0.50, blue: 0.22)
-    static let bedBg    = Color(red: 0.0, green: 0.0, blue: 0.0)
-    static let bedGlow  = Color(red: 0.0, green: 0.0, blue: 0.0)
-    static let bedText  = Color(red: 0.78, green: 0.70, blue: 0.60)
-    static let bedDim   = Color(red: 0.58, green: 0.50, blue: 0.42) // ~5:1 on true black — clears WCAG AA (was 4.15:1)
-
     // Focus — cool + energizing: a crisp cyan accent on deep cool indigo. The opposite
     // mood from the warm sleepy dusk, so the two modes read as different headspaces.
     static let focusAccent = Color(red: 0.32, green: 0.80, blue: 0.98) // electric cyan-azure
@@ -75,14 +67,10 @@ struct Palette {
 
     static let sleep   = Palette(accent: Theme.gold,        bg: Theme.bg,      glow: Theme.glow,      text: Theme.text,      dim: Theme.textDim, warm: true)
     static let focus   = Palette(accent: Theme.focusAccent, bg: Theme.focusBg, glow: Theme.focusGlow, text: Theme.focusText, dim: Theme.focusDim, warm: false)
-    static let bedtime = Palette(accent: Theme.bedGold,     bg: Theme.bedBg,   glow: Theme.bedGlow,   text: Theme.bedText,   dim: Theme.bedDim, warm: true)
 
     init(accent: Color, bg: Color, glow: Color, text: Color, dim: Color, warm: Bool = true) {
         self.accent = accent; self.bg = bg; self.glow = glow; self.text = text; self.dim = dim; self.warm = warm
     }
-    // Legacy initializer — the Bedtime/Wake toggle is gone, so `bedtime` is always false and
-    // this yields the warm Sleep palette. Kept so shared utility screens keep compiling.
-    init(bedtime: Bool) { self = bedtime ? .bedtime : .sleep }
     // Home drives its palette by mode: warm Sleep vs cool Focus.
     init(focusMode: Bool) { self = focusMode ? .focus : .sleep }
 }

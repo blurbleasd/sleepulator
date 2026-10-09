@@ -21,6 +21,8 @@ struct HomeView: View {
     /// One-time first-run coachmark: points at "Build mix" so a new user discovers that the app
     /// layers noise + binaural + podcasts. Set once the user dismisses it (or builds a mix).
     @AppStorage("hasCompletedFirstRun") private var hasCompletedFirstRun = false
+    /// The one-time "the sleep timer moved" note for people who used the app before the night ring.
+    @AppStorage("hasSeenNightRingTip") private var hasSeenNightRingTip = false
     @State private var showTimerActionSheet = false
     @State private var isPlayPressed = false
     @State private var showBreathing = false
@@ -30,6 +32,29 @@ struct HomeView: View {
     @State private var showOnRamp = false
     /// The deferred "begin playback" action, run after the on-ramp completes (or is skipped over).
     @State private var pendingStart: (() -> Void)?
+    /// Run once the timer sheet has finished dismissing — the on-ramp cover can't present while
+    /// the sheet is still on screen.
+    @State private var afterTimerSheet: (() -> Void)?
+    /// A mode switch waiting on its confirm (a live session would end or change; see SessionGuards).
+    @State private var modeSwitchRequest: PendingModeSwitch?
+    /// The night ring's remembered length in minutes (0 = All night). Play honours it in Sleep.
+    /// Its own key, defaulting to All night, so nobody's Play quietly starts timing out on update.
+    @AppStorage("nightLengthMinutes") private var nightLength: Double = 0
+    /// A ring drag is live: the left/right scene swipe stands down for that touch.
+    @State private var ringDragging = false
+    /// Run once the Build-mix sheet has finished dismissing (it hands off to Breathing, the timer
+    /// options, or a mode-switch confirm — none of which can present over the sheet).
+    @State private var afterMixSheet: (() -> Void)?
+    /// The confirm's title, held so it doesn't blank during the dismiss animation.
+    @State private var modeSwitchTitle = ""
+    /// Auto-dismisses a confirm left open (a 2am stray tap, then sleep): a lit dialog would sit
+    /// above the night veil all night and hold the screensaver off.
+    @State private var modeSwitchTimeout: DispatchWorkItem?
+    /// The floating mini-player's top edge (global), when it shows on Home; set by ContentView.
+    @Environment(\.miniPlayerTop) private var miniPlayerTop
+    /// The screen's bottom edge (global), from the full-bleed backdrop: content-independent, so the
+    /// mini-player clearance can't feed back into its own measurement when Home overflows.
+    @State private var screenMaxY: CGFloat = 0
     // Ambient screensaver: while a session plays, the controls fade after a spell of no
     // interaction, leaving just the sky + moon. A tap brings them back. The flag lives on
     // `audio` so ContentView's tab bar + mini-player can fade with the home chrome. When it may
@@ -49,6 +74,8 @@ struct HomeView: View {
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverOn
     @Environment(\.accessibilitySwitchControlEnabled) private var switchControlOn
     @Environment(\.accessibilityReduceMotion) var reduceMotion
+    /// Reduce Transparency: the sheets go opaque instead of letting the scene show through.
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.isLuminanceReduced) private var isLuminanceReduced
 
@@ -129,6 +156,17 @@ struct HomeView: View {
     private var assistiveTechRunning: Bool { voiceOverOn || switchControlOn }
     private var presentingFromHome: Bool {
         showMix || showTimerActionSheet || showBreathing || showOnRamp || nowPlayingPresented
+            || modeSwitchRequest != nil
+            // A ring drag is interaction too: the 3 s Sleep fade must never pull the chrome (and
+            // its hit testing) out from under a finger that's still setting the night.
+            || ringDragging
+    }
+
+    /// Room kept above the floating mini-player when it shows on Home. The safe bottom comes from
+    /// the anchored insets, so it holds still while the screensaver hides the tab bar.
+    private var homeClearance: CGFloat {
+        MiniPlayerClearanceMath.clearance(safeBottom: screenMaxY - anchoredInsets.bottom,
+                                          miniTop: miniPlayerTop)
     }
     private var mayFade: Bool {
         HomeScreensaverPolicy.mayFade(sessionActive: sessionActive,
@@ -160,7 +198,9 @@ struct HomeView: View {
     private func wakeChrome() {
         idleFade?.cancel()
         if audio.ambientScreensaver {
-            withAnimation(.easeInOut(duration: 0.4)) { audio.ambientScreensaver = false }
+            // Sleep eyes are dark-adapted: bring the controls up slowly rather than snapping them
+            // on. They take taps immediately; only the light ramps.
+            withAnimation(.easeOut(duration: audio.focusMode ? 0.4 : 1.0)) { audio.ambientScreensaver = false }
         }
         scheduleIdleFade()
     }
@@ -169,10 +209,9 @@ struct HomeView: View {
 
     // The currently-playing layers, shown as pills under the orb.
     private var activeLayers: [String] {
-        let binLabels = ["delta": "Deep", "theta": "Drift", "alpha": "Relax", "beta": "Concentrate", "gamma": "Focus"]
         var p: [String] = []
-        if audio.noiseOn { p.append(audio.noiseType.capitalized) }
-        if audio.binauralOn { p.append(binLabels[audio.binauralPreset] ?? audio.binauralPreset.capitalized) }
+        if audio.noiseOn { p.append(SoundNames.noise(audio.noiseType)) }
+        if audio.binauralOn { p.append(SoundNames.binaural(audio.binauralPreset)) }
         if audio.isPodPlaying { p.append("Podcast") }
         return p
     }
@@ -182,15 +221,15 @@ struct HomeView: View {
 
     private func statusText() -> String {
         var parts: [String] = []
-        if audio.noiseOn { parts.append(audio.noiseType.capitalized) }
-        if audio.binauralOn { parts.append(audio.binauralPreset.capitalized) }
+        if audio.noiseOn { parts.append(SoundNames.noise(audio.noiseType)) }
+        if audio.binauralOn { parts.append(SoundNames.binaural(audio.binauralPreset)) }
         if audio.isPodPlaying { parts.append("Podcast") }
         
         let layers = parts.isEmpty ? "All paused" : parts.joined(separator: " + ")
         
         if audio.isAnythingPlaying {
-            // The live "· Nm" countdown is appended by SleepStatusLine (which observes the timer),
-            // so statusText stays timer-free and doesn't re-render HomeView each second.
+            // The live countdown lives in NightLine / NightRing (which observe the timer), so
+            // statusText stays timer-free and doesn't re-render HomeView each second.
             return layers
         } else {
             if let mix = mixStore.lastMix, (mix.noiseOn || mix.binauralOn || mix.podcastUrl != nil) {
@@ -209,11 +248,25 @@ struct HomeView: View {
     // so mirror that snap here instead of echoing a stale Sleep mix's sound names in Focus.
     private func resumeDisplayName(noise: String) -> String {
         let palette = audio.focusMode ? AudioEngine.focusNoises : AudioEngine.sleepNoises
-        return (palette.contains(noise) ? noise : (palette.first ?? noise)).capitalized
+        return SoundNames.noise(palette.contains(noise) ? noise : (palette.first ?? noise))
     }
     private func resumeDisplayName(binaural: String) -> String {
         let palette = audio.focusMode ? AudioEngine.focusBinaurals : AudioEngine.sleepBinaurals
-        return (palette.contains(binaural) ? binaural : (palette.first ?? binaural)).capitalized
+        return SoundNames.binaural(palette.contains(binaural) ? binaural : (palette.first ?? binaural))
+    }
+
+    /// How beginning playback from rest would go: resume the last mix, the first-run layered bed,
+    /// or the transport's own resume (which always lands on at least the noise bed).
+    private func resolveBegin() -> () -> Void {
+        if let mix = mixStore.lastMix,
+           (mix.noiseOn || mix.binauralOn || mix.podcastUrl != nil) {
+            return { audio.resumeMix(mix) }
+        } else if !hasCompletedFirstRun {
+            // First-ever play with nothing to resume: start a layered bed (noise + binaural)
+            // instead of a single bare noise, so the first tap shows what the app actually does.
+            return { audio.startDefaultMix() }
+        }
+        return { audio.toggleMasterTransport() }
     }
 
     private func heroTap() {
@@ -223,26 +276,117 @@ struct HomeView: View {
             return
         }
 
-        // Resolve how this tap would begin playback.
-        let begin: () -> Void
-        if let mix = mixStore.lastMix,
-           (mix.noiseOn || mix.binauralOn || mix.podcastUrl != nil) {
-            begin = { audio.resumeMix(mix) }
-        } else if !hasCompletedFirstRun {
-            // First-ever play with nothing to resume: start a layered bed (noise + binaural)
-            // instead of a single bare noise, so the first tap shows what the app actually does.
-            begin = { audio.startDefaultMix() }
-        } else {
-            begin = { audio.toggleMasterTransport() }
-        }
-
+        // The night ring's timer starts with the session itself (AudioEngine.noteSessionStart).
+        let begin = resolveBegin()
         // Optional breathing wind-down before Sleep playback (never in Focus — Pomodoro starts now).
         if breathingOnRamp && !audio.focusMode {
             pendingStart = begin
-            showOnRamp = true
+            // The orb stays tappable above the half-height mixer, but a cover can't present over
+            // the sheet: close it first.
+            presentAfterMix { showOnRamp = true }
         } else {
             begin()
         }
+    }
+
+    /// "Play & start timer" from the timer sheet: begin the mix (through the breathing on-ramp
+    /// when it's on), then the countdown — so a sleep timer never runs over silence. With the
+    /// on-ramp, the countdown starts when the mix does, not while you're still breathing.
+    private func playAndStartTimer(minutes: Int) {
+        let begin = resolveBegin()
+        let session = {
+            // The sheet has already set the ring to `minutes`, so the engine's session-start rule
+            // times the night as the mix begins; start it here only if that didn't (no churn).
+            begin()
+            if audio.sleepTimer.timerRemaining <= 0 { audio.sleepTimer.startSleepTimer(minutes: minutes) }
+        }
+        if breathingOnRamp && !audio.focusMode {
+            pendingStart = session
+            afterTimerSheet = { showOnRamp = true }
+        } else {
+            session()
+        }
+    }
+
+    /// Present something from Home, closing the half-height mixer first when it's up: the mixer
+    /// leaves Home tappable, but another sheet, cover or confirm can't present over it (it fails
+    /// silently and leaves its flag stuck, which also holds the screensaver off).
+    private func presentAfterMix(_ present: @escaping () -> Void) {
+        if showMix {
+            afterMixSheet = present
+            showMix = false
+        } else {
+            present()
+        }
+    }
+
+    /// The timer options sheet, from the night line, the ring's VoiceOver action or the orb's menu.
+    private func openTimerOptions() {
+        if !hasSeenNightRingTip { hasSeenNightRingTip = true }   // they found the timer
+        presentAfterMix { showTimerActionSheet = true }
+    }
+
+    /// Retiring the first-run card retires the "timer moved" note too: a new user's first-run copy
+    /// already covers the ring, so they should never see a note about it having moved.
+    private func retireFirstRunTip() {
+        if !hasCompletedFirstRun { hasCompletedFirstRun = true }
+        if !hasSeenNightRingTip { hasSeenNightRingTip = true }
+    }
+
+    /// The mode switcher asks; a live session gets a confirm first (SessionGuards).
+    private func requestMode(_ focus: Bool) {
+        // One question at a time: a second tap while a confirm is up or queued is ignored.
+        guard modeSwitchRequest == nil, afterMixSheet == nil else { return }
+        let warning = SessionGuards.modeSwitchWarning(
+            toFocus: focus,
+            sleepTimerActive: audio.sleepTimer.timerRemaining > 0,
+            sleepSoundsPlaying: !audio.focusMode && audio.isAnythingPlaying,
+            pomodoroRunning: pomodoroRunning)
+        guard let warning else { applyMode(focus); return }
+        let request = PendingModeSwitch(toFocus: focus, warning: warning)
+        presentAfterMix { askModeSwitch(request) }
+    }
+
+    private func askModeSwitch(_ request: PendingModeSwitch) {
+        modeSwitchTitle = request.warning.title
+        modeSwitchRequest = request
+        modeSwitchTimeout?.cancel()
+        let work = DispatchWorkItem { modeSwitchRequest = nil }   // as if "Stay"
+        modeSwitchTimeout = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 20, execute: work)
+    }
+
+    /// The ring's length, sanitized on read (a restored backup could hold anything).
+    private var nightLengthBinding: Binding<Double> {
+        Binding(get: { NightRingMath.sanitized(nightLength) }, set: { nightLength = $0 })
+    }
+
+    private func applyMode(_ focus: Bool) {
+        if reduceMotion { audio.focusMode = focus }
+        else { withAnimation(.easeInOut(duration: 0.2)) { audio.focusMode = focus } }
+    }
+
+    private var buildMixButton: some View {
+        Button(action: {
+            retireFirstRunTip()
+            showMix = true
+        }) {
+            HStack(spacing: 7) {
+                Image(systemName: "slider.horizontal.3")
+                Text("Build mix").font(.subheadline.weight(.semibold))
+            }
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
+            .foregroundColor(pal.text)
+            .padding(.horizontal, 22).padding(.vertical, 13)
+            .background(Capsule().fill(pal.text.opacity(0.10)))
+            .overlay(Capsule().stroke(pal.accent.opacity(0.28), lineWidth: 0.5))
+        }
+        .frame(minHeight: 44)
+    }
+
+    private var focusSessionButton: some View {
+        SessionButton(pomodoro: audio.pomodoro, pal: pal)
     }
 
     var body: some View {
@@ -254,6 +398,7 @@ struct HomeView: View {
                 endRadius: 620
             )
             .ignoresSafeArea()
+            .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY } action: { screenMaxY = $0 }
 
             // Backdrop is the selected AmbientScene for the current mode (Phase 1 of
             // SCREENSAVER-LIBRARY-SPEC): scenes live behind a protocol + registry, so adding
@@ -281,7 +426,21 @@ struct HomeView: View {
             // "Build mix" control that opens the full mixer in a drawer. Everything detailed
             // is deliberately tucked away.
             VStack(spacing: 0) {
-                ModeSwitcher(focusMode: $audio.focusMode, pal: pal)
+                ModeSwitcher(focusMode: audio.focusMode, pal: pal,
+                             quiet: !audio.focusMode && (sessionActive || audio.sleepTimer.timerRemaining > 0),
+                             onSelect: requestMode)
+                    // Attached here, not on the root, so iOS 26's popover-style dialog points at
+                    // the switch that raised it.
+                    .confirmationDialog(modeSwitchTitle,
+                                        isPresented: Binding(get: { modeSwitchRequest != nil },
+                                                             set: { if !$0 { modeSwitchRequest = nil } }),
+                                        titleVisibility: .visible,
+                                        presenting: modeSwitchRequest) { request in
+                        Button(request.warning.confirm, role: .destructive) { applyMode(request.toFocus) }
+                        Button(request.warning.cancel, role: .cancel) {}
+                    } message: { request in
+                        Text(request.warning.message)
+                    }
                     .padding(.horizontal, 40)
                     .padding(.top, 6)
 
@@ -318,14 +477,33 @@ struct HomeView: View {
                         // Freeze the orb's breath whenever it isn't visible: the chrome has
                         // faded to the screensaver (opacity 0 below) OR the screen is occluded/
                         // backgrounded/low-luminance. Stops the all-night invisible blur composite.
-                        OrbButton(audio: audio, pal: pal, tap: heroTap,
-                                  paused: audio.ambientScreensaver || scenesFrozen)
-                            .anchorPreference(key: CoachmarkAnchorKey.self, value: .bounds) { [.orb: $0] }
+                        // The orb inside the night ring: tap the disc to play, drag the ring's
+                        // handle to set how long the night runs (Play honours it).
+                        ZStack {
+                            OrbButton(audio: audio, pal: pal, tap: heroTap,
+                                      paused: audio.ambientScreensaver || scenesFrozen,
+                                      idleStatus: statusText())
+                                .anchorPreference(key: CoachmarkAnchorKey.self, value: .bounds) { [.orb: $0] }
+                                // Long-press: the full timer options (ambient tail, end of episode).
+                                .contextMenu {
+                                    Button { openTimerOptions() } label: {
+                                        Label("Timer options", systemImage: "moon.zzz")
+                                    }
+                                }
+                            NightRing(sleepTimer: audio.sleepTimer, pal: pal,
+                                      playing: audio.isAnythingPlaying,
+                                      lengthMinutes: nightLengthBinding,
+                                      dragging: $ringDragging,
+                                      openOptions: openTimerOptions)
+                        }
 
-                        SleepStatusLine(base: statusText(),
-                                        showMinute: audio.isAnythingPlaying,
-                                        sleepTimer: audio.sleepTimer,
-                                        pal: pal)
+                        NightLine(resumeText: statusText(),
+                                  playing: audio.isAnythingPlaying,
+                                  lengthMinutes: NightRingMath.sanitized(nightLength),
+                                  sleepTimer: audio.sleepTimer,
+                                  pal: pal,
+                                  openOptions: openTimerOptions)
+                            .anchorPreference(key: CoachmarkAnchorKey.self, value: .bounds) { [.nightLine: $0] }
 
                         if !activeLayers.isEmpty {
                             LayerPills(layers: activeLayers, pal: pal)
@@ -342,50 +520,25 @@ struct HomeView: View {
                 Spacer()
 
                 VStack(spacing: 6) {
-                    HStack(spacing: 10) {
-                        Button(action: {
-                            if !hasCompletedFirstRun { hasCompletedFirstRun = true }
-                            showMix = true
-                        }) {
-                            HStack(spacing: 7) {
-                                Image(systemName: "slider.horizontal.3")
-                                Text("Build mix").font(.subheadline.weight(.semibold))
-                            }
-                            .foregroundColor(pal.text)
-                            .padding(.horizontal, 22).padding(.vertical, 13)
-                            .background(Capsule().fill(pal.text.opacity(0.10)))
-                            .overlay(Capsule().stroke(pal.accent.opacity(0.28), lineWidth: 0.5))
+                    if audio.focusMode {
+                        // Side by side when they fit; stacked at large text sizes, where the row
+                        // used to wrap "Build / mix" and run off the screen edge.
+                        ViewThatFits(in: .horizontal) {
+                            HStack(spacing: 10) { buildMixButton; focusSessionButton }
+                            VStack(spacing: 6) { buildMixButton; focusSessionButton }
                         }
-                        .frame(minHeight: 44)
-
-                        SessionButton(sleepTimer: audio.sleepTimer,
-                                      pomodoro: audio.pomodoro,
-                                      focusMode: audio.focusMode,
-                                      pal: pal,
-                                      onSleepTap: { showTimerActionSheet = true })
-                    }
-
-                    // Breathing is a quiet Sleep-mode extra (re-homed from the old hero).
-                    if !audio.focusMode {
-                        Button(action: { showBreathing = true }) {
-                            HStack(spacing: 5) {
-                                Image(systemName: "wind")
-                                Text("Breathing exercise")
-                            }
-                            .font(.caption.weight(.medium))
-                            .foregroundColor(pal.dim.opacity(0.8))
-                        }
-                        .frame(minHeight: 36)
+                    } else {
+                        // Sleep's timer lives on the orb's ring, so Build mix stands alone.
+                        buildMixButton
                     }
                 }
                 .frame(maxWidth: .infinity)
                 .anchorPreference(key: CoachmarkAnchorKey.self, value: .bounds) { [.mixRow: $0] }
-                // The mini-player floats over the bottom in EVERY state (it shows an idle
-                // "Nothing playing" bar when nothing's loaded), so the controls need this inset
-                // even with no episode — the old `: 22` let the always-present bar cover the
-                // "Build mix" button. A constant also stops the row jumping when a podcast
-                // loads/unloads. Tune by eye on device.
-                .padding(.bottom, 112)
+                // Clear of the floating mini-player by its measured height, when it shows on Home
+                // (Focus, or an episode loaded). Measured from the screen edge and the anchored
+                // insets, so it holds through the screensaver and can't feed back into itself.
+                .padding(.bottom, 16 + homeClearance)
+                .animation(reduceMotion ? nil : .easeInOut(duration: 0.4), value: homeClearance)
             }
             // First-run coachmark: a single dismissible card pointing down at "Build mix" so a new
             // user discovers the layering. It fills the band between the orb's disc and the Build
@@ -393,12 +546,21 @@ struct HomeView: View {
             // and picks a layout that fits it — so it never covers the orb its copy says to tap,
             // nor the row it points at. Inside the chrome stack, so it rides the chrome's fade.
             .overlayPreferenceValue(CoachmarkAnchorKey.self) { anchors in
-                if !hasCompletedFirstRun && !audio.focusMode,
+                if let tip = CoachmarkContent.current(focusMode: audio.focusMode,
+                                                      hasCompletedFirstRun: hasCompletedFirstRun,
+                                                      hasSeenNightRingTip: hasSeenNightRingTip),
                    let orb = anchors[.orb], let mixRow = anchors[.mixRow] {
                     GeometryReader { proxy in
-                        let room = CoachmarkLayout.room(orb: proxy[orb], mixRowTop: proxy[mixRow].minY)
-                        FirstRunCoachmark(pal: pal) {
-                            withAnimation(.easeInOut(duration: 0.3)) { hasCompletedFirstRun = true }
+                        // Below the night line: the tip talks about the ring and its line, so both
+                        // stay visible (falling back to clearing the ring if the line isn't measured).
+                        let room = anchors[.nightLine].map {
+                            CoachmarkLayout.room(belowY: proxy[$0].maxY, mixRowTop: proxy[mixRow].minY)
+                        } ?? CoachmarkLayout.room(orb: proxy[orb], mixRowTop: proxy[mixRow].minY,
+                                                  clearRadius: NightRing.ringSize / 2 + 4)
+                        FirstRunCoachmark(pal: pal, content: tip) {
+                            withAnimation(.easeInOut(duration: 0.3)) {
+                                if tip == .firstRun { retireFirstRunTip() } else { hasSeenNightRingTip = true }
+                            }
                         }
                         .padding(.horizontal, 28)
                         .frame(width: proxy.size.width, height: room.height, alignment: .bottom)
@@ -462,13 +624,14 @@ struct HomeView: View {
         .simultaneousGesture(
             DragGesture(minimumDistance: 24)
                 .onEnded { v in
+                    guard !ringDragging else { return }   // that touch was setting the night
                     let dx = v.translation.width, dy = v.translation.height
                     if abs(dx) > abs(dy) * 1.3 && abs(dx) > 48 {
                         if audio.ambientScreensaver { wakeChrome() } else { scheduleIdleFade() }
                         cycleScene(dx < 0 ? 1 : -1)               // swipe left → next scene
                     } else if dy < -60 && abs(dy) > abs(dx) * 1.3 {
                         if audio.ambientScreensaver { wakeChrome() }
-                        if !hasCompletedFirstRun { hasCompletedFirstRun = true }
+                        retireFirstRunTip()
                         showMix = true                            // swipe up → open the mixer
                     }
                 }
@@ -500,6 +663,15 @@ struct HomeView: View {
         .onChange(of: assistiveTechRunning) { _, _ in wakeChrome() }
         // A sheet opening cancels the countdown; closing one wakes the chrome and restarts it.
         .onChange(of: presentingFromHome) { _, _ in wakeChrome() }
+        // Using the ring counts as finding it: retire both tips.
+        .onChange(of: nightLength) { _, _ in
+            retireFirstRunTip()
+            if !hasSeenNightRingTip { hasSeenNightRingTip = true }
+        }
+        // A confirm answered (or timed out) needs no pending auto-dismiss.
+        .onChange(of: modeSwitchRequest == nil) { _, cleared in
+            if cleared { modeSwitchTimeout?.cancel(); modeSwitchTimeout = nil }
+        }
         .onChange(of: audio.focusMode) { _, _ in
             // Switching mood counts as interaction: bring the chrome back and restart the idle
             // countdown so the new mood's screensaver timing (Sleep fast / Focus longer) applies.
@@ -522,22 +694,35 @@ struct HomeView: View {
                 }
             )
         }
-        .sheet(isPresented: $showTimerActionSheet) {
-            TimerSelectionSheet(audio: audio, isPresented: $showTimerActionSheet, pal: pal)
+        .sheet(isPresented: $showTimerActionSheet, onDismiss: {
+            let next = afterTimerSheet
+            afterTimerSheet = nil
+            next?()
+        }) {
+            TimerSelectionSheet(audio: audio, isPresented: $showTimerActionSheet, pal: pal,
+                                playAndStart: playAndStartTimer)
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
                 // Let the home scene drift dimly behind the sheet so the glass panels have real
                 // moving content to refract — the difference between a flat box and real glass.
-                .presentationBackground(pal.bg.opacity(0.72))
+                .presentationBackground(pal.bg.opacity(reduceTransparency ? 1 : 0.72))
         }
-        .sheet(isPresented: $showMix) {
+        .sheet(isPresented: $showMix, onDismiss: {
+            let next = afterMixSheet
+            afterMixSheet = nil
+            next?()
+        }) {
             MixDrawer(audio: audio, mixStore: mixStore, pal: pal, onPickEpisode: {
                 showMix = false
                 selectedTab = 1   // jump to the Podcasts tab to choose an episode
+            }, onBreathing: {
+                // Breathing is a full-screen cover; it can only present once the sheet is gone.
+                afterMixSheet = { showBreathing = true }
+                showMix = false
             })
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
-                .presentationBackground(pal.bg.opacity(0.72))
+                .presentationBackground(pal.bg.opacity(reduceTransparency ? 1 : 0.72))
                 // Scene-visible half-sheet (the "easy + pleasant" mixer ask): at .medium the home
                 // scene above stays BRIGHT and LIVE — no dimming scrim, still tappable — so you can
                 // hear-and-see the mix while you adjust it. Dragging up to .large re-dims so the full
@@ -547,3 +732,8 @@ struct HomeView: View {
     }
 }
 
+/// A mode switch held for its confirm.
+struct PendingModeSwitch {
+    let toFocus: Bool
+    let warning: SessionGuards.ModeSwitchWarning
+}

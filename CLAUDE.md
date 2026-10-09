@@ -14,22 +14,27 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
 
 ## Layout (Xcode project at `Sleepulator/Sleepulator.xcodeproj`)
 - **App** — `Sleepulator/Sleepulator/`
-  - `SleepulatorApp.swift` (entry); `ContentView.swift` — the `TabView` root (Home / Podcasts / Settings).
+  - `SleepulatorApp.swift` (entry); `Views/ContentView.swift` — the `TabView` root (Home / Podcasts / Settings).
   - `Views/` — SwiftUI screens + components (HomeView, LibraryView, PodcastDetailView,
     NowPlayingSheet, MiniPlayerView, SettingsView, BreathingView, the `AmbientScene` backdrop
-    library, Components, Theme).
+    library, Components, Theme, `MiniPlayerClearance`, `SoundNames`). `Views/Home/` holds Home's
+    pieces: the orb + `NightRing`, `ModeSwitcher`, `MixDrawer`, `TimerSelectionSheet`, and the
+    pure, unit-tested rules `SessionGuards` and `HomeScreensaverPolicy`.
   - `Services/` — the engine + plumbing (below).
   - `Models/Models.swift` — `Podcast`, `Episode`, `SavedMix`, `NoiseType`.
   - `PrivacyInfo.xcprivacy`, `Info.plist`.
 - **Widget** — `SleepulatorWidget/` (sleep-timer Live Activity).
 - **Tests** — `SleepulatorTests/` (XCTest). Three files, many suites: `AudioMathTests.swift`;
   `AudioStateTests.swift` (also holds `PodcastParserTests`, `OPMLParserTests`,
-  `StorageManagerTests`, `NetRetryTests`, `CacheEvictionTests`, the sleep-timer suites, and
-  more); `PersistenceTests.swift` (`PersistenceMigrator` / `MixStore`).
+  `StorageManagerTests`, `NetRetryTests`, `CacheEvictionTests`, the sleep-timer suites, Home's
+  pure UI rules (`SessionGuardsTests`, `NightRingMathTests`, `MiniPlayerClearanceTests`,
+  `HomeScreensaverPolicyTests`), and more); `PersistenceTests.swift` (`PersistenceMigrator` /
+  `MixStore`).
 
 ## Services (the core)
 - `AudioEngine` — the app-facing `ObservableObject` facade. Owns UI state + policy, delegates
-  to the engines below; forwards child `objectWillChange` (queue, timer, mixes).
+  to the engines below. It does NOT forward child `objectWillChange`: views that show the timer,
+  queue or mixes observe those children directly (see the comment in `AudioEngine.init`).
 - `GenerativeAudioEngine` — `AVAudioEngine` + `AVAudioSourceNode`. Renders noise/binaural on the
   **real-time render thread**, reading params **lock-free** via an atomic double-buffer.
 - `PodcastPlayer` — `AVPlayer` + an `MTAudioProcessingTap` Night Limiter (loudness-bounded so
@@ -62,6 +67,17 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   rest. `PersistenceMigrator` owns the fragile launch-time legacy reads.
 - **Sound palettes are mode-scoped** — Sleep and Focus deliberately share no sounds
   (`AudioEngine.reconcileSoundsToMode`).
+- **The sleep timer starts from the Home orb's night ring.** `NightRing` sets
+  `nightLengthMinutes` (0 = All night, the default, so an update never starts timing anyone out).
+  Any Sleep session starting from rest starts the timer at that length: `AudioEngine.noteSessionStart`
+  on the idle→playing edge of `noiseOn`/`binauralOn`/`isPodPlaying`, so the orb, mixer switches,
+  podcasts, lock screen/AirPods, Siri and the widget all honour it. Nothing in Focus, for All night,
+  or while a countdown runs (resume, interruption, stall keep the night). The timer sheet syncs the
+  ring; its "Play all night" sets All night (the ring is the setting), and with nothing playing its
+  commit is "Play & start timer", so a countdown never runs over silence. The pure rules
+  (`timerOnPlay`, the mode-switch confirm over a live session, "the night veil only drops over
+  sound") live in `SessionGuards`, unit-tested: change them there, not in view code. Tests that
+  start sessions set `engine.nightLengthProvider` rather than relying on the simulator's defaults.
 - **Isolated deinits.** Under `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor` a class with no explicit
   `deinit` gets an implicit MainActor-*isolated* one (an explicit `deinit` is nonisolated). On the
   iOS 18.4–26.3 Swift runtimes that path aborts ("pointer being freed was not allocated" in
@@ -71,6 +87,26 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   `PodcastParser`), declares `nonisolated deinit {}`. A new engine-owned class without it crashes
   `IsolatedDeinitRuntimeBugTests` on an iOS 26.3 sim; 26.4+ runtimes hide the bug. CI runs the
   suite on both the newest runtime and the newest still-affected one (iOS 26.2 on the runner).
+
+## UI conventions
+- **Mode palette everywhere.** Views use `Palette(focusMode:)`, so Focus is cool on every tab, not
+  just Home. A view that doesn't otherwise display engine state reads the persisted
+  `@AppStorage("focusMode")` (AudioEngine writes it) instead of observing `audio`.
+  `Palette(bedtime:)` is legacy and only ever yields Sleep amber.
+- **Mini-player clearance is measured, not guessed.** ContentView measures the floating bar's top
+  edge and hands each tab `\.miniPlayerTop` (nil on Sleep Home unless a podcast plays). A screen
+  that ends at the bottom edge (a tab root, a pushed show page) applies `.miniPlayerClearance()`;
+  Home passes `frozen:` under the screensaver. No fixed bottom spacers: the old 112 / 80 / 60 pt
+  guesses broke as soon as the bar grew with text size.
+- **Dark-only.** `Info.plist` sets `UIUserInterfaceStyle = Dark` and a `UILaunchScreen` filled
+  with the `LaunchBackground` color; the generated launch screen is off
+  (`INFOPLIST_KEY_UILaunchScreen_Generation = NO`; it followed the system appearance and flashed
+  white on every cold launch). ContentView also forces `.dark`.
+- **Home's confirms can't present over a sheet.** A `confirmationDialog` raised while the
+  Build-mix sheet is up silently does nothing, and the stuck request holds the screensaver off.
+  Close the sheet, then ask (`HomeView.requestMode`).
+- **One name per sound.** Name sounds through `SoundNames` (binaurals are "Deep", "Drift", …,
+  never "Delta" / "Theta").
 
 ## Build / run
 - **Native Xcode build** — open `Sleepulator/Sleepulator.xcodeproj`. NOT Capacitor/CLI; there's

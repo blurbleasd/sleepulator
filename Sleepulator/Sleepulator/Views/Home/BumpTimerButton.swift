@@ -1,28 +1,10 @@
 import SwiftUI
 
-/// The Sleep-mode status line. `base` (the layer/resume/"tap to begin" text) is computed by
-/// HomeView and passed in; the live "· Nm" countdown is appended here from the observed timer.
-struct SleepStatusLine: View {
-    let base: String
-    let showMinute: Bool
-    @ObservedObject var sleepTimer: SleepTimerService
-    let pal: Palette
-
-    var body: some View {
-        Text(showMinute && sleepTimer.timerRemaining > 0
-             ? "\(base) · \(Int(sleepTimer.timerRemaining / 60))m"
-             : base)
-            .font(.system(.callout, design: .rounded).weight(.medium))
-            .foregroundColor(pal.dim)
-            .multilineTextAlignment(.center)
-            .padding(.horizontal, 30)
-    }
-}
-
 /// The half-asleep "+15m" bump, shown only in the last 2 minutes of a fixed-duration timer.
 struct BumpTimerButton: View {
     @ObservedObject var sleepTimer: SleepTimerService
     let pal: Palette
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// Visible only in the final 2 minutes of a fixed-duration timer — and never during the
     /// ambient tail, where bumpTimer() deliberately no-ops (the Live Activity hides its "+15m"
@@ -45,14 +27,20 @@ struct BumpTimerButton: View {
                         Image(systemName: "plus.circle.fill")
                         Text("Still awake? +15m").font(.subheadline.weight(.semibold))
                     }
-                    .foregroundColor(pal.bg)
+                    // Ember, not a solid amber slab: it appears in the last two minutes, when the
+                    // room is darkest. Cream on the tint still reads at a glance.
+                    .foregroundColor(pal.text)
                     .padding(.horizontal, 18).padding(.vertical, 11)
-                    .background(Capsule().fill(pal.accent))
+                    .background(Capsule().fill(pal.accent.opacity(0.22)))
+                    .overlay(Capsule().strokeBorder(
+                        LinearGradient(colors: [pal.accent.opacity(0.75), pal.accent.opacity(0.2)],
+                                       startPoint: .top, endPoint: .bottom),
+                        lineWidth: 1))
                 }
                 .frame(minHeight: 44)
                 .accessibilityLabel("Still awake, add 15 minutes to the sleep timer")
                 // Fade + scale in/out instead of popping (matches the episode-notes reveal style).
-                .transition(.scale.combined(with: .opacity))
+                .transition(reduceMotion ? .opacity : .scale.combined(with: .opacity))
             }
         }
         .animation(.easeInOut(duration: 0.35), value: isVisible)
