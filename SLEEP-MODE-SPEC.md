@@ -73,6 +73,9 @@ the entire field static. (See open question on a hard settle-to-static for batte
 
 ## 6. The ambient screensaver
 
+> **Superseded (2026-10):** 6.1–6.2 describe the first version. The current rules (any live
+> session, both moods, never under VoiceOver or behind a sheet) are in §9, "Screensaver gating".
+
 **6.1 Controls fade on inactivity.** While audio is playing in Sleep mode, after ~12s of no
 interaction the whole control layer (mode switch, status, buttons, orb) fades out, leaving
 the sky + moon — a pleasant screensaver. A tap anywhere brings the controls back and re-arms
@@ -169,6 +172,20 @@ glow for the prettier end image?
 
 Remaining open: on-device tuning of the 12s delay / 60s settle / battery tradeoff, and the
 moonset decision above.
+
+**Screensaver gating (2026-10, unverified on device).** `HomeScreensaverPolicy` now decides
+when the fade may begin, and is unit-tested:
+
+- It fades only over a live session: engine audio, Apple Music, or a running Pomodoro (silent
+  Focus counts). An idle app never fades — it used to blank a first launch 3s in.
+- Delays: 3s in Sleep, 10s in Focus (Focus fades too now; a good Focus scene encodes the
+  Pomodoro). Any touch on the controls or the mini-player pushes the countdown back.
+- Never under VoiceOver or Switch Control (opacity-0 controls leave the accessibility tree),
+  and never while a Home sheet, cover, or the mini-player's Now Playing is up.
+- A session ending on its own (sleep timer, interruption) leaves an already-faded screen dark
+  until a tap — no lighting the room at 2am. Visible controls just stay put.
+- Controls hold position while the tab bar is hidden (`chromeLift`), so they no longer drop
+  onto the mini-player as they fade in and out.
 
 ---
 
