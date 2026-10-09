@@ -4,6 +4,9 @@ struct TimerSelectionSheet: View {
     @ObservedObject var audio: AudioEngine
     @Binding var isPresented: Bool
     let pal: Palette
+    /// Begins the mix *and* the countdown when nothing is playing. Home owns how a session begins
+    /// (last mix, first-run bed, breathing on-ramp), so the sheet hands the minutes back to it.
+    let playAndStart: (_ minutes: Int) -> Void
     @AppStorage("timerMinutes") private var timerMinutes = 30.0
     /// Ambient-only span appended after the podcast stops at expiry (0 = off). Read live by
     /// SleepTimerService, so changing it mid-timer still applies.
@@ -12,6 +15,7 @@ struct TimerSelectionSheet: View {
     @ScaledMetric private var heroSize: CGFloat = 44
 
     private var timerActive: Bool { audio.sleepTimer.timerRemaining > 0 }
+    private var playing: Bool { audio.isAnythingPlaying }
 
     var body: some View {
         VStack(spacing: UI.xl) {
@@ -109,19 +113,22 @@ struct TimerSelectionSheet: View {
                 }
             }
 
-            // Single commit for the duration timer.
+            // Single commit for the duration timer. With nothing playing it starts the mix too: a
+            // countdown over silence did nothing but arm the night veil over a quiet room.
             Button(action: {
-                audio.sleepTimer.startSleepTimer(minutes: Int(timerMinutes))
+                let minutes = Int(timerMinutes)
+                if playing { audio.sleepTimer.startSleepTimer(minutes: minutes) } else { playAndStart(minutes) }
                 UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                 isPresented = false
             }) {
-                Text(timerActive ? "Restart Timer" : "Start Timer")
+                Text(SessionGuards.timerCommitTitle(playing: playing, timerActive: timerActive))
                     .font(.headline.bold())
                     .foregroundColor(pal.bg)
                     .frame(maxWidth: .infinity, minHeight: 44)
                     .padding()
                     .background(Capsule().fill(pal.accent))
             }
+            .accessibilityHint(playing ? "" : "Starts your mix, then the timer")
             .padding(.horizontal, 40)
 
             // "End of episode" — only when a podcast with a known, finite length is loaded (so

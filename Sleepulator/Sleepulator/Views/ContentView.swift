@@ -37,11 +37,18 @@ struct ContentView: View {
     // (tabs + mini-player) so a bedside screen goes dark. Tap to wake; re-arms after each
     // wake and on tab changes (navigating counts as interaction). When the timer ends we
     // only cancel the pending dim — never force the screen bright mid-night.
+    // Only over a session that's actually playing (SessionGuards.mayNightDim): a timer counting
+    // down over paused audio used to blank the screen on a silent room.
+    private var mayDim: Bool {
+        SessionGuards.mayNightDim(autoNightDim: autoNightDim, focusMode: audio.focusMode,
+                                  timerActive: timerActive, playing: audio.isAnythingPlaying)
+    }
+
     private func scheduleDim() {
         dimWorkItem?.cancel()
-        guard autoNightDim, !audio.focusMode, timerActive else { return }
+        guard mayDim else { return }
         let work = DispatchWorkItem {
-            if self.autoNightDim, !self.audio.focusMode, self.audio.sleepTimer.timerRemaining > 0 {
+            if self.mayDim {
                 withAnimation(.easeInOut(duration: 0.8)) { self.nightDimmed = true }
             }
         }
@@ -144,6 +151,10 @@ struct ContentView: View {
             guard active != timerWasActive else { return }
             timerWasActive = active
             if active { scheduleDim() } else { cancelDim() }
+        }
+        // Pausing drops the pending dim (never forces the screen bright); resuming re-arms it.
+        .onChange(of: audio.isAnythingPlaying) { _, playing in
+            if playing { if !nightDimmed { scheduleDim() } } else { cancelDim() }
         }
         .onChange(of: audio.focusMode) { _, focus in
             if focus { cancelDim(); withAnimation(.easeInOut(duration: 0.4)) { nightDimmed = false } }

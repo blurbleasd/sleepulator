@@ -1385,3 +1385,49 @@ final class CoachmarkLayoutTests: XCTestCase {
         XCTAssertEqual(CoachmarkLayout.room(orb: orb, mixRowTop: 280).height, 0)
     }
 }
+
+/// The moments one half-asleep tap could cost the night: a mode switch over a live session, a
+/// timer committed over silence, the veil dropping over a quiet room.
+final class SessionGuardsTests: XCTestCase {
+    func testSwitchingToFocusOverASleepTimerAsksFirst() {
+        let w = SessionGuards.modeSwitchWarning(toFocus: true, sleepTimerActive: true,
+                                                sleepSoundsPlaying: true, pomodoroRunning: false)
+        XCTAssertEqual(w?.confirm, "Switch to Focus")
+        XCTAssertTrue(w?.message.contains("sleep timer") ?? false)
+    }
+
+    func testSwitchingToFocusOverPlayingSleepSoundsAsksFirst() {
+        // No timer, but a stray 2am tap would still swap the bed and drop the limiter.
+        let w = SessionGuards.modeSwitchWarning(toFocus: true, sleepTimerActive: false,
+                                                sleepSoundsPlaying: true, pomodoroRunning: false)
+        XCTAssertNotNil(w)
+        XCTAssertFalse(w?.message.contains("timer") ?? true)
+    }
+
+    func testIdleSwitchToFocusIsImmediate() {
+        XCTAssertNil(SessionGuards.modeSwitchWarning(toFocus: true, sleepTimerActive: false,
+                                                     sleepSoundsPlaying: false, pomodoroRunning: false))
+    }
+
+    func testSwitchingToSleepOnlyAsksOverARunningPomodoro() {
+        XCTAssertNotNil(SessionGuards.modeSwitchWarning(toFocus: false, sleepTimerActive: false,
+                                                        sleepSoundsPlaying: false, pomodoroRunning: true))
+        XCTAssertNil(SessionGuards.modeSwitchWarning(toFocus: false, sleepTimerActive: false,
+                                                     sleepSoundsPlaying: false, pomodoroRunning: false))
+    }
+
+    func testVeilNeverDropsOverSilence() {
+        XCTAssertFalse(SessionGuards.mayNightDim(autoNightDim: true, focusMode: false, timerActive: true, playing: false))
+        XCTAssertTrue(SessionGuards.mayNightDim(autoNightDim: true, focusMode: false, timerActive: true, playing: true))
+        XCTAssertFalse(SessionGuards.mayNightDim(autoNightDim: true, focusMode: true, timerActive: true, playing: true))
+        XCTAssertFalse(SessionGuards.mayNightDim(autoNightDim: false, focusMode: false, timerActive: true, playing: true))
+        XCTAssertFalse(SessionGuards.mayNightDim(autoNightDim: true, focusMode: false, timerActive: false, playing: true))
+    }
+
+    func testTimerCommitStartsTheMixWhenNothingPlays() {
+        XCTAssertEqual(SessionGuards.timerCommitTitle(playing: false, timerActive: false), "Play & start timer")
+        XCTAssertEqual(SessionGuards.timerCommitTitle(playing: false, timerActive: true), "Play & start timer")
+        XCTAssertEqual(SessionGuards.timerCommitTitle(playing: true, timerActive: false), "Start timer")
+        XCTAssertEqual(SessionGuards.timerCommitTitle(playing: true, timerActive: true), "Restart timer")
+    }
+}

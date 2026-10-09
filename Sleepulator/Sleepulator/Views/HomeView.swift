@@ -30,6 +30,11 @@ struct HomeView: View {
     @State private var showOnRamp = false
     /// The deferred "begin playback" action, run after the on-ramp completes (or is skipped over).
     @State private var pendingStart: (() -> Void)?
+    /// Run once the timer sheet has finished dismissing — the on-ramp cover can't present while
+    /// the sheet is still on screen.
+    @State private var afterTimerSheet: (() -> Void)?
+    /// A mode switch waiting on its confirm (a live session would end or change; see SessionGuards).
+    @State private var modeSwitchRequest: PendingModeSwitch?
     // Ambient screensaver: while a session plays, the controls fade after a spell of no
     // interaction, leaving just the sky + moon. A tap brings them back. The flag lives on
     // `audio` so ContentView's tab bar + mini-player can fade with the home chrome. When it may
@@ -129,6 +134,7 @@ struct HomeView: View {
     private var assistiveTechRunning: Bool { voiceOverOn || switchControlOn }
     private var presentingFromHome: Bool {
         showMix || showTimerActionSheet || showBreathing || showOnRamp || nowPlayingPresented
+            || modeSwitchRequest != nil
     }
     private var mayFade: Bool {
         HomeScreensaverPolicy.mayFade(sessionActive: sessionActive,
@@ -216,6 +222,20 @@ struct HomeView: View {
         return (palette.contains(binaural) ? binaural : (palette.first ?? binaural)).capitalized
     }
 
+    /// How beginning playback from rest would go: resume the last mix, the first-run layered bed,
+    /// or the transport's own resume (which always lands on at least the noise bed).
+    private func resolveBegin() -> () -> Void {
+        if let mix = mixStore.lastMix,
+           (mix.noiseOn || mix.binauralOn || mix.podcastUrl != nil) {
+            return { audio.resumeMix(mix) }
+        } else if !hasCompletedFirstRun {
+            // First-ever play with nothing to resume: start a layered bed (noise + binaural)
+            // instead of a single bare noise, so the first tap shows what the app actually does.
+            return { audio.startDefaultMix() }
+        }
+        return { audio.toggleMasterTransport() }
+    }
+
     private func heroTap() {
         // Already playing → just toggle (pause). The on-ramp is only for *beginning* a session.
         if audio.isAnythingPlaying {
@@ -223,19 +243,7 @@ struct HomeView: View {
             return
         }
 
-        // Resolve how this tap would begin playback.
-        let begin: () -> Void
-        if let mix = mixStore.lastMix,
-           (mix.noiseOn || mix.binauralOn || mix.podcastUrl != nil) {
-            begin = { audio.resumeMix(mix) }
-        } else if !hasCompletedFirstRun {
-            // First-ever play with nothing to resume: start a layered bed (noise + binaural)
-            // instead of a single bare noise, so the first tap shows what the app actually does.
-            begin = { audio.startDefaultMix() }
-        } else {
-            begin = { audio.toggleMasterTransport() }
-        }
-
+        let begin = resolveBegin()
         // Optional breathing wind-down before Sleep playback (never in Focus — Pomodoro starts now).
         if breathingOnRamp && !audio.focusMode {
             pendingStart = begin
@@ -243,6 +251,42 @@ struct HomeView: View {
         } else {
             begin()
         }
+    }
+
+    /// "Play & start timer" from the timer sheet: begin the mix (through the breathing on-ramp
+    /// when it's on), then the countdown — so a sleep timer never runs over silence. With the
+    /// on-ramp, the countdown starts when the mix does, not while you're still breathing.
+    private func playAndStartTimer(minutes: Int) {
+        let begin = resolveBegin()
+        let session = {
+            begin()
+            audio.sleepTimer.startSleepTimer(minutes: minutes)
+        }
+        if breathingOnRamp && !audio.focusMode {
+            pendingStart = session
+            afterTimerSheet = { showOnRamp = true }
+        } else {
+            session()
+        }
+    }
+
+    /// The mode switcher asks; a live session gets a confirm first (SessionGuards).
+    private func requestMode(_ focus: Bool) {
+        let warning = SessionGuards.modeSwitchWarning(
+            toFocus: focus,
+            sleepTimerActive: audio.sleepTimer.timerRemaining > 0,
+            sleepSoundsPlaying: !audio.focusMode && audio.isAnythingPlaying,
+            pomodoroRunning: pomodoroRunning)
+        if let warning {
+            modeSwitchRequest = PendingModeSwitch(toFocus: focus, warning: warning)
+        } else {
+            applyMode(focus)
+        }
+    }
+
+    private func applyMode(_ focus: Bool) {
+        if reduceMotion { audio.focusMode = focus }
+        else { withAnimation(.easeInOut(duration: 0.2)) { audio.focusMode = focus } }
     }
 
     var body: some View {
@@ -281,7 +325,19 @@ struct HomeView: View {
             // "Build mix" control that opens the full mixer in a drawer. Everything detailed
             // is deliberately tucked away.
             VStack(spacing: 0) {
-                ModeSwitcher(focusMode: $audio.focusMode, pal: pal)
+                ModeSwitcher(focusMode: audio.focusMode, pal: pal, onSelect: requestMode)
+                    // Attached here, not on the root, so iOS 26's popover-style dialog points at
+                    // the switch that raised it.
+                    .confirmationDialog(modeSwitchRequest?.warning.title ?? "",
+                                        isPresented: Binding(get: { modeSwitchRequest != nil },
+                                                             set: { if !$0 { modeSwitchRequest = nil } }),
+                                        titleVisibility: .visible,
+                                        presenting: modeSwitchRequest) { request in
+                        Button(request.warning.confirm, role: .destructive) { applyMode(request.toFocus) }
+                        Button(request.warning.cancel, role: .cancel) {}
+                    } message: { request in
+                        Text(request.warning.message)
+                    }
                     .padding(.horizontal, 40)
                     .padding(.top, 6)
 
@@ -522,8 +578,13 @@ struct HomeView: View {
                 }
             )
         }
-        .sheet(isPresented: $showTimerActionSheet) {
-            TimerSelectionSheet(audio: audio, isPresented: $showTimerActionSheet, pal: pal)
+        .sheet(isPresented: $showTimerActionSheet, onDismiss: {
+            let next = afterTimerSheet
+            afterTimerSheet = nil
+            next?()
+        }) {
+            TimerSelectionSheet(audio: audio, isPresented: $showTimerActionSheet, pal: pal,
+                                playAndStart: playAndStartTimer)
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
                 // Let the home scene drift dimly behind the sheet so the glass panels have real
@@ -547,3 +608,8 @@ struct HomeView: View {
     }
 }
 
+/// A mode switch held for its confirm.
+struct PendingModeSwitch {
+    let toFocus: Bool
+    let warning: SessionGuards.ModeSwitchWarning
+}

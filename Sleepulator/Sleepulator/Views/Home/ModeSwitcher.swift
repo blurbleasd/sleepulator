@@ -1,18 +1,19 @@
 import SwiftUI
 
-// Prominent two-segment Sleep | Focus selector. The active segment fills with the accent.
+// Two-segment Sleep | Focus selector. It only *requests* a switch: Home decides whether the switch
+// needs a confirm first (a live sleep session or Pomodoro, see `SessionGuards`) and applies it.
 struct ModeSwitcher: View {
-    @Binding var focusMode: Bool
+    let focusMode: Bool
     let pal: Palette
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let onSelect: (_ focus: Bool) -> Void
 
     var body: some View {
         HStack(spacing: 0) {
             segment(title: "Sleep", icon: "moon.stars.fill", isActive: !focusMode) {
-                if focusMode { setMode(false) }
+                if focusMode { select(false) }
             }
             segment(title: "Focus", icon: "bolt.fill", isActive: focusMode) {
-                if !focusMode { setMode(true) }
+                if !focusMode { select(true) }
             }
         }
         .padding(4)
@@ -20,10 +21,9 @@ struct ModeSwitcher: View {
         .frame(maxWidth: .infinity)
     }
 
-    private func setMode(_ focus: Bool) {
+    private func select(_ focus: Bool) {
         UISelectionFeedbackGenerator().selectionChanged()
-        if reduceMotion { focusMode = focus }
-        else { withAnimation(.easeInOut(duration: 0.2)) { focusMode = focus } }
+        onSelect(focus)
     }
 
     private func segment(title: String, icon: String, isActive: Bool, action: @escaping () -> Void) -> some View {
@@ -35,8 +35,9 @@ struct ModeSwitcher: View {
             .font(.subheadline)
             .lineLimit(1)
             .minimumScaleFactor(0.7)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 10)
+            .padding(.vertical, 6)
+            // 44pt tall segments: the old 10pt padding left a 37pt hit area at the top of the screen.
+            .frame(maxWidth: .infinity, minHeight: 44)
             .foregroundColor(isActive ? pal.bg : pal.dim)
             .background(Capsule().fill(isActive ? pal.accent : Color.clear))
             .contentShape(Capsule())

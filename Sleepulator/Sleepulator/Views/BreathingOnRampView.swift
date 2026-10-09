@@ -55,7 +55,10 @@ struct BreathingOnRampView: View {
                             .padding(12)
                             .background(Circle().fill(.white.opacity(0.08)))
                     }
-                    .accessibilityLabel("Skip breathing and start now")
+                    // This closes without starting anything (Start now is the button below). The old
+                    // "Skip breathing and start now" label promised the opposite: a VoiceOver user
+                    // closed it believing the mix had begun, and lay down to silence.
+                    .accessibilityLabel("Close without starting your mix")
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 12)
