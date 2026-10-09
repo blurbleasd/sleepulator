@@ -437,7 +437,7 @@ final class AudioEngine: ObservableObject {
         // No child objectWillChange is forwarded into the engine (Phase 3 completes this).
         // Forwarding makes ANY child publish invalidate every view holding `audio`. Each child's
         // reactive consumers observe the child directly instead:
-        //   - sleepTimer / pomodoro (~1/sec): SessionButton, SleepStatusLine, BumpTimerButton in
+        //   - sleepTimer / pomodoro (~1/sec): SessionButton, NightRing, NightLine, BumpTimerButton in
         //     HomeView; FocusHero / FocusSessionReadout / CycleDots; NightDarken in AmbientScene.
         //     ContentView drives its night-dim off `sleepTimer.$timerRemaining` via onReceive.
         //   - playbackProgress (~1/sec): MiniPlayerView + NowPlayingSheet (Phase 1).

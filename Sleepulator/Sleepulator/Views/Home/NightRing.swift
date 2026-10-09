@@ -19,8 +19,11 @@ enum NightRingMath {
     static func fraction(forMinutes m: Double) -> Double { max(0, min(1, m / Double(dialMinutes))) }
 
     /// Keeps a drag from wrapping across 12 o'clock: sweeping past the top pins to the end you came
-    /// from instead of jumping between All night and two hours.
+    /// from instead of jumping between All night and two hours. Once pinned, it stays pinned until
+    /// the finger comes back round on the near half of the dial (no jump to 85 or 35 from overshoot).
     static func continuous(previous: Int, raw: Int) -> Int {
+        if previous == 0 && raw > dialMinutes / 2 { return 0 }
+        if previous == dialMinutes && raw < dialMinutes / 2 { return dialMinutes }
         if previous >= 90 && raw <= 30 { return dialMinutes }
         if previous <= 30 && raw >= 90 { return 0 }
         return raw
@@ -43,23 +46,43 @@ enum NightRingMath {
         return .start(minutes)
     }
 
-    /// The ring holds still in the last two minutes of a duration timer and through the ambient
-    /// tail: "+15m" is the control there, and a drag must never snap a fading bed back up.
+    /// The fade-out window (AudioMath.getFadeMultiplier fades over the last 600 s).
+    static let fadeWindow: TimeInterval = 600
+
+    /// The ring holds still once the night is fading (the last 10 minutes, either timer kind) and
+    /// through the ambient tail. A restart there would snap a fading bed back up to full volume —
+    /// the wake-up this app exists to prevent. "+15m" is the control in the last two minutes.
     static func locked(remaining: TimeInterval, inTail: Bool, endOfEpisode: Bool) -> Bool {
-        inTail || (!endOfEpisode && remaining > 0 && remaining <= 120)
+        inTail || (remaining > 0 && remaining <= fadeWindow)
     }
 
-    /// One VoiceOver adjustment: 5-minute steps, All night below 5, never past the dial.
-    static func adjusted(_ minutes: Int, up: Bool) -> Int {
-        up ? min(dialMinutes, minutes + step) : max(0, minutes - step)
+    /// A remembered length read back from storage, made safe to use: a hand-edited backup could
+    /// restore anything, and `Int(1e300)` traps at launch.
+    static func sanitized(_ minutes: Double) -> Double {
+        minutes.isFinite ? max(0, min(Double(dialMinutes), minutes)) : 0
     }
+
+    /// One VoiceOver adjustment, on the 5-minute grid: up goes to the next mark (43 → 45), down to
+    /// the one below (43 → 40, 5 → All night). Never past the dial, and "up" never shortens a night
+    /// that is already longer than the dial (an end-of-episode timer with 150 min left stays 150).
+    static func adjusted(_ minutes: Int, up: Bool) -> Int {
+        if up {
+            guard minutes < dialMinutes else { return minutes }
+            return min(dialMinutes, (max(0, minutes) / step + 1) * step)
+        }
+        guard minutes > 0 else { return 0 }
+        return ((minutes - 1) / step) * step
+    }
+
+    /// The remembered length is kept on the dial (the timer sheet's slider is 5…120).
+    static func storable(_ minutes: Int) -> Double { Double(max(0, min(dialMinutes, minutes))) }
 
     static func spoken(minutes: Int) -> String { minutes == 0 ? "All night" : "\(minutes) minutes" }
 }
 
 /// The night ring around the Sleep orb: the night-length setting and, while a timer runs, the
 /// night left. Drag the handle to set it; Play honours it (HomeView). A dim ember arc on a faint
-/// track, never brighter than the orb it circles. Observes the timer itself (like SleepStatusLine)
+/// track, never brighter than the orb it circles. Observes the timer itself (like BumpTimerButton)
 /// so the 1 Hz countdown re-renders only this leaf, never HomeView.
 struct NightRing: View {
     @ObservedObject var sleepTimer: SleepTimerService
@@ -73,8 +96,19 @@ struct NightRing: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var dragMinutes: Int?
+    /// Where the drag picked the ring up, so a wobble that ends where it began changes nothing
+    /// (no timer restart, no Live Activity churn).
+    @State private var dragStart: Int?
     /// A drag that began away from the handle (a scene swipe crossing the ring) is ignored whole.
     @State private var rejected = false
+    /// Live for exactly as long as the touch: resets on its own when the gesture is cancelled
+    /// (an incoming call, a system gesture, the chrome losing hit testing), when `onEnded` never
+    /// runs. Its reset is where the drag state is cleared, so a cancel can't leave the ring stuck.
+    @GestureState private var touchLive = false
+    /// VoiceOver steps settle before they restart the timer: each restart re-requests the Live
+    /// Activity, and a run of swipes shouldn't churn it.
+    @State private var pendingMinutes: Int?
+    @State private var pendingCommit: DispatchWorkItem?
 
     /// The drawn ring; the frame adds touch slop around it for the handle.
     static let ringSize: CGFloat = 214
@@ -92,9 +126,26 @@ struct NightRing: View {
     /// What the ring shows: the drag, else the running timer, else (at rest) the remembered
     /// length. Playing with no timer is honestly All night, whatever length is remembered.
     private var shownMinutes: Double {
-        if let d = dragMinutes { return Double(d) }
+        if let d = dragMinutes ?? pendingMinutes { return Double(d) }
         if timerActive { return sleepTimer.timerRemaining / 60 }
         return playing ? 0 : lengthMinutes
+    }
+
+    /// What VoiceOver steps from: what the ring shows, on the 5-minute grid. (Playing with no timer
+    /// is All night, so the first swipe up is 5 min, not the remembered length + 5.)
+    private var gridMinutes: Int {
+        if let p = pendingMinutes { return p }
+        let m = shownMinutes
+        if timerActive && m > Double(NightRingMath.dialMinutes) { return Int(m.rounded()) }
+        return Int((m / Double(NightRingMath.step)).rounded()) * NightRingMath.step
+    }
+
+    private var spokenValue: String {
+        if pendingMinutes == nil && timerActive {
+            return sleepTimer.isEndOfEpisode ? "Ends with the episode"
+                : "\(Int((sleepTimer.timerRemaining / 60).rounded(.up))) minutes left"
+        }
+        return NightRingMath.spoken(minutes: gridMinutes)
     }
 
     private func handlePoint(fraction: Double, center: CGPoint) -> CGPoint {
@@ -129,25 +180,50 @@ struct NightRing: View {
         .animation(dragMinutes == nil && !reduceMotion ? .easeOut(duration: 0.35) : nil, value: frac)
         // Only the band around the ring takes touches: the orb's disc inside stays the play button.
         .contentShape(RingBand(inner: radius - 22, outer: radius + 20), eoFill: true)
+        // …and only the band is the ring for VoiceOver touch exploration, so the orb inside still
+        // reads as Play.
+        .contentShape(.accessibility, RingBand(inner: radius - 22, outer: radius + 20), eoFill: true)
         .gesture(dragGesture)
+        .onChange(of: touchLive) { _, live in
+            if !live { endDrag() }
+        }
         .accessibilityElement()
         .accessibilityLabel("Night length")
-        .accessibilityValue(timerActive
-                            ? (sleepTimer.isEndOfEpisode ? "Ends with the episode"
-                               : "\(Int((sleepTimer.timerRemaining / 60).rounded(.up))) minutes left")
-                            : NightRingMath.spoken(minutes: Int(lengthMinutes)))
-        .accessibilityHint(locked ? "Locked near the end. Use Still awake to add time."
+        .accessibilityValue(spokenValue)
+        .accessibilityHint(locked ? "Locked while the night fades out."
                                   : "Swipe up or down to change. Play uses this length.")
         .accessibilityAdjustableAction { direction in
             guard !locked else { return }
-            let current = timerActive ? Int((sleepTimer.timerRemaining / 60).rounded()) : Int(lengthMinutes)
             switch direction {
-            case .increment: commit(NightRingMath.adjusted(current, up: true))
-            case .decrement: commit(NightRingMath.adjusted(current, up: false))
+            case .increment: stage(NightRingMath.adjusted(gridMinutes, up: true))
+            case .decrement: stage(NightRingMath.adjusted(gridMinutes, up: false))
             @unknown default: break
             }
         }
         .accessibilityAction(named: "Timer options") { openOptions() }
+    }
+
+    /// A VoiceOver step: show it at once, commit once the swipes stop.
+    private func stage(_ minutes: Int) {
+        pendingMinutes = minutes
+        pendingCommit?.cancel()
+        let work = DispatchWorkItem {
+            commit(minutes)
+            pendingMinutes = nil
+        }
+        pendingCommit = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8, execute: work)
+    }
+
+    /// Clears the drag however it ended (released or cancelled). Idempotent.
+    private func endDrag() {
+        if dragMinutes != nil {
+            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.25)) { dragMinutes = nil }
+        }
+        rejected = false
+        dragStart = nil
+        // Released after Home's swipe has read the flag for this same touch.
+        DispatchQueue.main.async { dragging = false }
     }
 
     private func readout(_ minutes: Int) -> some View {
@@ -177,6 +253,7 @@ struct NightRing: View {
 
     private var dragGesture: some Gesture {
         DragGesture(minimumDistance: 8, coordinateSpace: .local)
+            .updating($touchLive) { _, live, _ in live = true }
             .onChanged { value in
                 let center = CGPoint(x: Self.frameSize / 2, y: Self.frameSize / 2)
                 if dragMinutes == nil {
@@ -187,7 +264,9 @@ struct NightRing: View {
                     let d = hypot(value.startLocation.x - handle.x, value.startLocation.y - handle.y)
                     guard !locked, d <= Self.handleSlop else { rejected = true; return }
                     dragging = true
-                    dragMinutes = Int((shownMinutes / Double(NightRingMath.step)).rounded()) * NightRingMath.step
+                    let start = Int((shownMinutes / Double(NightRingMath.step)).rounded()) * NightRingMath.step
+                    dragStart = start
+                    dragMinutes = start
                 }
                 guard let previous = dragMinutes else { return }
                 let raw = NightRingMath.minutes(forAngle: NightRingMath.angle(of: value.location, center: center))
@@ -202,16 +281,15 @@ struct NightRing: View {
                 }
             }
             .onEnded { _ in
-                if let minutes = dragMinutes { commit(minutes) }
-                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.25)) { dragMinutes = nil }
-                rejected = false
-                // Released after Home's swipe has read the flag for this same touch.
-                DispatchQueue.main.async { dragging = false }
+                // Only a real release commits; a cancelled touch just clears (see touchLive). The
+                // lock is re-checked: the night may have started fading while the finger was down.
+                if let minutes = dragMinutes, minutes != dragStart, !locked { commit(minutes) }
+                endDrag()
             }
     }
 
     private func commit(_ minutes: Int) {
-        lengthMinutes = Double(minutes)
+        lengthMinutes = NightRingMath.storable(minutes)
         switch NightRingMath.commit(minutes: minutes, playing: playing, timerActive: timerActive) {
         case .start(let m):
             sleepTimer.startSleepTimer(minutes: m)
@@ -268,6 +346,22 @@ struct NightLine: View {
         return playing ? t : "\(resumeText) · \(t)"
     }
 
+    /// The same line in words for VoiceOver ("45m" reads as "45 meters").
+    private var spokenText: String {
+        let t = Self.timerText(remaining: sleepTimer.timerRemaining, inTail: sleepTimer.inTail,
+                               endOfEpisode: sleepTimer.isEndOfEpisode, playing: playing,
+                               lengthMinutes: lengthMinutes)
+        let words = Self.spoken(t)
+        return playing ? words : "\(resumeText.replacingOccurrences(of: " · ", with: ", ")), \(words)"
+    }
+
+    /// "38m left" → "38 minutes left", "45m" → "45 minutes"; other phrases pass through.
+    static func spoken(_ timerText: String) -> String {
+        guard let r = timerText.range(of: #"^\d+m"#, options: .regularExpression) else { return timerText }
+        let n = timerText[r].dropLast()
+        return "\(n) minutes" + timerText[r.upperBound...]
+    }
+
     var body: some View {
         Button(action: openOptions) {
             HStack(spacing: 6) {
@@ -285,7 +379,7 @@ struct NightLine: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(text)
+        .accessibilityLabel(spokenText)
         .accessibilityHint("Opens timer options")
     }
 }

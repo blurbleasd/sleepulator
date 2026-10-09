@@ -14,7 +14,7 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
 
 ## Layout (Xcode project at `Sleepulator/Sleepulator.xcodeproj`)
 - **App** — `Sleepulator/Sleepulator/`
-  - `SleepulatorApp.swift` (entry); `ContentView.swift` — the `TabView` root (Home / Podcasts / Settings).
+  - `SleepulatorApp.swift` (entry); `Views/ContentView.swift` — the `TabView` root (Home / Podcasts / Settings).
   - `Views/` — SwiftUI screens + components (HomeView, LibraryView, PodcastDetailView,
     NowPlayingSheet, MiniPlayerView, SettingsView, BreathingView, the `AmbientScene` backdrop
     library, Components, Theme, `MiniPlayerClearance`, `SoundNames`). `Views/Home/` holds Home's
@@ -33,7 +33,8 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
 
 ## Services (the core)
 - `AudioEngine` — the app-facing `ObservableObject` facade. Owns UI state + policy, delegates
-  to the engines below; forwards child `objectWillChange` (queue, timer, mixes).
+  to the engines below. It does NOT forward child `objectWillChange`: views that show the timer,
+  queue or mixes observe those children directly (see the comment in `AudioEngine.init`).
 - `GenerativeAudioEngine` — `AVAudioEngine` + `AVAudioSourceNode`. Renders noise/binaural on the
   **real-time render thread**, reading params **lock-free** via an atomic double-buffer.
 - `PodcastPlayer` — `AVPlayer` + an `MTAudioProcessingTap` Night Limiter (loudness-bounded so

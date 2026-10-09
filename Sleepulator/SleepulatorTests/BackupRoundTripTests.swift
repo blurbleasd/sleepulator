@@ -29,6 +29,18 @@ final class BackupRoundTripTests: XCTestCase {
 
     // MARK: full scalar round-trip (Double / Bool / Int / String all survive the JSON hop)
 
+    func testNightLengthAndTailRoundTrip() throws {
+        d.set(45.0, forKey: "nightLengthMinutes")
+        d.set(30, forKey: "ambientTailMinutes")
+        let file = try throughBackupFile(SettingsView.backupUserDefaults(from: d))
+        d.removePersistentDomain(forName: suite)
+        let (restored, skipped) = SettingsView.restoreUserDefaults(from: file, into: d)
+        XCTAssertEqual(skipped, 0)
+        XCTAssertEqual(restored, 2)
+        XCTAssertEqual(d.double(forKey: "nightLengthMinutes"), 45, accuracy: 1e-9)
+        XCTAssertEqual(d.integer(forKey: "ambientTailMinutes"), 30)
+    }
+
     func testScalarsRoundTripThroughJSON() throws {
         d.set(0.42, forKey: "masterVolume")
         d.set(true,  forKey: "autoPlay")

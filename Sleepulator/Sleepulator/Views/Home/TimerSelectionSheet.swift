@@ -4,8 +4,10 @@ import SwiftUI
 /// (AudioMath.getFadeMultiplier: the last 600 s; the ambient tail eases down from there).
 enum TimerCopy {
     static func consequence(minutes: Int, tailMinutes: Int) -> String {
+        // The whole bed fades with the timer, so in the tail the sounds are already very low:
+        // "softly" is the honest word, not "ease out".
         if tailMinutes > 0 {
-            return "The podcast stops at \(minutes) min. Your sounds ease out over \(tailMinutes) more."
+            return "The podcast stops at \(minutes) min. Your sounds carry on softly for \(tailMinutes) more."
         }
         return minutes > 10 ? "Fades out over the last 10 min, then stops." : "Fades out gently, then stops."
     }
@@ -55,8 +57,11 @@ struct TimerSelectionSheet: View {
 
             // What actually happens at the end, said once. The Live Activity already promised
             // "Audio fades out, then stops"; the sheet where you commit said nothing.
+            // A tail only runs with a podcast loaded AND a sound bed on (SleepTimerService's
+            // tailEligibleFn); say so only when it will.
             Text(TimerCopy.consequence(minutes: Int(timerMinutes),
-                                       tailMinutes: audio.hasLoadedEpisode ? ambientTailMinutes : 0))
+                                       tailMinutes: audio.hasLoadedEpisode && (audio.noiseOn || audio.binauralOn)
+                                           ? ambientTailMinutes : 0))
                 .font(.footnote)
                 .foregroundColor(pal.dim)
                 .multilineTextAlignment(.center)

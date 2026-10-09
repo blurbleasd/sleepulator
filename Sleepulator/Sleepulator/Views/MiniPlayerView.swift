@@ -47,7 +47,8 @@ struct MiniPlayerView: View {
         )
         .padding(.horizontal)
         // A compact bar: past accessibility size 2 it grew to a third of the screen and covered
-        // Home's controls. Long-press shows the Large Content Viewer for anything clipped.
+        // Home's controls. The transport buttons adopt the Large Content Viewer, so a long press
+        // still shows them large.
         .dynamicTypeSize(...DynamicTypeSize.accessibility2)
         .padding(.bottom, 80) // float above the tab bar
         .sheet(isPresented: $showNowPlaying) {
@@ -71,8 +72,10 @@ struct MiniPlayerView: View {
                 Image(systemName: audio.skipBackSymbol)
                     .font(.title3)
                     .foregroundColor(pal.accent)
+                    .frame(minWidth: 44, minHeight: 44)
+                    .contentShape(Rectangle())
             }
-            .frame(minWidth: 44, minHeight: 44)
+            .accessibilityShowsLargeContentViewer()
             .accessibilityLabel("Skip back \(Int(audio.skipInterval)) seconds")
 
             // Play/Pause — its own button, NOT nested inside the open-player button.
@@ -80,16 +83,20 @@ struct MiniPlayerView: View {
                 Image(systemName: audio.isPodPlaying ? "pause.circle.fill" : "play.circle.fill")
                     .font(.system(size: min(playGlyph, 40)))
                     .foregroundColor(pal.accent)
+                    .frame(minWidth: 44, minHeight: 44)
+                    .contentShape(Rectangle())
             }
-            .frame(minWidth: 44, minHeight: 44)
+            .accessibilityShowsLargeContentViewer()
             .accessibilityLabel(audio.isPodPlaying ? "Pause podcast" : "Play podcast")
 
             Button(action: { audio.seekPodcast(seconds: audio.skipInterval) }) {
                 Image(systemName: audio.skipForwardSymbol)
                     .font(.title3)
                     .foregroundColor(pal.accent)
+                    .frame(minWidth: 44, minHeight: 44)
+                    .contentShape(Rectangle())
             }
-            .frame(minWidth: 44, minHeight: 44)
+            .accessibilityShowsLargeContentViewer()
             .accessibilityLabel("Skip forward \(Int(audio.skipInterval)) seconds")
 
             // Title region — a separate sibling button that opens Now Playing.

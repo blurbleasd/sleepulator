@@ -28,10 +28,9 @@ enum MiniPlayerClearanceMath {
 ///
 /// As a bottom safe-area inset it also lifts scroll content and indicators. The edge is measured
 /// on the outer view (after the inset is applied), so the inset never feeds back into itself.
-/// `frozen` holds the last value while Home's screensaver hides the tab bar, so the controls
-/// don't drift as the safe area changes under them.
+/// For scroll/list roots, whose frame is the container's. (Home, whose content can overflow on a
+/// small phone at large text, measures from the screen edge instead: HomeView.homeClearance.)
 struct MiniPlayerClearance: ViewModifier {
-    var frozen = false
     @Environment(\.miniPlayerTop) private var miniTop
     @State private var safeBottom: CGFloat = 0
 
@@ -49,14 +48,14 @@ struct MiniPlayerClearance: ViewModifier {
             .onGeometryChange(for: CGFloat.self) { proxy in
                 proxy.frame(in: .global).maxY
             } action: { edge in
-                if !frozen { safeBottom = edge }
+                safeBottom = edge
             }
     }
 }
 
 extension View {
     /// Keep this screen's content clear of the floating mini-player.
-    func miniPlayerClearance(frozen: Bool = false) -> some View {
-        modifier(MiniPlayerClearance(frozen: frozen))
+    func miniPlayerClearance() -> some View {
+        modifier(MiniPlayerClearance())
     }
 }

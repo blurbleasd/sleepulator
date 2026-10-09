@@ -36,10 +36,12 @@ struct ContentView: View {
     // only exists on the Home screen.
     private var homeScreensaver: Bool { audio.ambientScreensaver && selectedTab == 0 }
 
-    // On Sleep Home the mini-player shows only while a podcast is actually playing: idle, its
-    // "Up next" bar put a second play button beside the orb, meaning something different. It
-    // stays everywhere else (Podcasts, Settings, Focus), and the mixer's Podcast row is unchanged.
-    private var miniPlayerShownOnHome: Bool { audio.focusMode || audio.isPodPlaying }
+    // On Sleep Home the mini-player shows only once an episode is loaded: idle, its "Up next" bar
+    // put a second play button beside the orb, meaning something different. It stays everywhere
+    // else (Podcasts, Settings, Focus), and the mixer's Podcast row is unchanged.
+    // Keyed on a loaded episode, not on playing: pausing from the orb must not fade the bar out
+    // (and move Home's controls) under the user's thumb.
+    private var miniPlayerShownOnHome: Bool { audio.focusMode || audio.hasLoadedEpisode }
     private var miniPlayerHidden: Bool {
         homeScreensaver || (selectedTab == 0 && !miniPlayerShownOnHome)
     }
@@ -55,9 +57,15 @@ struct ContentView: View {
                                   timerActive: timerActive, playing: audio.isAnythingPlaying)
     }
 
-    private func scheduleDim() {
+    /// `timerActiveNow` is the value just published: `$timerRemaining` emits in willSet, so
+    /// reading the property inside `onReceive` still sees the old value (0 on a fresh start) and
+    /// the veil never armed. The work item re-reads the live state when it fires.
+    private func scheduleDim(timerActiveNow: Bool? = nil) {
         dimWorkItem?.cancel()
-        guard mayDim else { return }
+        let armed = SessionGuards.mayNightDim(autoNightDim: autoNightDim, focusMode: audio.focusMode,
+                                              timerActive: timerActiveNow ?? timerActive,
+                                              playing: audio.isAnythingPlaying)
+        guard armed else { return }
         let work = DispatchWorkItem {
             if self.mayDim {
                 withAnimation(.easeInOut(duration: 0.8)) { self.nightDimmed = true }
@@ -128,8 +136,8 @@ struct ContentView: View {
             .accentColor(pal.accent)
 
             // Mini-player floats above the tab bar (a ZStack overlay, not a TabView safe-area
-            // inset — that docks it ON the UIKit tab bar). Tabs reserve room for it themselves
-            // (Home's bottom inset below, PodcastDetail's contentMargins).
+            // inset — that docks it ON the UIKit tab bar). Tabs reserve room for it themselves from
+            // its measured top edge (`miniPlayerTop`, MiniPlayerClearance).
             MiniPlayerView(audio: audio, progress: audio.playbackProgress, queue: audio.queueManager,
                            selectedTab: $selectedTab, showNowPlaying: $showNowPlaying)
                 .simultaneousGesture(TapGesture().onEnded { miniPlayerTouches &+= 1 })
@@ -172,7 +180,7 @@ struct ContentView: View {
             let active = remaining > 0
             guard active != timerWasActive else { return }
             timerWasActive = active
-            if active { scheduleDim() } else { cancelDim() }
+            if active { scheduleDim(timerActiveNow: true) } else { cancelDim() }
         }
         // Pausing drops the pending dim (never forces the screen bright); resuming re-arms it.
         .onChange(of: audio.isAnythingPlaying) { _, playing in

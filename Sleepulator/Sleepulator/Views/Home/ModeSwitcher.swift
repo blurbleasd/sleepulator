@@ -20,9 +20,8 @@ struct ModeSwitcher: View {
             }
         }
         .padding(4)
-        .background(Capsule().fill(pal.text.opacity(0.08)))
+        .background(Capsule().fill(pal.text.opacity(quiet ? 0.04 : 0.08)))
         .frame(maxWidth: .infinity)
-        .opacity(quiet ? 0.5 : 1)
         .animation(.easeInOut(duration: 0.6), value: quiet)
     }
 
@@ -45,12 +44,16 @@ struct ModeSwitcher: View {
             .frame(maxWidth: .infinity, minHeight: 44)
             // Ember, like the chips: a dim accent tint, cream label, top-lit hairline. The solid
             // amber fill was the brightest surface on the bedside Home, brighter than the orb.
-            .foregroundColor(isActive ? pal.text : pal.dim)
+            // Quiet (a live sleep session) dims the light, not the words: the active label drops to
+            // the dim tone and the ember to half strength, but every label keeps AA contrast (a
+            // 50% opacity on the whole switch put the inactive label near 2.6:1).
+            .foregroundColor(isActive && !quiet ? pal.text : pal.dim)
             .background {
                 if isActive {
-                    Capsule().fill(pal.accent.opacity(0.18))
+                    Capsule().fill(pal.accent.opacity(quiet ? 0.09 : 0.18))
                         .overlay(Capsule().strokeBorder(
-                            LinearGradient(colors: [pal.accent.opacity(0.7), pal.accent.opacity(0.15)],
+                            LinearGradient(colors: [pal.accent.opacity(quiet ? 0.35 : 0.7),
+                                                    pal.accent.opacity(quiet ? 0.08 : 0.15)],
                                            startPoint: .top, endPoint: .bottom),
                             lineWidth: 1))
                 }

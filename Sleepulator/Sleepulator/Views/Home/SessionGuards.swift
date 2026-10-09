@@ -45,11 +45,14 @@ enum SessionGuards {
         autoNightDim && !focusMode && timerActive && playing
     }
 
-    /// Play in Sleep honours the night ring: the minutes to time, or nil for All night or when a
-    /// countdown is already running (resuming from a pause keeps the night you set).
-    static func timerOnPlay(lengthMinutes: Double, timerActive: Bool) -> Int? {
-        guard !timerActive, lengthMinutes >= 5 else { return nil }
-        return Int(lengthMinutes)
+    /// Play in Sleep honours the night ring: the minutes to time, or nil in Focus (the Pomodoro is
+    /// its timer), for All night, or when a countdown is already running (resuming from a pause
+    /// keeps the night you set). The stored length is sanitized: a restored backup could hold
+    /// anything, and `Int` of a huge Double traps.
+    static func timerOnPlay(focusMode: Bool, lengthMinutes: Double, timerActive: Bool) -> Int? {
+        let length = NightRingMath.sanitized(lengthMinutes)
+        guard !focusMode, !timerActive, length >= 5 else { return nil }
+        return Int(length)
     }
 
     /// The timer sheet's commit button. With nothing playing it starts the mix as well, so the

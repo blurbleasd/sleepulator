@@ -109,6 +109,7 @@ struct FirstRunCoachmark: View {
                 .background(Capsule().fill(pal.accent))
         }
         .frame(minHeight: 44)
+        .contentShape(Rectangle())
     }
 }
 
@@ -142,9 +143,11 @@ enum CoachmarkLayout {
 
     /// The band the card may fill, in the coordinate space of `orb` and `mixRowTop`. `orb` is the
     /// OrbButton's frame — its soft glow overhangs the disc, and the card may cover glow but not
-    /// disc. Zero height when the two are too close for any card.
-    static func room(orb: CGRect, mixRowTop: CGFloat) -> (top: CGFloat, height: CGFloat) {
-        let top = orb.midY + OrbButton.discDiameter / 2 + clearance
+    /// what's within `clearRadius` of the centre (the disc, or on Sleep the night ring around it).
+    /// Zero height when the two are too close for any card.
+    static func room(orb: CGRect, mixRowTop: CGFloat,
+                     clearRadius: CGFloat = OrbButton.discDiameter / 2) -> (top: CGFloat, height: CGFloat) {
+        let top = orb.midY + clearRadius + clearance
         return (top, max(0, mixRowTop - clearance - top))
     }
 }

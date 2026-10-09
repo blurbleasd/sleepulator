@@ -295,6 +295,23 @@ this section is where you do it. Do it in a dark room at your real bedtime brigh
 6. **Dark launch.** Cold-launch at night. ✅ No white flash before Home (warm near-black launch).
 7. **VoiceOver.** The ring is "Night length, 45 minutes", swipe up/down adjusts in 5s; the on-ramp
    close button says "Close without starting your mix" (and doesn't start it).
+8. **Ring drag keeps the controls awake.** Mid-night (sounds playing): tap to wake, then drag the
+   ring slowly for 5+ s. ✅ The controls don't fade under the finger; ~3 s after release they do.
+   Inside the last 10 minutes the ring is locked (handle dims); a drag that ends where it began
+   doesn't restart the timer (no Live Activity flicker, no volume change).
+9. **Timer sheet ↔ ring.** With nothing playing, sheet "Play & start timer" (with and without the
+   on-ramp) starts the mix and sets the ring to that length; "Turn off timer" returns it to All
+   night; the sheet opens on the ring's length. Long-press the orb → "Timer options".
+10. **Mini-player on Sleep Home.** At rest with only a queue ("Up next"), no bar on Sleep Home; load an
+   episode → the bar appears and Home's controls rise to clear it; pause/play the podcast → nothing
+   moves. Focus Home, Podcasts and Settings always show it, and nothing sits under it at the
+   largest text size.
+11. **Focus colours everywhere.** In Focus, the tab bar, mini-player, Now Playing, Podcasts and
+   Settings are cyan, not amber.
+12. **Veil after a restart.** While playing, restart the timer from the sheet or the ring. ✅ The
+   night veil still drops ~60 s later.
+13. **Dark launch on upgrade too.** Check M.6 on a fresh install AND on an in-place upgrade (iOS
+   caches launch screens; an upgrade can show the old white one once).
 
 ---
 

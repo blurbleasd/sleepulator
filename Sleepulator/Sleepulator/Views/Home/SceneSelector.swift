@@ -44,9 +44,10 @@ struct SceneSelector: View {
                                         Capsule().fill(pal.text.opacity(0.08))
                                     }
                                 }
+                                // 44 pt tall to tap (the chip itself stays compact; was 29 pt).
+                                .frame(minHeight: 44)
+                                .contentShape(Rectangle())
                         }
-                        // 44 pt tall to tap (the chip itself stays compact; was 29 pt).
-                        .frame(minHeight: 44)
                         .accessibilityLabel("\(scene.title) backdrop")
                         .accessibilityAddTraits(on ? .isSelected : [])
                     }
