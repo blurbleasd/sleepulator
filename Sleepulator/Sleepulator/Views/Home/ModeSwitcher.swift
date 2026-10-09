@@ -5,6 +5,9 @@ import SwiftUI
 struct ModeSwitcher: View {
     let focusMode: Bool
     let pal: Palette
+    /// A sleep session is live: the switch steps back (it's the last thing a half-asleep thumb
+    /// should find) but stays usable, and a switch still asks first (SessionGuards).
+    var quiet: Bool = false
     let onSelect: (_ focus: Bool) -> Void
 
     var body: some View {
@@ -19,6 +22,8 @@ struct ModeSwitcher: View {
         .padding(4)
         .background(Capsule().fill(pal.text.opacity(0.08)))
         .frame(maxWidth: .infinity)
+        .opacity(quiet ? 0.5 : 1)
+        .animation(.easeInOut(duration: 0.6), value: quiet)
     }
 
     private func select(_ focus: Bool) {
@@ -38,8 +43,18 @@ struct ModeSwitcher: View {
             .padding(.vertical, 6)
             // 44pt tall segments: the old 10pt padding left a 37pt hit area at the top of the screen.
             .frame(maxWidth: .infinity, minHeight: 44)
-            .foregroundColor(isActive ? pal.bg : pal.dim)
-            .background(Capsule().fill(isActive ? pal.accent : Color.clear))
+            // Ember, like the chips: a dim accent tint, cream label, top-lit hairline. The solid
+            // amber fill was the brightest surface on the bedside Home, brighter than the orb.
+            .foregroundColor(isActive ? pal.text : pal.dim)
+            .background {
+                if isActive {
+                    Capsule().fill(pal.accent.opacity(0.18))
+                        .overlay(Capsule().strokeBorder(
+                            LinearGradient(colors: [pal.accent.opacity(0.7), pal.accent.opacity(0.15)],
+                                           startPoint: .top, endPoint: .bottom),
+                            lineWidth: 1))
+                }
+            }
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)

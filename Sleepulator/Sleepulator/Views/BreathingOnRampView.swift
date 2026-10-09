@@ -3,7 +3,7 @@ import SwiftUI
 /// An optional ~1-minute breathing wind-down shown before a Sleep session begins
 /// (Settings → "Start with a minute of breathing"). It reuses the entrainment bloom
 /// (`BreathingBloomView`) and auto-starts the mix when the countdown elapses, or immediately on
-/// "Start now". "Skip" dismisses without starting.
+/// "Start now". The close button dismisses without starting.
 ///
 /// The countdown runs on `.task`, which SwiftUI cancels when the cover is dismissed — so once the
 /// user has started or skipped, the timer can't fire a second `onBegin`. Turning two existing
@@ -13,7 +13,7 @@ struct BreathingOnRampView: View {
     var seconds: Int = 60
     /// Begin the Sleep mix — the countdown elapsed, or the user tapped "Start now".
     let onBegin: () -> Void
-    /// Dismiss without starting — the user tapped "Skip".
+    /// Dismiss without starting — the user tapped the close button.
     let onCancel: () -> Void
 
     @State private var remaining: Int
@@ -86,12 +86,18 @@ struct BreathingOnRampView: View {
                         .accessibilityLabel("Your mix starts in \(remaining) seconds")
 
                     Button(action: begin) {
+                        // A lit outline, not a near-white slab: this screen is the wind-down,
+                        // and the solid button was the brightest thing on it.
                         Text("Start now")
                             .font(.system(.headline, design: .rounded))
-                            .foregroundColor(.black)
+                            .foregroundColor(.white.opacity(0.9))
                             .padding(.horizontal, 36)
                             .padding(.vertical, 14)
-                            .background(Capsule().fill(.white.opacity(0.92)))
+                            .background(Capsule().fill(.white.opacity(0.12)))
+                            .overlay(Capsule().strokeBorder(
+                                LinearGradient(colors: [.white.opacity(0.45), .white.opacity(0.1)],
+                                               startPoint: .top, endPoint: .bottom),
+                                lineWidth: 1))
                     }
                     .accessibilityLabel("Start mix now")
                 }

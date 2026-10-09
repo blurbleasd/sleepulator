@@ -57,7 +57,9 @@ struct ContentView: View {
     }
 
     private func wake() {
-        withAnimation(.easeInOut(duration: 0.4)) { nightDimmed = false }
+        // A slow ramp out of true black (dark-adapted eyes at 3am), not a 0.4 s flash to full
+        // chrome. The veil stops taking taps at once; only the light eases back.
+        withAnimation(.easeOut(duration: 1.6)) { nightDimmed = false }
         scheduleDim()
     }
 

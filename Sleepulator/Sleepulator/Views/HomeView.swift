@@ -166,7 +166,9 @@ struct HomeView: View {
     private func wakeChrome() {
         idleFade?.cancel()
         if audio.ambientScreensaver {
-            withAnimation(.easeInOut(duration: 0.4)) { audio.ambientScreensaver = false }
+            // Sleep eyes are dark-adapted: bring the controls up slowly rather than snapping them
+            // on. They take taps immediately; only the light ramps.
+            withAnimation(.easeOut(duration: audio.focusMode ? 0.4 : 1.0)) { audio.ambientScreensaver = false }
         }
         scheduleIdleFade()
     }
@@ -324,7 +326,9 @@ struct HomeView: View {
             // "Build mix" control that opens the full mixer in a drawer. Everything detailed
             // is deliberately tucked away.
             VStack(spacing: 0) {
-                ModeSwitcher(focusMode: audio.focusMode, pal: pal, onSelect: requestMode)
+                ModeSwitcher(focusMode: audio.focusMode, pal: pal,
+                             quiet: !audio.focusMode && (sessionActive || audio.sleepTimer.timerRemaining > 0),
+                             onSelect: requestMode)
                     // Attached here, not on the root, so iOS 26's popover-style dialog points at
                     // the switch that raised it.
                     .confirmationDialog(modeSwitchRequest?.warning.title ?? "",

@@ -95,6 +95,9 @@ struct NowPlayingSheet: View {
                     }
                     .frame(width: 250, height: 250)
                     .cornerRadius(20)
+                    // Show artwork is often near-white and was the brightest thing in the app at
+                    // night; in Sleep it sits back a step (Focus keeps it full).
+                    .opacity(pal.warm ? 0.78 : 1)
                     .shadow(color: .black.opacity(0.3), radius: 20, x: 0, y: 10)
                 } else if let image = UIImage(named: "AppIcon") ?? UIImage(named: "icon-512") {
                     Image(uiImage: image)
