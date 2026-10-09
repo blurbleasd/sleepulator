@@ -50,6 +50,12 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   re-render storm is what overwhelmed the podcast list (`perf(podcasts)` fix, 2026-06).
 - **The Night Limiter (on-device tap) replaced the server proxy.** Loudness-bounded so a loud
   podcast spike can't jolt you awake; it can follow the mode (on for Sleep, off for Focus).
+- **The podcast `AVPlayer` is disposable.** Every item carries the limiter tap (volume + the
+  sleep fade live there even with the limiter off), and an interruption can kill an AVPlayer +
+  tap pipeline for good — only a new AVPlayer recovers. `PodcastPlayer` rebuilds it on item
+  failure, media-services reset, or its tap-heartbeat watchdog (clock running, no audio). Never
+  reintroduce one AVPlayer for the process. If a podcast is "playing but silent" again, read the
+  exported log's `podcast resume:` / `rebuilding the AVPlayer` lines before touching volume code.
 - **Downloads live in Application Support**, not Documents (Apple 2.5.x: re-downloadable content
   must not be iCloud-backed). `isExcludedFromBackup`, ~2GB LRU cap (`AudioDownloader`).
 - **Persistence is per-key JSON** via `StorageManager`; one oversized write must not abort the
