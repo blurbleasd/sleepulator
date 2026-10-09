@@ -21,6 +21,8 @@ struct HomeView: View {
     /// One-time first-run coachmark: points at "Build mix" so a new user discovers that the app
     /// layers noise + binaural + podcasts. Set once the user dismisses it (or builds a mix).
     @AppStorage("hasCompletedFirstRun") private var hasCompletedFirstRun = false
+    /// The one-time "the sleep timer moved" note for people who used the app before the night ring.
+    @AppStorage("hasSeenNightRingTip") private var hasSeenNightRingTip = false
     @State private var showTimerActionSheet = false
     @State private var isPlayPressed = false
     @State private var showBreathing = false
@@ -274,7 +276,8 @@ struct HomeView: View {
             return
         }
 
-        let begin = withNightLength(resolveBegin())
+        // The night ring's timer starts with the session itself (AudioEngine.noteSessionStart).
+        let begin = resolveBegin()
         // Optional breathing wind-down before Sleep playback (never in Focus — Pomodoro starts now).
         if breathingOnRamp && !audio.focusMode {
             pendingStart = begin
@@ -286,28 +289,16 @@ struct HomeView: View {
         }
     }
 
-    /// In Sleep, beginning playback also starts the night ring's timer (unless the ring is on All
-    /// night, or a countdown is already running from before a pause).
-    private func withNightLength(_ begin: @escaping () -> Void) -> () -> Void {
-        let length = nightLength
-        let focus = audio.focusMode
-        return {
-            begin()
-            if let m = SessionGuards.timerOnPlay(focusMode: focus, lengthMinutes: length,
-                                                 timerActive: audio.sleepTimer.timerRemaining > 0) {
-                audio.sleepTimer.startSleepTimer(minutes: m)
-            }
-        }
-    }
-
     /// "Play & start timer" from the timer sheet: begin the mix (through the breathing on-ramp
     /// when it's on), then the countdown — so a sleep timer never runs over silence. With the
     /// on-ramp, the countdown starts when the mix does, not while you're still breathing.
     private func playAndStartTimer(minutes: Int) {
         let begin = resolveBegin()
         let session = {
+            // The sheet has already set the ring to `minutes`, so the engine's session-start rule
+            // times the night as the mix begins; start it here only if that didn't (no churn).
             begin()
-            audio.sleepTimer.startSleepTimer(minutes: minutes)
+            if audio.sleepTimer.timerRemaining <= 0 { audio.sleepTimer.startSleepTimer(minutes: minutes) }
         }
         if breathingOnRamp && !audio.focusMode {
             pendingStart = session
@@ -331,7 +322,15 @@ struct HomeView: View {
 
     /// The timer options sheet, from the night line, the ring's VoiceOver action or the orb's menu.
     private func openTimerOptions() {
+        if !hasSeenNightRingTip { hasSeenNightRingTip = true }   // they found the timer
         presentAfterMix { showTimerActionSheet = true }
+    }
+
+    /// Retiring the first-run card retires the "timer moved" note too: a new user's first-run copy
+    /// already covers the ring, so they should never see a note about it having moved.
+    private func retireFirstRunTip() {
+        if !hasCompletedFirstRun { hasCompletedFirstRun = true }
+        if !hasSeenNightRingTip { hasSeenNightRingTip = true }
     }
 
     /// The mode switcher asks; a live session gets a confirm first (SessionGuards).
@@ -369,7 +368,7 @@ struct HomeView: View {
 
     private var buildMixButton: some View {
         Button(action: {
-            if !hasCompletedFirstRun { hasCompletedFirstRun = true }
+            retireFirstRunTip()
             showMix = true
         }) {
             HStack(spacing: 7) {
@@ -504,6 +503,7 @@ struct HomeView: View {
                                   sleepTimer: audio.sleepTimer,
                                   pal: pal,
                                   openOptions: openTimerOptions)
+                            .anchorPreference(key: CoachmarkAnchorKey.self, value: .bounds) { [.nightLine: $0] }
 
                         if !activeLayers.isEmpty {
                             LayerPills(layers: activeLayers, pal: pal)
@@ -546,14 +546,21 @@ struct HomeView: View {
             // and picks a layout that fits it — so it never covers the orb its copy says to tap,
             // nor the row it points at. Inside the chrome stack, so it rides the chrome's fade.
             .overlayPreferenceValue(CoachmarkAnchorKey.self) { anchors in
-                if !hasCompletedFirstRun && !audio.focusMode,
+                if let tip = CoachmarkContent.current(focusMode: audio.focusMode,
+                                                      hasCompletedFirstRun: hasCompletedFirstRun,
+                                                      hasSeenNightRingTip: hasSeenNightRingTip),
                    let orb = anchors[.orb], let mixRow = anchors[.mixRow] {
                     GeometryReader { proxy in
-                        // Clear the whole night ring (its copy says to drag it), not just the disc.
-                        let room = CoachmarkLayout.room(orb: proxy[orb], mixRowTop: proxy[mixRow].minY,
-                                                        clearRadius: NightRing.ringSize / 2 + 4)
-                        FirstRunCoachmark(pal: pal) {
-                            withAnimation(.easeInOut(duration: 0.3)) { hasCompletedFirstRun = true }
+                        // Below the night line: the tip talks about the ring and its line, so both
+                        // stay visible (falling back to clearing the ring if the line isn't measured).
+                        let room = anchors[.nightLine].map {
+                            CoachmarkLayout.room(belowY: proxy[$0].maxY, mixRowTop: proxy[mixRow].minY)
+                        } ?? CoachmarkLayout.room(orb: proxy[orb], mixRowTop: proxy[mixRow].minY,
+                                                  clearRadius: NightRing.ringSize / 2 + 4)
+                        FirstRunCoachmark(pal: pal, content: tip) {
+                            withAnimation(.easeInOut(duration: 0.3)) {
+                                if tip == .firstRun { retireFirstRunTip() } else { hasSeenNightRingTip = true }
+                            }
                         }
                         .padding(.horizontal, 28)
                         .frame(width: proxy.size.width, height: room.height, alignment: .bottom)
@@ -624,7 +631,7 @@ struct HomeView: View {
                         cycleScene(dx < 0 ? 1 : -1)               // swipe left → next scene
                     } else if dy < -60 && abs(dy) > abs(dx) * 1.3 {
                         if audio.ambientScreensaver { wakeChrome() }
-                        if !hasCompletedFirstRun { hasCompletedFirstRun = true }
+                        retireFirstRunTip()
                         showMix = true                            // swipe up → open the mixer
                     }
                 }
@@ -656,9 +663,10 @@ struct HomeView: View {
         .onChange(of: assistiveTechRunning) { _, _ in wakeChrome() }
         // A sheet opening cancels the countdown; closing one wakes the chrome and restarts it.
         .onChange(of: presentingFromHome) { _, _ in wakeChrome() }
-        // The first ring commit counts as finding the feature: retire the first-run tip.
+        // Using the ring counts as finding it: retire both tips.
         .onChange(of: nightLength) { _, _ in
-            if !hasCompletedFirstRun { hasCompletedFirstRun = true }
+            retireFirstRunTip()
+            if !hasSeenNightRingTip { hasSeenNightRingTip = true }
         }
         // A confirm answered (or timed out) needs no pending auto-dismiss.
         .onChange(of: modeSwitchRequest == nil) { _, cleared in

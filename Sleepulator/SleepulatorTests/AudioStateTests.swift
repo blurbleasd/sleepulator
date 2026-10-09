@@ -1386,6 +1386,13 @@ final class CoachmarkLayoutTests: XCTestCase {
         XCTAssertEqual(room.top + room.height, 420 - CoachmarkLayout.clearance)
     }
 
+    func testRoomStartsBelowTheNightLine() {
+        let room = CoachmarkLayout.room(belowY: 560, mixRowTop: 730)
+        XCTAssertEqual(room.top, 560 + CoachmarkLayout.clearance)
+        XCTAssertEqual(room.top + room.height, 730 - CoachmarkLayout.clearance)
+        XCTAssertEqual(CoachmarkLayout.room(belowY: 760, mixRowTop: 730).height, 0)
+    }
+
     func testRoomIsEmptyNotNegativeWhenTheRowCrowdsTheOrb() {
         // Large text on a small phone can push the row up against the disc: the card gets no
         // room (and shows nothing) instead of a negative height.
@@ -1706,5 +1713,98 @@ final class StageForEditingTests: XCTestCase {
         e.stageForEditing(mix("ocean", "delta"))                  // Sleep-only picks
         XCTAssertEqual(e.noiseType, n); XCTAssertEqual(e.binauralPreset, b)
         e.focusMode = false
+    }
+}
+
+/// Every way of starting a Sleep session from rest honours the night ring (it used to be the orb
+/// only): the engine starts the timer on the idle → playing edge.
+@MainActor
+final class NightTimerSessionStartTests: XCTestCase {
+    private final class NoopBackstop: SleepTimerBackstopScheduling {
+        func schedule(after seconds: TimeInterval) {}
+        func cancel() {}
+    }
+
+    private func engine(length: Double, focus: Bool = false) -> AudioEngine {
+        let e = AudioEngine()
+        e.sleepTimer.backstop = NoopBackstop()
+        e.nightLengthProvider = { length }
+        e.focusMode = focus
+        return e
+    }
+
+    private func tearDownEngine(_ e: AudioEngine) {
+        e.noiseOn = false; e.binauralOn = false; e.isPodPlaying = false
+        e.sleepTimer.cancelTimer()
+        e.focusMode = false
+    }
+
+    func testASleepSessionFromRestStartsTheNightTimer() {
+        let e = engine(length: 30)
+        defer { tearDownEngine(e) }
+        e.noiseOn = true                                       // a mixer switch, not the orb
+        XCTAssertEqual(e.sleepTimer.timerRemaining, 30 * 60, accuracy: 2)
+    }
+
+    func testAPodcastStartCountsToo() {
+        let e = engine(length: 20)
+        defer { tearDownEngine(e) }
+        e.isPodPlaying = true                                  // lock screen / AirPods / Podcasts tab
+        XCTAssertEqual(e.sleepTimer.timerRemaining, 20 * 60, accuracy: 2)
+    }
+
+    func testFocusNeverTimesAndAllNightStartsNothing() {
+        let f = engine(length: 30, focus: true)
+        defer { tearDownEngine(f) }
+        f.noiseOn = true
+        XCTAssertEqual(f.sleepTimer.timerRemaining, 0)
+
+        let a = engine(length: 0)
+        defer { tearDownEngine(a) }
+        a.noiseOn = true
+        XCTAssertEqual(a.sleepTimer.timerRemaining, 0)
+    }
+
+    func testAddingALayerMidSessionDoesNotRestartTheNight() {
+        var length = 30.0
+        let e = engine(length: 30)
+        e.nightLengthProvider = { length }
+        defer { tearDownEngine(e) }
+        e.noiseOn = true
+        length = 60
+        e.binauralOn = true                                    // already playing: not a new session
+        XCTAssertEqual(e.sleepTimer.timerRemaining, 30 * 60, accuracy: 2)
+    }
+
+    func testResumingAfterAPauseKeepsTheRunningCountdown() {
+        var length = 30.0
+        let e = engine(length: 30)
+        e.nightLengthProvider = { length }
+        defer { tearDownEngine(e) }
+        e.noiseOn = true
+        e.noiseOn = false                                      // paused (the countdown keeps going)
+        length = 60
+        e.noiseOn = true                                       // resume, or a podcast stall ending
+        XCTAssertEqual(e.sleepTimer.timerRemaining, 30 * 60, accuracy: 2)
+    }
+}
+
+/// Which Home tip shows: the first-run card for new users, the "timer moved" note once for people
+/// who used the app before the night ring, nothing in Focus.
+final class CoachmarkContentTests: XCTestCase {
+    func testNewUsersGetTheFirstRunCardOnly() {
+        XCTAssertEqual(CoachmarkContent.current(focusMode: false, hasCompletedFirstRun: false, hasSeenNightRingTip: false), .firstRun)
+        // Retiring it retires the note too (HomeView.retireFirstRunTip sets both).
+        XCTAssertNil(CoachmarkContent.current(focusMode: false, hasCompletedFirstRun: true, hasSeenNightRingTip: true))
+    }
+
+    func testUpgradersSeeTheNightRingNoteOnce() {
+        XCTAssertEqual(CoachmarkContent.current(focusMode: false, hasCompletedFirstRun: true, hasSeenNightRingTip: false), .nightRing)
+        XCTAssertFalse(CoachmarkContent.nightRing.pointsDown)       // it's about the ring above, not Build mix
+    }
+
+    func testNoTipsInFocus() {
+        XCTAssertNil(CoachmarkContent.current(focusMode: true, hasCompletedFirstRun: false, hasSeenNightRingTip: false))
+        XCTAssertNil(CoachmarkContent.current(focusMode: true, hasCompletedFirstRun: true, hasSeenNightRingTip: false))
     }
 }

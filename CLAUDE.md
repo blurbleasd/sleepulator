@@ -69,11 +69,15 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   (`AudioEngine.reconcileSoundsToMode`).
 - **The sleep timer starts from the Home orb's night ring.** `NightRing` sets
   `nightLengthMinutes` (0 = All night, the default, so an update never starts timing anyone out).
-  In Sleep, Play also starts the timer at that length; resuming from a pause keeps the running
-  countdown. The timer sheet syncs the ring, and with nothing playing its commit is "Play & start
-  timer", so a countdown never runs over silence. These rules, the mode-switch confirm over a live
-  session, and "the night veil only drops over sound" live in `SessionGuards` (pure,
-  unit-tested): change them there, not in view code.
+  Any Sleep session starting from rest starts the timer at that length: `AudioEngine.noteSessionStart`
+  on the idle→playing edge of `noiseOn`/`binauralOn`/`isPodPlaying`, so the orb, mixer switches,
+  podcasts, lock screen/AirPods, Siri and the widget all honour it. Nothing in Focus, for All night,
+  or while a countdown runs (resume, interruption, stall keep the night). The timer sheet syncs the
+  ring; its "Play all night" sets All night (the ring is the setting), and with nothing playing its
+  commit is "Play & start timer", so a countdown never runs over silence. The pure rules
+  (`timerOnPlay`, the mode-switch confirm over a live session, "the night veil only drops over
+  sound") live in `SessionGuards`, unit-tested: change them there, not in view code. Tests that
+  start sessions set `engine.nightLengthProvider` rather than relying on the simulator's defaults.
 - **Isolated deinits.** Under `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor` a class with no explicit
   `deinit` gets an implicit MainActor-*isolated* one (an explicit `deinit` is nonisolated). On the
   iOS 18.4–26.3 Swift runtimes that path aborts ("pointer being freed was not allocated" in

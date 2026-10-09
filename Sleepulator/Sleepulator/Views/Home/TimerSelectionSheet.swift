@@ -191,11 +191,16 @@ struct TimerSelectionSheet: View {
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
                     isPresented = false
                 }) {
-                    Label("Turn off timer", systemImage: "moon.zzz")
+                    // Says what it does: it stops tonight's countdown AND sets the ring to All night,
+                    // which Play then honours on later nights too (the ring is the setting).
+                    Label("Play all night", systemImage: "moon.zzz")
                         .font(.subheadline.weight(.medium))
                         .foregroundColor(pal.dim)
                         .frame(minHeight: 44)
+                        .contentShape(Rectangle())
                 }
+                .accessibilityLabel("Turn off the timer and play all night")
+                .accessibilityHint("The ring stays on All night until you set a length again")
             }
 
             Spacer()

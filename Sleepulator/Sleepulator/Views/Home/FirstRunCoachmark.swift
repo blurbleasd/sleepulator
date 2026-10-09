@@ -8,20 +8,53 @@ import SwiftUI
 // measures the room between the two (`CoachmarkLayout`) and proposes exactly that height; the
 // card then shows the largest layout that fits — the full card on standard phones, a brief one on
 // an SE-class screen or at large text sizes, and nothing at all if even the brief one can't fit.
+/// What a Home tip says. `firstRun` for a new user; `nightRing` once, for someone who used the app
+/// before the sleep timer moved from its text link onto the orb's ring (and Breathing into the
+/// mixer) — they never see the first-run card, so nothing else would tell them.
+struct CoachmarkContent: Equatable {
+    let icon: String
+    let title: String
+    let message: String
+    /// The brief card's line. VoiceOver still hears `message` in full.
+    let briefMessage: String
+    /// Whether the full card points down at Build mix (the first-run copy is about it).
+    let pointsDown: Bool
+
+    static let firstRun = CoachmarkContent(
+        icon: "square.stack.3d.up.fill",
+        title: "Layer your own soundscape",
+        message: "Tap the orb to start. Drag its ring to set how long it plays before fading out, and open Build mix to stack noise, binaural beats, and your own podcasts.",
+        briefMessage: "Tap the orb to start; drag its ring to set how long.",
+        pointsDown: true)
+
+    static let nightRing = CoachmarkContent(
+        icon: "moon.zzz",
+        title: "The sleep timer moved",
+        message: "It's the ring around the orb now: drag its handle to set how long tonight plays before it fades out. Breathing lives in Build mix.",
+        briefMessage: "Drag the ring around the orb to set the timer.",
+        pointsDown: false)
+
+    /// Which tip Home shows, if any: never in Focus; the first-run card until it's retired; then
+    /// the night-ring note once for upgraders (retiring the first-run card retires it too, since
+    /// that copy already covers the ring).
+    static func current(focusMode: Bool, hasCompletedFirstRun: Bool, hasSeenNightRingTip: Bool) -> CoachmarkContent? {
+        if focusMode { return nil }
+        if !hasCompletedFirstRun { return .firstRun }
+        return hasSeenNightRingTip ? nil : .nightRing
+    }
+}
+
 struct FirstRunCoachmark: View {
     let pal: Palette
+    var content: CoachmarkContent = .firstRun
     let dismiss: () -> Void
 
-    private static let title = "Layer your own soundscape"
-    private static let message = "Tap the orb to start. Drag its ring to set how long it plays before fading out, and open Build mix to stack noise, binaural beats, and your own podcasts."
-    /// The brief card's line. VoiceOver still hears `message` in full.
-    private static let briefMessage = "Tap the orb to start; drag its ring to set how long."
     /// Text sizes the brief card steps down through, largest first, when it can't fit as-is.
     private static let textSizeCaps: [DynamicTypeSize] = [.xxxLarge, .xxLarge, .xLarge, .large]
 
     var body: some View {
         ViewThatFits(in: .vertical) {
-            full(pointer: true)
+            if content.pointsDown { full(pointer: true) }
             full(pointer: false)
             brief
             // Out of room at a large text size: the tip stops growing at the largest size that
@@ -67,11 +100,11 @@ struct FirstRunCoachmark: View {
         HStack(spacing: UI.md) {
             VStack(alignment: .leading, spacing: UI.xs) {
                 titleText
-                Text(Self.briefMessage)
+                Text(content.briefMessage)
                     .font(.caption)
                     .foregroundColor(pal.dim)
                     .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityLabel(Self.message)
+                    .accessibilityLabel(content.message)
             }
             Spacer(minLength: 0)
             gotIt
@@ -81,19 +114,19 @@ struct FirstRunCoachmark: View {
     }
 
     private var icon: some View {
-        Image(systemName: "square.stack.3d.up.fill")
+        Image(systemName: content.icon)
             .foregroundColor(pal.accent)
     }
 
     private var titleText: some View {
-        Text(Self.title)
+        Text(content.title)
             .font(.system(.subheadline, design: .rounded).weight(.semibold))
             .foregroundColor(pal.text)
             .fixedSize(horizontal: false, vertical: true)
     }
 
     private var messageText: some View {
-        Text(Self.message)
+        Text(content.message)
             .font(.caption)
             .foregroundColor(pal.dim)
             .fixedSize(horizontal: false, vertical: true)
@@ -150,11 +183,18 @@ enum CoachmarkLayout {
         let top = orb.midY + clearRadius + clearance
         return (top, max(0, mixRowTop - clearance - top))
     }
+
+    /// The band between a measured line above (on Sleep, the night line under the ring, which the
+    /// tip talks about and so must stay readable) and the Build mix row below.
+    static func room(belowY: CGFloat, mixRowTop: CGFloat) -> (top: CGFloat, height: CGFloat) {
+        let top = belowY + clearance
+        return (top, max(0, mixRowTop - clearance - top))
+    }
 }
 
 /// The two views the coachmark is placed between, collected as anchors up to HomeView's chrome
 /// stack — they're siblings, so neither can measure the other directly.
-enum CoachmarkAnchor: Hashable { case orb, mixRow }
+enum CoachmarkAnchor: Hashable { case orb, nightLine, mixRow }
 
 struct CoachmarkAnchorKey: PreferenceKey {
     static var defaultValue: [CoachmarkAnchor: Anchor<CGRect>] = [:]
