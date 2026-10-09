@@ -69,7 +69,8 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   a task-local is bound outside a Task, and XCTest binds one around every sync test. So any class
   `AudioEngine` owns, or that tests create and free (`SceneClock`, temp-dir `StorageManager`,
   `PodcastParser`), declares `nonisolated deinit {}`. A new engine-owned class without it crashes
-  `IsolatedDeinitRuntimeBugTests` on an iOS 26.3 sim; 26.4+ runtimes hide the bug.
+  `IsolatedDeinitRuntimeBugTests` on an iOS 26.3 sim; 26.4+ runtimes hide the bug. CI runs the
+  suite on both the newest runtime and the newest still-affected one (iOS 26.2 on the runner).
 
 ## Build / run
 - **Native Xcode build** — open `Sleepulator/Sleepulator.xcodeproj`. NOT Capacitor/CLI; there's

@@ -31,50 +31,80 @@ jobs:
           xcodebuild -version
           swift --version
 
-      # Device names drift across Xcode versions, so resolve an available iPhone
-      # simulator UDID instead of hardcoding a name (a wrong name = "destination not found").
-      - name: Pick an available iPhone simulator
+      # Device names drift across Xcode versions, so resolve iPhone simulator UDIDs instead of
+      # hardcoding names (a wrong name = "destination not found"). Two picks:
+      #   latest: the newest iOS runtime on the runner (what most users' phones run).
+      #   guard:  the newest runtime still in iOS 18.4-26.3, where the isolated-deinit runtime bug
+      #           (CLAUDE.md, "Isolated deinits") is live. 26.4+ hides it, so without this run
+      #           IsolatedDeinitRuntimeBugTests can't catch a class missing `nonisolated deinit {}`.
+      #           On macos-26-arm64 that's iOS 26.2; the image ships 26.2, 26.4 and 26.5.
+      # No guard runtime fails the job rather than silently dropping the guard.
+      - name: Pick iPhone simulators
         id: sim
         run: |
-          UDID=$(xcrun simctl list devices available -j | python3 -c '
+          if ! xcrun simctl list devices available -j | python3 -c '
           import json, sys
           data = json.load(sys.stdin)["devices"]
-          pick = ""
-          for runtime, devices in sorted(data.items()):
-              if "iOS" not in runtime:
+          # Runtime keys end in e.g. "iOS-26-2". Compare versions numerically: as strings,
+          # "iOS-26-10" would sort before "iOS-26-2".
+          def version(runtime):
+              tail = runtime.rsplit(".", 1)[-1]
+              if not tail.startswith("iOS-"):
+                  return None
+              try:
+                  return tuple(int(part) for part in tail[4:].split("-"))
+              except ValueError:
+                  return None
+          iphones = []
+          for runtime, devices in data.items():
+              v = version(runtime)
+              if v is None:
                   continue
               for dev in devices:
                   if dev.get("isAvailable") and dev["name"].startswith("iPhone"):
-                      pick = dev["udid"]   # newest sorted runtime wins
-                      label = runtime.rsplit(".", 1)[-1] + " / " + dev["name"]
-          if pick:
-              print("Simulator runtime: " + label, file=sys.stderr)
-          print(pick)
-          ')
-          if [ -z "$UDID" ]; then echo "::error::No iOS simulator available"; xcrun simctl list devices; exit 1; fi
-          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
-          echo "Using simulator $UDID"
+                      iphones.append((v, dev["name"], dev["udid"]))
+          picks = {
+              "latest": max(iphones, default=None),
+              "guard": max((c for c in iphones if (18, 4) <= c[0] < (26, 4)), default=None),
+          }
+          for key, pick in picks.items():
+              if pick is None:
+                  print("::error::No iPhone simulator for " + key + " (guard needs an iOS 18.4-26.3 runtime)",
+                        file=sys.stderr)
+                  sys.exit(1)
+              print(key + " simulator: iOS " + ".".join(map(str, pick[0])) + " / " + pick[1], file=sys.stderr)
+              print(key + "=" + pick[2])
+          ' >> "$GITHUB_OUTPUT"; then
+            xcrun simctl list runtimes
+            exit 1
+          fi
 
       # Boot first: a cold simulator makes `xcodebuild test` fail with
       # "the test runner hung before establishing connection".
-      - name: Boot simulator
+      - name: Boot simulators
         run: |
-          xcrun simctl boot "${{ steps.sim.outputs.udid }}" || true
-          xcrun simctl bootstatus "${{ steps.sim.outputs.udid }}" -b || true
+          for udid in "${{ steps.sim.outputs.guard }}" "${{ steps.sim.outputs.latest }}"; do
+            xcrun simctl boot "$udid" || true
+            xcrun simctl bootstatus "$udid" -b || true
+          done
 
-      # Builds the app + widget + tests (the compile gate, incl. Metal shaders) and runs EVERY test
-      # class. The AudioEngine-owning suites used to be excluded as "crash on a headless CI
-      # simulator"; the real cause was the isolated-deinit runtime bug (CLAUDE.md, "Isolated
-      # deinits"), fixed in PR #18. IsolatedDeinitRuntimeBugTests guards it, but only on an
-      # iOS 18.4–26.3 sim runtime; newer runtimes hide the bug. None of this exercises real audio:
-      # the on-device gate in CLAUDE.md still applies.
+      # Builds the app + widget + tests (the compile gate, incl. Metal shaders), then runs EVERY
+      # test class on both simulators, one after the other: two at once is a lot for the runner.
+      # The AudioEngine-owning suites used to be excluded as "crash on a headless CI simulator";
+      # the real cause was the isolated-deinit runtime bug, fixed in PR #18. None of this
+      # exercises real audio: the on-device gate in CLAUDE.md still applies.
       - name: Build & test
         run: |
           set -o pipefail
+          DESTINATIONS=(-destination "id=${{ steps.sim.outputs.guard }}")
+          if [ "${{ steps.sim.outputs.latest }}" != "${{ steps.sim.outputs.guard }}" ]; then
+            DESTINATIONS+=(-destination "id=${{ steps.sim.outputs.latest }}")
+          fi
           xcodebuild test \
             -project Sleepulator/Sleepulator.xcodeproj \
             -scheme Sleepulator \
-            -destination "id=${{ steps.sim.outputs.udid }}" \
+            "${DESTINATIONS[@]}" \
+            -maximum-concurrent-test-simulator-destinations 1 \
             -resultBundlePath TestResults.xcresult \
             CODE_SIGNING_ALLOWED=NO
 
