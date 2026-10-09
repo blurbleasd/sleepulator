@@ -33,7 +33,70 @@ struct LimiterState {
     var lpHighR: Float
     var lpLowL: Float
     var lpLowR: Float
+    /// The owning player's render heartbeat (see `PodcastPlayer.tapHeartbeat`), bumped on the
+    /// render thread by this tap.
+    var heartbeat: UnsafeMutablePointer<TapHeartbeat>?
     var player: Unmanaged<PodcastPlayer>?
+}
+
+/// Proof-of-life counters the limiter tap bumps on the render thread (plain stores — no lock,
+/// no allocation) and the main thread samples at 1 Hz.
+struct TapHeartbeat {
+    /// Buffers in which the tap successfully pulled source audio from the player.
+    var pulls: UInt64 = 0
+    /// Of those, buffers whose source had real signal (not digital silence).
+    var signal: UInt64 = 0
+}
+
+/// Detects "the podcast plays but it's muted": the AVPlayer's clock keeps advancing (progress
+/// moves, the lock screen says playing, the noise bed is audible) while no podcast audio comes
+/// out. That is the signature of an AVPlayer whose audio pipeline died under it — documented for
+/// AVPlayer + MTAudioProcessingTap on iOS 17+ after a Clock alarm, and seen here on mornings
+/// with no alarm (overnight suspension / an earbud route change) — after which ONLY a new
+/// AVPlayer instance plays sound again. Two tiers, because a dead pipeline can look two ways:
+/// the tap stops being fed at all (fast, unambiguous), or it's fed nothing but digital silence
+/// (slow — a real episode can have silent passages, almost never this long). Pure → testable.
+struct RenderHeartbeatMonitor {
+    enum Verdict: Equatable {
+        case rendering      // real podcast audio went through the tap since the last tick
+        case unknown        // nothing conclusive yet
+        case dead           // clock advancing, tap not fed at all
+        case sourceSilent   // clock advancing, tap fed only digital silence
+    }
+
+    /// Seconds of advancing playback with the tap not fed at all. A healthy tap is fed many times
+    /// a second, even with the screen locked.
+    static let deadAfter: Double = 4
+    /// Seconds of advancing playback with the tap fed only digital silence. Long, because sleep
+    /// and meditation tracks can carry real silent passages; a rebuild inside one is inaudible.
+    static let silentSourceAfter: Double = 45
+
+    private var last: (pulls: UInt64, signal: UInt64, clock: Double)?
+    private(set) var unfedSeconds: Double = 0
+    private(set) var silentSeconds: Double = 0
+
+    mutating func reset() {
+        last = nil
+        unfedSeconds = 0
+        silentSeconds = 0
+    }
+
+    /// Feed one time-observer tick. `eligible` means the player claims to be playing an item that
+    /// has a tap (otherwise there's no heartbeat to expect) — anything else resets.
+    mutating func observe(_ beat: TapHeartbeat, clock: Double, eligible: Bool) -> Verdict {
+        guard eligible, clock.isFinite else { reset(); return .unknown }
+        defer { last = (beat.pulls, beat.signal, clock) }
+        guard let prev = last else { return .unknown }
+        // Only forward, playback-sized steps count. A backwards jump or a big leap is a seek, and a
+        // clock that isn't moving isn't "playing muted" (that's a stall, handled elsewhere).
+        let step = clock - prev.clock
+        let played = (step > 0 && step < 5) ? step : 0
+        unfedSeconds = beat.pulls == prev.pulls ? unfedSeconds + played : 0
+        silentSeconds = beat.signal == prev.signal ? silentSeconds + played : 0
+        if unfedSeconds >= Self.deadAfter { return .dead }
+        if silentSeconds >= Self.silentSourceAfter { return .sourceSilent }
+        return beat.signal != prev.signal ? .rendering : .unknown
+    }
 }
 
 final class PodcastPlayer: NSObject {
@@ -80,7 +143,8 @@ final class PodcastPlayer: NSObject {
     /// in (the "next podcast doesn't start at the beginning" race). The sleep-timer keep-alive
     /// (backgroundTick) is intentionally NOT gated by this — it must keep firing across a swap.
     private var isLoadingItem = false
-    private var currentItem: AVPlayerItem?
+    /// Read-only outside so tests can drive the item-level failure notifications.
+    private(set) var currentItem: AVPlayerItem?
     private var currentTitle: String = "No episode loaded"
     private var playbackSpeed: Float = 1.0
     /// Seconds for the skip-back / skip-forward controls and lock-screen commands.
@@ -109,6 +173,30 @@ final class PodcastPlayer: NSObject {
     /// advancing the queue, so the finished episode stays both loaded and at the queue head.
     /// Cleared by a fresh `play()` and by any explicit seek (scrubbing back un-spends it).
     private(set) var didPlayToEnd = false
+
+    /// True once this AVPlayer's audio pipeline is known dead (item failed to play to end, media
+    /// services reset, or the heartbeat watchdog caught it playing muted). The next `play()` /
+    /// `resume()` throws the AVPlayer away and builds a fresh one — re-using it is what left the
+    /// podcast muted until a force-quit, since even a new episode went into the same dead player.
+    private(set) var needsRebuild = false
+    /// Bumped by the limiter tap on the render thread; read on main by the heartbeat watchdog.
+    /// Single writer at a time (the rendering tap), and aligned 64-bit loads/stores are single-copy
+    /// atomic on arm64 — a stale read only delays detection by a tick. Lives as long as the player
+    /// (every tap retains the player, so it outlives them).
+    fileprivate let tapHeartbeat: UnsafeMutablePointer<TapHeartbeat> = {
+        let p = UnsafeMutablePointer<TapHeartbeat>.allocate(capacity: 1)
+        p.initialize(to: TapHeartbeat())
+        return p
+    }()
+    /// Snapshot of the tap counters — what the watchdog and the resume log line read.
+    var renderHeartbeat: TapHeartbeat { heartbeatOverride?() ?? tapHeartbeat.pointee }
+    /// Injectable for tests: a frozen reader stands in for a dead pipeline, which the simulator
+    /// can't produce on demand.
+    var heartbeatOverride: (() -> TapHeartbeat)?
+    private var heartbeatMonitor = RenderHeartbeatMonitor()
+    /// Automatic (watchdog) rebuilds since the tap last rendered. Capped at 1 so a player that
+    /// stays silent after a rebuild can't trigger a rebuild loop all night.
+    private var autoRebuildsWithoutRender = 0
 
     /// How far to rewind on resume given how long playback was paused. The longer the gap, the
     /// further back — so a quick pause barely moves, but nodding off and coming back recovers
@@ -165,6 +253,8 @@ final class PodcastPlayer: NSObject {
     fileprivate let stateLock = NSLock()
     
     var hasPlayer: Bool { player?.currentItem != nil }
+    /// Identity of the live AVPlayer — lets tests prove a dead pipeline gets a NEW player.
+    var playerInstanceId: ObjectIdentifier? { player.map(ObjectIdentifier.init) }
     /// The id of the episode actually loaded in the AVPlayer — the ground truth the owner compares
     /// against the queue head to detect display/audio divergence (sleep-aware hold, see
     /// `resumeOverrideFn`). nil until the first `play()`.
@@ -207,6 +297,8 @@ final class PodcastPlayer: NSObject {
         preloadTapTask?.cancel()
         playbackTask?.cancel()
         flushPositionsToDisk()
+        tapHeartbeat.deinitialize(count: 1)
+        tapHeartbeat.deallocate()
     }
     
     /// Cap the resume-position map at `cap` entries, always keeping `currentId` (the episode in
@@ -298,6 +390,8 @@ final class PodcastPlayer: NSObject {
         NotificationCenter.default.addObserver(self, selector: #selector(itemDidFinishPlaying), name: .AVPlayerItemDidPlayToEndTime, object: playerItem)
         NotificationCenter.default.removeObserver(self, name: .AVPlayerItemPlaybackStalled, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(itemStalled), name: .AVPlayerItemPlaybackStalled, object: playerItem)
+        NotificationCenter.default.removeObserver(self, name: .AVPlayerItemFailedToPlayToEndTime, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(itemFailedToPlayToEnd(_:)), name: .AVPlayerItemFailedToPlayToEndTime, object: playerItem)
 
         playerItem.addObserver(self, forKeyPath: "status", options: [.new, .old], context: nil)
         
@@ -314,7 +408,12 @@ final class PodcastPlayer: NSObject {
                     onPlaybackNote?("Volume limiter off for this stream")
                 }
             }
-            
+
+            // A dead pipeline never comes back on the same AVPlayer — not via pause/play, and not
+            // via replaceCurrentItem — so drop it and let the branch below build a fresh one. This
+            // covers every load path (resume rebuild, queue advance, a newly picked episode).
+            if needsRebuild { discardPlayer() }
+
             if player == nil {
                 player = AVPlayer(playerItem: playerItem)
                 player?.automaticallyWaitsToMinimizeStalling = true
@@ -348,6 +447,9 @@ final class PodcastPlayer: NSObject {
                             self.flushPositionsToDisk()
                         }
                     }
+
+                    // The clock is ticking — is any audio actually being rendered?
+                    self.checkRenderHeartbeat(clock: time.seconds)
 
                     self.backgroundTick?()
                 }
@@ -411,18 +513,36 @@ final class PodcastPlayer: NSObject {
 
         // Adaptive rewind: nudge back proportionally to how long we were paused so you don't
         // resume mid-sentence (and recover the thread if you nodded off). Seek before play.
+        var rewindTarget: Double?
         if let pausedAt = pausedAt {
             let rewind = Self.adaptiveRewind(forPause: Date().timeIntervalSince(pausedAt))
             if rewind > 0 {
-                let target = max(0, CMTimeGetSeconds(player.currentTime()) - rewind)
-                player.seek(to: CMTime(seconds: target, preferredTimescale: 1000),
-                            toleranceBefore: .zero, toleranceAfter: .zero)
+                rewindTarget = max(0, CMTimeGetSeconds(player.currentTime()) - rewind)
             }
         }
         pausedAt = nil
 
         onResume?()                      // a resume is a "keep listening" signal — let the owner
                                          // lift a sleep-timer tail whose fade would mute this play
+        // One line per resume for the exported trail: if a podcast is ever silent again, this says
+        // whether the level, the route, or the pipeline (fed/signal counters) was the problem.
+        let hb = renderHeartbeat
+        let route = AVAudioSession.sharedInstance().currentRoute.outputs.map(\.portType.rawValue).joined(separator: ",")
+        Log.audio.notice("podcast resume: level=\(self.currentVolume * self.fadeMult, privacy: .public) needsRebuild=\(self.needsRebuild, privacy: .public) fed=\(hb.pulls, privacy: .public) signal=\(hb.signal, privacy: .public) route=\(route, privacy: .public)")
+
+        // This AVPlayer's audio pipeline died (alarm / interruption / media reset). Playing it
+        // again would run the clock in silence — the "muted until force-quit" bug — so rebuild a
+        // fresh player at the same spot instead.
+        if needsRebuild {
+            Log.audio.notice("podcast resume on a dead pipeline — rebuilding the AVPlayer")
+            rebuildPlayer(at: rewindTarget ?? currentPositionSeconds)
+            return true
+        }
+
+        if let target = rewindTarget {
+            player.seek(to: CMTime(seconds: target, preferredTimescale: 1000),
+                        toleranceBefore: .zero, toleranceAfter: .zero)
+        }
         beginFadeIn()                    // ease back in instead of snapping to full volume
         player.play()
         player.rate = playbackSpeed
@@ -588,6 +708,117 @@ final class PodcastPlayer: NSObject {
         onPlaybackNote?(nil)
     }
 
+    // MARK: - Dead-pipeline recovery
+    //
+    // "The podcast plays but it's muted until I force-quit." This AVPlayer always carries the
+    // limiter tap (it applies volume + the sleep fade even with the limiter off), and AVPlayer +
+    // MTAudioProcessingTap has a known iOS 17+ failure: a Clock alarm (or other system audio)
+    // interrupting it kills the audio pipeline (`rt_receiver::receive_loop failed: 89`, then
+    // `AVPlayerItemFailedToPlayToEndTime`). Pause/play does not revive it — only a new AVPlayer
+    // does — and this class used to keep one AVPlayer for the whole process. So: detect the death
+    // three ways (item failure, media-services reset, heartbeat watchdog) and rebuild.
+
+    /// `.AVPlayerItemFailedToPlayToEndTime` — posted on an arbitrary thread. Fires for the alarm
+    /// failure above and for a stream error mid-episode; a fresh player at the same spot is the
+    /// right answer to both.
+    @objc private func itemFailedToPlayToEnd(_ note: Notification) {
+        let reason = (note.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? Error)?.localizedDescription ?? "unknown error"
+        let failedItem = (note.object as AnyObject?).map(ObjectIdentifier.init)
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let current = self.currentItem,
+                  failedItem == ObjectIdentifier(current) else { return }   // a stale item's news
+            Log.audio.error("podcast failed to play to end (\(reason, privacy: .public)) — AVPlayer will be rebuilt on next play")
+            self.markPipelineDead()
+        }
+    }
+
+    /// The media server restarted: every AVFoundation playback object is now invalid (Apple:
+    /// dispose and recreate). Rebuild right away if the podcast was playing, else on next play.
+    func handleMediaServicesReset() {
+        guard player != nil else { return }
+        let wasPlaying = pausedAt == nil && !didPlayToEnd
+        Log.audio.error("media services reset — podcast AVPlayer will be rebuilt (wasPlaying=\(wasPlaying, privacy: .public))")
+        markPipelineDead()
+        if wasPlaying { resume() }
+    }
+
+    /// Flag the AVPlayer as dead and stop pretending it's playing: the transport, the mini-player
+    /// and the lock screen all go to "paused" — the next play rebuilds. Showing paused beats the
+    /// old behavior of a clock that runs in silence.
+    private func markPipelineDead() {
+        needsRebuild = true
+        heartbeatMonitor.reset()
+        cancelStallWatchdog()
+        if pausedAt == nil { pausedAt = Date() }   // keep an earlier pause so the rewind is honest
+        player?.pause()
+        onPlaybackStateChanged?(false)
+        updateNowPlaying(isPlaying: false)
+    }
+
+    /// Re-open the current episode on a brand-new AVPlayer (and a fresh item + tap) at `position`.
+    /// Falls back to the saved-position map when the dead player can't say where it was.
+    private func rebuildPlayer(at position: Double?) {
+        guard let url = currentUrl, let id = currentId else { return }
+        needsRebuild = true                // play() discards the dead player before loading
+        play(url: url, id: id, title: currentTitle, resume: true, startAt: position)
+    }
+
+    /// Tear the dead AVPlayer down completely: its time observer, its item, and the item's audio
+    /// mix — dropping the mix is what lets AVFoundation release (and finalize) the dead tap.
+    private func discardPlayer() {
+        needsRebuild = false
+        heartbeatMonitor.reset()
+        guard let dead = player else { return }
+        if let observer = timeObserver {
+            dead.removeTimeObserver(observer)
+            timeObserver = nil
+        }
+        dead.pause()
+        dead.currentItem?.audioMix = nil
+        dead.replaceCurrentItem(with: nil)
+        player = nil
+    }
+
+    /// The watchdog, run from the 1 Hz time observer. Catches a dead pipeline that AVFoundation
+    /// never reported: the clock advancing while no podcast audio reaches the tap (see
+    /// `RenderHeartbeatMonitor` for the two tiers). First time, rebuild in
+    /// place and keep playing. If a FRESH player is silent too, a second dead pipeline is less
+    /// likely than a route the watchdog misreads — so don't auto-pause (that would cut real audio
+    /// every few seconds); flag it so the user's own pause/play rebuilds, and stand down.
+    private func checkRenderHeartbeat(clock: Double) {
+        guard let player else { return }
+        let eligible = !isLoadingItem && !needsRebuild
+            && player.timeControlStatus == .playing
+            && currentItem?.audioMix != nil        // no tap on this stream → no heartbeat to expect
+            && !player.isExternalPlaybackActive    // rendered elsewhere: the tap legitimately idles
+            && !Self.isAirPlayRoute()
+        let verdict = heartbeatMonitor.observe(renderHeartbeat, clock: clock, eligible: eligible)
+        switch verdict {
+        case .rendering:
+            autoRebuildsWithoutRender = 0
+        case .unknown:
+            break
+        case .dead, .sourceSilent:
+            heartbeatMonitor.reset()
+            let why = verdict == .dead
+                ? "tap not fed for \(Int(RenderHeartbeatMonitor.deadAfter))s"
+                : "tap fed only digital silence for \(Int(RenderHeartbeatMonitor.silentSourceAfter))s"
+            if autoRebuildsWithoutRender < 1 {
+                autoRebuildsWithoutRender += 1
+                Log.audio.error("podcast clock running but no audio (\(why, privacy: .public)) — rebuilding the AVPlayer")
+                rebuildPlayer(at: currentPositionSeconds)
+            } else {
+                Log.audio.error("podcast still silent after a rebuild — watchdog standing down; next pause/play rebuilds")
+                needsRebuild = true          // also idles the watchdog (see `eligible`)
+                onPlaybackNote?("No podcast audio? Pause and play to restart it")
+            }
+        }
+    }
+
+    private static func isAirPlayRoute() -> Bool {
+        AVAudioSession.sharedInstance().currentRoute.outputs.contains { $0.portType == .airPlay }
+    }
+
     override func observeValue(forKeyPath keyPath: String?, of object: Any?, change: [NSKeyValueChangeKey : Any]?, context: UnsafeMutableRawPointer?) {
         if keyPath == "status", let item = object as? AVPlayerItem {
             if item.status == .failed {
@@ -718,7 +949,7 @@ final class PodcastPlayer: NSObject {
             clientInfo: UnsafeMutableRawPointer(Unmanaged.passUnretained(self).toOpaque()),
             init: { tap, clientInfo, tapStorageOut in
                 let state = UnsafeMutablePointer<LimiterState>.allocate(capacity: 1)
-                state.initialize(to: LimiterState(gain: 1.0, ceiling: 0.71, attackCoef: 0.01, releaseCoef: 0.0005, enabled: 1.0, volume: 0.0, volTarget: 1.0, volCoef: 0.000174, eqEnabled: 0.0, eqIntensity: 1.0, sampleRate: 48000, aHigh: 0.4076, aLow: 0.0207, lpHighL: 0, lpHighR: 0, lpLowL: 0, lpLowR: 0, player: nil))
+                state.initialize(to: LimiterState(gain: 1.0, ceiling: 0.71, attackCoef: 0.01, releaseCoef: 0.0005, enabled: 1.0, volume: 0.0, volTarget: 1.0, volCoef: 0.000174, eqEnabled: 0.0, eqIntensity: 1.0, sampleRate: 48000, aHigh: 0.4076, aLow: 0.0207, lpHighL: 0, lpHighR: 0, lpLowL: 0, lpLowR: 0, heartbeat: nil, player: nil))
                 tapStorageOut.pointee = UnsafeMutableRawPointer(state)
 
                 if let clientInfo = clientInfo {
@@ -729,6 +960,7 @@ final class PodcastPlayer: NSObject {
                     // stateLock / activeLimiterStates. clientInfo stays unretained — it's only
                     // read here in init, which runs synchronously while self is still alive.
                     state.pointee.player = Unmanaged.passRetained(p)
+                    state.pointee.heartbeat = p.tapHeartbeat
 
                     p.stateLock.lock()
                     p.activeLimiterStates.append(state)
@@ -781,6 +1013,12 @@ final class PodcastPlayer: NSObject {
                 
                 let tapStorage = MTAudioProcessingTapGetStorage(tap)
                 let state = tapStorage.assumingMemoryBound(to: LimiterState.self)
+                // Proof of life for the dead-pipeline watchdog: the player fed this tap. Plain
+                // stores — no lock, no allocation (render-thread rules). `signal` is bumped after
+                // the loop, once we know the source wasn't digital silence.
+                let heartbeat = state.pointee.heartbeat
+                if let heartbeat { heartbeat.pointee.pulls &+= 1 }
+                var sourcePeak: Float = 0
 
                 // Volume is applied here (not via AVPlayer.volume, which a PostEffects tap
                 // bypasses). Limiting is applied only when enabled, but volume always.
@@ -824,6 +1062,7 @@ final class PodcastPlayer: NSObject {
                     vol += (volTarget - vol) * volCoef
                     var valL = ch0[f * stride0]
                     var valR = isStereo ? ch1![f * stride1] : valL
+                    sourcePeak = max(sourcePeak, abs(valL), abs(valR))
 
                     if eqOn {
                         // Treble roll-off: one-pole LP, keep 50% of the high part (-6 dB shelf).
@@ -865,6 +1104,8 @@ final class PodcastPlayer: NSObject {
                 }
                 // Snap once settled so the exponential tail can't idle in denormals.
                 state.pointee.volume = abs(volTarget - vol) < 1e-6 ? volTarget : vol
+                // ~-100 dBFS: anything above is real programme, not a dead pipeline's zeros.
+                if sourcePeak > 1e-5, let heartbeat { heartbeat.pointee.signal &+= 1 }
             }
         )
         
