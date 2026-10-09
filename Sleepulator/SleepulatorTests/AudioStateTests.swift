@@ -1,4 +1,5 @@
 import XCTest
+import SwiftUI
 @testable import Sleepulator
 
 @MainActor
@@ -1009,5 +1010,76 @@ final class ResumeIntegrityTests: XCTestCase {
         engine.focusMode = false
         engine.resumeMix(lastNight(noiseType: "green", layers: []))   // green is a valid Sleep sound
         XCTAssertEqual(engine.noiseType, "green")
+    }
+}
+
+/// The Home screensaver hides every control and the tab bar, so it must only ever engage over a
+/// session in progress — never an idle app, never under assistive tech, never behind a sheet.
+final class HomeScreensaverPolicyTests: XCTestCase {
+    func testIdleHomeNeverFades() {
+        // The 2026-10 audit bug: a fresh launch with nothing playing blanked to stars in 3 s.
+        XCTAssertFalse(HomeScreensaverPolicy.mayFade(sessionActive: false, assistiveTechRunning: false, presenting: false))
+    }
+
+    func testFadesOverASession() {
+        XCTAssertTrue(HomeScreensaverPolicy.mayFade(sessionActive: true, assistiveTechRunning: false, presenting: false))
+    }
+
+    func testNeverFadesUnderAssistiveTech() {
+        // Opacity-0 controls leave the accessibility tree — VoiceOver/Switch Control would lose Home.
+        XCTAssertFalse(HomeScreensaverPolicy.mayFade(sessionActive: true, assistiveTechRunning: true, presenting: false))
+    }
+
+    func testNeverFadesBehindAHomeSheet() {
+        XCTAssertFalse(HomeScreensaverPolicy.mayFade(sessionActive: true, assistiveTechRunning: false, presenting: true))
+    }
+
+    func testSleepFadesFasterThanFocus() {
+        XCTAssertLessThan(HomeScreensaverPolicy.idleDelay(focusMode: false),
+                          HomeScreensaverPolicy.idleDelay(focusMode: true))
+    }
+
+    func testAnySourceCountsAsASession() {
+        XCTAssertFalse(HomeScreensaverPolicy.sessionActive(audioPlaying: false, appleMusicOn: false, pomodoroRunning: false))
+        XCTAssertTrue(HomeScreensaverPolicy.sessionActive(audioPlaying: true, appleMusicOn: false, pomodoroRunning: false))
+        // Apple Music sits outside `isAnythingPlaying`, and a silent Pomodoro has no audio at all —
+        // both are still a session the scene can take over.
+        XCTAssertTrue(HomeScreensaverPolicy.sessionActive(audioPlaying: false, appleMusicOn: true, pomodoroRunning: false))
+        XCTAssertTrue(HomeScreensaverPolicy.sessionActive(audioPlaying: false, appleMusicOn: false, pomodoroRunning: true))
+    }
+
+    func testChromeLiftRestoresWhatTheHiddenTabBarTookAway() {
+        // iPhone: hiding the tab bar shrinks the bottom inset 83 → 34; the controls get 49 back.
+        let shown = EdgeInsets(top: 62, leading: 0, bottom: 83, trailing: 0)
+        let hidden = EdgeInsets(top: 62, leading: 0, bottom: 34, trailing: 0)
+        let lift = HomeScreensaverPolicy.chromeLift(anchored: shown, live: hidden)
+        XCTAssertEqual(lift.bottom, 49)
+        XCTAssertEqual(lift.top, 0)
+    }
+
+    func testChromeLiftIsZeroWhileChromeShowsAndNeverNegative() {
+        let shown = EdgeInsets(top: 62, leading: 0, bottom: 83, trailing: 0)
+        XCTAssertEqual(HomeScreensaverPolicy.chromeLift(anchored: shown, live: shown), EdgeInsets())
+        // Live inset larger than the anchor (e.g. a stale anchor after rotation): clamp, don't pull up.
+        let taller = EdgeInsets(top: 80, leading: 0, bottom: 100, trailing: 0)
+        XCTAssertEqual(HomeScreensaverPolicy.chromeLift(anchored: shown, live: taller), EdgeInsets())
+    }
+}
+
+final class CoachmarkLayoutTests: XCTestCase {
+    // OrbButton's frame is the 200pt glow; the 132pt disc sits centred in it.
+    private let orb = CGRect(x: 87, y: 108, width: 200, height: 200)   // disc spans y 142…274
+
+    func testRoomClearsTheDiscAndTheRow() {
+        // The 2026-10 review bug: on an iPhone SE the card covered the lower half of the orb.
+        let room = CoachmarkLayout.room(orb: orb, mixRowTop: 384)
+        XCTAssertEqual(room.top, 274 + CoachmarkLayout.clearance)   // starts below the disc, not the glow
+        XCTAssertEqual(room.top + room.height, 384 - CoachmarkLayout.clearance)
+    }
+
+    func testRoomIsEmptyNotNegativeWhenTheRowCrowdsTheOrb() {
+        // Large text on a small phone can push the row up against the disc: the card gets no
+        // room (and shows nothing) instead of a negative height.
+        XCTAssertEqual(CoachmarkLayout.room(orb: orb, mixRowTop: 280).height, 0)
     }
 }

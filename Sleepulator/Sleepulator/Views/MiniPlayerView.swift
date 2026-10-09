@@ -10,7 +10,9 @@ struct MiniPlayerView: View {
     @ObservedObject var queue: PodcastQueueManager
     @Binding var selectedTab: Int
     @AppStorage("bedtimeMode") private var bedtimeMode = false
-    @State private var showNowPlaying = false
+    /// Owned by ContentView so Home's screensaver knows the full player is up (it must not fade
+    /// Home, the tab bar and this bar behind the sheet).
+    @Binding var showNowPlaying: Bool
     @ScaledMetric(relativeTo: .title) private var playGlyph: CGFloat = 32
 
     var pal: Palette { Palette(bedtime: bedtimeMode) }
