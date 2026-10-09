@@ -67,6 +67,10 @@ final class PodcastQueueManager: ObservableObject {
         
 
     }
+
+    // Explicitly nonisolated: the implicit MainActor-isolated deinit aborts on iOS 18.4–26.3
+    // runtimes (CLAUDE.md, "Isolated deinits"). Only releases stored properties.
+    nonisolated deinit {}
     
     /// Reload all persisted queue state from disk/UserDefaults — used by the in-process Restore
     /// so the queue reflects the imported backup without an app relaunch.

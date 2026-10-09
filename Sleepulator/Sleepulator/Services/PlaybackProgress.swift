@@ -10,4 +10,8 @@ final class PlaybackProgress: ObservableObject {
     @Published var progress: Double = 0.0   // 0…1
     @Published var elapsed: Double = 0.0     // seconds
     @Published var duration: Double = 1.0    // seconds (1.0 sentinel until a real duration is known)
+
+    // Explicitly nonisolated: the implicit MainActor-isolated deinit aborts on iOS 18.4–26.3
+    // runtimes (CLAUDE.md, "Isolated deinits"). Only releases stored properties.
+    nonisolated deinit {}
 }

@@ -34,6 +34,10 @@ final class SceneClock {
         elapsed = start
     }
 
+    // Explicitly nonisolated: the implicit MainActor-isolated deinit aborts on iOS 18.4–26.3
+    // runtimes (CLAUDE.md, "Isolated deinits"). Only releases stored properties.
+    nonisolated deinit {}
+
     /// Normal frames — and hitches down to 2fps — pass through wall-clock-true; only longer
     /// gaps (pause→resume arrives as minutes or hours, never fractions of a second) clamp,
     /// which is what makes the freeze hold its pose across an occluded night. Not smaller:

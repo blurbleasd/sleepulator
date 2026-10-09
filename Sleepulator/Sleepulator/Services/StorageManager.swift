@@ -37,6 +37,10 @@ final class StorageManager {
         self.appSupportURL = directory
     }
 
+    // Explicitly nonisolated: the implicit MainActor-isolated deinit aborts on iOS 18.4–26.3
+    // runtimes (CLAUDE.md, "Isolated deinits"). Only releases stored properties.
+    nonisolated deinit {}
+
     private func fileURL(for filename: String) -> URL {
         return appSupportURL.appendingPathComponent(filename)
     }
