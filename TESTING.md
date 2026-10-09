@@ -70,6 +70,23 @@ Install via Xcode onto the device (not the simulator). Then:
    ✅ Nothing resumes — the deliberate stop is not overridden by the interruption-ended resume.
 5. **Route loss during a call** (unverified): podcast on AirPods, take a call, put the AirPods
    in the case mid-call, end the call. ✅ The podcast does NOT resume on the loudspeaker.
+6. **"Plays muted until force-quit"** (2026-10-07, unverified). Reported symptom: the clock moves,
+   the noise bed is audible, only the podcast is silent, and it lasts until a force-quit. Seen
+   on mornings with NO alarm, and after other apps' audio. The podcast `AVPlayer` always carries
+   the limiter tap, and an AVPlayer + MTAudioProcessingTap pipeline can die under it (documented
+   for the Clock alarm on iOS 17+). Only a new AVPlayer recovers, and the app used to keep one for
+   its whole life. Now it rebuilds on item failure, on media-services reset, and via a heartbeat
+   watchdog: the clock advances 4 s with the tap never fed, or 45 s with the tap fed only digital
+   silence. Run each with a podcast playing, **without force-quitting between them**:
+   a. Overnight timer with earbuds in; let them fall out / disconnect; next morning, play (lock
+      screen and in-app). ✅ Audible, or audible within ~4 s after a brief hiccup.
+   b. Play a video/voice note in another app, come back, tap play. ✅ Audible.
+   c. Set a Clock alarm 1 min out, let it ring, stop it. ✅ Never "playing" in silence.
+   d. After any of these, pick a *different* episode. ✅ Audible (it used to inherit the dead
+      player).
+   If it still happens, **Export logs** and look for: `podcast resume: level=… fed=… signal=…
+   route=…` (one per resume), `clock running but no audio`, `rebuilding the AVPlayer`,
+   `failed to play to end`, `media services reset`.
 
 ### C. Sleep timer — fade + terminal stop (full run)
 1. Set a realistic timer (≥ 30 min), lock the phone, let it run to the end **unattended**.
