@@ -1330,6 +1330,7 @@ final class AudioEngine: ObservableObject {
         Log.timer.error("media services were reset — re-asserting the session, rebuilding the podcast player")
         AudioSessionConfig.applyCategory()
         Log.activateAudioSession("media services reset")
+        genEngine.handleMediaServicesReset(restart: noiseOn || binauralOn)
         podPlayer.handleMediaServicesReset()
     }
 
