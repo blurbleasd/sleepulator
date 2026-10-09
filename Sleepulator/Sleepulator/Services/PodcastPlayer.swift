@@ -400,6 +400,9 @@ final class PodcastPlayer: NSObject {
             guard let self else { return }
             if playerItem.audioMix == nil {
                 let success = await attachLimiterTap(to: playerItem)
+                // Superseded by a newer play() (a rebuild racing a tap, two quick picks): cancel()
+                // doesn't stop this task, so bail before it swaps a stale item into the player.
+                if Task.isCancelled { return }
                 if !success {
                     // Benign: the tap can't attach to some streams (HLS / no audio track).
                     // Playback continues unprocessed — surface a gentle, non-destructive
@@ -473,6 +476,7 @@ final class PodcastPlayer: NSObject {
                 // not the resume logic — this log distinguishes the two on a device run.
                 Log.audio.debug("play() seek: fresh start 0 (resume=\(resume, privacy: .public)) id=\(id, privacy: .public)")
             }
+            if Task.isCancelled { return }   // superseded during the seek — the newer load owns the player
             // Swap + seek are done; let the observer record positions for the new item again.
             self.isLoadingItem = false
 
