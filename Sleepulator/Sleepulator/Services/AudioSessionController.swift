@@ -42,6 +42,8 @@ final class AudioSessionController {
     var onRouteChange: ((Notification) -> Void)?
     var onAppBackground: (() -> Void)?
     var onOnlineChanged: ((Bool) -> Void)?
+    /// The media server restarted — every playback object (AVPlayer, the tap) is now invalid.
+    var onMediaServicesReset: (() -> Void)?
 
     private let monitor = NWPathMonitor()
 
@@ -66,6 +68,7 @@ final class AudioSessionController {
         nc.addObserver(self, selector: #selector(forwardInterruption(_:)), name: AVAudioSession.interruptionNotification, object: nil)
         nc.addObserver(self, selector: #selector(forwardRouteChange(_:)), name: AVAudioSession.routeChangeNotification, object: nil)
         nc.addObserver(self, selector: #selector(forwardAppBackground), name: Notification.Name("AppDidEnterBackground"), object: nil)
+        nc.addObserver(self, selector: #selector(forwardMediaServicesReset), name: AVAudioSession.mediaServicesWereResetNotification, object: nil)
     }
 
     @objc private func forwardInterruption(_ note: Notification) {
@@ -76,6 +79,9 @@ final class AudioSessionController {
     }
     @objc private func forwardAppBackground() {
         DispatchQueue.main.async { [weak self] in self?.onAppBackground?() }
+    }
+    @objc private func forwardMediaServicesReset() {
+        DispatchQueue.main.async { [weak self] in self?.onMediaServicesReset?() }
     }
 
     deinit {

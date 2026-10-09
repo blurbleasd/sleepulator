@@ -678,6 +678,7 @@ final class AudioEngine: ObservableObject {
         sessionController.onRouteChange = { [weak self] note in self?.handleRouteChange(note: note) }
         sessionController.onAppBackground = { [weak self] in self?.handleAppBackground() }
         sessionController.onOnlineChanged = { [weak self] online in self?.connectivity.isOnline = online }
+        sessionController.onMediaServicesReset = { [weak self] in self?.handleMediaServicesReset() }
         sessionController.start()
         
         notificationTokens.append(NotificationCenter.default.addObserver(forName: Notification.Name("StartSleepulatorMix"), object: nil, queue: .main) { [weak self] _ in
@@ -1276,6 +1277,15 @@ final class AudioEngine: ObservableObject {
         if noiseOn || binauralOn {
             genEngine.resumeIfNeeded()
         }
+    }
+
+    /// The media server restarted (Apple: re-apply the category, reactivate, recreate players).
+    /// Without this the podcast's AVPlayer stays invalid — silent — until the app is relaunched.
+    private func handleMediaServicesReset() {
+        Log.timer.error("media services were reset — re-asserting the session, rebuilding the podcast player")
+        AudioSessionConfig.applyCategory()
+        Log.activateAudioSession("media services reset")
+        podPlayer.handleMediaServicesReset()
     }
 
     private func handleAppBackground() {

@@ -1,4 +1,5 @@
 import XCTest
+import AVFoundation
 import SwiftUI
 @testable import Sleepulator
 
@@ -1046,6 +1047,271 @@ final class ResumeIntegrityTests: XCTestCase {
         engine.focusMode = false
         engine.resumeMix(lastNight(noiseType: "green", layers: []))   // green is a valid Sleep sound
         XCTAssertEqual(engine.noiseType, "green")
+    }
+}
+
+// "Podcast plays muted until force-quit." The dead-pipeline detector: the AVPlayer clock keeps
+// advancing while no podcast audio reaches the limiter tap. Pure — fed heartbeat/clock samples.
+@MainActor
+final class RenderHeartbeatMonitorTests: XCTestCase {
+    private func hb(_ pulls: UInt64, _ signal: UInt64) -> TapHeartbeat {
+        TapHeartbeat(pulls: pulls, signal: signal)
+    }
+
+    func testUnfedTapIsDeadAfterFourSeconds() {
+        var m = RenderHeartbeatMonitor()
+        XCTAssertEqual(m.observe(hb(7, 7), clock: 100, eligible: true), .unknown)   // first sample
+        XCTAssertEqual(m.observe(hb(7, 7), clock: 101, eligible: true), .unknown)
+        XCTAssertEqual(m.observe(hb(7, 7), clock: 102, eligible: true), .unknown)
+        XCTAssertEqual(m.observe(hb(7, 7), clock: 103, eligible: true), .unknown)   // 3 s unfed
+        XCTAssertEqual(m.observe(hb(7, 7), clock: 104, eligible: true), .dead,
+                       "4 s of advancing playback with the tap never fed is a dead pipeline")
+    }
+
+    func testHealthyTapNeverTrips() {
+        var m = RenderHeartbeatMonitor()
+        var beat = hb(0, 0)
+        for t in 0..<120 {
+            beat.pulls += 40; beat.signal += 40           // fed many times a second, real audio
+            let v = m.observe(beat, clock: Double(t), eligible: true)
+            XCTAssertNotEqual(v, .dead)
+            XCTAssertNotEqual(v, .sourceSilent)
+            if t > 0 { XCTAssertEqual(v, .rendering) }
+        }
+    }
+
+    func testFedOnlySilenceTripsAfterTheSlowWindowNotBefore() {
+        // The pipeline still calls the tap, but every buffer is digital zero.
+        var m = RenderHeartbeatMonitor()
+        var pulls: UInt64 = 0
+        var verdicts: [RenderHeartbeatMonitor.Verdict] = []
+        for t in 0...Int(RenderHeartbeatMonitor.silentSourceAfter) {
+            pulls += 40
+            verdicts.append(m.observe(hb(pulls, 5), clock: Double(t), eligible: true))
+        }
+        XCTAssertFalse(verdicts.dropLast().contains(.sourceSilent),
+                       "a few silent seconds are normal programme — don't trip early")
+        XCTAssertFalse(verdicts.contains(.dead), "the tap IS being fed — this is not the fast tier")
+        XCTAssertEqual(verdicts.last, .sourceSilent)
+    }
+
+    func testRealAudioClearsBothCounters() {
+        var m = RenderHeartbeatMonitor()
+        _ = m.observe(hb(1, 1), clock: 0, eligible: true)
+        _ = m.observe(hb(1, 1), clock: 3, eligible: true)             // 3 s unfed + silent…
+        XCTAssertEqual(m.observe(hb(2, 2), clock: 4, eligible: true), .rendering)   // …then audio
+        XCTAssertEqual(m.unfedSeconds, 0)
+        XCTAssertEqual(m.silentSeconds, 0)
+        XCTAssertEqual(m.observe(hb(2, 2), clock: 5, eligible: true), .unknown,
+                       "the count restarts from the render, not from the old silence")
+    }
+
+    func testFedButSilentStillResetsTheFastTier() {
+        var m = RenderHeartbeatMonitor()
+        _ = m.observe(hb(1, 1), clock: 0, eligible: true)
+        _ = m.observe(hb(1, 1), clock: 3, eligible: true)
+        XCTAssertEqual(m.observe(hb(9, 1), clock: 4, eligible: true), .unknown)   // fed, no signal
+        XCTAssertEqual(m.unfedSeconds, 0)
+        XCTAssertEqual(m.silentSeconds, 4, accuracy: 0.0001)
+    }
+
+    func testIneligibleTicksResetTheWatch() {
+        // Paused / loading / no tap / AirPlay: no heartbeat is expected, so nothing accumulates.
+        var m = RenderHeartbeatMonitor()
+        _ = m.observe(hb(1, 1), clock: 0, eligible: true)
+        _ = m.observe(hb(1, 1), clock: 3, eligible: true)
+        XCTAssertEqual(m.observe(hb(1, 1), clock: 4, eligible: false), .unknown)
+        XCTAssertEqual(m.unfedSeconds, 0)
+        XCTAssertEqual(m.observe(hb(1, 1), clock: 5, eligible: true), .unknown)
+        XCTAssertEqual(m.observe(hb(1, 1), clock: 8, eligible: true), .unknown)   // 3 s since re-arm
+    }
+
+    func testSeeksAndAStuckClockDontCountAsPlayback() {
+        var m = RenderHeartbeatMonitor()
+        _ = m.observe(hb(1, 1), clock: 100, eligible: true)
+        XCTAssertEqual(m.observe(hb(1, 1), clock: 40, eligible: true), .unknown)    // seek back
+        XCTAssertEqual(m.observe(hb(1, 1), clock: 400, eligible: true), .unknown)   // seek forward
+        XCTAssertEqual(m.observe(hb(1, 1), clock: 400, eligible: true), .unknown)   // stalled clock
+        XCTAssertEqual(m.unfedSeconds, 0, "only playback-sized forward steps count")
+    }
+
+    func testNonFiniteClockIsIgnored() {
+        var m = RenderHeartbeatMonitor()
+        _ = m.observe(hb(1, 1), clock: 0, eligible: true)
+        XCTAssertEqual(m.observe(hb(1, 1), clock: .nan, eligible: true), .unknown)
+        XCTAssertEqual(m.unfedSeconds, 0)
+    }
+}
+
+// The fix itself, on a real AVPlayer (simulator): once the pipeline is known dead, the next play
+// must come from a NEW AVPlayer. The bug was that one AVPlayer lived for the whole process, so a
+// pipeline killed by an alarm/interruption stayed silent — even for new episodes — until relaunch.
+@MainActor
+final class PodcastPlayerRebuildTests: XCTestCase {
+    private var fileURL: URL!
+
+    override func setUpWithError() throws {
+        fileURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("rebuild-\(UUID().uuidString).wav")
+        try Self.quietWav(seconds: 20).write(to: fileURL)
+    }
+
+    override func tearDownWithError() throws {
+        try? FileManager.default.removeItem(at: fileURL)
+    }
+
+    private func waitUntil(_ timeout: TimeInterval = 8, _ condition: () -> Bool) async -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if condition() { return true }
+            try? await Task.sleep(nanoseconds: 20_000_000)
+        }
+        return condition()
+    }
+
+    /// Start playback and return the player plus the identity of its first AVPlayer.
+    private func startPlaying() async throws -> (PodcastPlayer, ObjectIdentifier) {
+        let p = PodcastPlayer()
+        p.play(url: fileURL.absoluteString, id: "rebuild-\(UUID().uuidString)", title: "Test", resume: false)
+        let ready = await waitUntil { p.playerInstanceId != nil }
+        XCTAssertTrue(ready, "AVPlayer never came up")
+        return (p, try XCTUnwrap(p.playerInstanceId))
+    }
+
+    func testPlainResumeKeepsTheSameAVPlayer() async throws {
+        // Guard against over-correcting: a healthy pause/resume must not rebuild.
+        let (p, first) = try await startPlaying()
+        p.pause()
+        p.resume()
+        XCTAssertFalse(p.needsRebuild)
+        XCTAssertEqual(p.playerInstanceId, first)
+    }
+
+    func testHealthyPlaybackIsNeverFlaggedByTheWatchdog() async throws {
+        // The false-positive guard: past the watchdog's 4 s window, a working tap must keep the
+        // heartbeat alive — no rebuild, no "No podcast audio?" note.
+        let (p, first) = try await startPlaying()
+        var note: String?
+        p.onPlaybackNote = { if let n = $0 { note = n } }
+        let played = await waitUntil(12) { (p.currentPositionSeconds ?? 0) > RenderHeartbeatMonitor.deadAfter + 2 }
+        XCTAssertTrue(played, "the clock must actually run past the watchdog window for this to mean anything")
+        XCTAssertEqual(p.playerInstanceId, first, "a healthy player must not be rebuilt")
+        XCTAssertFalse(p.needsRebuild)
+        XCTAssertNil(note)
+        // Both tiers' inputs are live: the tap is fed, and real programme counts as signal (the
+        // slow digital-silence tier would otherwise misfire on every real episode).
+        XCTAssertGreaterThan(p.renderHeartbeat.pulls, 0)
+        XCTAssertGreaterThan(p.renderHeartbeat.signal, 0, "a quiet tone must register as real signal")
+    }
+
+    func testWatchdogRebuildsASilentPlayerThenStandsDown() async throws {
+        // The no-alarm morning case: nothing reports a failure, the clock just runs in silence.
+        // A frozen heartbeat stands in for a tap that's no longer fed.
+        let (p, first) = try await startPlaying()
+        var note: String?
+        var pausedAfterStart = false
+        p.onPlaybackNote = { if let n = $0 { note = n } }
+        p.onPlaybackStateChanged = { playing in if !playing { pausedAfterStart = true } }
+        let frozen = p.renderHeartbeat
+        p.heartbeatOverride = { frozen }
+
+        let rebuilt = await waitUntil(12) { p.playerInstanceId != nil && p.playerInstanceId != first }
+        XCTAssertTrue(rebuilt, "4 s of clock with no audio must swap in a fresh AVPlayer")
+
+        // Still silent on the fresh player (the override stays frozen): no rebuild loop and no
+        // auto-pause — flag it for the user's next pause/play and stand down.
+        let stoodDown = await waitUntil(12) { p.needsRebuild }
+        XCTAssertTrue(stoodDown)
+        XCTAssertEqual(note, "No podcast audio? Pause and play to restart it")
+        XCTAssertFalse(pausedAfterStart, "the watchdog must never pause real playback on its own")
+    }
+
+    func testRebuildResumesAtTheSameSpot() async throws {
+        // A rebuild re-opens the episode — it must not restart it from 0:00.
+        let (p, first) = try await startPlaying()
+        p.seekTo(seconds: 8)
+        let seeked = await waitUntil { (p.currentPositionSeconds ?? 0) >= 8 }
+        XCTAssertTrue(seeked)
+        NotificationCenter.default.post(name: .AVPlayerItemFailedToPlayToEndTime, object: p.currentItem)
+        _ = await waitUntil { p.needsRebuild }
+        p.resume()
+        let rebuilt = await waitUntil { p.playerInstanceId != nil && p.playerInstanceId != first }
+        XCTAssertTrue(rebuilt)
+        // The new player appears before its resume-seek lands, so wait for the position.
+        let restored = await waitUntil { (p.currentPositionSeconds ?? 0) >= 7.5 }
+        XCTAssertTrue(restored, "rebuilt player lost the episode position (restarted from 0?)")
+        XCTAssertLessThan(p.currentPositionSeconds ?? .infinity, 13)
+    }
+
+    func testFailedToPlayToEndRebuildsOnNextResume() async throws {
+        let (p, first) = try await startPlaying()
+        var reportedPaused = false
+        p.onPlaybackStateChanged = { playing in if !playing { reportedPaused = true } }
+
+        // What the Clock-alarm failure posts for an AVPlayer + MTAudioProcessingTap item.
+        NotificationCenter.default.post(name: .AVPlayerItemFailedToPlayToEndTime, object: p.currentItem)
+        let flagged = await waitUntil { p.needsRebuild }
+        XCTAssertTrue(flagged, "an item that failed to play to end must flag the player dead")
+        XCTAssertTrue(reportedPaused, "the transport must show paused, not keep 'playing' in silence")
+
+        p.resume()
+        let rebuilt = await waitUntil { p.playerInstanceId != nil && p.playerInstanceId != first }
+        XCTAssertTrue(rebuilt, "resume after a dead pipeline must play from a NEW AVPlayer")
+        XCTAssertFalse(p.needsRebuild)
+    }
+
+    func testFailureFromAStaleItemIsIgnored() async throws {
+        let (p, first) = try await startPlaying()
+        let stale = AVPlayerItem(url: fileURL)
+        NotificationCenter.default.post(name: .AVPlayerItemFailedToPlayToEndTime, object: stale)
+        try? await Task.sleep(nanoseconds: 200_000_000)
+        XCTAssertFalse(p.needsRebuild, "only the loaded item's failure condemns the player")
+        XCTAssertEqual(p.playerInstanceId, first)
+    }
+
+    func testMediaServicesResetWhilePlayingRebuildsImmediately() async throws {
+        let (p, first) = try await startPlaying()
+        p.handleMediaServicesReset()
+        let rebuilt = await waitUntil { p.playerInstanceId != nil && p.playerInstanceId != first }
+        XCTAssertTrue(rebuilt, "a media-services reset invalidates the AVPlayer — playing → rebuild now")
+    }
+
+    func testMediaServicesResetWhilePausedWaitsForPlay() async throws {
+        let (p, first) = try await startPlaying()
+        p.pause()
+        p.handleMediaServicesReset()
+        XCTAssertTrue(p.needsRebuild)
+        XCTAssertEqual(p.playerInstanceId, first, "paused → don't start playing on our own")
+        p.resume()
+        let rebuilt = await waitUntil { p.playerInstanceId != nil && p.playerInstanceId != first }
+        XCTAssertTrue(rebuilt)
+    }
+
+    func testNewEpisodeAfterDeathAlsoGetsAFreshPlayer() async throws {
+        // Picking a different episode used to replaceCurrentItem into the same dead AVPlayer.
+        let (p, first) = try await startPlaying()
+        NotificationCenter.default.post(name: .AVPlayerItemFailedToPlayToEndTime, object: p.currentItem)
+        _ = await waitUntil { p.needsRebuild }
+        p.play(url: fileURL.absoluteString, id: "other-\(UUID().uuidString)", title: "Other", resume: false)
+        let rebuilt = await waitUntil { p.playerInstanceId != nil && p.playerInstanceId != first }
+        XCTAssertTrue(rebuilt)
+    }
+
+    /// 16-bit mono PCM WAV, a very quiet 220 Hz tone (real samples, not digital zero).
+    private static func quietWav(seconds: Int, sampleRate: Int = 44_100) -> Data {
+        let count = seconds * sampleRate
+        var pcm = Data(capacity: count * 2)
+        for i in 0..<count {
+            let s = Int16(60 * sin(2 * Double.pi * 220 * Double(i) / Double(sampleRate)))
+            withUnsafeBytes(of: s.littleEndian) { pcm.append(contentsOf: $0) }
+        }
+        func u32(_ v: UInt32) -> Data { withUnsafeBytes(of: v.littleEndian) { Data($0) } }
+        func u16(_ v: UInt16) -> Data { withUnsafeBytes(of: v.littleEndian) { Data($0) } }
+        var d = Data("RIFF".utf8); d += u32(UInt32(36 + pcm.count)); d += Data("WAVE".utf8)
+        d += Data("fmt ".utf8); d += u32(16); d += u16(1); d += u16(1)
+        d += u32(UInt32(sampleRate)); d += u32(UInt32(sampleRate * 2)); d += u16(2); d += u16(16)
+        d += Data("data".utf8); d += u32(UInt32(pcm.count)); d += pcm
+        return d
     }
 }
 
