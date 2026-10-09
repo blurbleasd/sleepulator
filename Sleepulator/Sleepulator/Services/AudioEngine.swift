@@ -118,6 +118,8 @@ final class AudioEngine: ObservableObject {
     @Published var screenDimmed = false
 
     private let genEngine = GenerativeAudioEngine()
+    /// Read-only, for tests that check the media-services reset reaches the generative engine.
+    var generativeEngineForTesting: GenerativeAudioEngine { genEngine }
     private let podPlayer = PodcastPlayer()
     /// Apple Music as a parallel, Focus-only source. DRM means it can't go through the generative
     /// mixer or the limiter tap — it plays alongside via MusicKit's system player with the session

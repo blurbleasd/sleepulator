@@ -73,4 +73,41 @@ final class GenerativeMediaResetTests: XCTestCase {
         XCTAssertNotEqual(nodeIDs(new), built, "the observer must be registered on the new engine")
         XCTAssertTrue(gen.isRunning)
     }
+
+    func testConfigurationChangeWhilePausedRebuildsButStaysStopped() throws {
+        let gen = try makeRunningEngine()
+        gen.suspendEngine()
+        let engine = gen.currentEngine
+        let built = nodeIDs(engine)
+        NotificationCenter.default.post(name: .AVAudioEngineConfigurationChange, object: engine)
+        drainMainQueue()
+        XCTAssertNotEqual(nodeIDs(engine), built, "the graph is still rebuilt for the new route")
+        XCTAssertFalse(gen.isRunning, "a power-save pause must not be undone by a route change")
+    }
+
+    // MARK: AudioEngine wiring (AudioSessionController → AudioEngine → GenerativeAudioEngine)
+
+    func testAudioEngineResetRebuildsAPlayingBed() throws {
+        let audio = AudioEngine()
+        audio.noiseOn = true
+        let gen = audio.generativeEngineForTesting
+        try XCTSkipUnless(gen.isRunning, "AVAudioEngine can't start here (no audio output)")
+        let old = gen.currentEngine
+        NotificationCenter.default.post(name: AVAudioSession.mediaServicesWereResetNotification, object: nil)
+        drainMainQueue()   // AudioSessionController forwards on main
+        XCTAssertFalse(gen.currentEngine === old, "the reset must reach the generative engine")
+        XCTAssertTrue(gen.isRunning, "noise is on, so the bed must be playing again")
+    }
+
+    func testAudioEngineResetLeavesAnIdleBedStopped() throws {
+        let audio = AudioEngine()
+        audio.noiseOn = false
+        audio.binauralOn = false
+        let gen = audio.generativeEngineForTesting
+        let old = gen.currentEngine
+        NotificationCenter.default.post(name: AVAudioSession.mediaServicesWereResetNotification, object: nil)
+        drainMainQueue()
+        XCTAssertFalse(gen.currentEngine === old, "the reset must reach the generative engine")
+        XCTAssertFalse(gen.isRunning, "nothing is on, so the rebuilt engine must stay idle")
+    }
 }
