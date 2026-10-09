@@ -1,24 +1,5 @@
 import SwiftUI
 
-/// The Sleep-mode status line. `base` (the layer/resume/"tap to begin" text) is computed by
-/// HomeView and passed in; the live "· Nm" countdown is appended here from the observed timer.
-struct SleepStatusLine: View {
-    let base: String
-    let showMinute: Bool
-    @ObservedObject var sleepTimer: SleepTimerService
-    let pal: Palette
-
-    var body: some View {
-        Text(showMinute && sleepTimer.timerRemaining > 0
-             ? "\(base) · \(Int(sleepTimer.timerRemaining / 60))m"
-             : base)
-            .font(.system(.callout, design: .rounded).weight(.medium))
-            .foregroundColor(pal.dim)
-            .multilineTextAlignment(.center)
-            .padding(.horizontal, 30)
-    }
-}
-
 /// The half-asleep "+15m" bump, shown only in the last 2 minutes of a fixed-duration timer.
 struct BumpTimerButton: View {
     @ObservedObject var sleepTimer: SleepTimerService

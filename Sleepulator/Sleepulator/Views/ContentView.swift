@@ -33,6 +33,13 @@ struct ContentView: View {
     // only exists on the Home screen.
     private var homeScreensaver: Bool { audio.ambientScreensaver && selectedTab == 0 }
 
+    // On Sleep Home the mini-player shows only while a podcast is actually playing: idle, its
+    // "Up next" bar put a second play button beside the orb, meaning something different. It
+    // stays everywhere else (Podcasts, Settings, Focus), and the mixer's Podcast row is unchanged.
+    private var miniPlayerHidden: Bool {
+        homeScreensaver || (selectedTab == 0 && !audio.focusMode && !audio.isPodPlaying)
+    }
+
     // App-wide night-dim: ~60s into a sleep session, drop a black veil over the whole app
     // (tabs + mini-player) so a bedside screen goes dark. Tap to wake; re-arms after each
     // wake and on tab changes (navigating counts as interaction). When the timer ends we
@@ -117,9 +124,10 @@ struct ContentView: View {
             MiniPlayerView(audio: audio, progress: audio.playbackProgress, queue: audio.queueManager,
                            selectedTab: $selectedTab, showNowPlaying: $showNowPlaying)
                 .simultaneousGesture(TapGesture().onEnded { miniPlayerTouches &+= 1 })
-                .opacity(homeScreensaver ? 0 : 1)
-                .allowsHitTesting(!homeScreensaver)
-                .animation(.easeInOut(duration: 0.9), value: homeScreensaver)
+                .opacity(miniPlayerHidden ? 0 : 1)
+                .allowsHitTesting(!miniPlayerHidden)
+                .accessibilityHidden(miniPlayerHidden)
+                .animation(.easeInOut(duration: 0.9), value: miniPlayerHidden)
 
             // Full-screen night veil — over the tabs and mini-player both.
             if nightDimmed {

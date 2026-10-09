@@ -45,6 +45,13 @@ enum SessionGuards {
         autoNightDim && !focusMode && timerActive && playing
     }
 
+    /// Play in Sleep honours the night ring: the minutes to time, or nil for All night or when a
+    /// countdown is already running (resuming from a pause keeps the night you set).
+    static func timerOnPlay(lengthMinutes: Double, timerActive: Bool) -> Int? {
+        guard !timerActive, lengthMinutes >= 5 else { return nil }
+        return Int(lengthMinutes)
+    }
+
     /// The timer sheet's commit button. With nothing playing it starts the mix as well, so the
     /// timer can never be set against silence.
     static func timerCommitTitle(playing: Bool, timerActive: Bool) -> String {

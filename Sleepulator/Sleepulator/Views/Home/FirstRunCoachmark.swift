@@ -13,9 +13,9 @@ struct FirstRunCoachmark: View {
     let dismiss: () -> Void
 
     private static let title = "Layer your own soundscape"
-    private static let message = "Tap the orb to start, then open Build mix to stack noise, binaural beats, and your own podcasts — with a sleep timer that fades it all out."
+    private static let message = "Tap the orb to start. Drag its ring to set how long it plays before fading out, and open Build mix to stack noise, binaural beats, and your own podcasts."
     /// The brief card's line. VoiceOver still hears `message` in full.
-    private static let briefMessage = "Tap the orb to start, then open Build mix to stack your sounds."
+    private static let briefMessage = "Tap the orb to start; drag its ring to set how long."
     /// Text sizes the brief card steps down through, largest first, when it can't fit as-is.
     private static let textSizeCaps: [DynamicTypeSize] = [.xxxLarge, .xxLarge, .xLarge, .large]
 

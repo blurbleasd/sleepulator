@@ -1448,3 +1448,65 @@ final class ClarityCopyTests: XCTestCase {
                        "The podcast stops at 30 min. Your sounds ease out over 15 more.")
     }
 }
+
+/// The night ring: a 120-minute dial from 12 o'clock, snapping to 5, 0 = All night.
+final class NightRingMathTests: XCTestCase {
+    func testAngleMapsToSnappedMinutes() {
+        XCTAssertEqual(NightRingMath.minutes(forAngle: 0), 0)
+        XCTAssertEqual(NightRingMath.minutes(forAngle: .pi / 2), 30)          // 3 o'clock
+        XCTAssertEqual(NightRingMath.minutes(forAngle: .pi), 60)              // 6 o'clock
+        XCTAssertEqual(NightRingMath.minutes(forAngle: 2 * .pi * 0.01), 0)    // 1.2 min → All night
+        XCTAssertEqual(NightRingMath.minutes(forAngle: 2 * .pi * 0.99), 120)
+    }
+
+    func testAngleIsClockwiseFromTwelve() {
+        let c = CGPoint(x: 100, y: 100)
+        XCTAssertEqual(NightRingMath.angle(of: CGPoint(x: 100, y: 0), center: c), 0, accuracy: 1e-9)
+        XCTAssertEqual(NightRingMath.angle(of: CGPoint(x: 200, y: 100), center: c), .pi / 2, accuracy: 1e-9)
+        XCTAssertEqual(NightRingMath.angle(of: CGPoint(x: 0, y: 100), center: c), 3 * .pi / 2, accuracy: 1e-9)
+    }
+
+    func testDragNeverWrapsAcrossTwelve() {
+        XCTAssertEqual(NightRingMath.continuous(previous: 115, raw: 5), 120)
+        XCTAssertEqual(NightRingMath.continuous(previous: 5, raw: 115), 0)
+        XCTAssertEqual(NightRingMath.continuous(previous: 40, raw: 45), 45)
+    }
+
+    func testReleaseAtRestOnlySetsTheLength() {
+        XCTAssertEqual(NightRingMath.commit(minutes: 45, playing: false, timerActive: false), .none)
+        XCTAssertEqual(NightRingMath.commit(minutes: 45, playing: true, timerActive: false), .start(45))
+        XCTAssertEqual(NightRingMath.commit(minutes: 45, playing: false, timerActive: true), .start(45))
+        XCTAssertEqual(NightRingMath.commit(minutes: 0, playing: true, timerActive: true), .cancel)
+        XCTAssertEqual(NightRingMath.commit(minutes: 0, playing: true, timerActive: false), .none)
+    }
+
+    func testRingLocksNearTheEndAndInTheTail() {
+        XCTAssertTrue(NightRingMath.locked(remaining: 90, inTail: false, endOfEpisode: false))
+        XCTAssertTrue(NightRingMath.locked(remaining: 900, inTail: true, endOfEpisode: false))
+        XCTAssertFalse(NightRingMath.locked(remaining: 900, inTail: false, endOfEpisode: false))
+        XCTAssertFalse(NightRingMath.locked(remaining: 90, inTail: false, endOfEpisode: true))
+        XCTAssertFalse(NightRingMath.locked(remaining: 0, inTail: false, endOfEpisode: false))
+    }
+
+    func testVoiceOverStepsStayOnTheDial() {
+        XCTAssertEqual(NightRingMath.adjusted(0, up: true), 5)
+        XCTAssertEqual(NightRingMath.adjusted(5, up: false), 0)
+        XCTAssertEqual(NightRingMath.adjusted(0, up: false), 0)
+        XCTAssertEqual(NightRingMath.adjusted(120, up: true), 120)
+    }
+
+    func testPlayHonoursTheRing() {
+        XCTAssertEqual(SessionGuards.timerOnPlay(lengthMinutes: 45, timerActive: false), 45)
+        XCTAssertNil(SessionGuards.timerOnPlay(lengthMinutes: 0, timerActive: false))    // All night
+        XCTAssertNil(SessionGuards.timerOnPlay(lengthMinutes: 45, timerActive: true))    // resume keeps it
+    }
+
+    func testNightLineSaysTheNightPlainly() {
+        XCTAssertEqual(NightLine.timerText(remaining: 0, inTail: false, endOfEpisode: false, playing: false, lengthMinutes: 45), "45m")
+        XCTAssertEqual(NightLine.timerText(remaining: 0, inTail: false, endOfEpisode: false, playing: false, lengthMinutes: 0), "All night")
+        XCTAssertEqual(NightLine.timerText(remaining: 0, inTail: false, endOfEpisode: false, playing: true, lengthMinutes: 45), "All night")
+        XCTAssertEqual(NightLine.timerText(remaining: 61, inTail: false, endOfEpisode: false, playing: true, lengthMinutes: 45), "2m left")
+        XCTAssertEqual(NightLine.timerText(remaining: 600, inTail: false, endOfEpisode: true, playing: true, lengthMinutes: 0), "Ends with the episode")
+        XCTAssertEqual(NightLine.timerText(remaining: 600, inTail: true, endOfEpisode: false, playing: true, lengthMinutes: 0), "Sounds easing out")
+    }
+}

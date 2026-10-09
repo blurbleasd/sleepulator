@@ -35,6 +35,13 @@ struct HomeView: View {
     @State private var afterTimerSheet: (() -> Void)?
     /// A mode switch waiting on its confirm (a live session would end or change; see SessionGuards).
     @State private var modeSwitchRequest: PendingModeSwitch?
+    /// The night ring's remembered length in minutes (0 = All night). Play honours it in Sleep.
+    /// Its own key, defaulting to All night, so nobody's Play quietly starts timing out on update.
+    @AppStorage("nightLengthMinutes") private var nightLength: Double = 0
+    /// A ring drag is live: the left/right scene swipe stands down for that touch.
+    @State private var ringDragging = false
+    /// Run once the Build-mix sheet has finished dismissing (it hands off to Breathing).
+    @State private var afterMixSheet: (() -> Void)?
     // Ambient screensaver: while a session plays, the controls fade after a spell of no
     // interaction, leaving just the sky + moon. A tap brings them back. The flag lives on
     // `audio` so ContentView's tab bar + mini-player can fade with the home chrome. When it may
@@ -244,13 +251,27 @@ struct HomeView: View {
             return
         }
 
-        let begin = resolveBegin()
+        let begin = withNightLength(resolveBegin())
         // Optional breathing wind-down before Sleep playback (never in Focus — Pomodoro starts now).
         if breathingOnRamp && !audio.focusMode {
             pendingStart = begin
             showOnRamp = true
         } else {
             begin()
+        }
+    }
+
+    /// In Sleep, beginning playback also starts the night ring's timer (unless the ring is on All
+    /// night, or a countdown is already running from before a pause).
+    private func withNightLength(_ begin: @escaping () -> Void) -> () -> Void {
+        guard !audio.focusMode else { return begin }
+        let length = nightLength
+        return {
+            begin()
+            if let m = SessionGuards.timerOnPlay(lengthMinutes: length,
+                                                 timerActive: audio.sleepTimer.timerRemaining > 0) {
+                audio.sleepTimer.startSleepTimer(minutes: m)
+            }
         }
     }
 
@@ -377,15 +398,26 @@ struct HomeView: View {
                         // Freeze the orb's breath whenever it isn't visible: the chrome has
                         // faded to the screensaver (opacity 0 below) OR the screen is occluded/
                         // backgrounded/low-luminance. Stops the all-night invisible blur composite.
-                        OrbButton(audio: audio, pal: pal, tap: heroTap,
-                                  paused: audio.ambientScreensaver || scenesFrozen,
-                                  idleStatus: statusText())
-                            .anchorPreference(key: CoachmarkAnchorKey.self, value: .bounds) { [.orb: $0] }
+                        // The orb inside the night ring: tap the disc to play, drag the ring's
+                        // handle to set how long the night runs (Play honours it).
+                        ZStack {
+                            OrbButton(audio: audio, pal: pal, tap: heroTap,
+                                      paused: audio.ambientScreensaver || scenesFrozen,
+                                      idleStatus: statusText())
+                                .anchorPreference(key: CoachmarkAnchorKey.self, value: .bounds) { [.orb: $0] }
+                            NightRing(sleepTimer: audio.sleepTimer, pal: pal,
+                                      playing: audio.isAnythingPlaying,
+                                      lengthMinutes: $nightLength,
+                                      dragging: $ringDragging,
+                                      openOptions: { showTimerActionSheet = true })
+                        }
 
-                        SleepStatusLine(base: statusText(),
-                                        showMinute: audio.isAnythingPlaying,
-                                        sleepTimer: audio.sleepTimer,
-                                        pal: pal)
+                        NightLine(resumeText: statusText(),
+                                  playing: audio.isAnythingPlaying,
+                                  lengthMinutes: nightLength,
+                                  sleepTimer: audio.sleepTimer,
+                                  pal: pal,
+                                  openOptions: { showTimerActionSheet = true })
 
                         if !activeLayers.isEmpty {
                             LayerPills(layers: activeLayers, pal: pal)
@@ -418,24 +450,14 @@ struct HomeView: View {
                         }
                         .frame(minHeight: 44)
 
-                        SessionButton(sleepTimer: audio.sleepTimer,
-                                      pomodoro: audio.pomodoro,
-                                      focusMode: audio.focusMode,
-                                      pal: pal,
-                                      onSleepTap: { showTimerActionSheet = true })
-                    }
-
-                    // Breathing is a quiet Sleep-mode extra (re-homed from the old hero).
-                    if !audio.focusMode {
-                        Button(action: { showBreathing = true }) {
-                            HStack(spacing: 5) {
-                                Image(systemName: "wind")
-                                Text("Breathing exercise")
-                            }
-                            .font(.caption.weight(.medium))
-                            .foregroundColor(pal.dim.opacity(0.8))
+                        // Sleep's timer lives on the orb's ring now; Focus keeps its session control.
+                        if audio.focusMode {
+                            SessionButton(sleepTimer: audio.sleepTimer,
+                                          pomodoro: audio.pomodoro,
+                                          focusMode: audio.focusMode,
+                                          pal: pal,
+                                          onSleepTap: { showTimerActionSheet = true })
                         }
-                        .frame(minHeight: 36)
                     }
                 }
                 .frame(maxWidth: .infinity)
@@ -522,6 +544,7 @@ struct HomeView: View {
         .simultaneousGesture(
             DragGesture(minimumDistance: 24)
                 .onEnded { v in
+                    guard !ringDragging else { return }   // that touch was setting the night
                     let dx = v.translation.width, dy = v.translation.height
                     if abs(dx) > abs(dy) * 1.3 && abs(dx) > 48 {
                         if audio.ambientScreensaver { wakeChrome() } else { scheduleIdleFade() }
@@ -595,10 +618,18 @@ struct HomeView: View {
                 // moving content to refract — the difference between a flat box and real glass.
                 .presentationBackground(pal.bg.opacity(0.72))
         }
-        .sheet(isPresented: $showMix) {
+        .sheet(isPresented: $showMix, onDismiss: {
+            let next = afterMixSheet
+            afterMixSheet = nil
+            next?()
+        }) {
             MixDrawer(audio: audio, mixStore: mixStore, pal: pal, onPickEpisode: {
                 showMix = false
                 selectedTab = 1   // jump to the Podcasts tab to choose an episode
+            }, onBreathing: {
+                // Breathing is a full-screen cover; it can only present once the sheet is gone.
+                afterMixSheet = { showBreathing = true }
+                showMix = false
             })
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)

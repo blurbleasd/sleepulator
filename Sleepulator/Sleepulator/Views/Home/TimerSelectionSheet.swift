@@ -22,6 +22,9 @@ struct TimerSelectionSheet: View {
     /// Ambient-only span appended after the podcast stops at expiry (0 = off). Read live by
     /// SleepTimerService, so changing it mid-timer still applies.
     @AppStorage("ambientTailMinutes") private var ambientTailMinutes = 0
+    /// The Home night ring's length. Starting a timer here sets it; turning the timer off returns
+    /// the ring to All night, so the ring and Play keep agreeing with what you last chose.
+    @AppStorage("nightLengthMinutes") private var nightLength: Double = 0
     /// Hero number size — @ScaledMetric so it grows with Dynamic Type instead of a fixed 44pt.
     @ScaledMetric private var heroSize: CGFloat = 44
 
@@ -140,6 +143,7 @@ struct TimerSelectionSheet: View {
             // countdown over silence did nothing but arm the night veil over a quiet room.
             Button(action: {
                 let minutes = Int(timerMinutes)
+                nightLength = Double(minutes)
                 if playing { audio.sleepTimer.startSleepTimer(minutes: minutes) } else { playAndStart(minutes) }
                 UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                 isPresented = false
@@ -176,6 +180,7 @@ struct TimerSelectionSheet: View {
             // new one. Only shown when a timer is actually counting down.
             if timerActive {
                 Button(action: {
+                    nightLength = 0
                     audio.sleepTimer.cancelTimer()
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
                     isPresented = false
@@ -191,6 +196,8 @@ struct TimerSelectionSheet: View {
         }
         .padding(.top, UI.xxl)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Open on the length the ring shows, when it has one.
+        .onAppear { if nightLength >= 5 { timerMinutes = nightLength } }
         // Translucent sheet backdrop (see the presentationBackground at the call site) — the scene
         // drifts behind rather than a flat fill.
     }
