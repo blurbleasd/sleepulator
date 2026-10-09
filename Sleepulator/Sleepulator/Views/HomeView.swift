@@ -13,6 +13,11 @@ struct HomeView: View {
     let mixStore: MixStore
     /// Drives the Podcasts-tab deep link when the user taps the (empty) podcast layer.
     @Binding var selectedTab: Int
+    /// The mini-player's Now Playing sheet (owned by ContentView): a presentation over Home, so
+    /// the screensaver must not fade Home, the tab bar and the mini-player behind it.
+    var nowPlayingPresented: Bool = false
+    /// Bumped by ContentView on every mini-player tap: Home interaction, pushes the countdown back.
+    var miniPlayerTouches: Int = 0
     /// One-time first-run coachmark: points at "Build mix" so a new user discovers that the app
     /// layers noise + binaural + podcasts. Set once the user dismisses it (or builds a mix).
     @AppStorage("hasCompletedFirstRun") private var hasCompletedFirstRun = false
@@ -33,6 +38,9 @@ struct HomeView: View {
     /// Mirrors `audio.pomodoro.isRunning` — the Pomodoro isn't forwarded through `audio`, so
     /// HomeView would otherwise never re-render when a silent Focus session starts or stops.
     @State private var pomodoroRunning = false
+    /// True while Home is the on-screen tab. Input changes fire onChange even when another tab is
+    /// showing; a fade scheduled then would publish `ambientScreensaver` from off-screen.
+    @State private var homeVisible = false
     /// Safe-area insets while the tab bar shows, and the live ones. The screensaver hides the tab
     /// bar, which shrinks the bottom inset; `chromeLift` pads that difference back so the controls
     /// hold their position instead of dropping onto the mini-player as they fade in and out.
@@ -119,7 +127,9 @@ struct HomeView: View {
                                             pomodoroRunning: pomodoroRunning)
     }
     private var assistiveTechRunning: Bool { voiceOverOn || switchControlOn }
-    private var presentingFromHome: Bool { showMix || showTimerActionSheet || showBreathing || showOnRamp }
+    private var presentingFromHome: Bool {
+        showMix || showTimerActionSheet || showBreathing || showOnRamp || nowPlayingPresented
+    }
     private var mayFade: Bool {
         HomeScreensaverPolicy.mayFade(sessionActive: sessionActive,
                                       assistiveTechRunning: assistiveTechRunning,
@@ -132,12 +142,13 @@ struct HomeView: View {
 
     private func scheduleIdleFade() {
         idleFade?.cancel()
-        guard mayFade else { return }
+        guard homeVisible, mayFade else { return }
         // Both modes settle to the bare backdrop after a spell of no interaction (delays in
-        // HomeScreensaverPolicy). Any change to a mayFade input wakes the chrome and reschedules,
-        // which cancels this item, so it can't fire on stale conditions.
+        // HomeScreensaverPolicy). Any change to a mayFade input cancels or reschedules this item,
+        // so it can't fire on stale conditions.
         let delay = HomeScreensaverPolicy.idleDelay(focusMode: audio.focusMode)
         let work = DispatchWorkItem {
+            guard self.homeVisible else { return }   // @State: reads the live value, not the copy's
             withAnimation(.easeInOut(duration: 0.9)) { self.audio.ambientScreensaver = true }
         }
         idleFade = work
@@ -457,15 +468,28 @@ struct HomeView: View {
                     }
                 }
         )
-        .onAppear { scheduleIdleFade() }
+        .onAppear {
+            homeVisible = true
+            scheduleIdleFade()
+        }
         // Leaving Home (tab switch, sheet, etc.): kill the pending idle-fade so the screensaver
         // can't engage while another tab is showing and hide its tab bar (the "stuck off Home" bug).
-        .onDisappear { idleFade?.cancel() }
-        // Every mayFade input wakes/reschedules on change — the pending fade never outlives the
-        // conditions it was scheduled under.
+        .onDisappear {
+            homeVisible = false
+            idleFade?.cancel()
+        }
+        // Every mayFade input cancels or reschedules on change — the pending fade never outlives
+        // the conditions it was scheduled under.
         .onReceive(audio.pomodoro.$isRunning) { pomodoroRunning = $0 }
         .onChange(of: sessionActive) { _, active in
-            if active { scheduleIdleFade() } else { wakeChrome() }
+            // A session ending on its own (sleep timer, AirPods out, an interruption) must not
+            // light the room: if the screen has already faded it stays dark until a tap, and
+            // visible controls simply stay put. Only the pending fade is dropped.
+            if active { scheduleIdleFade() } else { idleFade?.cancel() }
+        }
+        // A mini-player tap is interaction with the Home screen too.
+        .onChange(of: miniPlayerTouches) { _, _ in
+            if !audio.ambientScreensaver { scheduleIdleFade() }
         }
         // VoiceOver / Switch Control turned on mid-screensaver: bring every control back now.
         .onChange(of: assistiveTechRunning) { _, _ in wakeChrome() }

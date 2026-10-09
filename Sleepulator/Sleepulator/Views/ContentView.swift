@@ -15,6 +15,12 @@ struct ContentView: View {
     /// not on every per-second `timerRemaining` publish (which would reschedule the 60 s dim work
     /// item forever and it would never fire).
     @State private var timerWasActive = false
+    /// The mini-player's full Now Playing sheet. Lifted here so HomeView can count it as a
+    /// presentation (no screensaver fade behind it), alongside its own sheets.
+    @State private var showNowPlaying = false
+    /// Bumped on every mini-player tap — touching the mini-player is Home interaction too, so it
+    /// pushes the screensaver countdown back.
+    @State private var miniPlayerTouches = 0
 
     var pal: Palette { Palette(bedtime: bedtimeMode) }
 
@@ -69,7 +75,8 @@ struct ContentView: View {
     var body: some View {
         ZStack(alignment: .bottom) {
             TabView(selection: $selectedTab) {
-                HomeView(audio: audio, mixStore: audio.mixStore, selectedTab: $selectedTab)
+                HomeView(audio: audio, mixStore: audio.mixStore, selectedTab: $selectedTab,
+                         nowPlayingPresented: showNowPlaying, miniPlayerTouches: miniPlayerTouches)
                     .tabItem {
                         // Reflect the active mode — a cyan "Sleep/moon" tab while focusing
                         // was disorienting (the tab contradicted the screen).
@@ -98,7 +105,9 @@ struct ContentView: View {
             // Mini-player floats above the tab bar (a ZStack overlay, not a TabView safe-area
             // inset — that docks it ON the UIKit tab bar). Tabs reserve room for it themselves
             // (Home's bottom inset below, PodcastDetail's contentMargins).
-            MiniPlayerView(audio: audio, progress: audio.playbackProgress, queue: audio.queueManager, selectedTab: $selectedTab)
+            MiniPlayerView(audio: audio, progress: audio.playbackProgress, queue: audio.queueManager,
+                           selectedTab: $selectedTab, showNowPlaying: $showNowPlaying)
+                .simultaneousGesture(TapGesture().onEnded { miniPlayerTouches &+= 1 })
                 .opacity(homeScreensaver ? 0 : 1)
                 .allowsHitTesting(!homeScreensaver)
                 .animation(.easeInOut(duration: 0.9), value: homeScreensaver)

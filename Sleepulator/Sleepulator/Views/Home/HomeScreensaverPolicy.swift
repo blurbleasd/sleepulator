@@ -14,8 +14,11 @@ enum HomeScreensaverPolicy {
     ///   • under VoiceOver / Switch Control — SwiftUI drops opacity-0 views from the accessibility
     ///     tree, so a faded Home left those users a 3 s window to reach any control, and moving
     ///     focus isn't a touch, so it never pushed the countdown back;
-    ///   • while a Home sheet or cover is up — work in the sheet doesn't reach Home's idle timer,
-    ///     so dismissing it used to land on a blank screen.
+    ///   • while a sheet or cover is up over Home (its own, or the mini-player's Now Playing) —
+    ///     work in the sheet doesn't reach Home's idle timer, so dismissing it used to land on a
+    ///     blank screen.
+    /// When a session ends on its own, an already-faded screen stays dark until a tap (no
+    /// lighting the room at 2am); this only governs when a fade may *begin*.
     static func mayFade(sessionActive: Bool, assistiveTechRunning: Bool, presenting: Bool) -> Bool {
         sessionActive && !assistiveTechRunning && !presenting
     }
