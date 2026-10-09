@@ -28,6 +28,9 @@ struct OrbButton: View {
 
     /// Slow breath cadence, seconds — unchanged from the original pulse.
     private static let breathPeriod: Double = 4.5
+    /// The solid disc (and its glyph) — the part the first-run coachmark must never cover. The
+    /// view's frame is larger: the soft glow around the disc sets it.
+    static let discDiameter: CGFloat = 132
 
     var body: some View {
         Button(action: {
@@ -70,7 +73,7 @@ struct OrbButton: View {
                 // Opacity is NEVER modulated by audio — a brightening orb at 2am is a nightlight.
                 .opacity(audio.isAnythingPlaying ? 0.5 : 0.22)
             Circle().fill(Color(white: 0.09).opacity(0.85))
-                .frame(width: 132, height: 132)
+                .frame(width: Self.discDiameter, height: Self.discDiameter)
                 .overlay(Circle().stroke(pal.accent.opacity(0.35), lineWidth: 1))
             Image(systemName: audio.isAnythingPlaying ? "pause.fill" : "play.fill")
                 .font(.system(size: 46, weight: .medium, design: .rounded))

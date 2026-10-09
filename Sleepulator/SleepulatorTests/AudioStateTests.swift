@@ -1065,3 +1065,21 @@ final class HomeScreensaverPolicyTests: XCTestCase {
         XCTAssertEqual(HomeScreensaverPolicy.chromeLift(anchored: shown, live: taller), EdgeInsets())
     }
 }
+
+final class CoachmarkLayoutTests: XCTestCase {
+    // OrbButton's frame is the 200pt glow; the 132pt disc sits centred in it.
+    private let orb = CGRect(x: 87, y: 108, width: 200, height: 200)   // disc spans y 142…274
+
+    func testRoomClearsTheDiscAndTheRow() {
+        // The 2026-10 review bug: on an iPhone SE the card covered the lower half of the orb.
+        let room = CoachmarkLayout.room(orb: orb, mixRowTop: 384)
+        XCTAssertEqual(room.top, 274 + CoachmarkLayout.clearance)   // starts below the disc, not the glow
+        XCTAssertEqual(room.top + room.height, 384 - CoachmarkLayout.clearance)
+    }
+
+    func testRoomIsEmptyNotNegativeWhenTheRowCrowdsTheOrb() {
+        // Large text on a small phone can push the row up against the disc: the card gets no
+        // room (and shows nothing) instead of a negative height.
+        XCTAssertEqual(CoachmarkLayout.room(orb: orb, mixRowTop: 280).height, 0)
+    }
+}

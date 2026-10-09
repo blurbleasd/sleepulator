@@ -320,6 +320,7 @@ struct HomeView: View {
                         // backgrounded/low-luminance. Stops the all-night invisible blur composite.
                         OrbButton(audio: audio, pal: pal, tap: heroTap,
                                   paused: audio.ambientScreensaver || scenesFrozen)
+                            .anchorPreference(key: CoachmarkAnchorKey.self, value: .bounds) { [.orb: $0] }
 
                         SleepStatusLine(base: statusText(),
                                         showMinute: audio.isAnythingPlaying,
@@ -378,29 +379,33 @@ struct HomeView: View {
                     }
                 }
                 .frame(maxWidth: .infinity)
-                // First-run coachmark: a single dismissible card pointing down at "Build mix" so
-                // a new user discovers the layering. Anchored to this row rather than a guessed
-                // screen offset (the old fixed 96pt fell below the 112pt row it pointed at and
-                // covered it): a zero-height, bottom-aligned frame pinned to the row's top edge,
-                // so the card grows upward from just above the row. Rides the chrome's fade.
-                .overlay(alignment: .top) {
-                    if !hasCompletedFirstRun && !audio.focusMode {
-                        FirstRunCoachmark(pal: pal) {
-                            withAnimation(.easeInOut(duration: 0.3)) { hasCompletedFirstRun = true }
-                        }
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.horizontal, 28)
-                        .padding(.bottom, UI.sm)
-                        .frame(height: 0, alignment: .bottom)
-                        .transition(.opacity)
-                    }
-                }
+                .anchorPreference(key: CoachmarkAnchorKey.self, value: .bounds) { [.mixRow: $0] }
                 // The mini-player floats over the bottom in EVERY state (it shows an idle
                 // "Nothing playing" bar when nothing's loaded), so the controls need this inset
                 // even with no episode — the old `: 22` let the always-present bar cover the
                 // "Build mix" button. A constant also stops the row jumping when a podcast
                 // loads/unloads. Tune by eye on device.
                 .padding(.bottom, 112)
+            }
+            // First-run coachmark: a single dismissible card pointing down at "Build mix" so a new
+            // user discovers the layering. It fills the band between the orb's disc and the Build
+            // mix row, measured from both (a fixed offset can't fit every phone and text size),
+            // and picks a layout that fits it — so it never covers the orb its copy says to tap,
+            // nor the row it points at. Inside the chrome stack, so it rides the chrome's fade.
+            .overlayPreferenceValue(CoachmarkAnchorKey.self) { anchors in
+                if !hasCompletedFirstRun && !audio.focusMode,
+                   let orb = anchors[.orb], let mixRow = anchors[.mixRow] {
+                    GeometryReader { proxy in
+                        let room = CoachmarkLayout.room(orb: proxy[orb], mixRowTop: proxy[mixRow].minY)
+                        FirstRunCoachmark(pal: pal) {
+                            withAnimation(.easeInOut(duration: 0.3)) { hasCompletedFirstRun = true }
+                        }
+                        .padding(.horizontal, 28)
+                        .frame(width: proxy.size.width, height: room.height, alignment: .bottom)
+                        .offset(y: room.top)
+                    }
+                    .transition(.opacity)
+                }
             }
             // Hold position while the screensaver has the tab bar hidden (see `chromeLift`).
             .padding(.top, chromeLift.top)
