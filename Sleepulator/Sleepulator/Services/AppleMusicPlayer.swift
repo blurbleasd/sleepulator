@@ -32,6 +32,10 @@ final class AppleMusicPlayer {
     private var stateObserver: AnyCancellable?
     private var queueObserver: AnyCancellable?
 
+    // Explicitly nonisolated: the implicit MainActor-isolated deinit aborts on iOS 18.4–26.3
+    // runtimes (CLAUDE.md, "Isolated deinits"). Only releases stored properties.
+    nonisolated deinit {}
+
     /// True while the system player reports `.playing`.
     var isPlaying: Bool { player.state.playbackStatus == .playing }
     /// True once a queue has been set — i.e. the user has chosen something to play at least once

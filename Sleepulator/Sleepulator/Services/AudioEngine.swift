@@ -21,6 +21,10 @@ enum AppConfig {
 /// engine publishes (podTitle, transport, settings) from re-rendering the podcast list.
 final class Connectivity: ObservableObject {
     @Published var isOnline = true
+
+    // Explicitly nonisolated: the implicit MainActor-isolated deinit aborts on iOS 18.4–26.3
+    // runtimes (CLAUDE.md, "Isolated deinits"). Only releases stored properties.
+    nonisolated deinit {}
 }
 
 /// Comfort/playback settings bound by SettingsView. Split out of AudioEngine so the settings screen
@@ -71,6 +75,10 @@ final class PlaybackSettings: ObservableObject {
         sleepEQIntensity = d.object(forKey: "sleepEQIntensity") as? Double ?? 1.0
         beatRouting = d.string(forKey: "beatRouting") ?? "auto"
     }
+
+    // Explicitly nonisolated: the implicit MainActor-isolated deinit aborts on iOS 18.4–26.3
+    // runtimes (CLAUDE.md, "Isolated deinits"). Only releases stored properties.
+    nonisolated deinit {}
 
     /// Re-read from UserDefaults after a Backup restore. Reassigning fires didSet, re-persisting
     /// (harmless) and re-applying each side-effect — exactly what restore needs.

@@ -32,6 +32,10 @@ final class MixStore: ObservableObject {
         self.storage = storage
     }
 
+    // Explicitly nonisolated: the implicit MainActor-isolated deinit aborts on iOS 18.4–26.3
+    // runtimes (CLAUDE.md, "Isolated deinits"). Only releases stored properties.
+    nonisolated deinit {}
+
     /// Store the latest "Last Night" snapshot. Synchronous UserDefaults write under the legacy
     /// "lastMix" key, so Settings backup/restore keeps reading it unchanged.
     func saveLast(_ mix: SavedMix) {

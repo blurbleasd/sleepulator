@@ -13,6 +13,11 @@ struct HomeView: View {
     let mixStore: MixStore
     /// Drives the Podcasts-tab deep link when the user taps the (empty) podcast layer.
     @Binding var selectedTab: Int
+    /// The mini-player's Now Playing sheet (owned by ContentView): a presentation over Home, so
+    /// the screensaver must not fade Home, the tab bar and the mini-player behind it.
+    var nowPlayingPresented: Bool = false
+    /// Bumped by ContentView on every mini-player tap: Home interaction, pushes the countdown back.
+    var miniPlayerTouches: Int = 0
     /// One-time first-run coachmark: points at "Build mix" so a new user discovers that the app
     /// layers noise + binaural + podcasts. Set once the user dismisses it (or builds a mix).
     @AppStorage("hasCompletedFirstRun") private var hasCompletedFirstRun = false
@@ -25,10 +30,24 @@ struct HomeView: View {
     @State private var showOnRamp = false
     /// The deferred "begin playback" action, run after the on-ramp completes (or is skipped over).
     @State private var pendingStart: (() -> Void)?
-    // Ambient screensaver: while playing in Sleep mode, the controls fade after a spell of
-    // no interaction, leaving just the sky + moon. A tap brings them back. The flag lives on
-    // `audio` so ContentView's tab bar + mini-player can fade with the home chrome.
+    // Ambient screensaver: while a session plays, the controls fade after a spell of no
+    // interaction, leaving just the sky + moon. A tap brings them back. The flag lives on
+    // `audio` so ContentView's tab bar + mini-player can fade with the home chrome. When it may
+    // engage is `HomeScreensaverPolicy`'s call.
     @State private var idleFade: DispatchWorkItem?
+    /// Mirrors `audio.pomodoro.isRunning` — the Pomodoro isn't forwarded through `audio`, so
+    /// HomeView would otherwise never re-render when a silent Focus session starts or stops.
+    @State private var pomodoroRunning = false
+    /// True while Home is the on-screen tab. Input changes fire onChange even when another tab is
+    /// showing; a fade scheduled then would publish `ambientScreensaver` from off-screen.
+    @State private var homeVisible = false
+    /// Safe-area insets while the tab bar shows, and the live ones. The screensaver hides the tab
+    /// bar, which shrinks the bottom inset; `chromeLift` pads that difference back so the controls
+    /// hold their position instead of dropping onto the mini-player as they fade in and out.
+    @State private var anchoredInsets = EdgeInsets()
+    @State private var liveInsets = EdgeInsets()
+    @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverOn
+    @Environment(\.accessibilitySwitchControlEnabled) private var switchControlOn
     @Environment(\.accessibilityReduceMotion) var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.isLuminanceReduced) private var isLuminanceReduced
@@ -102,14 +121,34 @@ struct HomeView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.6, execute: work)
     }
 
+    private var sessionActive: Bool {
+        HomeScreensaverPolicy.sessionActive(audioPlaying: audio.isAnythingPlaying,
+                                            appleMusicOn: audio.appleMusicOn,
+                                            pomodoroRunning: pomodoroRunning)
+    }
+    private var assistiveTechRunning: Bool { voiceOverOn || switchControlOn }
+    private var presentingFromHome: Bool {
+        showMix || showTimerActionSheet || showBreathing || showOnRamp || nowPlayingPresented
+    }
+    private var mayFade: Bool {
+        HomeScreensaverPolicy.mayFade(sessionActive: sessionActive,
+                                      assistiveTechRunning: assistiveTechRunning,
+                                      presenting: presentingFromHome)
+    }
+
+    private var chromeLift: EdgeInsets {
+        HomeScreensaverPolicy.chromeLift(anchored: anchoredInsets, live: liveInsets)
+    }
+
     private func scheduleIdleFade() {
         idleFade?.cancel()
-        // Both modes settle to the bare backdrop on their own after a spell of no interaction.
-        // Sleep fades fast (you want the room dark quickly); Focus lingers longer before the scene
-        // takes over — the session readout is useful mid-work, and a good Focus scene encodes the
-        // Pomodoro progress anyway, so losing the numbers to the screensaver is no real loss.
-        let delay: TimeInterval = audio.focusMode ? 10 : 3
+        guard homeVisible, mayFade else { return }
+        // Both modes settle to the bare backdrop after a spell of no interaction (delays in
+        // HomeScreensaverPolicy). Any change to a mayFade input cancels or reschedules this item,
+        // so it can't fire on stale conditions.
+        let delay = HomeScreensaverPolicy.idleDelay(focusMode: audio.focusMode)
         let work = DispatchWorkItem {
+            guard self.homeVisible else { return }   // @State: reads the live value, not the copy's
             withAnimation(.easeInOut(duration: 0.9)) { self.audio.ambientScreensaver = true }
         }
         idleFade = work
@@ -281,6 +320,7 @@ struct HomeView: View {
                         // backgrounded/low-luminance. Stops the all-night invisible blur composite.
                         OrbButton(audio: audio, pal: pal, tap: heroTap,
                                   paused: audio.ambientScreensaver || scenesFrozen)
+                            .anchorPreference(key: CoachmarkAnchorKey.self, value: .bounds) { [.orb: $0] }
 
                         SleepStatusLine(base: statusText(),
                                         showMinute: audio.isAnythingPlaying,
@@ -338,6 +378,8 @@ struct HomeView: View {
                         .frame(minHeight: 36)
                     }
                 }
+                .frame(maxWidth: .infinity)
+                .anchorPreference(key: CoachmarkAnchorKey.self, value: .bounds) { [.mixRow: $0] }
                 // The mini-player floats over the bottom in EVERY state (it shows an idle
                 // "Nothing playing" bar when nothing's loaded), so the controls need this inset
                 // even with no episode — the old `: 22` let the always-present bar cover the
@@ -345,6 +387,29 @@ struct HomeView: View {
                 // loads/unloads. Tune by eye on device.
                 .padding(.bottom, 112)
             }
+            // First-run coachmark: a single dismissible card pointing down at "Build mix" so a new
+            // user discovers the layering. It fills the band between the orb's disc and the Build
+            // mix row, measured from both (a fixed offset can't fit every phone and text size),
+            // and picks a layout that fits it — so it never covers the orb its copy says to tap,
+            // nor the row it points at. Inside the chrome stack, so it rides the chrome's fade.
+            .overlayPreferenceValue(CoachmarkAnchorKey.self) { anchors in
+                if !hasCompletedFirstRun && !audio.focusMode,
+                   let orb = anchors[.orb], let mixRow = anchors[.mixRow] {
+                    GeometryReader { proxy in
+                        let room = CoachmarkLayout.room(orb: proxy[orb], mixRowTop: proxy[mixRow].minY)
+                        FirstRunCoachmark(pal: pal) {
+                            withAnimation(.easeInOut(duration: 0.3)) { hasCompletedFirstRun = true }
+                        }
+                        .padding(.horizontal, 28)
+                        .frame(width: proxy.size.width, height: room.height, alignment: .bottom)
+                        .offset(y: room.top)
+                    }
+                    .transition(.opacity)
+                }
+            }
+            // Hold position while the screensaver has the tab bar hidden (see `chromeLift`).
+            .padding(.top, chromeLift.top)
+            .padding(.bottom, chromeLift.bottom)
             .opacity(audio.ambientScreensaver ? 0 : 1)
             .allowsHitTesting(!audio.ambientScreensaver)
             .animation(.easeInOut(duration: 0.9), value: audio.ambientScreensaver)
@@ -367,22 +432,6 @@ struct HomeView: View {
                     .accessibilityAddTraits(.isButton)
             }
 
-            // First-run coachmark: a single dismissible card pointing down at "Build mix" so a
-            // new user discovers the layering. Never shown once dismissed, or while the screen
-            // has faded to the ambient screensaver.
-            if !hasCompletedFirstRun && !audio.focusMode && !audio.ambientScreensaver {
-                VStack {
-                    Spacer()
-                    FirstRunCoachmark(pal: pal) {
-                        withAnimation(.easeInOut(duration: 0.3)) { hasCompletedFirstRun = true }
-                    }
-                    .padding(.horizontal, 28)
-                    // Sit just above the Build mix / timer row.
-                    .padding(.bottom, audio.hasLoadedEpisode ? 188 : 96)
-                }
-                .transition(.opacity)
-            }
-
             // Transient backdrop name, shown for ~1.6s after a swipe changes the scene.
             if sceneTitleVisible {
                 VStack {
@@ -399,6 +448,11 @@ struct HomeView: View {
                 .allowsHitTesting(false)
                 .transition(.opacity)
             }
+        }
+        .onGeometryChange(for: EdgeInsets.self) { $0.safeAreaInsets } action: { insets in
+            liveInsets = insets
+            // Anchor only while the tab bar shows, so the lift is exactly what hiding it took away.
+            if !audio.ambientScreensaver { anchoredInsets = insets }
         }
         // A small home-screen gesture vocabulary, simultaneous so it coexists with the orb press
         // and the idle-fade tap:
@@ -419,13 +473,33 @@ struct HomeView: View {
                     }
                 }
         )
-        .onAppear { scheduleIdleFade() }
+        .onAppear {
+            homeVisible = true
+            scheduleIdleFade()
+        }
         // Leaving Home (tab switch, sheet, etc.): kill the pending idle-fade so the screensaver
         // can't engage while another tab is showing and hide its tab bar (the "stuck off Home" bug).
-        .onDisappear { idleFade?.cancel() }
-        .onChange(of: audio.isAnythingPlaying) { _, playing in
-            if playing { scheduleIdleFade() } else { wakeChrome() }
+        .onDisappear {
+            homeVisible = false
+            idleFade?.cancel()
         }
+        // Every mayFade input cancels or reschedules on change — the pending fade never outlives
+        // the conditions it was scheduled under.
+        .onReceive(audio.pomodoro.$isRunning) { pomodoroRunning = $0 }
+        .onChange(of: sessionActive) { _, active in
+            // A session ending on its own (sleep timer, AirPods out, an interruption) must not
+            // light the room: if the screen has already faded it stays dark until a tap, and
+            // visible controls simply stay put. Only the pending fade is dropped.
+            if active { scheduleIdleFade() } else { idleFade?.cancel() }
+        }
+        // A mini-player tap is interaction with the Home screen too.
+        .onChange(of: miniPlayerTouches) { _, _ in
+            if !audio.ambientScreensaver { scheduleIdleFade() }
+        }
+        // VoiceOver / Switch Control turned on mid-screensaver: bring every control back now.
+        .onChange(of: assistiveTechRunning) { _, _ in wakeChrome() }
+        // A sheet opening cancels the countdown; closing one wakes the chrome and restarts it.
+        .onChange(of: presentingFromHome) { _, _ in wakeChrome() }
         .onChange(of: audio.focusMode) { _, _ in
             // Switching mood counts as interaction: bring the chrome back and restart the idle
             // countdown so the new mood's screensaver timing (Sleep fast / Focus longer) applies.

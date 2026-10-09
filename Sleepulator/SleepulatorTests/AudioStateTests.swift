@@ -1,5 +1,6 @@
 import XCTest
 import AVFoundation
+import SwiftUI
 @testable import Sleepulator
 
 @MainActor
@@ -764,6 +765,42 @@ final class FirstRunDefaultMixTests: XCTestCase {
     }
 }
 
+// Regression for the 47-test SIGABRT on the iOS 26.3 simulator. Under SWIFT_DEFAULT_ACTOR_ISOLATION
+// = MainActor a class WITHOUT an explicit deinit gets an implicit main-actor-*isolated* one, and on
+// the iOS 18.4–26.3 Swift runtimes that path aborts ("pointer being freed was not allocated", in
+// TaskLocal::StopLookupScope — swiftlang/swift 29245e4) when it runs synchronously on the main
+// thread while a task-local is bound outside any Task. XCTest binds one around every sync test, so
+// every AudioEngine teardown crashed. The engine's subtree, SceneClock and StorageManager opt out
+// with `nonisolated deinit {}`; this binds its own task-local so the trigger doesn't depend on
+// XCTest internals. A fixed runtime (26.4+) passes regardless — run it on a 26.3 sim to exercise it.
+private enum DeinitProbe {
+    @TaskLocal static var value = 0
+}
+
+@MainActor
+final class IsolatedDeinitRuntimeBugTests: XCTestCase {
+    func testTeardownInsideSyncTaskLocalBindingDoesNotAbort() {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("IsolatedDeinit-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        weak var weakEngine: AudioEngine?
+        weak var weakClock: SceneClock?
+        weak var weakStore: StorageManager?
+        DeinitProbe.$value.withValue(1) {
+            let engine = AudioEngine()
+            let clock = SceneClock()
+            let store = StorageManager(directory: dir)
+            weakEngine = engine
+            weakClock = clock
+            weakStore = store
+        }   // all released here, still inside the binding — the crashing path pre-fix
+        XCTAssertNil(weakEngine, "engine must be freed inside the binding or this test proves nothing")
+        XCTAssertNil(weakClock, "clock must be freed inside the binding or this test proves nothing")
+        XCTAssertNil(weakStore, "store must be freed inside the binding or this test proves nothing")
+    }
+}
+
 // Episode/Podcast identity is the id only. A custom == with a synthesized hash(into:) over all
 // fields would break the Hashable contract (equal values, unequal hashes) — corrupting Set/dict use.
 final class ModelIdentityTests: XCTestCase {
@@ -1275,5 +1312,76 @@ final class PodcastPlayerRebuildTests: XCTestCase {
         d += u32(UInt32(sampleRate)); d += u32(UInt32(sampleRate * 2)); d += u16(2); d += u16(16)
         d += Data("data".utf8); d += u32(UInt32(pcm.count)); d += pcm
         return d
+    }
+}
+
+/// The Home screensaver hides every control and the tab bar, so it must only ever engage over a
+/// session in progress — never an idle app, never under assistive tech, never behind a sheet.
+final class HomeScreensaverPolicyTests: XCTestCase {
+    func testIdleHomeNeverFades() {
+        // The 2026-10 audit bug: a fresh launch with nothing playing blanked to stars in 3 s.
+        XCTAssertFalse(HomeScreensaverPolicy.mayFade(sessionActive: false, assistiveTechRunning: false, presenting: false))
+    }
+
+    func testFadesOverASession() {
+        XCTAssertTrue(HomeScreensaverPolicy.mayFade(sessionActive: true, assistiveTechRunning: false, presenting: false))
+    }
+
+    func testNeverFadesUnderAssistiveTech() {
+        // Opacity-0 controls leave the accessibility tree — VoiceOver/Switch Control would lose Home.
+        XCTAssertFalse(HomeScreensaverPolicy.mayFade(sessionActive: true, assistiveTechRunning: true, presenting: false))
+    }
+
+    func testNeverFadesBehindAHomeSheet() {
+        XCTAssertFalse(HomeScreensaverPolicy.mayFade(sessionActive: true, assistiveTechRunning: false, presenting: true))
+    }
+
+    func testSleepFadesFasterThanFocus() {
+        XCTAssertLessThan(HomeScreensaverPolicy.idleDelay(focusMode: false),
+                          HomeScreensaverPolicy.idleDelay(focusMode: true))
+    }
+
+    func testAnySourceCountsAsASession() {
+        XCTAssertFalse(HomeScreensaverPolicy.sessionActive(audioPlaying: false, appleMusicOn: false, pomodoroRunning: false))
+        XCTAssertTrue(HomeScreensaverPolicy.sessionActive(audioPlaying: true, appleMusicOn: false, pomodoroRunning: false))
+        // Apple Music sits outside `isAnythingPlaying`, and a silent Pomodoro has no audio at all —
+        // both are still a session the scene can take over.
+        XCTAssertTrue(HomeScreensaverPolicy.sessionActive(audioPlaying: false, appleMusicOn: true, pomodoroRunning: false))
+        XCTAssertTrue(HomeScreensaverPolicy.sessionActive(audioPlaying: false, appleMusicOn: false, pomodoroRunning: true))
+    }
+
+    func testChromeLiftRestoresWhatTheHiddenTabBarTookAway() {
+        // iPhone: hiding the tab bar shrinks the bottom inset 83 → 34; the controls get 49 back.
+        let shown = EdgeInsets(top: 62, leading: 0, bottom: 83, trailing: 0)
+        let hidden = EdgeInsets(top: 62, leading: 0, bottom: 34, trailing: 0)
+        let lift = HomeScreensaverPolicy.chromeLift(anchored: shown, live: hidden)
+        XCTAssertEqual(lift.bottom, 49)
+        XCTAssertEqual(lift.top, 0)
+    }
+
+    func testChromeLiftIsZeroWhileChromeShowsAndNeverNegative() {
+        let shown = EdgeInsets(top: 62, leading: 0, bottom: 83, trailing: 0)
+        XCTAssertEqual(HomeScreensaverPolicy.chromeLift(anchored: shown, live: shown), EdgeInsets())
+        // Live inset larger than the anchor (e.g. a stale anchor after rotation): clamp, don't pull up.
+        let taller = EdgeInsets(top: 80, leading: 0, bottom: 100, trailing: 0)
+        XCTAssertEqual(HomeScreensaverPolicy.chromeLift(anchored: shown, live: taller), EdgeInsets())
+    }
+}
+
+final class CoachmarkLayoutTests: XCTestCase {
+    // OrbButton's frame is the 200pt glow; the 132pt disc sits centred in it.
+    private let orb = CGRect(x: 87, y: 108, width: 200, height: 200)   // disc spans y 142…274
+
+    func testRoomClearsTheDiscAndTheRow() {
+        // The 2026-10 review bug: on an iPhone SE the card covered the lower half of the orb.
+        let room = CoachmarkLayout.room(orb: orb, mixRowTop: 384)
+        XCTAssertEqual(room.top, 274 + CoachmarkLayout.clearance)   // starts below the disc, not the glow
+        XCTAssertEqual(room.top + room.height, 384 - CoachmarkLayout.clearance)
+    }
+
+    func testRoomIsEmptyNotNegativeWhenTheRowCrowdsTheOrb() {
+        // Large text on a small phone can push the row up against the disc: the card gets no
+        // room (and shows nothing) instead of a negative height.
+        XCTAssertEqual(CoachmarkLayout.room(orb: orb, mixRowTop: 280).height, 0)
     }
 }

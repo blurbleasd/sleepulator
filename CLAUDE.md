@@ -62,6 +62,14 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   rest. `PersistenceMigrator` owns the fragile launch-time legacy reads.
 - **Sound palettes are mode-scoped** — Sleep and Focus deliberately share no sounds
   (`AudioEngine.reconcileSoundsToMode`).
+- **Isolated deinits.** Under `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor` a class with no explicit
+  `deinit` gets an implicit MainActor-*isolated* one (an explicit `deinit` is nonisolated). On the
+  iOS 18.4–26.3 Swift runtimes that path aborts ("pointer being freed was not allocated" in
+  `TaskLocal::StopLookupScope`, swiftlang/swift 29245e4) when it runs synchronously on main while
+  a task-local is bound outside a Task, and XCTest binds one around every sync test. So any class
+  `AudioEngine` owns, or that tests create and free (`SceneClock`, temp-dir `StorageManager`,
+  `PodcastParser`), declares `nonisolated deinit {}`. A new engine-owned class without it crashes
+  `IsolatedDeinitRuntimeBugTests` on an iOS 26.3 sim; 26.4+ runtimes hide the bug.
 
 ## Build / run
 - **Native Xcode build** — open `Sleepulator/Sleepulator.xcodeproj`. NOT Capacitor/CLI; there's

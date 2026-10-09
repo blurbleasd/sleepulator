@@ -24,6 +24,10 @@ class PodcastParser: NSObject, XMLParserDelegate {
     private var inItem = false
     private var inImage = false
     private var tempImageUrl = ""
+
+    // Explicitly nonisolated: the implicit MainActor-isolated deinit aborts on iOS 18.4–26.3
+    // runtimes (CLAUDE.md, "Isolated deinits"). Only releases stored properties.
+    nonisolated deinit {}
     
     func parseFeed(url: URL) async throws -> ParsedFeed {
         // Configured session + retry-with-backoff: a single flaky-Wi-Fi blip no longer reads as

@@ -27,6 +27,10 @@ final class NotificationBackstopScheduler: SleepTimerBackstopScheduling {
     static let identifier = "app.sleepulator.sleeptimer.backstop"
     private var requestedAuth = false
 
+    // Explicitly nonisolated: the implicit MainActor-isolated deinit aborts on iOS 18.4–26.3
+    // runtimes (CLAUDE.md, "Isolated deinits"). Only releases stored properties.
+    nonisolated deinit {}
+
     func schedule(after seconds: TimeInterval) {
         guard seconds > 0 else { return }
         let center = UNUserNotificationCenter.current()
@@ -140,6 +144,10 @@ final class SleepTimerService: ObservableObject {
 
     /// Out-of-process safety net for the terminal stop (see protocol doc). Injectable for tests.
     var backstop: SleepTimerBackstopScheduling = NotificationBackstopScheduler()
+
+    // Explicitly nonisolated: the implicit MainActor-isolated deinit aborts on iOS 18.4–26.3
+    // runtimes (CLAUDE.md, "Isolated deinits"). Only releases stored properties.
+    nonisolated deinit {}
 
     func startSleepTimer(minutes: Int) {
         cancelTimer()
@@ -641,6 +649,10 @@ final class ChimePlayer {
         player?.volume = 0.6
         player?.prepareToPlay()
     }
+
+    // Explicitly nonisolated: the implicit MainActor-isolated deinit aborts on iOS 18.4–26.3
+    // runtimes (CLAUDE.md, "Isolated deinits"). Only releases stored properties.
+    nonisolated deinit {}
 
     func play() {
         player?.currentTime = 0
