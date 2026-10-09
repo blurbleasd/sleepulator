@@ -1714,6 +1714,70 @@ final class StageForEditingTests: XCTestCase {
         XCTAssertEqual(e.noiseType, n); XCTAssertEqual(e.binauralPreset, b)
         e.focusMode = false
     }
+
+    private func layer(_ id: String, _ type: String, _ volume: Double, muted: Bool? = nil) -> ExtraNoiseLayer {
+        ExtraNoiseLayer(id: id, type: type, volume: volume, muted: muted)
+    }
+
+    func testStagesTheSnapshotsExtraLayers() {
+        // A Sleep → Focus → Sleep round trip dropped the rain layer from the mixer; Resume would
+        // still bring it back, so Build mix must show it.
+        let e = AudioEngine(); e.focusMode = false
+        e.noiseOn = false; e.binauralOn = false; e.extraLayers = []
+        defer { e.extraLayers = [] }
+        var m = mix("brown", "theta")
+        m.extraLayers = [layer("a", "rain", 0.42), layer("b", "ocean", 0.2, muted: true)]
+        e.stageForEditing(m)
+        XCTAssertEqual(e.extraLayers, m.extraLayers)              // ids, levels, mute all kept
+        XCTAssertFalse(e.isAnythingPlaying)
+    }
+
+    func testSnapshotWithoutLayersClearsStaleOnes() {
+        // Play resumes with no extra layers, so the idle mixer shouldn't show any.
+        let e = AudioEngine(); e.focusMode = false
+        e.noiseOn = false; e.binauralOn = false
+        e.extraLayers = [layer("old", "forest", 0.5)]
+        defer { e.extraLayers = [] }
+        e.stageForEditing(mix("brown", "theta"))
+        XCTAssertEqual(e.extraLayers, [])
+    }
+
+    func testStagedLayersAreCappedLikeResume() {
+        let e = AudioEngine(); e.focusMode = false
+        e.noiseOn = false; e.binauralOn = false; e.extraLayers = []
+        defer { e.extraLayers = [] }
+        var m = mix("brown", "theta")
+        m.extraLayers = [layer("a", "rain", 0.3), layer("b", "ocean", 0.3), layer("c", "forest", 0.3)]
+        e.stageForEditing(m)
+        XCTAssertEqual(e.extraLayers.map(\.id), Array(["a", "b", "c"].prefix(AudioEngine.maxExtraLayers)))
+    }
+
+    func testCrossModeLayersStayPut() {
+        let e = AudioEngine(); e.focusMode = true
+        e.noiseOn = false; e.binauralOn = false
+        let focusLayers = [layer("f", "fan", 0.35)]
+        e.extraLayers = focusLayers
+        defer { e.extraLayers = []; e.focusMode = false }
+        var sleepOnly = mix("ocean", "delta")
+        sleepOnly.extraLayers = [layer("r", "rain", 0.5)]
+        e.stageForEditing(sleepOnly)
+        XCTAssertEqual(e.extraLayers, focusLayers)
+        // Pink is in both palettes, so it stages, but its Sleep-only layer keeps the stack out.
+        var pinkLed = mix("pink", "delta")
+        pinkLed.extraLayers = [layer("r", "rain", 0.5)]
+        e.stageForEditing(pinkLed)
+        XCTAssertEqual(e.noiseType, "pink")
+        XCTAssertEqual(e.extraLayers, focusLayers)
+    }
+
+    func testLiveLayersAreNeverStaged() {
+        let e = AudioEngine(); e.focusMode = false
+        e.noiseType = "brown"; e.extraLayers = [layer("live", "rain", 0.5)]
+        e.noiseOn = true
+        defer { e.noiseOn = false; e.extraLayers = [] }
+        e.stageForEditing(mix("brown", "theta"))
+        XCTAssertEqual(e.extraLayers.map(\.id), ["live"])
+    }
 }
 
 /// Every way of starting a Sleep session from rest honours the night ring (it used to be the orb
