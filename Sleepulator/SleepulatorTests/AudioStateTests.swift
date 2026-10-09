@@ -1011,3 +1011,30 @@ final class ResumeIntegrityTests: XCTestCase {
         XCTAssertEqual(engine.noiseType, "green")
     }
 }
+
+/// The Home screensaver hides every control and the tab bar, so it must only ever engage over a
+/// session in progress — never an idle app, never under assistive tech, never behind a sheet.
+final class HomeScreensaverPolicyTests: XCTestCase {
+    func testIdleHomeNeverFades() {
+        // The 2026-10 audit bug: a fresh launch with nothing playing blanked to stars in 3 s.
+        XCTAssertFalse(HomeScreensaverPolicy.mayFade(sessionActive: false, assistiveTechRunning: false, presenting: false))
+    }
+
+    func testFadesOverASession() {
+        XCTAssertTrue(HomeScreensaverPolicy.mayFade(sessionActive: true, assistiveTechRunning: false, presenting: false))
+    }
+
+    func testNeverFadesUnderAssistiveTech() {
+        // Opacity-0 controls leave the accessibility tree — VoiceOver/Switch Control would lose Home.
+        XCTAssertFalse(HomeScreensaverPolicy.mayFade(sessionActive: true, assistiveTechRunning: true, presenting: false))
+    }
+
+    func testNeverFadesBehindAHomeSheet() {
+        XCTAssertFalse(HomeScreensaverPolicy.mayFade(sessionActive: true, assistiveTechRunning: false, presenting: true))
+    }
+
+    func testSleepFadesFasterThanFocus() {
+        XCTAssertLessThan(HomeScreensaverPolicy.idleDelay(focusMode: false),
+                          HomeScreensaverPolicy.idleDelay(focusMode: true))
+    }
+}
