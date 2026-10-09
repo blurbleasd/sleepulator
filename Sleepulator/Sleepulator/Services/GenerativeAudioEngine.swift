@@ -88,7 +88,9 @@ struct AudioRenderState {
 }
 
 final class GenerativeAudioEngine {
-    private let engine = AVAudioEngine()
+    /// `var` only so a media-services reset can swap in a fresh instance (Apple: every audio
+    /// object is invalid after one). Read and replaced on the main queue only.
+    private var engine = AVAudioEngine()
     private var noiseNodes: [AVAudioSourceNode] = []
     private var binauralNode: AVAudioSourceNode!
     private var limiterNode: AVAudioUnitEffect!
@@ -132,6 +134,11 @@ final class GenerativeAudioEngine {
         statePtr.initialize(to: AudioRenderState())
 
         setupEngine()
+        observeConfigurationChanges(of: engine)
+    }
+
+    /// The observer is scoped to one engine instance, so a media-services rebuild must move it.
+    private func observeConfigurationChanges(of engine: AVAudioEngine) {
         NotificationCenter.default.addObserver(self, selector: #selector(handleConfigurationChange), name: .AVAudioEngineConfigurationChange, object: engine)
     }
 
@@ -152,7 +159,21 @@ final class GenerativeAudioEngine {
     }
 
     @objc private func handleConfigurationChange(notification: Notification) {
-        let wasRunning = engine.isRunning
+        // AVAudioEngine can post this off the main queue. Hop to main so this rebuild can't race
+        // a media-services engine swap (or the main-queue resume/suspend calls). A change posted
+        // by an engine that has since been swapped out is stale: ignore it.
+        let source = notification.object as AnyObject?
+        DispatchQueue.main.async { [weak self] in
+            guard let self, source === self.engine else { return }
+            let wasRunning = self.engine.isRunning
+            self.tearDownGraph()
+            self.setupEngine(startEngine: wasRunning)
+        }
+    }
+
+    /// Stop `engine`, then detach every node `setupEngine` attached. Stopping first is what makes
+    /// this safe: no render callback can be running while its node is detached.
+    private func tearDownGraph() {
         engine.stop()
         for node in noiseNodes { engine.detach(node) }
         noiseNodes.removeAll()
@@ -164,8 +185,36 @@ final class GenerativeAudioEngine {
             limiterNode.removeTap(onBus: 0)
             engine.detach(limiterNode)
         }
-        setupEngine(startEngine: wasRunning)
     }
+
+    /// The media server restarted, and every audio object, this AVAudioEngine included, is now
+    /// invalid. Without a new engine the bed stays silent until the app is relaunched.
+    /// `restart`: whether the bed should be playing (noise or binaural on).
+    func handleMediaServicesReset(restart: Bool) {
+        #if DEBUG
+        dispatchPrecondition(condition: .onQueue(.main))
+        #endif
+        Log.audio.error("media services reset — rebuilding the generative engine (restart=\(restart, privacy: .public))")
+        NotificationCenter.default.removeObserver(self, name: .AVAudioEngineConfigurationChange, object: engine)
+        // Stop the old engine before the swap. Its source nodes read paramsBuffer / readIdx / the
+        // state pointers, which the new nodes reuse, so the old render callbacks must be finished.
+        tearDownGraph()
+        engine = AVAudioEngine()
+        observeConfigurationChanges(of: engine)
+        // Nothing is rendering now (old engine stopped, new one not started), so zeroing the
+        // smoothed gains is race-free. The bed then ramps back in instead of stepping in at full
+        // level. fadeMult is left alone so a sleep-timer fade doesn't jump.
+        for i in 0..<kMaxNoiseLayers { (noiseStatePtr + i).pointee.noiseGCur = 0 }
+        statePtr.pointee.binGCur = 0
+        // The mix itself (gains, types, preset, fade) lives in paramsBuffer, which outlives the
+        // engine, so the new nodes render the same bed with no resync.
+        setupEngine(startEngine: restart)
+    }
+
+    /// Whether the current engine instance is rendering.
+    var isRunning: Bool { engine.isRunning }
+    /// The live engine instance, read-only. Tests use it to check that a reset swaps it.
+    var currentEngine: AVAudioEngine { engine }
 
     /// Build one noise source node bound to layer `index` (its own NoiseLayerState slot and its
     /// own gain/type in the shared param struct). The per-sample DSP is identical to the original

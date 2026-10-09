@@ -87,6 +87,18 @@ Install via Xcode onto the device (not the simulator). Then:
    If it still happens, **Export logs** and look for: `podcast resume: level=… fed=… signal=…
    route=…` (one per resume), `clock running but no audio`, `rebuilding the AVPlayer`,
    `failed to play to end`, `media services reset`.
+7. **Noise bed survives a media-services reset** (2026-10-07, unverified on device). After a
+   reset every audio object is invalid. The generative `AVAudioEngine` used to be created once
+   for the app's lifetime, so the noise/binaural bed stayed silent until relaunch. Now
+   `GenerativeAudioEngine.handleMediaServicesReset` stops the old engine, builds a new one, and
+   restarts it only if noise or binaural is on. Unit tests cover the swap and the restart, but
+   not the audio. Force the reset with **Settings > Developer > Reset Media Services**:
+   a. Noise + binaural playing, screen locked. Reset. ✅ The bed comes back within a few seconds
+      (it ramps in, with no pop) and plays at the same mix, volume, and sleep-timer fade level.
+   b. Noise off, podcast only. Reset, then turn noise on. ✅ Noise plays.
+   c. After (a), plug or unplug headphones. ✅ The bed keeps playing: the configuration-change
+      observer follows the new engine.
+   Export logs: look for `rebuilding the generative engine`.
 
 ### C. Sleep timer — fade + terminal stop (full run)
 1. Set a realistic timer (≥ 30 min), lock the phone, let it run to the end **unattended**.

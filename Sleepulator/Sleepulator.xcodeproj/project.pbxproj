@@ -10,6 +10,7 @@
 		2E448B63520859F2E217098F /* SleepulatorTests/AudioMathTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5D5D733507738D0157791A3 /* SleepulatorTests/AudioMathTests.swift */; };
 		AA0100000000000000000002 /* SleepulatorTests/BackupRoundTripTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0200000000000000000002 /* SleepulatorTests/BackupRoundTripTests.swift */; };
 		AA0100000000000000000001 /* SleepulatorTests/FocusDriversTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0200000000000000000001 /* SleepulatorTests/FocusDriversTests.swift */; };
+		AA0100000000000000000003 /* SleepulatorTests/GenerativeAudioEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0200000000000000000003 /* SleepulatorTests/GenerativeAudioEngineTests.swift */; };
 		896817F92FE6F20900C5DF4D /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 896817F82FE6F20900C5DF4D /* WidgetKit.framework */; };
 		896817FB2FE6F20900C5DF4D /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 896817FA2FE6F20900C5DF4D /* SwiftUI.framework */; };
 		8968180C2FE6F20E00C5DF4D /* SleepulatorWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 896817F72FE6F20900C5DF4D /* SleepulatorWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
@@ -61,6 +62,7 @@
 		C5D5D733507738D0157791A3 /* SleepulatorTests/AudioMathTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SleepulatorTests/AudioMathTests.swift; sourceTree = "<group>"; };
 		BB0200000000000000000002 /* SleepulatorTests/BackupRoundTripTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SleepulatorTests/BackupRoundTripTests.swift; sourceTree = "<group>"; };
 		BB0200000000000000000001 /* SleepulatorTests/FocusDriversTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SleepulatorTests/FocusDriversTests.swift; sourceTree = "<group>"; };
+		BB0200000000000000000003 /* SleepulatorTests/GenerativeAudioEngineTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SleepulatorTests/GenerativeAudioEngineTests.swift; sourceTree = "<group>"; };
 		CC03CC03CC03CC03CC03CC03 /* SleepulatorTests/PersistenceTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SleepulatorTests/PersistenceTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -143,6 +145,7 @@
 				C5D5D733507738D0157791A3 /* SleepulatorTests/AudioMathTests.swift */,
 				BB0200000000000000000002 /* SleepulatorTests/BackupRoundTripTests.swift */,
 				BB0200000000000000000001 /* SleepulatorTests/FocusDriversTests.swift */,
+				BB0200000000000000000003 /* SleepulatorTests/GenerativeAudioEngineTests.swift */,
 				AA01AA01AA01AA01AA01AA01 /* SleepulatorTests/AudioStateTests.swift */,
 				CC03CC03CC03CC03CC03CC03 /* SleepulatorTests/PersistenceTests.swift */,
 			);
@@ -327,6 +330,7 @@
 				2E448B63520859F2E217098F /* SleepulatorTests/AudioMathTests.swift in Sources */,
 				AA0100000000000000000002 /* SleepulatorTests/BackupRoundTripTests.swift in Sources */,
 				AA0100000000000000000001 /* SleepulatorTests/FocusDriversTests.swift in Sources */,
+				AA0100000000000000000003 /* SleepulatorTests/GenerativeAudioEngineTests.swift in Sources */,
 				BB02BB02BB02BB02BB02BB02 /* SleepulatorTests/AudioStateTests.swift in Sources */,
 				DD04DD04DD04DD04DD04DD04 /* SleepulatorTests/PersistenceTests.swift in Sources */,
 			);
