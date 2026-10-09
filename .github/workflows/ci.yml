@@ -81,6 +81,8 @@ jobs:
             -only-testing:SleepulatorTests/CacheEvictionTests \
             -only-testing:SleepulatorTests/ModelIdentityTests \
             -only-testing:SleepulatorTests/OPMLParserTests \
+            -only-testing:SleepulatorTests/HomeScreensaverPolicyTests \
+            -only-testing:SleepulatorTests/CoachmarkLayoutTests \
             CODE_SIGNING_ALLOWED=NO
 
       - name: Upload test results
