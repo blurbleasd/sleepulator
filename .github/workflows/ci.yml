@@ -46,6 +46,9 @@ jobs:
               for dev in devices:
                   if dev.get("isAvailable") and dev["name"].startswith("iPhone"):
                       pick = dev["udid"]   # newest sorted runtime wins
+                      label = runtime.rsplit(".", 1)[-1] + " / " + dev["name"]
+          if pick:
+              print("Simulator runtime: " + label, file=sys.stderr)
           print(pick)
           ')
           if [ -z "$UDID" ]; then echo "::error::No iOS simulator available"; xcrun simctl list devices; exit 1; fi
@@ -59,12 +62,13 @@ jobs:
           xcrun simctl boot "${{ steps.sim.outputs.udid }}" || true
           xcrun simctl bootstatus "${{ steps.sim.outputs.udid }}" -b || true
 
-      # `test` still BUILDS the whole app + widget + all test classes (the real compile gate, incl.
-      # Metal shaders), but only RUNS the deterministic, non-CoreAudio classes. Tests that construct
-      # a live AudioEngine / AVAudioSession (AudioEngineBehaviorTests, NoiseLayeringTests,
-      # FirstRunDefaultMixTests, AudioStateTests, the SleepTimer* classes) crash on a headless CI
-      # simulator and are covered by the real-device gate (CLAUDE.md). Add new pure classes here.
-      - name: Build & test (pure/logic suites)
+      # Builds the app + widget + tests (the compile gate, incl. Metal shaders) and runs EVERY test
+      # class. The AudioEngine-owning suites used to be excluded as "crash on a headless CI
+      # simulator"; the real cause was the isolated-deinit runtime bug (CLAUDE.md, "Isolated
+      # deinits"), fixed in PR #18. IsolatedDeinitRuntimeBugTests guards it, but only on an
+      # iOS 18.4–26.3 sim runtime; newer runtimes hide the bug. None of this exercises real audio:
+      # the on-device gate in CLAUDE.md still applies.
+      - name: Build & test
         run: |
           set -o pipefail
           xcodebuild test \
@@ -72,17 +76,6 @@ jobs:
             -scheme Sleepulator \
             -destination "id=${{ steps.sim.outputs.udid }}" \
             -resultBundlePath TestResults.xcresult \
-            -only-testing:SleepulatorTests/AudioMathTests \
-            -only-testing:SleepulatorTests/AdaptiveRewindTests \
-            -only-testing:SleepulatorTests/NoiseMigrationTests \
-            -only-testing:SleepulatorTests/PodcastParserTests \
-            -only-testing:SleepulatorTests/StorageManagerTests \
-            -only-testing:SleepulatorTests/NetRetryTests \
-            -only-testing:SleepulatorTests/CacheEvictionTests \
-            -only-testing:SleepulatorTests/ModelIdentityTests \
-            -only-testing:SleepulatorTests/OPMLParserTests \
-            -only-testing:SleepulatorTests/HomeScreensaverPolicyTests \
-            -only-testing:SleepulatorTests/CoachmarkLayoutTests \
             CODE_SIGNING_ALLOWED=NO
 
       - name: Upload test results
