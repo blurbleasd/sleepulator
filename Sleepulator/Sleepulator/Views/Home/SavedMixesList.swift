@@ -175,7 +175,9 @@ struct WarmMixerRow: View {
                     HStack { Spacer(); removeButton; rowToggle }
                 }
             } else {
-                HStack(alignment: .firstTextBaseline) {
+                // Centre-aligned: a labels-hidden Toggle has no text baseline, so first-baseline
+                // alignment hung the switch a line below its title (rows ran ~68 pt for one line).
+                HStack(alignment: .center) {
                     iconAndTitle
                     Spacer()
                     removeButton

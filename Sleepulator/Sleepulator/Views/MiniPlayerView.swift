@@ -9,13 +9,15 @@ struct MiniPlayerView: View {
     /// is loaded (user-action frequency — no re-render storm, same as NowPlayingSheet).
     @ObservedObject var queue: PodcastQueueManager
     @Binding var selectedTab: Int
-    @AppStorage("bedtimeMode") private var bedtimeMode = false
     /// Owned by ContentView so Home's screensaver knows the full player is up (it must not fade
     /// Home, the tab bar and this bar behind the sheet).
     @Binding var showNowPlaying: Bool
     @ScaledMetric(relativeTo: .title) private var playGlyph: CGFloat = 32
 
-    var pal: Palette { Palette(bedtime: bedtimeMode) }
+    /// Mode-aware like Home: Focus is cool everywhere, not just on Home. Read from the persisted
+    /// "focusMode" key (AudioEngine writes it) so this view needn't observe the whole engine.
+    @AppStorage("focusMode") private var focusMode = false
+    var pal: Palette { Palette(focusMode: focusMode) }
 
     var body: some View {
         // Always present (per design): full controls when an episode is loaded, an actionable
@@ -34,13 +36,13 @@ struct MiniPlayerView: View {
         // ghosted through and overprinted the subtitle. Reduce Transparency is honoured by the
         // material itself.
         .background(
-            RoundedRectangle(cornerRadius: 16)
+            RoundedRectangle(cornerRadius: UI.cardRadius)
                 .fill(.ultraThinMaterial)
-                .overlay(RoundedRectangle(cornerRadius: 16).fill(pal.bg.opacity(0.7)))
+                .overlay(RoundedRectangle(cornerRadius: UI.cardRadius).fill(pal.bg.opacity(0.7)))
                 .shadow(color: .black.opacity(0.3), radius: 10, x: 0, y: -5)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 16)
+            RoundedRectangle(cornerRadius: UI.cardRadius)
                 .stroke(pal.text.opacity(0.1), lineWidth: 1)
         )
         .padding(.horizontal)
@@ -70,7 +72,7 @@ struct MiniPlayerView: View {
                     .font(.title3)
                     .foregroundColor(pal.accent)
             }
-            .frame(minWidth: 40, minHeight: 44)
+            .frame(minWidth: 44, minHeight: 44)
             .accessibilityLabel("Skip back \(Int(audio.skipInterval)) seconds")
 
             // Play/Pause — its own button, NOT nested inside the open-player button.
@@ -87,7 +89,7 @@ struct MiniPlayerView: View {
                     .font(.title3)
                     .foregroundColor(pal.accent)
             }
-            .frame(minWidth: 40, minHeight: 44)
+            .frame(minWidth: 44, minHeight: 44)
             .accessibilityLabel("Skip forward \(Int(audio.skipInterval)) seconds")
 
             // Title region — a separate sibling button that opens Now Playing.

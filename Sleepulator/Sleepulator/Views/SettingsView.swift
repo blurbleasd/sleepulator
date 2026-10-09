@@ -12,7 +12,6 @@ struct SettingsView: View {
     @ObservedObject var queue: PodcastQueueManager
     /// Comfort/playback settings (skip interval, stereo width, limiter, EQ, beat routing).
     @ObservedObject var settings: PlaybackSettings
-    @AppStorage("bedtimeMode") private var bedtimeMode = false
     @AppStorage("autoNightDim") private var autoNightDim = true
     @AppStorage("breathingOnRamp") private var breathingOnRamp = false
     @AppStorage("ambientMotion") private var ambientMotion = true
@@ -30,6 +29,7 @@ struct SettingsView: View {
         "nightLimiterEnabled", "sleepEQEnabled", "sleepEQIntensity", "limiterByMode",
         "beatRouting", "skipInterval", "playbackSpeed", "focusMode", "sceneSleep", "sceneFocus",
         "bedtimeMode", "autoNightDim", "breathingOnRamp", "ambientMotion", "timerMinutes",
+        "nightLengthMinutes", "ambientTailMinutes",
         "pomoWork", "pomoRest", "pomoLongRest", "pomoCycles"
     ]
 
@@ -42,7 +42,10 @@ struct SettingsView: View {
         "episodePositions": "positions.json"
     ]
     
-    var pal: Palette { Palette(bedtime: bedtimeMode) }
+    /// Mode-aware like Home: Focus is cool everywhere, not just on Home. Read from the persisted
+    /// "focusMode" key (AudioEngine writes it) so this view needn't observe the whole engine.
+    @AppStorage("focusMode") private var focusMode = false
+    var pal: Palette { Palette(focusMode: focusMode) }
 
     private var eqAmountLabel: String {
         switch settings.sleepEQIntensity {
@@ -89,7 +92,7 @@ struct SettingsView: View {
                                 .foregroundColor(pal.dim)
                             Text("With a sleep timer running, finish the current episode and keep only the ambient sounds going.")
                                 .font(.caption2)
-                                .foregroundColor(pal.dim.opacity(0.7))
+                                .foregroundColor(pal.dim)
 
                             Toggle("Shuffle Queue", isOn: $queue.shuffleQueue)
                                 .toggleStyle(SwitchToggleStyle(tint: pal.accent))
@@ -400,7 +403,7 @@ struct SettingsView: View {
                             if let built = AppInfo.builtAtLabel {
                                 Text("Built \(built)")
                                     .font(.caption2)
-                                    .foregroundColor(pal.dim.opacity(0.7))
+                                    .foregroundColor(pal.dim)
                             }
                         }
                         .frame(maxWidth: .infinity)

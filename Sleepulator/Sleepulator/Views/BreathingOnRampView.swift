@@ -54,6 +54,7 @@ struct BreathingOnRampView: View {
                             .foregroundColor(.white.opacity(0.7))
                             .padding(12)
                             .background(Circle().fill(.white.opacity(0.08)))
+                            .frame(minWidth: 44, minHeight: 44)
                     }
                     // This closes without starting anything (Start now is the button below). The old
                     // "Skip breathing and start now" label promised the opposite: a VoiceOver user

@@ -61,6 +61,8 @@ struct HomeView: View {
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverOn
     @Environment(\.accessibilitySwitchControlEnabled) private var switchControlOn
     @Environment(\.accessibilityReduceMotion) var reduceMotion
+    /// Reduce Transparency: the sheets go opaque instead of letting the scene show through.
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.isLuminanceReduced) private var isLuminanceReduced
 
@@ -628,7 +630,7 @@ struct HomeView: View {
                 .presentationDragIndicator(.visible)
                 // Let the home scene drift dimly behind the sheet so the glass panels have real
                 // moving content to refract — the difference between a flat box and real glass.
-                .presentationBackground(pal.bg.opacity(0.72))
+                .presentationBackground(pal.bg.opacity(reduceTransparency ? 1 : 0.72))
         }
         .sheet(isPresented: $showMix, onDismiss: {
             let next = afterMixSheet
@@ -645,7 +647,7 @@ struct HomeView: View {
             })
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
-                .presentationBackground(pal.bg.opacity(0.72))
+                .presentationBackground(pal.bg.opacity(reduceTransparency ? 1 : 0.72))
                 // Scene-visible half-sheet (the "easy + pleasant" mixer ask): at .medium the home
                 // scene above stays BRIGHT and LIVE — no dimming scrim, still tappable — so you can
                 // hear-and-see the mix while you adjust it. Dragging up to .large re-dims so the full

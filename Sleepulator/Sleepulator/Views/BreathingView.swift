@@ -13,7 +13,12 @@ struct BreathingView: View {
     @State private var pending: [DispatchWorkItem] = []
     @State private var mode: String = "478"
     @State private var instruction: String = "Inhale"
-    @State private var instructionColor: Color = Color(red: 0.9, green: 0.7, blue: 0.4)
+    /// On the app's tokens, not bespoke amber/blue/grey: inhale is the dusk amber, holds the warm
+    /// cream, exhale a soft cool (Focus's muted tone) so the phases still read apart by colour.
+    private static let inhaleColor = Theme.gold
+    private static let holdColor = Theme.text
+    private static let exhaleColor = Theme.focusDim
+    @State private var instructionColor: Color = Theme.gold
     
     var body: some View {
         ZStack {
@@ -41,7 +46,7 @@ struct BreathingView: View {
                     }) {
                         Image(systemName: "xmark")
                             .font(.title)
-                            .foregroundColor(.gray)
+                            .foregroundColor(Theme.textDim)
                             .padding()
                             .frame(minWidth: 44, minHeight: 44)
                     }
@@ -58,8 +63,12 @@ struct BreathingView: View {
                     .padding(.horizontal, 20)
                     .padding(.vertical, 10)
                     .frame(minHeight: 44)
-                    .background(mode == "478" ? Color(red: 0.9, green: 0.7, blue: 0.4) : Color.white.opacity(0.1))
-                    .foregroundColor(mode == "478" ? .black : .gray)
+                    .foregroundColor(mode == "478" ? Theme.text : Theme.textDim)
+                    .background(Capsule().fill(mode == "478" ? Theme.gold.opacity(0.18) : Theme.text.opacity(0.08)))
+                    .overlay(Capsule().strokeBorder(
+                        LinearGradient(colors: [Theme.gold.opacity(mode == "478" ? 0.7 : 0),
+                                                Theme.gold.opacity(mode == "478" ? 0.15 : 0)],
+                                       startPoint: .top, endPoint: .bottom), lineWidth: 1))
                     .clipShape(Capsule())
                     .font(.system(.headline, design: .rounded))
                     .accessibilityLabel("4-7-8 breathing")
@@ -74,8 +83,12 @@ struct BreathingView: View {
                     .padding(.horizontal, 20)
                     .padding(.vertical, 10)
                     .frame(minHeight: 44)
-                    .background(mode == "box" ? Color(red: 0.9, green: 0.7, blue: 0.4) : Color.white.opacity(0.1))
-                    .foregroundColor(mode == "box" ? .black : .gray)
+                    .foregroundColor(mode == "box" ? Theme.text : Theme.textDim)
+                    .background(Capsule().fill(mode == "box" ? Theme.gold.opacity(0.18) : Theme.text.opacity(0.08)))
+                    .overlay(Capsule().strokeBorder(
+                        LinearGradient(colors: [Theme.gold.opacity(mode == "box" ? 0.7 : 0),
+                                                Theme.gold.opacity(mode == "box" ? 0.15 : 0)],
+                                       startPoint: .top, endPoint: .bottom), lineWidth: 1))
                     .clipShape(Capsule())
                     .font(.system(.headline, design: .rounded))
                     .accessibilityLabel("Box breathing")
@@ -126,19 +139,19 @@ struct BreathingView: View {
         cancelPending()
         // Inhale (4s)
         instruction = "Inhale"
-        instructionColor = Color(red: 0.9, green: 0.7, blue: 0.4)
+        instructionColor = Self.inhaleColor
         withAnimation(.easeInOut(duration: 4.0)) { scale = 1.3; opacity = 0.8 }
 
         // Hold (7s)
         schedule(after: 4.0) {
             instruction = "Hold"
-            instructionColor = .white
+            instructionColor = Self.holdColor
         }
 
         // Exhale (8s)
         schedule(after: 11.0) {
             instruction = "Exhale"
-            instructionColor = Color(red: 0.4, green: 0.6, blue: 0.9)
+            instructionColor = Self.exhaleColor
             withAnimation(.easeInOut(duration: 8.0)) { scale = 1.0; opacity = 0.3 }
         }
     }
@@ -147,26 +160,26 @@ struct BreathingView: View {
         cancelPending()
         // Inhale (4s)
         instruction = "Inhale"
-        instructionColor = Color(red: 0.9, green: 0.7, blue: 0.4)
+        instructionColor = Self.inhaleColor
         withAnimation(.easeInOut(duration: 4.0)) { scale = 1.3; opacity = 0.8 }
 
         // Hold (4s)
         schedule(after: 4.0) {
             instruction = "Hold"
-            instructionColor = .white
+            instructionColor = Self.holdColor
         }
 
         // Exhale (4s)
         schedule(after: 8.0) {
             instruction = "Exhale"
-            instructionColor = Color(red: 0.4, green: 0.6, blue: 0.9)
+            instructionColor = Self.exhaleColor
             withAnimation(.easeInOut(duration: 4.0)) { scale = 1.0; opacity = 0.3 }
         }
 
         // Hold (4s)
         schedule(after: 12.0) {
             instruction = "Hold"
-            instructionColor = .white
+            instructionColor = Self.holdColor
         }
     }
 

@@ -5,7 +5,6 @@ struct ContentView: View {
     @StateObject private var audio = AudioEngine()
     @Environment(\.scenePhase) private var scenePhase
     @State private var selectedTab = 0
-    @AppStorage("bedtimeMode") private var bedtimeMode = false
     @AppStorage("autoNightDim") private var autoNightDim = true
     @State private var nightDimmed = false
     @State private var dimWorkItem: DispatchWorkItem?
@@ -24,7 +23,9 @@ struct ContentView: View {
     /// The mini-player bar's top edge (global Y), measured; each tab reserves room below it.
     @State private var miniPlayerTop: CGFloat?
 
-    var pal: Palette { Palette(bedtime: bedtimeMode) }
+    // Mode-aware: the tab bar tint (and everything it accents) follows Sleep / Focus. It stayed
+    // Sleep amber in Focus while Home turned cyan.
+    var pal: Palette { Palette(focusMode: audio.focusMode) }
 
     private var timerActive: Bool { audio.sleepTimer.timerRemaining > 0 }
 

@@ -27,8 +27,10 @@ struct LibraryView: View {
     @State private var opmlFeeds: [OPMLFeed] = []
     @State private var showOPMLSelector = false
     
-    @AppStorage("bedtimeMode") private var bedtimeMode = false
-    var pal: Palette { Palette(bedtime: bedtimeMode) }
+    /// Mode-aware like Home: Focus is cool everywhere, not just on Home. Read from the persisted
+    /// "focusMode" key (AudioEngine writes it) so this view needn't observe the whole engine.
+    @AppStorage("focusMode") private var focusMode = false
+    var pal: Palette { Palette(focusMode: focusMode) }
     
     var body: some View {
         NavigationStack {
@@ -38,12 +40,14 @@ struct LibraryView: View {
                 
                 VStack(spacing: 0) {
                     if !connectivity.isOnline {
-                        Text("No Internet Connection")
+                        // Palette, not system orange: a saturated orange bar was the loudest thing in
+                        // the app at night. Cream on the ember tint keeps AA without the glare.
+                        Label("No internet connection", systemImage: "wifi.slash")
                             .font(.caption.bold())
-                            .foregroundColor(.black)   // black on orange = 9.4:1 (white was 2.23:1, fails AA)
+                            .foregroundColor(pal.text)
                             .frame(maxWidth: .infinity)
-                            .padding(.vertical, 4)
-                            .background(Color.orange)
+                            .padding(.vertical, 6)
+                            .background(pal.accent.opacity(0.18))
                     }
                     
                     List {
@@ -83,7 +87,7 @@ struct LibraryView: View {
                                     } label: {
                                         Label("Play latest", systemImage: "play.fill")
                                     }
-                                    .tint(.green)
+                                    .tint(pal.accent)
                                 }
                             }
                         }
@@ -328,7 +332,7 @@ struct AddPodcastSheet: View {
                 if !connectivity.isOnline {
                     Text("Offline: Search is unavailable.")
                         .font(.subheadline)
-                        .foregroundColor(.orange)
+                        .foregroundColor(pal.accent)
                         .padding(.horizontal, 24)
                 }
                 
@@ -458,8 +462,10 @@ struct EpisodeRowView: View {
     // engine's finishedEpisodes set, so the row needn't observe the engine (scroll-storm fix).
     var initiallyPlayed: Bool = false
 
-    @AppStorage("bedtimeMode") private var bedtimeMode = false
-    var pal: Palette { Palette(bedtime: bedtimeMode) }
+    /// Mode-aware like Home: Focus is cool everywhere, not just on Home. Read from the persisted
+    /// "focusMode" key (AudioEngine writes it) so this view needn't observe the whole engine.
+    @AppStorage("focusMode") private var focusMode = false
+    var pal: Palette { Palette(focusMode: focusMode) }
 
     @State private var isDownloaded = false
     @State private var downloadProgress: Double? = nil
@@ -679,7 +685,7 @@ struct EpisodeRowView: View {
             Button { queueManager.playEpisode(ep) } label: {
                 Label("Play", systemImage: "play.fill")
             }
-            .tint(.green)
+            .tint(pal.accent)
         }
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             Button { queueManager.addToQueue(ep) } label: {

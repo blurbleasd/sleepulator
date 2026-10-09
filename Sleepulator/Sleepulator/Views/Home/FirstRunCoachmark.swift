@@ -108,7 +108,7 @@ struct FirstRunCoachmark: View {
                 .padding(.horizontal, 16).padding(.vertical, 7)
                 .background(Capsule().fill(pal.accent))
         }
-        .frame(minHeight: 36)
+        .frame(minHeight: 44)
     }
 }
 

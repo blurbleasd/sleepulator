@@ -27,6 +27,7 @@ struct TimerSelectionSheet: View {
     @AppStorage("nightLengthMinutes") private var nightLength: Double = 0
     /// Hero number size — @ScaledMetric so it grows with Dynamic Type instead of a fixed 44pt.
     @ScaledMetric private var heroSize: CGFloat = 44
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var timerActive: Bool { audio.sleepTimer.timerRemaining > 0 }
     private var playing: Bool { audio.isAnythingPlaying }
@@ -69,7 +70,7 @@ struct TimerSelectionSheet: View {
                 ForEach([15, 30, 45, 60], id: \.self) { mins in
                     let selected = Int(timerMinutes) == mins
                     Button(action: {
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { timerMinutes = Double(mins) }
+                        withAnimation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.85)) { timerMinutes = Double(mins) }
                         UISelectionFeedbackGenerator().selectionChanged()
                     }) {
                         Text("\(mins)m")
@@ -112,7 +113,7 @@ struct TimerSelectionSheet: View {
                         ForEach([0, 15, 30, 60], id: \.self) { mins in
                             let selected = ambientTailMinutes == mins
                             Button(action: {
-                                withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { ambientTailMinutes = mins }
+                                withAnimation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.85)) { ambientTailMinutes = mins }
                                 UISelectionFeedbackGenerator().selectionChanged()
                             }) {
                                 Text(mins == 0 ? "Off" : "+\(mins)m")

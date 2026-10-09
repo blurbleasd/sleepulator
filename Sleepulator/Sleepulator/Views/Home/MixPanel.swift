@@ -165,7 +165,7 @@ struct AppleMusicMixRow: View {
                     Image(systemName: "magnifyingglass")
                         .font(.footnote.weight(.semibold))
                         .foregroundColor(pal.accent)
-                        .frame(width: 36, height: 36)
+                        .frame(width: 44, height: 44)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Change Apple Music selection")

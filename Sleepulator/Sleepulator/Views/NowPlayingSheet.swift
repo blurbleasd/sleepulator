@@ -90,11 +90,11 @@ struct NowPlayingSheet: View {
                         if let image = phase.image {
                             image.resizable().aspectRatio(contentMode: .fill)
                         } else {
-                            RoundedRectangle(cornerRadius: 20).fill(pal.text.opacity(0.1))
+                            RoundedRectangle(cornerRadius: UI.cardRadius).fill(pal.text.opacity(0.1))
                         }
                     }
                     .frame(width: 250, height: 250)
-                    .cornerRadius(20)
+                    .cornerRadius(UI.cardRadius)
                     // Show artwork is often near-white and was the brightest thing in the app at
                     // night; in Sleep it sits back a step (Focus keeps it full).
                     .opacity(pal.warm ? 0.78 : 1)
@@ -104,10 +104,10 @@ struct NowPlayingSheet: View {
                         .resizable()
                         .aspectRatio(contentMode: .fit)
                         .frame(width: 250, height: 250)
-                        .cornerRadius(20)
+                        .cornerRadius(UI.cardRadius)
                         .shadow(color: .black.opacity(0.3), radius: 20, x: 0, y: 10)
                 } else {
-                    RoundedRectangle(cornerRadius: 20)
+                    RoundedRectangle(cornerRadius: UI.cardRadius)
                         .fill(pal.text.opacity(0.1))
                         .frame(width: 250, height: 250)
                 }

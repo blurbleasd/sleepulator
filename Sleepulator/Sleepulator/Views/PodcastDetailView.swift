@@ -9,8 +9,10 @@ struct PodcastDetailView: View {
     @State private var opmlExporting = false
     @State private var exportedOPMLUrl: URL?
     
-    @AppStorage("bedtimeMode") private var bedtimeMode = false
-    var pal: Palette { Palette(bedtime: bedtimeMode) }
+    /// Mode-aware like Home: Focus is cool everywhere, not just on Home. Read from the persisted
+    /// "focusMode" key (AudioEngine writes it) so this view needn't observe the whole engine.
+    @AppStorage("focusMode") private var focusMode = false
+    var pal: Palette { Palette(focusMode: focusMode) }
     
     @State private var isLoading = false
     @State private var errorMessage: String? = nil
