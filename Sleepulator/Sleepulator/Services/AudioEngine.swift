@@ -1015,6 +1015,10 @@ final class AudioEngine: ObservableObject {
     /// opening Build mix at rest shows what Play would resume. Home's "Resume · Brown" and a mixer
     /// row reading "Green" used to disagree. Only sounds in the current mode's palette are taken:
     /// the mixer is mode-scoped, and a cross-mode pick stays as it is.
+    /// The extra layers come with the noise, built the way `resumeMix` builds them, but only when
+    /// the snapshot's whole noise stack is in the palette. A mode round trip drops cross-mode
+    /// layers from the mixer while the snapshot keeps them, and a Sleep stack that happens to lead
+    /// with pink (in both palettes) mustn't wipe the Focus layers.
     func stageForEditing(_ mix: SavedMix) {
         guard !isAnythingPlaying else { return }
         let noises = focusMode ? Self.focusNoises : Self.sleepNoises
@@ -1023,6 +1027,10 @@ final class AudioEngine: ObservableObject {
         if noises.contains(noise) {
             if noiseType != noise { noiseType = noise }
             if noiseVolume != mix.noiseVolume { noiseVolume = mix.noiseVolume }
+            let layers = (mix.extraLayers ?? []).prefix(Self.maxExtraLayers).map {
+                ExtraNoiseLayer(id: $0.id, type: NoiseType.migrate($0.type), volume: $0.volume, muted: $0.muted)
+            }
+            if layers.allSatisfy({ noises.contains($0.type) }), extraLayers != layers { extraLayers = layers }
         }
         if binaurals.contains(mix.binauralPreset) {
             if binauralPreset != mix.binauralPreset { binauralPreset = mix.binauralPreset }
