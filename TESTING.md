@@ -21,15 +21,20 @@ xcodebuild test -project Sleepulator/Sleepulator.xcodeproj \
   -scheme Sleepulator -destination 'platform=iOS Simulator,name=iPhone 16'
 ```
 
-Suites in `SleepulatorTests/` (three files, many suites):
+Suites in `SleepulatorTests/` (six files, many suites):
 
 - `AudioMathTests.swift` — fade curve, carrier/beat math, scrub targets.
 - `AudioStateTests.swift` — engine state/policy plus `PodcastParserTests` (CDATA, durations,
   dates, caps, enclosures), `OPMLParserTests` (scheme validation, dedupe, corrupt files),
   `StorageManagerTests` (backup recovery), `NetRetryTests`, `CacheEvictionTests`, the
-  sleep-timer suites (backstop, cancel, end-of-episode), layering, and mode reconciliation.
+  sleep-timer suites (backstop, cancel, end-of-episode), layering, mode reconciliation, and the
+  Podcasts-tab rules (`PodcastTextTests`, `ShowNotesPreviewTests`, `ShowNotesEdgeTests`,
+  `TonightShelfTests`, `QueueMoveToHeadTests`).
 - `PersistenceTests.swift` — legacy `SavedMix` → `SoundPreset` migration, library seeding,
   position-map coercion, `MixStore` reloads.
+- `BackupRoundTripTests.swift` — settings Export → Import round-trip and its key allowlist.
+- `FocusDriversTests.swift` — the Pomodoro → Focus-scene look mapping.
+- `GenerativeAudioEngineTests.swift` — generative-bed rebuild after a media-services reset.
 
 These catch parsing/logic regressions cheaply; they do **not** exercise audio or iOS behavior.
 
@@ -343,7 +348,7 @@ this section is where you do it. Do it in a dark room at your real bedtime brigh
    episode → the shelf shows only the next one; nothing to offer → no shelf at all.
 3. **Show page.** A show you're partway through says **Resume** (with the episode and time left);
    otherwise **Play Latest**. "…" → Play All / Shuffle with a non-empty queue asks "Replace your
-   queue?" (Replace / Add to End / Cancel); with an empty queue it just plays.
+   queue?" (Replace Queue / Add to End / Cancel); with an empty queue it just plays.
 4. **Show notes** read as plain paragraphs (no `<p>`/`<a href>`), opening paragraphs first, "More"
    for the rest.
 5. **Downloads tell the truth.** Airplane mode → Episode options → Download Offline. ✅ An amber

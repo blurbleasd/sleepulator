@@ -19,8 +19,8 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
     NowPlayingSheet, MiniPlayerView, SettingsView, BreathingView, the `AmbientScene` backdrop
     library, Components, Theme, `MiniPlayerClearance`, `SoundNames`). `Views/Home/` holds Home's
     pieces: the orb + `NightRing`, `ModeSwitcher`, `MixDrawer`, `TimerSelectionSheet`, and the
-    pure, unit-tested rules `SessionGuards` and `HomeScreensaverPolicy`. `TonightShelfView` is
-    the Podcasts tab's "Tonight" (Focus: "Continue") shelf.
+    pure, unit-tested rules `SessionGuards` and `HomeScreensaverPolicy`. `Views/TonightShelfView.swift`
+    is the Podcasts tab's "Tonight" (Focus: "Continue") shelf.
   - `Services/` — the engine + plumbing (below).
   - `Models/Models.swift` — `Podcast`, `Episode`, `SavedMix`, `NoiseType`. `Models/PodcastText.swift`
     (show-notes HTML → plain text, counts, durations, placeholder names) and
@@ -28,13 +28,14 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
     pure, unit-tested podcast rules.
   - `PrivacyInfo.xcprivacy`, `Info.plist`.
 - **Widget** — `SleepulatorWidget/` (sleep-timer Live Activity).
-- **Tests** — `SleepulatorTests/` (XCTest). Three files, many suites: `AudioMathTests.swift`;
+- **Tests** — `SleepulatorTests/` (XCTest). Six files, many suites: `AudioMathTests.swift`;
   `AudioStateTests.swift` (also holds `PodcastParserTests`, `OPMLParserTests`,
   `StorageManagerTests`, `NetRetryTests`, `CacheEvictionTests`, the sleep-timer suites, Home's
   pure UI rules (`SessionGuardsTests`, `NightRingMathTests`, `MiniPlayerClearanceTests`,
   `HomeScreensaverPolicyTests`), the podcast rules (`PodcastTextTests`, `ShowNotesPreviewTests`,
-  `TonightShelfTests`), and more); `PersistenceTests.swift` (`PersistenceMigrator` /
-  `MixStore`).
+  `ShowNotesEdgeTests`, `TonightShelfTests`, `QueueMoveToHeadTests`), and more);
+  `PersistenceTests.swift` (`PersistenceMigrator` / `MixStore`); `BackupRoundTripTests.swift`;
+  `FocusDriversTests.swift`; `GenerativeAudioEngineTests.swift` (`GenerativeMediaResetTests`).
 
 ## Services (the core)
 - `AudioEngine` — the app-facing `ObservableObject` facade. Owns UI state + policy, delegates
