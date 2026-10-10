@@ -16,7 +16,12 @@ struct LibraryView: View {
     @State private var errorMessage: String? = nil
     
     @State private var searchText = ""
-    @State private var showAddSheet = false
+    /// The open add sheet, carrying what it searches for as it opens ("Find a sleep podcast" starts
+    /// on sleep shows). An item, not a flag + a separate query: set together, the sheet read the
+    /// query from before the tap and opened blank.
+    @State private var addSheet: AddSheetRequest?
+    /// The OPML importer can't present over the add sheet: it asks, the sheet closes, then this.
+    @State private var importAfterAddSheet = false
     
     let defaultFeed = "https://feeds.simplecast.com/tOaZvgCO"
     
@@ -104,7 +109,8 @@ struct LibraryView: View {
                 }
                 .listStyle(.insetGrouped)
                 .scrollContentBackground(.hidden)
-                .searchable(text: $searchText, prompt: "Search subscriptions")
+                // Nothing to search until there's a show: the field sat over an empty screen.
+                .searchable(if: !podcasts.isEmpty, text: $searchText, prompt: "Search subscriptions")
                 .refreshable {
                     if !connectivity.isOnline { return }
                     await withTaskGroup(of: Void.self) { group in
@@ -123,24 +129,20 @@ struct LibraryView: View {
                         }
                     }
                 }
-
-                // Empty state — the screen was a black void with no subscriptions.
-                if podcasts.isEmpty {
-                    VStack(spacing: 14) {
-                        Image(systemName: "dot.radiowaves.left.and.right")
-                            .font(.system(size: 46))
-                            .foregroundColor(pal.accent.opacity(0.55))
-                        Text("No podcasts yet")
-                            .font(.system(.title3, design: .rounded).bold())
-                            .foregroundColor(pal.text)
-                        Text("Tap + to add a show, or bring your subscriptions over from another app with Import OPML.")
-                            .font(.subheadline)
-                            .foregroundColor(pal.dim)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal, 44)
+                // Empty state: one thing to do, right here. An overlay on the list, so it has the
+                // whole screen: as a sibling below the (empty) list it only ever got the bottom
+                // half. Centred when it fits; it scrolls when the largest text sizes don't.
+                .overlay {
+                    if podcasts.isEmpty {
+                        GeometryReader { proxy in
+                            ScrollView {
+                                emptyState
+                                    .padding(.vertical, 24)
+                                    .frame(maxWidth: .infinity, minHeight: proxy.size.height)
+                            }
+                            .scrollBounceBehavior(.basedOnSize)
+                        }
                     }
-                    .frame(maxHeight: .infinity)
-                    .allowsHitTesting(false)
                 }
             }
             // Room for the floating mini-player (the empty state used to sit under it).
@@ -149,16 +151,11 @@ struct LibraryView: View {
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(action: { showAddSheet = true }) {
+                    Button(action: { openAddSheet() }) {
                         Image(systemName: "plus")
                             .foregroundColor(pal.accent)
                     }
                     .accessibilityLabel("Add podcast")
-                }
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Import OPML") { opmlImporting = true }
-                        .font(.caption.bold())
-                        .foregroundColor(pal.accent)
                 }
             }
             .navigationDestination(for: String.self) { podcastId in
@@ -181,10 +178,15 @@ struct LibraryView: View {
                 loadPodcasts()
             }
         }
-        .sheet(isPresented: $showAddSheet) {
+        .sheet(item: $addSheet, onDismiss: {
+            if importAfterAddSheet { importAfterAddSheet = false; opmlImporting = true }
+        }) { request in
             AddPodcastSheet(feedUrlInput: $feedUrlInput, isLoading: $isLoading, errorMessage: $errorMessage, pal: pal, onAdd: {
                 loadFeed()
-            }, connectivity: connectivity)
+            }, connectivity: connectivity, initialQuery: request.query, onImportOPML: {
+                importAfterAddSheet = true
+                addSheet = nil
+            })
             .presentationDetents([.fraction(0.8), .large])
         }
         .fileImporter(isPresented: $opmlImporting, allowedContentTypes: [.xml, .plainText, .data], allowsMultipleSelection: false) { result in
@@ -252,6 +254,40 @@ struct LibraryView: View {
     }
     }
     
+    private func openAddSheet(query: String = "") {
+        errorMessage = nil
+        addSheet = AddSheetRequest(query: query)
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: 14) {
+            Image(systemName: "dot.radiowaves.left.and.right")
+                .font(.largeTitle)
+                .foregroundColor(pal.accent.opacity(0.55))
+                .accessibilityHidden(true)
+            Text("No podcasts yet")
+                .font(.system(.title3, design: .rounded).bold())
+                .foregroundColor(pal.text)
+                .multilineTextAlignment(.center)
+            Text("Find a calm show to fall asleep to. It plays under your sounds and fades out with them.")
+                .font(.subheadline)
+                .foregroundColor(pal.dim)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+            Button(action: { openAddSheet(query: AddPodcastSheet.sleepQuery) }) {
+                Label("Find a sleep podcast", systemImage: "magnifyingglass")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundColor(pal.text)
+                    .padding(.horizontal, 22).padding(.vertical, 13)
+                    .background(Capsule().fill(pal.text.opacity(0.10)))
+                    .overlay(Capsule().stroke(pal.accent.opacity(0.28), lineWidth: 0.5))
+            }
+            .frame(minHeight: 44)
+            .padding(.top, 6)
+        }
+        .padding(.horizontal, 32)
+    }
+
     /// Subscription-row subtitle: surface the unplayed count once episodes are loaded so the
     /// list is scannable ("3 unplayed · 120"), falling back to a prompt or "All caught up".
     private func subtitle(for podcast: Podcast) -> String {
@@ -281,7 +317,7 @@ struct LibraryView: View {
                     }
                     self.feedUrlInput = ""
                     self.isLoading = false
-                    self.showAddSheet = false
+                    self.addSheet = nil
                 }
             } catch {
                 Log.network.error("Feed parse error: \(error.localizedDescription, privacy: .public)")
@@ -307,6 +343,11 @@ struct LibraryView: View {
     }
 }
 
+struct AddSheetRequest: Identifiable {
+    let id = UUID()
+    let query: String
+}
+
 struct AddPodcastSheet: View {
     @Binding var feedUrlInput: String
     @Binding var isLoading: Bool
@@ -314,7 +355,16 @@ struct AddPodcastSheet: View {
     let pal: Palette
     let onAdd: () -> Void
     @ObservedObject var connectivity: Connectivity
+    /// Searched as the sheet opens (the empty library's "Find a sleep podcast"); "" shows the starters.
+    var initialQuery: String = ""
+    /// Bring subscriptions over from another app. The importer opens once this sheet has closed.
+    var onImportOPML: () -> Void = {}
 
+    /// Starting points rather than picked shows: live from Apple's search, so they never go stale.
+    static let sleepQuery = "Sleep stories"
+    static let starters = ["Sleep stories", "Bedtime reading", "Nature sounds", "Meditation"]
+
+    @Environment(\.dismiss) private var dismiss
     @State private var searchResults: [ITunesPodcast] = []
     @State private var isSearching = false
     @State private var searchQuery = ""
@@ -324,19 +374,26 @@ struct AddPodcastSheet: View {
         ZStack {
             pal.bg.ignoresSafeArea()
             VStack(alignment: .leading, spacing: 16) {
-                Text("Add Podcast")
-                    .font(.title2.bold())
-                    .foregroundColor(pal.text)
-                    .padding(.horizontal, 24)
-                
+                HStack(alignment: .firstTextBaseline) {
+                    Text("Add a podcast")
+                        .font(.title2.bold())
+                        .foregroundColor(pal.text)
+                    Spacer()
+                    Button("Cancel") { dismiss() }
+                        .foregroundColor(pal.accent)
+                        .frame(minHeight: 44)
+                }
+                .padding(.horizontal, 24)
+
                 if !connectivity.isOnline {
-                    Text("Offline: Search is unavailable.")
+                    Text("You're offline. Connect to search for a show or add one by link.")
                         .font(.subheadline)
                         .foregroundColor(pal.accent)
+                        .fixedSize(horizontal: false, vertical: true)
                         .padding(.horizontal, 24)
                 }
-                
-                TextField("Search iTunes or enter RSS...", text: $searchQuery)
+
+                TextField("Search Apple Podcasts or paste an RSS link", text: $searchQuery)
                     .textFieldStyle(PlainTextFieldStyle())
                     .padding(12)
                     .background(pal.text.opacity(0.1))
@@ -376,6 +433,7 @@ struct AddPodcastSheet: View {
                         }
                     }
                     .onDisappear { searchTask?.cancel() }
+                    .onAppear { if searchQuery.isEmpty && !initialQuery.isEmpty { searchQuery = initialQuery } }
                 
                 if let err = errorMessage {
                     // Palette amber + a warning glyph (Home's playback note does the same): system
@@ -395,7 +453,7 @@ struct AddPodcastSheet: View {
                                 .background(pal.accent)
                                 .cornerRadius(12)
                         } else {
-                            Text("Add Subscription")
+                            Text("Add podcast")
                                 .font(.headline.bold())
                                 .foregroundColor(pal.bg)
                                 .frame(maxWidth: .infinity, minHeight: 44)
@@ -430,18 +488,91 @@ struct AddPodcastSheet: View {
                                             .font(.subheadline)
                                             .foregroundColor(pal.dim)
                                     }
+                                    Spacer(minLength: 8)
+                                    // A tap subscribes straight away: say so before the tap.
+                                    Image(systemName: "plus.circle")
+                                        .font(.title3)
+                                        .foregroundColor(pal.accent)
                                 }
+                                .contentShape(Rectangle())
                             }
                             .listRowBackground(Color.clear)
+                            .accessibilityLabel("Add \(result.collectionName ?? "podcast")")
+                            .accessibilityHint(result.artistName ?? "")
                         }
                         .listStyle(.plain)
+                    } else if searchQuery.isEmpty && connectivity.isOnline {
+                        starterChips
                     }
                 }
-                
+
                 Spacer()
+
+                Button(action: onImportOPML) {
+                    Label("Import from another podcast app (OPML)", systemImage: "square.and.arrow.down")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundColor(pal.accent)
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                }
+                .padding(.horizontal, 24)
+                .padding(.bottom, 8)
             }
             .padding(.top, 24)
         }
+    }
+}
+
+extension AddPodcastSheet {
+    /// Calm places to start, each a search: tap one and its results load here.
+    fileprivate var starterChips: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Start with")
+                .font(.footnote)
+                .foregroundColor(pal.dim)
+            FlowChips(items: Self.starters, pal: pal) { searchQuery = $0 }
+        }
+        .padding(.horizontal, 24)
+    }
+}
+
+/// Wrapping chips (the starters on the add sheet): rows fill the width, then wrap.
+private struct FlowChips: View {
+    let items: [String]
+    let pal: Palette
+    let onTap: (String) -> Void
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) { chips }
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) { ForEach(items.prefix(2), id: \.self) { chip($0) } }
+                HStack(spacing: 8) { ForEach(items.dropFirst(2), id: \.self) { chip($0) } }
+            }
+            VStack(alignment: .leading, spacing: 8) { chips }
+        }
+    }
+
+    @ViewBuilder private var chips: some View {
+        ForEach(items, id: \.self) { chip($0) }
+    }
+
+    private func chip(_ title: String) -> some View {
+        Button { onTap(title) } label: {
+            Text(title)
+                .font(.subheadline)
+                .foregroundColor(pal.text)
+                .padding(.horizontal, 14).padding(.vertical, 9)
+                .background(Capsule().fill(pal.text.opacity(0.10)))
+        }
+        .frame(minHeight: 44)
+        .accessibilityHint("Searches for \(title.lowercased()) podcasts")
+    }
+}
+
+extension View {
+    /// `.searchable`, only while there's something to search.
+    @ViewBuilder func searchable(if condition: Bool, text: Binding<String>, prompt: String) -> some View {
+        if condition { searchable(text: text, prompt: Text(prompt)) } else { self }
     }
 }
 
