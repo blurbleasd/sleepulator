@@ -12,6 +12,8 @@ struct MiniPlayerView: View {
     /// Owned by ContentView so Home's screensaver knows the full player is up (it must not fade
     /// Home, the tab bar and this bar behind the sheet).
     @Binding var showNowPlaying: Bool
+    /// A touch in the full player, for the night veil's countdown (see NowPlayingSheet).
+    var onSheetInteraction: () -> Void = {}
     @ScaledMetric(relativeTo: .title) private var playGlyph: CGFloat = 32
 
     /// Mode-aware like Home: Focus is cool everywhere, not just on Home. Read from the persisted
@@ -24,14 +26,18 @@ struct MiniPlayerView: View {
         // "Up next" when the queue has items but nothing's loaded yet, and a quiet "Nothing
         // playing" otherwise — so transport/queue access is always one tap away.
         VStack(spacing: 0) {
-            if audio.hasLoadedEpisode {
-                loadedBar
+            // The loaded episode, not the queue head: the queue can move on without it.
+            if let loaded = audio.loadedEpisode {
+                loadedBar(loaded)
             } else if let next = queue.queue.first {
                 upNextBar(next)
             } else {
                 idleBar
             }
         }
+        // The progress line runs along the top edge; clipped, it follows the card's corners
+        // instead of poking square past them.
+        .clipShape(RoundedRectangle(cornerRadius: UI.cardRadius))
         // A real material under the dusk tint: at 85% flat fill, the rows scrolling beneath
         // ghosted through and overprinted the subtitle. Reduce Transparency is honoured by the
         // material itself.
@@ -56,15 +62,42 @@ struct MiniPlayerView: View {
         .accessibilityIdentifier("miniPlayer")
         .padding(.bottom, 80) // float above the tab bar
         .sheet(isPresented: $showNowPlaying) {
-            NowPlayingSheet(audio: audio, queue: audio.queueManager, progress: progress, isPresented: $showNowPlaying, pal: pal)
+            NowPlayingSheet(audio: audio, queue: audio.queueManager, progress: progress,
+                            isPresented: $showNowPlaying, pal: pal, onInteraction: onSheetInteraction)
+                // The system grabber (the hand-drawn one scrolled away with the content).
                 .presentationDragIndicator(.visible)
+                .presentationBackground(pal.bg)
         }
     }
 
-    // MARK: Loaded — full transport (unchanged behaviour)
+    // MARK: Loaded — full transport
+
+    private var phase: NowPlayingState.Phase { audio.playerPhase(progress) }
+    /// Skips act only once the player has a position (they used to land on the previous item
+    /// while a new one loaded). A live stream keeps them.
+    private var canSkip: Bool { NowPlayingState.canSkip(phase) }
+    /// The play disc: tracks the text size, capped so the bar stays compact (40 pt inside its
+    /// 44 pt target).
+    private var discDiameter: CGFloat { min(playGlyph + 6, 40) }
+
+    /// What the player is doing, always shown; a note (buffering, stream lost) joins it rather
+    /// than replacing it.
+    private var statusText: String {
+        let state: String
+        switch phase {
+        case .failed: return NowPlayingState.failedCopy
+        case .loading: state = "Loading…"
+        case .live: state = "Live"
+        case .finished: state = queue.queue.isEmpty ? "Queue finished" : "Finished"
+        case .playing: state = "Playing"
+        case .paused, .ready: state = "Paused"
+        }
+        if let note = audio.playbackNote { return "\(state) · \(note)" }
+        return state
+    }
 
     @ViewBuilder
-    private var loadedBar: some View {
+    private func loadedBar(_ episode: Episode) -> some View {
         // Thin progress bar
         ProgressView(value: max(0, min(1, progress.progress)))
             .progressViewStyle(LinearProgressViewStyle(tint: pal.accent))
@@ -76,31 +109,42 @@ struct MiniPlayerView: View {
             Button(action: { audio.seekPodcast(seconds: -audio.skipInterval) }) {
                 Image(systemName: audio.skipBackSymbol)
                     .font(.title3)
-                    .foregroundColor(pal.accent)
+                    .foregroundColor(pal.accent.opacity(canSkip ? 1 : 0.35))
                     .frame(minWidth: 44, minHeight: 44)
                     .contentShape(Rectangle())
             }
+            .disabled(!canSkip)
             .accessibilityShowsLargeContentViewer()
             .accessibilityLabel("Skip back \(Int(audio.skipInterval)) seconds")
 
-            // Play/Pause — its own button, NOT nested inside the open-player button.
-            Button(action: { audio.togglePodcast() }) {
-                Image(systemName: audio.isPodPlaying ? "pause.circle.fill" : "play.circle.fill")
-                    .font(.system(size: min(playGlyph, 40)))
-                    .foregroundColor(pal.accent)
-                    .frame(minWidth: 44, minHeight: 44)
-                    .contentShape(Rectangle())
+            // Play/Pause — its own button, NOT nested inside the open-player button. While the
+            // episode loads it's a spinner (a tap there used to resume the previous item); after
+            // a failure it retries.
+            // The orb's dark disc, small: a solid amber disc here outshone the orb on Sleep Home.
+            if phase == .loading {
+                // Still a pause while it plays (a stall before the first position report); only a
+                // load in flight disables it.
+                PlayerDiscButton(systemImage: nil, diameter: discDiameter, pal: pal) { audio.togglePodcast() }
+                    .disabled(audio.episodeLoading)
+                    .accessibilityLabel(audio.episodeLoading ? "Loading episode" : "Pause podcast")
+            } else {
+                let failed = phase == .failed
+                PlayerDiscButton(systemImage: failed ? "arrow.clockwise" : audio.isPodPlaying ? "pause.fill" : "play.fill",
+                                 diameter: discDiameter, pal: pal) {
+                    failed ? audio.retryLoadedEpisode() : audio.togglePodcast()
+                }
+                .accessibilityShowsLargeContentViewer()
+                .accessibilityLabel(failed ? "Try again" : audio.isPodPlaying ? "Pause podcast" : "Play podcast")
             }
-            .accessibilityShowsLargeContentViewer()
-            .accessibilityLabel(audio.isPodPlaying ? "Pause podcast" : "Play podcast")
 
             Button(action: { audio.seekPodcast(seconds: audio.skipInterval) }) {
                 Image(systemName: audio.skipForwardSymbol)
                     .font(.title3)
-                    .foregroundColor(pal.accent)
+                    .foregroundColor(pal.accent.opacity(canSkip ? 1 : 0.35))
                     .frame(minWidth: 44, minHeight: 44)
                     .contentShape(Rectangle())
             }
+            .disabled(!canSkip)
             .accessibilityShowsLargeContentViewer()
             .accessibilityLabel("Skip forward \(Int(audio.skipInterval)) seconds")
 
@@ -108,30 +152,23 @@ struct MiniPlayerView: View {
             Button(action: { showNowPlaying = true }) {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(audio.podTitle)
+                        Text(episode.title)
                             .font(.subheadline.bold())
                             .foregroundColor(pal.text)
                             .lineLimit(1)
-                            .minimumScaleFactor(0.8)
                             .truncationMode(.tail)
 
-                        if let note = audio.playbackNote {
-                            Text(note)
-                                .font(.caption2)
-                                .foregroundColor(pal.accent)
-                                .lineLimit(1)
-                        } else {
-                            Text(audio.isPodPlaying ? "Playing" : "Paused")
-                                .font(.caption2)
-                                .foregroundColor(pal.dim)
-                        }
+                        Text(statusText)
+                            .font(.caption2)
+                            .foregroundColor(phase == .failed ? pal.accent : pal.dim)
+                            .lineLimit(1)
                     }
                     Spacer()
                 }
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Now playing: \(audio.podTitle)")
+            .accessibilityLabel("Now playing: \(episode.title), \(statusText)")
             .accessibilityHint("Opens the full player")
         }
         .padding(.horizontal, 16)
@@ -143,12 +180,10 @@ struct MiniPlayerView: View {
     @ViewBuilder
     private func upNextBar(_ next: Episode) -> some View {
         HStack(spacing: 6) {
-            Button(action: { audio.playAll(queue.queue) }) {
-                Image(systemName: "play.circle.fill")
-                    .font(.system(size: min(playGlyph, 40)))
-                    .foregroundColor(pal.accent)
+            PlayerDiscButton(systemImage: "play.fill", diameter: discDiameter, pal: pal) {
+                audio.playAll(queue.queue)
             }
-            .frame(minWidth: 44, minHeight: 44)
+            .accessibilityShowsLargeContentViewer()
             .accessibilityLabel("Play queue")
 
             Button(action: { showNowPlaying = true }) {
@@ -158,9 +193,11 @@ struct MiniPlayerView: View {
                             .font(.subheadline.bold())
                             .foregroundColor(pal.text)
                             .lineLimit(1)
-                            .minimumScaleFactor(0.8)
                             .truncationMode(.tail)
-                        Text(queue.queue.count == 1 ? "Up next" : "Up next · \(queue.queue.count) in queue")
+                        // Counts what follows this episode, the way the full player's Up Next does
+                        // (it used to count the head too: "5 in queue" over a list of 4).
+                        let more = queue.queue.count - 1
+                        Text(more == 0 ? "Up next" : "Up next · \(more) more after it")
                             .font(.caption2)
                             .foregroundColor(pal.dim)
                     }
@@ -178,25 +215,45 @@ struct MiniPlayerView: View {
 
     // MARK: Idle — nothing loaded, empty queue
 
+    /// Off the Podcasts tab it leads there; on it, it just says so. (It used to show a half-lit
+    /// play glyph, 2.6:1, that looked like a disabled button and did nothing.)
     @ViewBuilder
     private var idleBar: some View {
-        HStack(spacing: 6) {
-            // Not a play button: with nothing loaded there's nothing to play, and a dim ▶ that did
-            // nothing read as broken. A plain podcast mark instead.
-            Image(systemName: "dot.radiowaves.left.and.right")
-                .font(.body)
+        if selectedTab != 1 {
+            Button(action: { selectedTab = 1 }) {
+                idleContent(leads: true).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Nothing playing")
+            .accessibilityHint("Opens Podcasts")
+        } else {
+            idleContent(leads: false)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Nothing playing")
+        }
+    }
+
+    private func idleContent(leads: Bool) -> some View {
+        HStack(spacing: UI.sm) {
+            Image(systemName: "music.note.list")
+                .font(.title3)
                 .foregroundColor(pal.dim)
                 .frame(minWidth: 44, minHeight: 44)
 
-            Text("Nothing playing")
-                .font(.subheadline)
-                .foregroundColor(pal.dim)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Nothing playing")
+                    .font(.subheadline)
+                    .foregroundColor(pal.dim)
+                if leads {
+                    Text("Find an episode in Podcasts")
+                        .font(.caption2)
+                        .foregroundColor(pal.dim)
+                }
+            }
 
             Spacer()
         }
-        .padding(.horizontal, 16)
+        .padding(.horizontal, UI.lg)
         .padding(.vertical, 10)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Nothing playing")
     }
 }

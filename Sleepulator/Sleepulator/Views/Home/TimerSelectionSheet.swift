@@ -11,6 +11,11 @@ enum TimerCopy {
         }
         return minutes > 10 ? "Fades out over the last 10 min, then stops." : "Fades out gently, then stops."
     }
+
+    /// One name (and glyph) for the end-of-episode timer wherever it's offered: this sheet and the
+    /// Sleep player's chip.
+    static let stopAfterEpisode = "Stop after this episode"
+    static let stopAfterEpisodeSymbol = "text.append"
 }
 
 struct TimerSelectionSheet: View {
@@ -184,7 +189,10 @@ struct TimerSelectionSheet: View {
                 // "End of episode" — only when a podcast with a known, finite length is loaded (so
                 // the button can't silently no-op before the duration is known, or on a live stream).
                 // A genuinely different timer kind, so it stays its own one-tap action.
-                if audio.hasLoadedEpisode, audio.podcastDuration.isFinite, audio.podcastDuration > 5 {
+                // Only while it plays: the end-of-episode timer ticks off the playback clock, so set
+                // on a paused episode it replaced the night's timer with one that never ran out.
+                if audio.hasLoadedEpisode, audio.isPodPlaying,
+                   audio.podcastDuration.isFinite, audio.podcastDuration > 5 {
                     Button(action: {
                         audio.startEndOfEpisodeTimer()
                         isPresented = false
@@ -192,9 +200,10 @@ struct TimerSelectionSheet: View {
                         Label {
                             // Large text wraps it to two lines; centre the second under the first.
                             // Set on the Text itself: the Label's title ignores it from outside.
-                            Text("Stop at end of episode").multilineTextAlignment(.center)
+                            // One name for this action wherever it's offered (the player's chip too).
+                            Text(TimerCopy.stopAfterEpisode).multilineTextAlignment(.center)
                         } icon: {
-                            Image(systemName: "text.append")
+                            Image(systemName: TimerCopy.stopAfterEpisodeSymbol)
                         }
                             .font(.subheadline.weight(.semibold))
                             // Dim, not full accent: amber text read as bright as the cream commit

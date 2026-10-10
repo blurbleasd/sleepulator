@@ -21,7 +21,10 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
     pieces: the orb + `NightRing`, `NightEmber` (the faint time-left arc left in the ring's place
     under the Sleep screensaver), `ModeSwitcher`, `MixDrawer`, `TimerSelectionSheet`, and the
     pure, unit-tested rules `SessionGuards` and `HomeScreensaverPolicy`. `Views/TonightShelfView.swift`
-    is the Podcasts tab's "Tonight" (Focus: "Continue") shelf.
+    is the Podcasts tab's "Tonight" (Focus: "Continue") shelf. `Views/NowPlayingState.swift` holds
+    the player views' pure, unit-tested rules: `NowPlayingState` (hero, Up Next, phase),
+    `PlayerClock` (times, speeds, lengths, clamped) and `NightLineCopy` (the Sleep player's
+    night line).
   - `Services/` — the engine + plumbing (below).
   - `Models/Models.swift` — `Podcast`, `Episode`, `SavedMix`, `NoiseType`. `Models/PodcastText.swift`
     (show-notes HTML → plain text, counts, durations, placeholder names) and
@@ -39,7 +42,8 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   `StorageManagerTests`, `NetRetryTests`, `CacheEvictionTests`, the sleep-timer suites, Home's
   pure UI rules (`SessionGuardsTests`, `NightRingMathTests`, `MiniPlayerClearanceTests`,
   `HomeScreensaverPolicyTests`), the podcast rules (`PodcastTextTests`, `ShowNotesPreviewTests`,
-  `ShowNotesEdgeTests`, `TonightShelfTests`, `QueueMoveToHeadTests`), and more);
+  `ShowNotesEdgeTests`, `TonightShelfTests`, `QueueMoveToHeadTests`), the player rules
+  (`NowPlayingStateTests`, `NightLineCopyTests`, `PlayerQueueActionTests`), and more);
   `PersistenceTests.swift` (`PersistenceMigrator` / `MixStore`); `BackupRoundTripTests.swift`;
   `FocusDriversTests.swift`; `GenerativeAudioEngineTests.swift` (`GenerativeMediaResetTests`).
 
@@ -67,12 +71,23 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   re-render storm is what overwhelmed the podcast list (`perf(podcasts)` fix, 2026-06).
 - **The Night Limiter (on-device tap) replaced the server proxy.** Loudness-bounded so a loud
   podcast spike can't jolt you awake; it can follow the mode (on for Sleep, off for Focus).
+  A tap that can't attach fails open (`PodcastPlayer.onLimiterUnavailable` →
+  `AudioEngine.limiterOffForStream`): one dim line in the full player, only with the limiter on,
+  never a `playbackNote` (that raised an amber banner on Home all night).
 - **The podcast `AVPlayer` is disposable.** Every item carries the limiter tap (volume + the
   sleep fade live there even with the limiter off), and an interruption can kill an AVPlayer +
   tap pipeline for good — only a new AVPlayer recovers. `PodcastPlayer` rebuilds it on item
   failure, media-services reset, or its tap-heartbeat watchdog (clock running, no audio). Never
   reintroduce one AVPlayer for the process. If a podcast is "playing but silent" again, read the
   exported log's `podcast resume:` / `rebuilding the AVPlayer` lines before touching volume code.
+- **Now playing is `AudioEngine.loadedEpisode`, never the queue head.** Every load sets it (all
+  loads go through `loadPodcast`; an unqueued episode gets a title-only stand-in), and it outlives
+  the queue moving on (a failure, the sleep-aware hold, a removal). The player views resolve the
+  hero and Up Next through `NowPlayingState`, not `queue.first` / `dropFirst()`, and the player's
+  queue edits pin the loaded episode, not `queue[0]` (`PodcastQueueManager.skipToNext`,
+  `moveInUpNext`, `shuffleRemainingQueue(nowPlayingId:)`, `remove`/`restore` for Undo). Next is a
+  skip, not a finish: it never marks played or deletes the download, and plays on with Auto-Play
+  off. Failures carry their episode id; `handlePodcastFailure` ignores one from a replaced item.
 - **Downloads live in Application Support**, not Documents (Apple 2.5.x: re-downloadable content
   must not be iCloud-backed). `isExcludedFromBackup`, ~2GB LRU cap (`AudioDownloader`).
 - **Persistence is per-key JSON** via `StorageManager`; one oversized write must not abort the
@@ -93,6 +108,13 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   (`timerOnPlay`, the mode-switch confirm over a live session, "the night veil only drops over
   sound") live in `SessionGuards`, unit-tested: change them there, not in view code. Tests that
   start sessions set `engine.nightLengthProvider` rather than relying on the simulator's defaults.
+- **The stop-with-episode timer runs on the playback clock.** "Stop after this episode" (the timer
+  sheet and the Sleep player's chip, `startEndOfEpisodeTimer`) is offered and starts only while the
+  episode plays. A pause hands it to the wall clock with the same end
+  (`SleepTimerService.podcastPaused`); left on the playback clock, the bed played all night. The
+  episode's end, from the last tick or the player's end-of-item report, goes through
+  `episodeEnded()` (the tail if set, else the stop). In the tail an ended episode tidies the queue
+  and never auto-plays the next; only a person's pick lifts the tail.
 - **Isolated deinits.** Under `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor` a class with no explicit
   `deinit` gets an implicit MainActor-*isolated* one (an explicit `deinit` is nonisolated). On the
   iOS 18.4–26.3 Swift runtimes that path aborts ("pointer being freed was not allocated" in
@@ -117,6 +139,11 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   To measure a full-bleed view, put `.onGeometryChange` *before* its `.ignoresSafeArea()`.
   Placed after it, you get the un-expanded frame (the tab bar's top edge, not the screen's). That
   bug once hid Focus's whole bottom row under the bar; `HomeLayoutUITests` now guards it.
+- **The night veil closes an idle Now Playing sheet.** Any touch anywhere restarts the veil's
+  minute (`WindowActivity`), and a presented sheet or dialog makes it wait rather than drop over it
+  (`SessionGuards.veilTimeout`). The Now Playing sheet is the exception (`.closeNowPlaying`): left
+  untouched for the minute, it's the brightest surface on the night screen, so ContentView closes
+  it and the veil drops. Never under VoiceOver or Switch Control, which reach it without touches.
 - **Dark-only.** `Info.plist` sets `UIUserInterfaceStyle = Dark` and a `UILaunchScreen` filled
   with the `LaunchBackground` color; the generated launch screen is off
   (`INFOPLIST_KEY_UILaunchScreen_Generation = NO`; it followed the system appearance and flashed
@@ -138,17 +165,20 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
 - **Podcasts is split by depth.** The library and its Tonight shelf follow the 2am rules (artwork
   dimmed to 0.78 in Sleep, `EmberButtonStyle`, no solid accent slabs); a show's page and the Add
   sheet are the brighter browsing surfaces. Swipe actions draw a fixed white label, so tint them
-  `pal.actionFill` (the deep accent), never `pal.accent` (2.18:1).
+  `pal.actionFill` (the deep accent), never `pal.accent` (2.18:1). The Sleep Now Playing sheet
+  follows the 2am rules too (150 pt desaturated art under a scrim, a `VolumeBar` scrubber, dim
+  notes, never amber), and its play button and the mini-player's are the orb's dark
+  `PlayerDiscButton`.
 - **Manual podcast starts cancel the ambient tail.** A fresh `play()` never fires
   `podPlayer.onResume`, so a podcast started in the tail would play at its near-zero fade and then
   be stopped. `AudioEngine.cancelTailForManualStart` runs for the queue's user-facing plays
-  (`PodcastQueueManager.userStartedPlaybackFn`: rows, swipes, Play All), never its auto-advance,
-  and for `AudioEngine.resumeEpisode`, the Podcasts tab's Resume / Back 5 min / Up next / Play
-  Latest. `resumeEpisode` also continues an already-loaded, settled (`!isLoadingItem`) episode from
-  the live player, starting it over if it's spent, and re-heads the queue in one write
-  (`moveToHead`). Resume positions come from the player's in-memory map (`savedEpisodePositions`),
-  which beats the Last Night snapshot (stale after a podcast-only pause). LibraryView reads
-  library.json once; its state is the source of truth.
+  (`PodcastQueueManager.userStartedPlaybackFn`: rows, swipes, Play All, the player's Next and
+  Try again), never its auto-advance, and for `AudioEngine.resumeEpisode`, the Podcasts tab's
+  Resume / Back 5 min / Up next / Play Latest. `resumeEpisode` also continues an already-loaded,
+  settled (`!isLoadingItem`) episode from the live player, starting it over if it's spent, and
+  re-heads the queue in one write (`moveToHead`). Resume positions come from the player's
+  in-memory map (`savedEpisodePositions`), which beats the Last Night snapshot (stale after a
+  podcast-only pause). LibraryView reads library.json once; its state is the source of truth.
 - **SwiftUI drops a state update whose new value `==` the old.** `Podcast` hashes by id but its
   `==` also compares what the library row shows; id-only `==` left rows stale after a show page
   loaded more episodes. Keep row-visible fields in `==` (and keep it O(1)).

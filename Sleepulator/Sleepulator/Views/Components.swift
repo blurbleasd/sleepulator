@@ -199,11 +199,19 @@ struct VolumeBar: View {
     /// When true a tap (no drag) jumps the value to the tapped position. Off for the mixer (a
     /// graze must not jolt the bed); on for Settings, where tap-to-set is expected.
     var tapToSet: Bool = false
+    /// The caller supplies its own accessibility element (the podcast scrubber does: VoiceOver
+    /// steps it by the skip interval, and a seek must commit on each step, which the stand-in
+    /// Slider below can't do).
+    var customAccessibility: Bool = false
     /// Snap to this increment (the sleep timer's 5-minute detents), with a selection tick per
     /// detent. Nil (the default) is the continuous fader.
     var step: Double? = nil
     var onEditingChanged: ((Bool) -> Void)? = nil
     @State private var editing = false
+    /// True only while a finger is down. Unlike `editing` it resets by itself when the system
+    /// cancels the gesture (the bar stops taking touches mid-drag), which never calls `onEnded`
+    /// and used to leave `editing` stuck: the next drag then skipped its grab and jumped.
+    @GestureState private var touching = false
     /// Last drag translation, for incremental (relative) movement — see the gesture.
     @State private var lastX: CGFloat = 0
     /// Whether this gesture has moved past the tap threshold (gates tap-to-set on release).
@@ -213,6 +221,18 @@ struct VolumeBar: View {
     @State private var raw: Double = 0
 
     var body: some View {
+        if customAccessibility {
+            fader
+        } else {
+            // Hand VoiceOver a standard adjustable slider — the real value stays the source of truth.
+            // A stepped bar adjusts one detent per swipe.
+            fader.accessibilityRepresentation {
+                if let step { Slider(value: $value, in: range, step: step) } else { Slider(value: $value, in: range) }
+            }
+        }
+    }
+
+    private var fader: some View {
         GeometryReader { geo in
             let w = max(geo.size.width, 1)
             let span = max(range.upperBound - range.lowerBound, 0.0001)
@@ -242,6 +262,7 @@ struct VolumeBar: View {
             .animation(.spring(response: 0.3, dampingFraction: 0.72), value: editing)
             .gesture(
                 DragGesture(minimumDistance: 0)
+                    .updating($touching) { _, state, _ in state = true }
                     .onChanged { g in
                         if !editing {
                             editing = true
@@ -279,13 +300,15 @@ struct VolumeBar: View {
                         onEditingChanged?(false)
                     }
             )
+            .onChange(of: touching) { _, down in
+                // A cancelled drag: no onEnded came, so close the edit here.
+                if !down && editing {
+                    editing = false
+                    onEditingChanged?(false)
+                }
+            }
         }
         .frame(height: 28)
-        // Hand VoiceOver a standard adjustable slider — the real value stays the source of truth.
-        // A stepped bar adjusts one detent per swipe.
-        .accessibilityRepresentation {
-            if let step { Slider(value: $value, in: range, step: step) } else { Slider(value: $value, in: range) }
-        }
     }
 
     /// Writes `v` rounded to the nearest detent, ticking only when that crosses into a new one.

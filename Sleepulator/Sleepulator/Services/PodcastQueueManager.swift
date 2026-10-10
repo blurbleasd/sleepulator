@@ -157,21 +157,66 @@ final class PodcastQueueManager: ObservableObject {
         queue.move(fromOffsets: source, toOffset: destination)
     }
     
-    func moveUp(episode: Episode) {
-        guard let idx = queue.firstIndex(where: { $0.id == episode.id }), idx > 1 else { return }
-        queue.swapAt(idx, idx - 1)
+    /// Move an episode one place up (`step` -1) or down (+1) within Up Next: the queue as the
+    /// player lists it, which leaves out the episode the player is on. That episode can sit
+    /// anywhere in the queue, or nowhere (a failure or the sleep-aware hold drops it), so the
+    /// head-pinned `moveUp`/`moveDown` (index > 1) could do nothing or move it. Swapping the two
+    /// queue slots of neighbours in Up Next leaves the playing episode where it is.
+    /// `nowPlayingId` nil means nothing is loaded: the head is what plays next, and stays put.
+    func moveInUpNext(_ episode: Episode, by step: Int, nowPlayingId: String?) {
+        let pinned = nowPlayingId ?? queue.first?.id
+        let upNext = queue.filter { $0.id != pinned }
+        guard let i = upNext.firstIndex(where: { $0.id == episode.id }),
+              upNext.indices.contains(i + step),
+              let a = queue.firstIndex(where: { $0.id == episode.id }),
+              let b = queue.firstIndex(where: { $0.id == upNext[i + step].id }) else { return }
+        queue.swapAt(a, b)
     }
-    
-    func moveDown(episode: Episode) {
-        guard let idx = queue.firstIndex(where: { $0.id == episode.id }), idx > 0, idx < queue.count - 1 else { return }
-        queue.swapAt(idx, idx + 1)
+
+    /// Take an episode out of the queue. Never touches its download. Returns where it was, so the
+    /// player can offer Undo (`restore`); nil if it wasn't queued.
+    @discardableResult
+    func remove(_ episode: Episode) -> Int? {
+        guard let i = queue.firstIndex(where: { $0.id == episode.id }) else { return nil }
+        queue.remove(at: i)
+        return i
     }
-    
-    func shuffleRemainingQueue() {
-        guard queue.count > 1 else { return }
-        let current = queue[0]
-        let remaining = queue.dropFirst().shuffled()
-        queue = [current] + remaining
+
+    /// Undo a `remove`: put the episode back where it was (clamped, in case the queue has since
+    /// shrunk). A no-op if it's already queued again.
+    func restore(_ episode: Episode, at index: Int) {
+        guard !queue.contains(where: { $0.id == episode.id }) else { return }
+        queue.insert(episode, at: min(max(0, index), queue.count))
+    }
+
+    /// The player's Next: drop the episode being skipped and play the one after it. A skip is not
+    /// a finish, so unlike `advanceQueue` it never deletes the download (delete-on-completion is
+    /// for episodes you heard) and never marks it played. It plays the next one whatever Auto-Play
+    /// says: Auto-Play is about an episode ending on its own, not a tap on Next (which used to
+    /// pause and silently drop the episode). Shuffle picks the next one as it does at an episode's
+    /// end. Returns false, changing nothing, when nothing follows.
+    @discardableResult
+    func skipToNext(currentId: String?) -> Bool {
+        var rest = queue.filter { $0.id != currentId }
+        guard !rest.isEmpty else { return false }
+        userStartedPlaybackFn?()   // a person's Next: lifts the ambient tail like any other pick
+        let next = rest.remove(at: shuffleQueue ? Int.random(in: 0..<rest.count) : 0)
+        queue = [next] + rest
+        loadPodcastFn?(next.audioUrl, next.id, next.title, true)
+        return true
+    }
+
+    /// Shuffle Up Next. Like `moveInUpNext`, the episode that stays put is the one the player is
+    /// on, wherever it sits (or nowhere, after a failure or the sleep-aware hold); only with nothing
+    /// loaded is it the head. Pinning `queue[0]` regardless froze Up Next's first row, the very
+    /// episode Next and auto-advance play, whenever the loaded episode had left the queue.
+    func shuffleRemainingQueue(nowPlayingId: String? = nil) {
+        let pinned = nowPlayingId ?? queue.first?.id
+        let pinnedIndex = queue.firstIndex { $0.id == pinned }
+        var shuffled = queue.filter { $0.id != pinned }.shuffled()
+        guard shuffled.count > 1 || pinnedIndex == nil else { return }
+        if let i = pinnedIndex { shuffled.insert(queue[i], at: min(i, shuffled.count)) }
+        queue = shuffled
     }
 
     /// `suppressAutoPlay`: advance the queue data (drop the finished head, honor

@@ -984,6 +984,52 @@ final class SleepTimerTailTests: XCTestCase {
         return svc
     }
 
+    // The player's end-of-item report reaches the same hand-off as the last clock tick: the 1 Hz tick
+    // only lands in the final 0.4 s on some episodes, and the report path used to hard-stop.
+    func testTheEndOfItemReportAlsoStartsTheTail() {
+        let svc = SleepTimerService()
+        svc.backstop = NoopBackstop()
+        var stops = 0
+        svc.stopAllFn = { stops += 1 }
+        svc.stopPodcastFn = { }
+        svc.ambientTailFn = { 300 }
+        svc.tailEligibleFn = { true }
+        svc.startEndOfEpisode(remaining: 60)
+        svc.episodeEnded()
+        XCTAssertTrue(svc.inTail)
+        XCTAssertEqual(stops, 0)
+        svc.episodeEnded()   // the other path arriving second changes nothing
+        XCTAssertTrue(svc.inTail)
+        XCTAssertEqual(stops, 0)
+        svc.cancelTimer()
+    }
+
+    func testEpisodeEndWithoutATailStopsOnce() {
+        let svc = SleepTimerService()
+        svc.backstop = NoopBackstop()
+        var stops = 0
+        svc.stopAllFn = { stops += 1 }
+        svc.ambientTailFn = { 0 }
+        svc.startEndOfEpisode(remaining: 60)
+        svc.episodeEnded()
+        svc.externalTick(remaining: 0.2)
+        XCTAssertEqual(stops, 1)
+    }
+
+    // Regression: AirPods out paused the podcast but kept the sounds; a stop-with-episode timer only
+    // counted on the playback clock, so it never ran out and the sounds played all night.
+    func testPausingTheEpisodeMovesItsTimerToTheWallClock() {
+        let svc = SleepTimerService()
+        svc.backstop = NoopBackstop()
+        svc.startEndOfEpisode(remaining: 600)
+        svc.podcastPaused()
+        XCTAssertFalse(svc.isEndOfEpisode, "now a duration timer the wall clock ends")
+        XCTAssertEqual(svc.timerRemaining, 600, accuracy: 1)
+        svc.podcastPaused()   // already converted: nothing more
+        XCTAssertFalse(svc.isEndOfEpisode)
+        svc.cancelTimer()
+    }
+
     func testEpisodeEndHandsOffToTailInsteadOfStopping() {
         let svc = SleepTimerService()
         svc.backstop = NoopBackstop()
@@ -1580,6 +1626,50 @@ final class ClarityCopyTests: XCTestCase {
     }
 }
 
+/// The Sleep player's night line: does tonight's timer cut this story off, or does it end first?
+final class NightLineCopyTests: XCTestCase {
+    private func line(timer: Double, eoe: Bool = false, tail: Bool = false,
+                      episode: Double?, tailMinutes: Int = 0) -> String {
+        NightLineCopy.line(timerRemaining: timer, endOfEpisode: eoe, inTail: tail,
+                           episodeRemaining: episode, tailMinutes: tailMinutes)
+    }
+
+    func testNoTimerPlaysAllNight() {
+        XCTAssertEqual(line(timer: 0, episode: 1000), "Plays all night")
+    }
+
+    func testTimerCutsTheEpisodeShort() {
+        XCTAssertEqual(line(timer: 38 * 60, episode: 61 * 60),
+                       "Timer ends in 38 min · 23 min before this episode does")
+    }
+
+    func testEpisodeEndsFirst() {
+        XCTAssertEqual(line(timer: 52 * 60, episode: 38 * 60), "This episode ends 14 min before the timer")
+    }
+
+    func testWithinAMinuteTheyEndTogether() {
+        XCTAssertEqual(line(timer: 30 * 60, episode: 30 * 60 + 40), "Timer ends with this episode · in 30 min")
+    }
+
+    func testStopWithEpisodeMentionsTheTail() {
+        XCTAssertEqual(line(timer: 17 * 60, eoe: true, episode: 17 * 60), "Stops with this episode · in 17 min")
+        XCTAssertEqual(line(timer: 17 * 60, eoe: true, episode: 17 * 60, tailMinutes: 30),
+                       "Stops with this episode · in 17 min · sounds go on 30 min")
+    }
+
+    func testTailAndUnknownLength() {
+        XCTAssertEqual(line(timer: 12 * 60, tail: true, episode: nil), "Sounds fading · 12 min left")
+        XCTAssertEqual(line(timer: 38 * 60, episode: nil), "Timer ends in 38 min")
+    }
+
+    func testSpanRoundsUpAndShowsHours() {
+        XCTAssertEqual(NightLineCopy.span(1), "1 min")
+        XCTAssertEqual(NightLineCopy.span(61), "2 min", "a countdown never claims less than is left")
+        XCTAssertEqual(NightLineCopy.span(72 * 60), "1 hr 12 min")
+        XCTAssertEqual(NightLineCopy.span(120 * 60), "2 hr")
+    }
+}
+
 /// The night ring: a 120-minute dial from 12 o'clock, snapping to 5, 0 = All night.
 final class NightRingMathTests: XCTestCase {
     func testAngleMapsToSnappedMinutes() {
@@ -1986,6 +2076,446 @@ final class CoachmarkContentTests: XCTestCase {
     func testNoTipsInFocus() {
         XCTAssertNil(CoachmarkContent.current(focusMode: true, hasCompletedFirstRun: false, hasSeenNightRingTip: false))
         XCTAssertNil(CoachmarkContent.current(focusMode: true, hasCompletedFirstRun: true, hasSeenNightRingTip: false))
+    }
+}
+
+/// The player's one source of truth: the loaded episode leads, Up Next is everything else, and the
+/// two never disagree, wherever (or whether) the loaded episode sits in the queue.
+final class NowPlayingStateTests: XCTestCase {
+    private func ep(_ id: String, duration: TimeInterval? = 100) -> Episode {
+        Episode(id: id, title: "Ep \(id)", audioUrl: "http://example.com/\(id)", duration: duration)
+    }
+
+    func testNothingLoadedLeadsWithTheHead() {
+        let s = NowPlayingState(loaded: nil, queue: [ep("A"), ep("B"), ep("C")])
+        XCTAssertEqual(s.hero?.id, "A")
+        XCTAssertFalse(s.isLoaded)
+        XCTAssertEqual(s.upNext.map(\.id), ["B", "C"])
+    }
+
+    func testLoadedEpisodeLeadsEvenWhenTheQueueMovedOn() {
+        // A failure (Auto-Play off) or the sleep-aware hold drops the loaded episode from the
+        // queue. The sheet used to show the head's art over the loaded title and hide the head.
+        let s = NowPlayingState(loaded: ep("X"), queue: [ep("A"), ep("B")])
+        XCTAssertEqual(s.hero?.id, "X")
+        XCTAssertTrue(s.isLoaded)
+        XCTAssertEqual(s.upNext.map(\.id), ["A", "B"], "the cued head stays visible")
+    }
+
+    func testLoadedEpisodeMidQueueIsLeftOutOfUpNext() {
+        let s = NowPlayingState(loaded: ep("B"), queue: [ep("A"), ep("B"), ep("C")])
+        XCTAssertEqual(s.upNext.map(\.id), ["A", "C"])
+    }
+
+    func testEmptyQueueAndNothingLoaded() {
+        let s = NowPlayingState(loaded: nil, queue: [])
+        XCTAssertNil(s.hero)
+        XCTAssertTrue(s.upNext.isEmpty)
+    }
+
+    func testPhase() {
+        func p(loaded: Bool = true, failed: Bool = false, loading: Bool = false, playing: Bool,
+               elapsed: Double, duration: Double) -> NowPlayingState.Phase {
+            NowPlayingState.phase(isLoaded: loaded, failed: failed, loading: loading, isPlaying: playing,
+                                  elapsed: elapsed, duration: duration)
+        }
+        XCTAssertEqual(p(loaded: false, playing: false, elapsed: 0, duration: 1), .ready)
+        XCTAssertEqual(p(loading: true, playing: false, elapsed: 0, duration: 0), .loading)
+        XCTAssertEqual(p(playing: true, elapsed: 0, duration: 0), .loading, "playing, first report not in yet")
+        XCTAssertEqual(p(failed: true, loading: true, playing: false, elapsed: 30, duration: 100), .failed)
+        XCTAssertEqual(p(playing: true, elapsed: 12, duration: 0), .live)
+        XCTAssertEqual(p(playing: true, elapsed: 12, duration: 100), .playing)
+        XCTAssertEqual(p(playing: false, elapsed: 12, duration: 100), .paused)
+        XCTAssertEqual(p(playing: false, elapsed: 99.5, duration: 100), .finished)
+    }
+
+    // Regression: a pause before the player's first position report (a call, AirPods out) used to
+    // leave .loading, a disabled spinner, with no way to press Play in either player.
+    func testPausedBeforeTheFirstReportIsPausedNotLoading() {
+        XCTAssertEqual(NowPlayingState.phase(isLoaded: true, failed: false, loading: false, isPlaying: false,
+                                             elapsed: 0, duration: 0), .paused)
+        XCTAssertEqual(NowPlayingState.phase(isLoaded: true, failed: false, loading: false, isPlaying: false,
+                                             elapsed: 40, duration: 0), .paused, "a paused live stream reads paused")
+    }
+
+    func testSkipsNeedAPositionNotALength() {
+        XCTAssertTrue(NowPlayingState.canSkip(.live), "a live stream keeps back/forward 15")
+        XCTAssertTrue(NowPlayingState.canSkip(.paused))
+        XCTAssertFalse(NowPlayingState.canSkip(.loading))
+        XCTAssertFalse(NowPlayingState.canSkip(.failed))
+        XCTAssertFalse(NowPlayingState.canSkip(.ready))
+    }
+
+    func testSeekingNeedsAPositionAndALength() {
+        XCTAssertTrue(NowPlayingState.canSeek(.paused, duration: 100))
+        XCTAssertFalse(NowPlayingState.canSeek(.paused, duration: 0))
+        XCTAssertFalse(NowPlayingState.canSeek(.loading, duration: 100))
+        XCTAssertFalse(NowPlayingState.canSeek(.failed, duration: 100))
+        XCTAssertFalse(NowPlayingState.canSeek(.live, duration: 0))
+    }
+
+    // Values from a restored backup or a bad feed used to trap the Int conversion and crash the
+    // player on open.
+    func testAbsurdValuesFormatWithoutCrashing() {
+        XCTAssertFalse(PlayerClock.string(1e300).isEmpty)
+        XCTAssertFalse(PlayerClock.short(1e300).isEmpty)
+        XCTAssertFalse(PlayerClock.spoken(1e300).isEmpty)
+        XCTAssertFalse(PlayerClock.speedLabel(1e300).isEmpty)
+        XCTAssertEqual(PlayerClock.speedLabel(.nan), "1\u{00D7}")
+        XCTAssertFalse(NightLineCopy.span(1e300).isEmpty)
+    }
+
+    func testClockShowsHoursPastAnHour() {
+        XCTAssertEqual(PlayerClock.string(0), "0:00")
+        XCTAssertEqual(PlayerClock.string(245), "4:05")
+        XCTAssertEqual(PlayerClock.string(4607), "1:16:47", "not -76:47")
+        XCTAssertEqual(PlayerClock.string(-3), "0:00")
+        XCTAssertEqual(PlayerClock.string(.nan), "0:00")
+    }
+
+    func testShortLengthsAndSpeeds() {
+        XCTAssertEqual(PlayerClock.short(66 * 60 + 41), "1 hr 7 min")
+        XCTAssertEqual(PlayerClock.short(45 * 60), "45 min")
+        XCTAssertEqual(PlayerClock.short(120 * 60), "2 hr")
+        XCTAssertEqual(PlayerClock.short(10), "1 min", "never \"0 min\"")
+        XCTAssertEqual(PlayerClock.speedLabel(1.0), "1\u{00D7}")
+        XCTAssertEqual(PlayerClock.speedLabel(1.2), "1.2\u{00D7}")
+    }
+
+    func testSpokenTimeUsesWords() {
+        XCTAssertFalse(PlayerClock.spoken(4607).contains(":"))
+        XCTAssertFalse(PlayerClock.spoken(0).isEmpty)
+    }
+}
+
+/// Next, retry and queue edits from the player. A skip is not a finish.
+@MainActor
+final class PlayerQueueActionTests: XCTestCase {
+    // A local URL that doesn't exist: an engine-level load never touches the network, and the
+    // assertions run before any of the player's main-queue callbacks can.
+    private func ep(_ id: String) -> Episode {
+        Episode(id: id, title: "Ep \(id)", audioUrl: "file:///nonexistent/sleepulator-test-\(id).mp3", duration: 100)
+    }
+
+    func testSkipPlaysTheNextEvenWithAutoPlayOff() {
+        let qm = PodcastQueueManager()
+        qm.autoPlay = false                   // Next used to pause and silently drop the episode
+        qm.shuffleQueue = false
+        qm.queue = [ep("1"), ep("2"), ep("3")]
+        var loaded: (id: String, resume: Bool)?
+        qm.loadPodcastFn = { _, id, _, resume in loaded = (id, resume) }
+        var paused = false
+        qm.pausePodcastFn = { paused = true }
+
+        XCTAssertTrue(qm.skipToNext(currentId: "1"))
+        XCTAssertEqual(loaded?.id, "2")
+        XCTAssertEqual(loaded?.resume, true, "a tap on Next resumes where you left that episode")
+        XCTAssertFalse(paused)
+        XCTAssertEqual(qm.queue.map(\.id), ["2", "3"])
+    }
+
+    func testSkipNeverMarksPlayed() {
+        let qm = PodcastQueueManager()
+        qm.shuffleQueue = false
+        qm.markUnfinished("1")
+        qm.queue = [ep("1"), ep("2")]
+        qm.loadPodcastFn = { _, _, _, _ in }
+        qm.skipToNext(currentId: "1")
+        XCTAssertFalse(qm.finishedEpisodes.contains("1"))
+    }
+
+    func testSkipFromAnEpisodeNoLongerQueuedPlaysTheHead() {
+        let qm = PodcastQueueManager()
+        qm.shuffleQueue = false
+        qm.queue = [ep("A"), ep("B")]
+        var loadedId: String?
+        qm.loadPodcastFn = { _, id, _, _ in loadedId = id }
+        qm.skipToNext(currentId: "gone")      // the loaded episode failed and left the queue
+        XCTAssertEqual(loadedId, "A")
+        XCTAssertEqual(qm.queue.map(\.id), ["A", "B"])
+    }
+
+    func testSkipWithNothingAfterChangesNothing() {
+        let qm = PodcastQueueManager()
+        qm.queue = [ep("1")]
+        var loads = 0
+        qm.loadPodcastFn = { _, _, _, _ in loads += 1 }
+        XCTAssertFalse(qm.skipToNext(currentId: "1"))
+        XCTAssertEqual(loads, 0)
+        XCTAssertEqual(qm.queue.map(\.id), ["1"])
+    }
+
+    func testMoveInUpNextSkipsThePlayingEpisode() {
+        let qm = PodcastQueueManager()
+        // B is loaded and sits mid-queue; Up Next reads A, C, D.
+        qm.queue = [ep("A"), ep("B"), ep("C"), ep("D")]
+        qm.moveInUpNext(ep("C"), by: -1, nowPlayingId: "B")
+        XCTAssertEqual(qm.queue.map(\.id), ["C", "B", "A", "D"], "C and A trade places; B stays put")
+        qm.moveInUpNext(ep("C"), by: -1, nowPlayingId: "B")
+        XCTAssertEqual(qm.queue.map(\.id), ["C", "B", "A", "D"], "already first in Up Next")
+    }
+
+    func testMoveInUpNextWhenTheLoadedEpisodeLeftTheQueue() {
+        let qm = PodcastQueueManager()
+        qm.queue = [ep("A"), ep("B")]          // the old moveDown couldn't move the head
+        qm.moveInUpNext(ep("A"), by: 1, nowPlayingId: "gone")
+        XCTAssertEqual(qm.queue.map(\.id), ["B", "A"])
+    }
+
+    func testMoveInUpNextWithNothingLoadedPinsTheHead() {
+        let qm = PodcastQueueManager()
+        qm.queue = [ep("A"), ep("B"), ep("C")]
+        qm.moveInUpNext(ep("B"), by: -1, nowPlayingId: nil)
+        XCTAssertEqual(qm.queue.map(\.id), ["A", "B", "C"], "the head is what plays next; it isn't in Up Next")
+        qm.moveInUpNext(ep("C"), by: -1, nowPlayingId: nil)
+        XCTAssertEqual(qm.queue.map(\.id), ["A", "C", "B"])
+    }
+
+    func testRemoveThenUndoPutsItBackInPlace() {
+        let qm = PodcastQueueManager()
+        qm.queue = [ep("A"), ep("B"), ep("C")]
+        let at = qm.remove(ep("B"))
+        XCTAssertEqual(at, 1)
+        XCTAssertEqual(qm.queue.map(\.id), ["A", "C"])
+        qm.restore(ep("B"), at: at!)
+        XCTAssertEqual(qm.queue.map(\.id), ["A", "B", "C"])
+        qm.restore(ep("B"), at: 0)                     // already back: no duplicate
+        XCTAssertEqual(qm.queue.map(\.id), ["A", "B", "C"])
+    }
+
+    func testUndoAfterTheQueueShrankClampsTheIndex() {
+        let qm = PodcastQueueManager()
+        qm.queue = [ep("A"), ep("B"), ep("C")]
+        let at = qm.remove(ep("C"))!                  // was at 2
+        qm.remove(ep("B"))
+        qm.restore(ep("C"), at: at)
+        XCTAssertEqual(qm.queue.map(\.id), ["A", "C"])
+        XCTAssertNil(qm.remove(ep("Z")), "not queued")
+    }
+
+    func testShuffleUpNextMovesTheHeadWhenTheLoadedEpisodeLeftTheQueue() {
+        let qm = PodcastQueueManager()
+        let eps = (1...8).map { ep("\($0)") }
+        var headMoved = false
+        for _ in 0..<20 where !headMoved {
+            qm.queue = eps
+            qm.shuffleRemainingQueue(nowPlayingId: "gone")   // the loaded episode failed and left
+            headMoved = qm.queue.first?.id != "1"
+        }
+        XCTAssertTrue(headMoved, "Up Next's first row (what Next plays) must be shuffleable")
+        XCTAssertEqual(Set(qm.queue.map(\.id)), Set(eps.map(\.id)))
+    }
+
+    func testShuffleUpNextKeepsTheLoadedEpisodeInPlace() {
+        let qm = PodcastQueueManager()
+        let eps = (1...6).map { ep("\($0)") }
+        qm.queue = eps
+        qm.shuffleRemainingQueue(nowPlayingId: "3")
+        XCTAssertEqual(qm.queue[2].id, "3")
+        XCTAssertEqual(Set(qm.queue.map(\.id)), Set(eps.map(\.id)))
+    }
+
+    func testShuffledSkipPromotesARemainingEpisode() {
+        let qm = PodcastQueueManager()
+        qm.shuffleQueue = true
+        defer { qm.shuffleQueue = false }
+        qm.queue = [ep("1"), ep("2"), ep("3")]
+        var loadedId: String?
+        qm.loadPodcastFn = { _, id, _, _ in loadedId = id }
+        XCTAssertTrue(qm.skipToNext(currentId: "1"))
+        XCTAssertNotNil(loadedId)
+        XCTAssertNotEqual(loadedId, "1")
+        XCTAssertEqual(qm.queue.first?.id, loadedId)
+        XCTAssertEqual(Set(qm.queue.map(\.id)), ["2", "3"])
+    }
+
+    func testSkipFromAMidQueueEpisodePlaysUpNextsFirst() {
+        let qm = PodcastQueueManager()
+        qm.shuffleQueue = false
+        qm.queue = [ep("A"), ep("X"), ep("C")]
+        var loadedId: String?
+        qm.loadPodcastFn = { _, id, _, _ in loadedId = id }
+        qm.skipToNext(currentId: "X")
+        XCTAssertEqual(loadedId, "A")
+        XCTAssertEqual(qm.queue.map(\.id), ["A", "C"])
+    }
+
+    private final class NoopBackstop: SleepTimerBackstopScheduling {
+        func schedule(after seconds: TimeInterval) {}
+        func cancel() {}
+    }
+
+    /// An engine whose loads can't start a night: the tests below drive real loads (to a file URL
+    /// that doesn't exist), and CLAUDE.md requires session-starting tests to pin the night length.
+    /// No real timer backstop notification either.
+    private func quietEngine() -> AudioEngine {
+        let engine = AudioEngine()
+        engine.nightLengthProvider = { 0 }
+        engine.sleepTimer.backstop = NoopBackstop()
+        return engine
+    }
+
+    /// Run with Auto-Play set, then put the user's setting back (it persists to UserDefaults).
+    private func withAutoPlay(_ on: Bool, _ engine: AudioEngine, _ body: () -> Void) {
+        let saved = engine.queueManager.autoPlay
+        engine.queueManager.autoPlay = on
+        defer { engine.queueManager.autoPlay = saved; engine.stopAll() }
+        body()
+    }
+
+    func testRetryPutsTheFailedEpisodeBackAndClearsTheFailure() {
+        let engine = quietEngine()
+        withAutoPlay(false, engine) {
+            engine.queueManager.queue = [ep("1"), ep("2")]
+            engine.queueManager.playEpisode(ep("1"))
+            XCTAssertEqual(engine.loadedEpisode?.id, "1")
+            XCTAssertTrue(engine.episodeLoading)
+            // What a failure does: the player reports it, then the queue advances without it.
+            engine.handlePodcastFailure(episodeId: "1")
+            engine.queueManager.advanceQueue(finishedEpId: "1")
+            XCTAssertTrue(engine.podcastFailed)
+            XCTAssertFalse(engine.episodeLoading)
+            XCTAssertEqual(engine.playbackNote, NowPlayingState.failedCopy)
+            XCTAssertEqual(engine.loadedEpisode?.id, "1", "the player is still on it")
+            XCTAssertEqual(engine.queueManager.queue.map(\.id), ["2"])
+            XCTAssertFalse(engine.finishedEpisodes.contains("1"), "a failure is not a listen")
+
+            engine.retryLoadedEpisode()
+            XCTAssertFalse(engine.podcastFailed, "Try again must leave the failed state")
+            XCTAssertNil(engine.playbackNote)
+            XCTAssertEqual(engine.queueManager.queue.map(\.id), ["1", "2"])
+            XCTAssertEqual(engine.loadedEpisode?.id, "1")
+        }
+    }
+
+    // A failure arrives through the main queue; one from an item that's since been replaced must
+    // not paint "Try again" over the episode now loading.
+    func testAFailureFromAReplacedEpisodeIsIgnored() {
+        let engine = quietEngine()
+        withAutoPlay(false, engine) {
+            engine.queueManager.queue = [ep("1"), ep("2")]
+            engine.queueManager.playEpisode(ep("2"))
+            engine.handlePodcastFailure(episodeId: "1")
+            XCTAssertFalse(engine.podcastFailed)
+        }
+    }
+
+    func testAFailureWithAutoPlayOnMovesStraightOn() {
+        let engine = quietEngine()
+        withAutoPlay(true, engine) {
+            engine.queueManager.shuffleQueue = false
+            engine.queueManager.queue = [ep("1"), ep("2"), ep("3")]
+            engine.queueManager.playEpisode(ep("1"))
+            engine.handlePodcastFailure(episodeId: "1")
+            engine.queueManager.advanceQueue(finishedEpId: "1")
+            XCTAssertEqual(engine.loadedEpisode?.id, "2")
+            XCTAssertFalse(engine.podcastFailed, "the next load clears it")
+            XCTAssertEqual(engine.queueManager.queue.map(\.id), ["2", "3"])
+            XCTAssertFalse(engine.finishedEpisodes.contains("1"))
+        }
+    }
+
+    // Next from a failed episode (Auto-Play off) plays the real next, not the one after it.
+    func testNextAfterAFailurePlaysTheCuedHead() {
+        let engine = quietEngine()
+        withAutoPlay(false, engine) {
+            engine.queueManager.shuffleQueue = false
+            engine.queueManager.queue = [ep("1"), ep("2"), ep("3")]
+            engine.queueManager.playEpisode(ep("1"))
+            engine.handlePodcastFailure(episodeId: "1")
+            engine.queueManager.advanceQueue(finishedEpId: "1")
+            engine.skipToNextEpisode()
+            XCTAssertEqual(engine.loadedEpisode?.id, "2")
+            XCTAssertEqual(engine.queueManager.queue.map(\.id), ["2", "3"])
+        }
+    }
+
+    func testNextIsIgnoredWhileAnEpisodeLoads() {
+        let engine = quietEngine()
+        withAutoPlay(false, engine) {
+            engine.queueManager.shuffleQueue = false
+            engine.queueManager.queue = [ep("1"), ep("2")]
+            engine.queueManager.playEpisode(ep("1"))
+            XCTAssertTrue(engine.episodeLoading)
+            engine.skipToNextEpisode()   // a double tap: the first already started this load
+            XCTAssertEqual(engine.queueManager.queue.map(\.id), ["1", "2"], "nothing dropped unheard")
+        }
+    }
+
+    // Resume Last Night after its episode left the queue: the cold-launch podTitle is the queue
+    // head's, and the player showed that name over the resumed audio.
+    func testLoadingAnUnqueuedEpisodeDoesNotBorrowTheHeadsTitle() {
+        let engine = quietEngine()
+        defer { engine.stopAll() }
+        engine.queueManager.queue = [ep("A")]
+        engine.podTitle = "Ep A"
+        engine.loadPodcast("file:///nonexistent/sleepulator-test-X.mp3", id: "X",
+                           fallbackTitle: "Last night\u{2019}s episode")
+        XCTAssertEqual(engine.loadedEpisode?.id, "X")
+        XCTAssertEqual(engine.loadedEpisode?.title, "Last night\u{2019}s episode")
+        XCTAssertEqual(engine.podTitle, "Last night\u{2019}s episode", "the lock screen agrees")
+    }
+
+    // Only a user's pick lifts the ambient tail. An automatic load (auto-advance) during the tail
+    // must leave the night's fade and timer alone.
+    func testOnlyAUserPickCancelsTheAmbientTail() {
+        let engine = quietEngine()
+        defer { engine.stopAll() }
+        func intoTail() {
+            engine.sleepTimer.ambientTailFn = { 300 }
+            engine.sleepTimer.tailEligibleFn = { true }
+            engine.sleepTimer.startEndOfEpisode(remaining: 60)
+            engine.sleepTimer.externalTick(remaining: 0.3)
+            XCTAssertTrue(engine.sleepTimer.inTail)
+        }
+        intoTail()
+        engine.queueManager.queue = [ep("2"), ep("3")]
+        engine.queueManager.loadPodcastFn?(ep("2").audioUrl, "2", "Ep 2", false)   // auto-advance
+        XCTAssertTrue(engine.sleepTimer.inTail, "an automatic load keeps the night")
+        engine.queueManager.skipToNext(currentId: "2")                              // a tap on Next
+        XCTAssertFalse(engine.sleepTimer.inTail, "picking an episode means awake")
+        XCTAssertEqual(engine.sleepTimer.timerRemaining, 0)
+    }
+
+    // Try again on Resume Last Night's stand-in reloads it without writing a title-only
+    // placeholder into the queue.
+    func testRetryingAStandInDoesNotQueueIt() {
+        let engine = quietEngine()
+        defer { engine.stopAll() }
+        engine.queueManager.queue = [ep("A")]
+        engine.loadPodcast("file:///nonexistent/sleepulator-test-X.mp3", id: "X", fallbackTitle: "Last night")
+        engine.handlePodcastFailure(episodeId: "X")
+        engine.retryLoadedEpisode()
+        XCTAssertEqual(engine.queueManager.queue.map(\.id), ["A"])
+        XCTAssertEqual(engine.loadedEpisode?.id, "X")
+        XCTAssertFalse(engine.podcastFailed)
+    }
+
+    // The end-of-episode timer ticks off the playback clock; started on a paused episode it would
+    // replace the night's timer with one that never runs out.
+    func testStopAfterThisEpisodeNeedsTheEpisodePlaying() {
+        let engine = quietEngine()
+        defer { engine.stopAll() }
+        engine.sleepTimer.startSleepTimer(minutes: 45)
+        engine.startEndOfEpisodeTimer()   // nothing playing
+        XCTAssertFalse(engine.sleepTimer.isEndOfEpisode)
+        XCTAssertGreaterThan(engine.sleepTimer.timerRemaining, 0, "the night's timer stands")
+        engine.sleepTimer.cancelTimer()
+    }
+}
+
+/// The veil's timeout over a presented sheet: wait (mid-task), except an idle Now Playing sheet,
+/// the brightest surface at night, which closes so the veil can drop.
+final class VeilTimeoutNowPlayingTests: XCTestCase {
+    func testAnIdleNowPlayingSheetClosesSoTheVeilCanDrop() {
+        XCTAssertEqual(SessionGuards.veilTimeout(mayDim: true, presenting: true, nowPlayingUp: true), .closeNowPlaying)
+        XCTAssertEqual(SessionGuards.veilTimeout(mayDim: true, presenting: true, nowPlayingUp: false), .wait,
+                       "any other sheet or dialog keeps the veil waiting")
+        XCTAssertEqual(SessionGuards.veilTimeout(mayDim: true, presenting: true, nowPlayingUp: true,
+                                                 assistiveTech: true), .wait,
+                       "VoiceOver / Switch Control reach the sheet without touches")
+        XCTAssertEqual(SessionGuards.veilTimeout(mayDim: false, presenting: true, nowPlayingUp: true), .stand)
+        XCTAssertEqual(SessionGuards.veilTimeout(mayDim: true, presenting: false, nowPlayingUp: false), .drop)
     }
 }
 

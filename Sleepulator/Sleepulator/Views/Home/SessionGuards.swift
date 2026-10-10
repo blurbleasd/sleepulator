@@ -56,15 +56,22 @@ enum SessionGuards {
         return firstSessionStarted ? .transport : .firstBed
     }
 
-    enum VeilTimeout: Equatable { case drop, wait, stand }
+    enum VeilTimeout: Equatable { case drop, wait, stand, closeNowPlaying }
 
     /// What the veil's countdown does when it runs out (~60 s after the last touch). The veil is
     /// part of the root view, so a sheet, dialog or full-screen cover sits above it: dropping it
     /// then left that presentation lit on a black screen (a red "Switch to Focus?" at 2am). It
     /// waits another round instead, which also spares the untouched breathing exercise.
-    static func veilTimeout(mayDim: Bool, presenting: Bool) -> VeilTimeout {
+    ///
+    /// The exception is an idle Now Playing sheet: its artwork and transport are the brightest
+    /// surface on the night screen, and with no touch for the veil's minute nobody is using it, so
+    /// it closes and the veil drops (`.closeNowPlaying`). Not under VoiceOver or Switch Control,
+    /// which reach the sheet without the touches that restart the countdown.
+    static func veilTimeout(mayDim: Bool, presenting: Bool, nowPlayingUp: Bool = false,
+                            assistiveTech: Bool = false) -> VeilTimeout {
         guard mayDim else { return .stand }
-        return presenting ? .wait : .drop
+        guard presenting else { return .drop }
+        return nowPlayingUp && !assistiveTech ? .closeNowPlaying : .wait
     }
 
     /// Whether the status bar and home indicator go: under the veil, and under the Sleep

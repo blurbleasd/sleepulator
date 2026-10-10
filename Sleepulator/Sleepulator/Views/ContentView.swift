@@ -42,7 +42,9 @@ struct ContentView: View {
     // else (Podcasts, Settings, Focus), and the mixer's Podcast row is unchanged.
     // Keyed on a loaded episode, not on playing: pausing from the orb must not fade the bar out
     // (and move Home's controls) under the user's thumb.
-    private var miniPlayerShownOnHome: Bool { audio.focusMode || audio.hasLoadedEpisode }
+    // `loadedEpisode` (published, and what the bar itself shows), not `hasLoadedEpisode` (whether
+    // the AVPlayer holds an item, false for a moment during a load or a pipeline rebuild).
+    private var miniPlayerShownOnHome: Bool { audio.focusMode || audio.loadedEpisode != nil }
     private var miniPlayerHidden: Bool {
         homeScreensaver || (selectedTab == 0 && !miniPlayerShownOnHome)
     }
@@ -73,7 +75,12 @@ struct ContentView: View {
                                               playing: audio.isAnythingPlaying)
         guard armed else { return }
         let work = DispatchWorkItem {
-            switch SessionGuards.veilTimeout(mayDim: self.mayDim, presenting: self.windowActivity.isPresenting) {
+            let assistive = UIAccessibility.isVoiceOverRunning || UIAccessibility.isSwitchControlRunning
+            switch SessionGuards.veilTimeout(mayDim: self.mayDim, presenting: self.windowActivity.isPresenting,
+                                             nowPlayingUp: self.showNowPlaying, assistiveTech: assistive) {
+            case .closeNowPlaying:
+                self.showNowPlaying = false
+                withAnimation(.easeInOut(duration: 0.8)) { self.nightDimmed = true }
             case .drop: withAnimation(.easeInOut(duration: 0.8)) { self.nightDimmed = true }
             case .wait: self.scheduleDim()   // a sheet or dialog is up: it would stay lit on black
             case .stand: break
@@ -148,7 +155,8 @@ struct ContentView: View {
             // inset — that docks it ON the UIKit tab bar). Tabs reserve room for it themselves from
             // its measured top edge (`miniPlayerTop`, MiniPlayerClearance).
             MiniPlayerView(audio: audio, progress: audio.playbackProgress, queue: audio.queueManager,
-                           selectedTab: $selectedTab, showNowPlaying: $showNowPlaying)
+                           selectedTab: $selectedTab, showNowPlaying: $showNowPlaying,
+                           onSheetInteraction: { if !nightDimmed { scheduleDim() } })
                 .simultaneousGesture(TapGesture().onEnded { miniPlayerTouches &+= 1 })
                 .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).minY } action: { top in
                     miniPlayerTop = top
