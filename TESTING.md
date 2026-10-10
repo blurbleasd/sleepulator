@@ -354,6 +354,14 @@ this section is where you do it. Do it in a dark room at your real bedtime brigh
    - ✅ Tap the veil once: the ember shows the time left with no controls, then the dark returns.
    - Check the first session on a fresh install: the first-run card stays up about 15 s before
      the fade. It comes back with the controls on a tap, and it's never held up all night.
+17. **First run teaches one thing at a time** (added 2026-10-10, simulator-checked only). On a
+   fresh install:
+   - ✅ The card's title and line are both about the orb and its ring, on both the full and the
+     brief card.
+   - Drag the ring first (that retires the card), then Play. ✅ Both noise and binaural start
+     (e.g. Brown + Deep), not a bare noise.
+   - ✅ The first Build mix shows one line under "Your mix" about turning on several sounds. It
+     doesn't show on the next open.
 
 ---
 

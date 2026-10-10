@@ -23,6 +23,8 @@ struct HomeView: View {
     @AppStorage("hasCompletedFirstRun") private var hasCompletedFirstRun = false
     /// The one-time "the sleep timer moved" note for people who used the app before the night ring.
     @AppStorage("hasSeenNightRingTip") private var hasSeenNightRingTip = false
+    /// Set by the first session the orb starts; until then, the orb starts the layered first bed.
+    @AppStorage("hasStartedFirstSession") private var hasStartedFirstSession = false
     @State private var showTimerActionSheet = false
     @State private var isPlayPressed = false
     @State private var showBreathing = false
@@ -262,17 +264,19 @@ struct HomeView: View {
     }
 
     /// How beginning playback from rest would go: resume the last mix, the first-run layered bed,
-    /// or the transport's own resume (which always lands on at least the noise bed).
+    /// or the transport's own resume (which always lands on at least the noise bed). Decided now,
+    /// run later (the breathing on-ramp holds it), and only then counted as the first session.
     private func resolveBegin() -> () -> Void {
-        if let mix = mixStore.lastMix,
-           (mix.noiseOn || mix.binauralOn || mix.podcastUrl != nil) {
-            return { audio.resumeMix(mix) }
-        } else if !hasCompletedFirstRun {
-            // First-ever play with nothing to resume: start a layered bed (noise + binaural)
-            // instead of a single bare noise, so the first tap shows what the app actually does.
-            return { audio.startDefaultMix() }
+        let mix = mixStore.lastMix.flatMap { $0.noiseOn || $0.binauralOn || $0.podcastUrl != nil ? $0 : nil }
+        let begin = SessionGuards.begin(hasResumableMix: mix != nil, firstSessionStarted: hasStartedFirstSession)
+        return {
+            hasStartedFirstSession = true
+            switch begin {
+            case .resume: if let mix { audio.resumeMix(mix) }
+            case .firstBed: audio.startDefaultMix()
+            case .transport: audio.toggleMasterTransport()
+            }
         }
-        return { audio.toggleMasterTransport() }
     }
 
     private func heroTap() {

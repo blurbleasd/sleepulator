@@ -1453,6 +1453,15 @@ final class SessionGuardsTests: XCTestCase {
         XCTAssertFalse(SessionGuards.mayNightDim(autoNightDim: true, focusMode: false, timerActive: false, playing: true))
     }
 
+    func testTheFirstSessionIsTheLayeredBedHoweverTheTipWasDismissed() {
+        // The first bed has its own flag: touching the ring (which retires the first-run tip)
+        // used to make the first play a bare Brown.
+        XCTAssertTrue(SessionGuards.begin(hasResumableMix: false, firstSessionStarted: false) == .firstBed)
+        XCTAssertTrue(SessionGuards.begin(hasResumableMix: false, firstSessionStarted: true) == .transport)
+        XCTAssertTrue(SessionGuards.begin(hasResumableMix: true, firstSessionStarted: false) == .resume)
+        XCTAssertTrue(SessionGuards.begin(hasResumableMix: true, firstSessionStarted: true) == .resume)
+    }
+
     func testVeilWaitsOutAPresentationInsteadOfDroppingUnderIt() {
         // The veil can't cover a sheet or dialog: dropping it then left a lit dialog on black.
         XCTAssertTrue(SessionGuards.veilTimeout(mayDim: true, presenting: false) == .drop)
@@ -1890,6 +1899,16 @@ final class CoachmarkContentTests: XCTestCase {
     func testUpgradersSeeTheNightRingNoteOnce() {
         XCTAssertEqual(CoachmarkContent.current(focusMode: false, hasCompletedFirstRun: true, hasSeenNightRingTip: false), .nightRing)
         XCTAssertFalse(CoachmarkContent.nightRing.pointsDown)       // it's about the ring above, not Build mix
+    }
+
+    func testTheFirstRunCardSaysOneThingAtEitherSize() {
+        // The brief card (most phones) shows the title over `briefMessage`: both are about the
+        // orb and its ring. Layering is the mixer's own first-open hint now.
+        let card = CoachmarkContent.firstRun
+        XCTAssertTrue(card.title.contains("orb"))
+        XCTAssertTrue(card.briefMessage.contains("ring"))
+        XCTAssertFalse(card.title.localizedCaseInsensitiveContains("layer"))
+        XCTAssertTrue(card.message.contains("Build mix"), "the full card still points at Build mix")
     }
 
     func testNoTipsInFocus() {

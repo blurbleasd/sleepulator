@@ -45,6 +45,17 @@ enum SessionGuards {
         autoNightDim && !focusMode && timerActive && playing
     }
 
+    enum Begin: Equatable { case resume, firstBed, transport }
+
+    /// What the orb starts from rest: the last mix if there is one, else (only before any session
+    /// has started) the layered first bed, noise + binaural, so the first tap shows what the app
+    /// does; else the transport's own resume. Its own flag, not the first-run tip's: dismissing
+    /// the tip (touching the ring counts) used to cost the first bed, and play started bare Brown.
+    static func begin(hasResumableMix: Bool, firstSessionStarted: Bool) -> Begin {
+        if hasResumableMix { return .resume }
+        return firstSessionStarted ? .transport : .firstBed
+    }
+
     enum VeilTimeout: Equatable { case drop, wait, stand }
 
     /// What the veil's countdown does when it runs out (~60 s after the last touch). The veil is
