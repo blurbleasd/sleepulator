@@ -191,7 +191,9 @@ struct TimerSelectionSheet: View {
                     }) {
                         Label("Stop at end of episode", systemImage: "text.append")
                             .font(.subheadline.weight(.semibold))
-                            .foregroundColor(pal.accent)
+                            // Dim, not full accent: amber text read as bright as the cream commit
+                            // above it. The accent hairline still marks it as a button.
+                            .foregroundColor(pal.dim)
                             .padding(.horizontal, UI.xl)
                             .padding(.vertical, UI.md)
                             .frame(minHeight: 44)
