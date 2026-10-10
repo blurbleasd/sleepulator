@@ -111,9 +111,18 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   with the `LaunchBackground` color; the generated launch screen is off
   (`INFOPLIST_KEY_UILaunchScreen_Generation = NO`; it followed the system appearance and flashed
   white on every cold launch). ContentView also forces `.dark`.
-- **Home's confirms can't present over a sheet.** A `confirmationDialog` raised while the
-  Build-mix sheet is up silently does nothing, and the stuck request holds the screensaver off.
-  Close the sheet, then ask (`HomeView.requestMode`).
+- **Home's confirms can't present over a sheet.** A confirm (the mode switch's `.alert`) raised
+  while the Build-mix sheet is up silently does nothing, and the stuck request holds the
+  screensaver off. Close the sheet, then ask (`HomeView.requestMode`). Night-time confirms are
+  `.alert`s with no `.destructive` role. iOS 26 draws a `confirmationDialog` as a popover with no
+  cancel button, which left a lone red button on a dark screen.
+- **The night veil runs from the last touch.** ContentView drops it 60 s after the last touch
+  anywhere in the window (`WindowActivity`: a recognizer that observes every touch, sheets
+  included, and claims none). If a sheet, dialog or full-screen cover is up when the countdown
+  ends, the veil waits another round (`SessionGuards.veilTimeout`). The veil is part of the root
+  view, so it can't cover them. The status bar and home indicator hide under the veil and the
+  Sleep screensaver (`SessionGuards.hidesSystemOverlays`); Focus keeps its clock. The pending
+  countdown lives on `WindowActivity`, not in `@State`: it changes on every touch.
 - **One name per sound.** Name sounds through `SoundNames` (binaurals are "Deep", "Drift", …,
   never "Delta" / "Theta").
 

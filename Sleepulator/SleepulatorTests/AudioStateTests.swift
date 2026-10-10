@@ -1444,6 +1444,22 @@ final class SessionGuardsTests: XCTestCase {
         XCTAssertFalse(SessionGuards.mayNightDim(autoNightDim: true, focusMode: false, timerActive: false, playing: true))
     }
 
+    func testVeilWaitsOutAPresentationInsteadOfDroppingUnderIt() {
+        // The veil can't cover a sheet or dialog: dropping it then left a lit dialog on black.
+        XCTAssertTrue(SessionGuards.veilTimeout(mayDim: true, presenting: false) == .drop)
+        XCTAssertTrue(SessionGuards.veilTimeout(mayDim: true, presenting: true) == .wait)
+        XCTAssertTrue(SessionGuards.veilTimeout(mayDim: false, presenting: false) == .stand)
+        XCTAssertTrue(SessionGuards.veilTimeout(mayDim: false, presenting: true) == .stand)
+    }
+
+    func testSystemOverlaysHideOnlyInTheDark() {
+        // The veil hides them in any mode it can show in; the screensaver only in Sleep.
+        XCTAssertTrue(SessionGuards.hidesSystemOverlays(nightDimmed: true, screensaver: false, focusMode: false))
+        XCTAssertTrue(SessionGuards.hidesSystemOverlays(nightDimmed: false, screensaver: true, focusMode: false))
+        XCTAssertFalse(SessionGuards.hidesSystemOverlays(nightDimmed: false, screensaver: true, focusMode: true))
+        XCTAssertFalse(SessionGuards.hidesSystemOverlays(nightDimmed: false, screensaver: false, focusMode: false))
+    }
+
     func testTimerCommitStartsTheMixWhenNothingPlays() {
         XCTAssertEqual(SessionGuards.timerCommitTitle(playing: false, timerActive: false), "Play & start timer")
         XCTAssertEqual(SessionGuards.timerCommitTitle(playing: false, timerActive: true), "Play & start timer")

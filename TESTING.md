@@ -335,6 +335,16 @@ this section is where you do it. Do it in a dark room at your real bedtime brigh
    (first run already done). ✅ Sleep Home shows the note once, below the night line, never over
    the ring or the line; "Got it", dragging the ring, or opening timer options retires it for good.
    A fresh install sees only the first-run card, never this note.
+15. **A dark night, start to finish** (added 2026-10-09, simulator-checked only). Sleep, a timer
+   set, playing:
+   - The Sleep screensaver and the veil show no clock, battery or home indicator. Focus's
+     screensaver still shows the clock.
+   - Adjust the mix for over a minute in small touches. ✅ The veil never drops while you're
+     touching. ✅ It drops a minute after the last touch.
+   - Leave the mixer (or the timer sheet) open and untouched for 2+ min. ✅ The veil doesn't
+     drop under it. ✅ Close it; the veil drops a minute later.
+   - Tap Focus mid-session. ✅ A centred alert shows both "Switch to Focus" and "Stay in Sleep",
+     and nothing is red.
 
 ---
 

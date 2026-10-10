@@ -434,14 +434,15 @@ struct HomeView: View {
                 ModeSwitcher(focusMode: audio.focusMode, pal: pal,
                              quiet: !audio.focusMode && (sessionActive || audio.sleepTimer.timerRemaining > 0),
                              onSelect: requestMode)
-                    // Attached here, not on the root, so iOS 26's popover-style dialog points at
-                    // the switch that raised it.
-                    .confirmationDialog(modeSwitchTitle,
-                                        isPresented: Binding(get: { modeSwitchRequest != nil },
-                                                             set: { if !$0 { modeSwitchRequest = nil } }),
-                                        titleVisibility: .visible,
-                                        presenting: modeSwitchRequest) { request in
-                        Button(request.warning.confirm, role: .destructive) { applyMode(request.toFocus) }
+                    // An alert, not a confirmation dialog: iOS 26 draws that as a popover and drops
+                    // its cancel button, which left one red "Switch to Focus" on a dark screen. An
+                    // alert always shows the way back ("Stay in Sleep"), and nothing here is red:
+                    // the switch is reversible, and red is the loudest light in the room at 2am.
+                    .alert(modeSwitchTitle,
+                           isPresented: Binding(get: { modeSwitchRequest != nil },
+                                                set: { if !$0 { modeSwitchRequest = nil } }),
+                           presenting: modeSwitchRequest) { request in
+                        Button(request.warning.confirm) { applyMode(request.toFocus) }
                         Button(request.warning.cancel, role: .cancel) {}
                     } message: { request in
                         Text(request.warning.message)

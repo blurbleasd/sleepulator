@@ -7,7 +7,6 @@ struct ContentView: View {
     @State private var selectedTab = 0
     @AppStorage("autoNightDim") private var autoNightDim = true
     @State private var nightDimmed = false
-    @State private var dimWorkItem: DispatchWorkItem?
     @State private var veilCaptionShown = true
     @State private var veilCaptionHide: DispatchWorkItem?
     /// Tracks the timer's active/idle state so the dim side-effect fires only on the transition,
@@ -22,6 +21,8 @@ struct ContentView: View {
     @State private var miniPlayerTouches = 0
     /// The mini-player bar's top edge (global Y), measured; each tab reserves room below it.
     @State private var miniPlayerTop: CGFloat?
+    /// Every touch anywhere in the window, and whether something is presented: the veil's inputs.
+    @State private var windowActivity = WindowActivity()
 
     // Mode-aware: the tab bar tint (and everything it accents) follows Sleep / Focus. It stayed
     // Sleep amber in Focus while Home turned cyan.
@@ -46,10 +47,15 @@ struct ContentView: View {
         homeScreensaver || (selectedTab == 0 && !miniPlayerShownOnHome)
     }
 
-    // App-wide night-dim: ~60s into a sleep session, drop a black veil over the whole app
-    // (tabs + mini-player) so a bedside screen goes dark. Tap to wake; re-arms after each
-    // wake and on tab changes (navigating counts as interaction). When the timer ends we
-    // only cancel the pending dim — never force the screen bright mid-night.
+    private var hidesSystemOverlays: Bool {
+        SessionGuards.hidesSystemOverlays(nightDimmed: nightDimmed, screensaver: homeScreensaver,
+                                          focusMode: audio.focusMode)
+    }
+
+    // App-wide night-dim: ~60s after the last touch in a sleep session, drop a black veil over
+    // the whole app (tabs + mini-player) so a bedside screen goes dark. Tap to wake. Any touch
+    // anywhere (Home, the mixer, any sheet) re-arms it (`WindowActivity`), as do tab changes.
+    // When the timer ends we only cancel the pending dim, never force the screen bright mid-night.
     // Only over a session that's actually playing (SessionGuards.mayNightDim): a timer counting
     // down over paused audio used to blank the screen on a silent room.
     private var mayDim: Bool {
@@ -61,17 +67,19 @@ struct ContentView: View {
     /// reading the property inside `onReceive` still sees the old value (0 on a fresh start) and
     /// the veil never armed. The work item re-reads the live state when it fires.
     private func scheduleDim(timerActiveNow: Bool? = nil) {
-        dimWorkItem?.cancel()
+        windowActivity.pendingDim?.cancel()
         let armed = SessionGuards.mayNightDim(autoNightDim: autoNightDim, focusMode: audio.focusMode,
                                               timerActive: timerActiveNow ?? timerActive,
                                               playing: audio.isAnythingPlaying)
         guard armed else { return }
         let work = DispatchWorkItem {
-            if self.mayDim {
-                withAnimation(.easeInOut(duration: 0.8)) { self.nightDimmed = true }
+            switch SessionGuards.veilTimeout(mayDim: self.mayDim, presenting: self.windowActivity.isPresenting) {
+            case .drop: withAnimation(.easeInOut(duration: 0.8)) { self.nightDimmed = true }
+            case .wait: self.scheduleDim()   // a sheet or dialog is up: it would stay lit on black
+            case .stand: break
             }
         }
-        dimWorkItem = work
+        windowActivity.pendingDim = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 60, execute: work)
     }
 
@@ -83,8 +91,8 @@ struct ContentView: View {
     }
 
     private func cancelDim() {
-        dimWorkItem?.cancel()
-        dimWorkItem = nil
+        windowActivity.pendingDim?.cancel()
+        windowActivity.pendingDim = nil
     }
 
     // Show the veil's "Tap to wake" hint briefly each time the veil engages, then fade it out
@@ -173,6 +181,15 @@ struct ContentView: View {
         }
         // Force dark mode for bedtime aesthetic
         .preferredColorScheme(.dark)
+        // No lit clock, battery or home indicator over the veil or the Sleep screensaver.
+        .statusBarHidden(hidesSystemOverlays)
+        .persistentSystemOverlays(hidesSystemOverlays ? .hidden : .automatic)
+        .background(WindowActivityProbe(activity: windowActivity))
+        .onAppear {
+            // Any touch is interaction: restart the countdown. On the veil itself, its own tap
+            // wakes (and re-arms) instead.
+            windowActivity.onTouch = { if !nightDimmed { scheduleDim() } }
+        }
         // Drive dim scheduling off the timer's published countdown, but only act on the
         // active↔idle transition (sleepTimer is no longer forwarded through `audio`, so the body
         // won't re-render each tick — and we must NOT reschedule the dim every second).
