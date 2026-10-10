@@ -29,8 +29,11 @@ Suites in `SleepulatorTests/` (six files, many suites):
   `StorageManagerTests` (backup recovery), `NetRetryTests`, `CacheEvictionTests`, the
   sleep-timer suites (backstop, cancel, end-of-episode), layering, mode reconciliation, and the
   Podcasts-tab rules (`PodcastTextTests`, `ShowNotesPreviewTests`, `ShowNotesEdgeTests`,
-  `TonightShelfTests`, `QueueMoveToHeadTests`), and the player rules (`NowPlayingStateTests`,
-  `NightLineCopyTests`, `PlayerQueueActionTests`).
+  `TonightShelfTests`, `QueueMoveToHeadTests`), the player rules (`NowPlayingStateTests`,
+  `NightLineCopyTests`, `PlayerQueueActionTests`, `PodcastFailureStreakTests`), and three suites
+  on a real `AVPlayer` in the simulator: `PodcastPlayerRebuildTests` (dead-pipeline rebuilds),
+  `PodcastLoadHoldTests` (a pause, stop or call during a load sticks) and `PodcastItemEndTests`
+  (an episode's end is filed under its own item).
 - `PersistenceTests.swift` — legacy `SavedMix` → `SoundPreset` migration, library seeding,
   position-map coercion, `MixStore` reloads.
 - `BackupRoundTripTests.swift` — settings Export → Import round-trip and its key allowlist.
@@ -413,7 +416,8 @@ changes are the ones a simulator can't settle.
    arrow; the mini-player says the same. No raw system error, no spinner over the previous
    episode's audio, and lock-screen Play doesn't resume the previous episode under this one's
    name. Back online → Try again plays it. Play next plays Up Next's first row even with Auto-Play
-   off. With Auto-Play on, a failure moves straight on. The failed episode is never marked played.
+   off. With Auto-Play on, a failure moves straight on and the failed episode stays queued, right
+   behind the one now playing. The failed episode is never marked played (and see §3P.5).
 5. **A live stream keeps a clock.** Play a live or 24/7 stream from a feed. ✅ "Live · 12:34"
    counts up where the scrubber was (not a bar stuck at 0:00, not a spinner); back/forward 15
    work; no "Stop after this episode" chip; the night line reads "Timer ends in …" or "Plays all
@@ -429,6 +433,48 @@ changes are the ones a simulator can't settle.
    screensaver hides it, and at the largest text size. (The fix was measured on an iPhone 17 Pro
    only.)
 
+### P. Podcast engine: loads that hold, late ends, offline Auto-Play (added 2026-10-10, simulator-checked only)
+Three fixes in `PodcastPlayer` / `AudioEngine` / `PodcastQueueManager`. The unit suites drive a
+real AVPlayer in the simulator, but the lock screen, AirPods, calls, routes and a real network
+dropping out need the phone. Use episodes that are NOT downloaded for 1–4 (a stream's load takes
+longest, so the window is widest). Export logs after each.
+
+1. **A pause during an auto-advance sticks.** Auto-Play on, two streamed episodes queued. Scrub
+   the first to its last ~10 s, lock the phone. The moment it ends, pause from the lock screen
+   (or squeeze an AirPod). ✅ The next episode's title shows on the lock screen, paused, and stays
+   paused: nothing starts a second later. Play → it starts from its beginning. Log:
+   `podcast load landed after a pause — holding it paused`.
+2. **The timer's stop during a load stays stopped.** Start a short sleep timer with only the
+   podcast playing, and scrub the episode so it ends a few seconds before the timer does.
+   ✅ When the timer stops everything, nothing restarts: the next episode is loaded but paused,
+   and no fresh timer appears on the orb. (A hard one to time; the unit test covers it. Worth one attempt.)
+3. **A call or Siri during a load.** Tap a streamed episode in the Podcasts tab and immediately
+   hold the side button for Siri (or have someone call). ✅ The episode doesn't start under Siri
+   or the call. When it ends, the episode starts (if iOS says to resume). Pull the AirPods out
+   within a second of tapping an episode. ✅ Nothing plays from the speaker.
+4. **Play on a paused first load.** Cold launch, tap Resume Last Night (or an episode), pause
+   from the lock screen before it starts, then tap Play in the mini-player. ✅ That same episode
+   plays, not the queue's first.
+5. **Offline doesn't drain the queue.** Queue five streamed episodes, Auto-Play on, airplane
+   mode, play the first. ✅ Within a few seconds Auto-Play stops after three: the player reads
+   "Couldn't play this episode" with Try again, the sounds carry on, and all five are still
+   queued in the order you queued them (the third, failed, is the one on screen; Up Next lists
+   the other four). None marked played, no download deleted. Log:
+   `auto-play stopped: 3 failed episodes in a row, all kept queued`. Back online → Try again
+   plays. Repeat with one DOWNLOADED episode third in the queue. ✅ It plays after the two streams
+   fail, and the failed ones wait right behind it.
+6. **A stream lost mid-episode stays queued.** Play a streamed episode for a few minutes, then
+   airplane mode. ✅ After about a minute, "Podcast stream lost", and the next one is tried
+   (downloaded plays, streams fail as in 5). The lost episode is still in Up Next, and tapping it
+   continues near where the stream was lost (unless Auto-Play reached it again overnight, which
+   starts it over, as any auto-advance does).
+7. **Next right at an episode's end.** Settings → Delete Played Episodes ON, three downloaded
+   episodes queued. Scrub the first to its last 2 s, tap Next just as it ends (try a few times).
+   ✅ The second plays from where you left it (or its start), stays unplayed, and keeps its
+   download (its row still shows the Downloaded tick); the third is still queued. If the end won the race, the
+   log shows `ignoring the end of a podcast item that's since been replaced`, and nothing else
+   moved.
+
 ---
 
 ## Quick release checklist
@@ -442,6 +488,7 @@ changes are the ones a simulator can't settle.
 - [ ] All-night soak (§3E)
 - [ ] Ambient scenes: freeze/resume + phase clock (§3H), after any scene-engine change
 - [ ] Depth scenes: freeze-in-place, reactive settle, A/B vs flat, F3 power log (§3L), after depth-scene changes
+- [ ] Podcast engine: holds, late ends, offline Auto-Play (§3P), after `PodcastPlayer` / queue changes
 
 ## Device-pass log
 
