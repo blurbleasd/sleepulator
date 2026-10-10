@@ -21,15 +21,20 @@ xcodebuild test -project Sleepulator/Sleepulator.xcodeproj \
   -scheme Sleepulator -destination 'platform=iOS Simulator,name=iPhone 16'
 ```
 
-Suites in `SleepulatorTests/` (three files, many suites):
+Suites in `SleepulatorTests/` (six files, many suites):
 
 - `AudioMathTests.swift` — fade curve, carrier/beat math, scrub targets.
 - `AudioStateTests.swift` — engine state/policy plus `PodcastParserTests` (CDATA, durations,
   dates, caps, enclosures), `OPMLParserTests` (scheme validation, dedupe, corrupt files),
   `StorageManagerTests` (backup recovery), `NetRetryTests`, `CacheEvictionTests`, the
-  sleep-timer suites (backstop, cancel, end-of-episode), layering, and mode reconciliation.
+  sleep-timer suites (backstop, cancel, end-of-episode), layering, mode reconciliation, and the
+  Podcasts-tab rules (`PodcastTextTests`, `ShowNotesPreviewTests`, `ShowNotesEdgeTests`,
+  `TonightShelfTests`, `QueueMoveToHeadTests`).
 - `PersistenceTests.swift` — legacy `SavedMix` → `SoundPreset` migration, library seeding,
   position-map coercion, `MixStore` reloads.
+- `BackupRoundTripTests.swift` — settings Export → Import round-trip and its key allowlist.
+- `FocusDriversTests.swift` — the Pomodoro → Focus-scene look mapping.
+- `GenerativeAudioEngineTests.swift` — generative-bed rebuild after a media-services reset.
 
 These catch parsing/logic regressions cheaply; they do **not** exercise audio or iOS behavior.
 
@@ -362,21 +367,60 @@ this section is where you do it. Do it in a dark room at your real bedtime brigh
      (e.g. Brown + Deep), not a bare noise.
    - ✅ The first Build mix shows one line under "Your mix" about turning on several sounds. It
      doesn't show on the next open.
-18. **Podcasts and Settings** (added 2026-10-10, simulator-checked only).
+18. **Podcasts empty state and Settings** (added 2026-10-10, simulator-checked only). The add
+   sheet and the rest of the tab are §N's.
    - **Podcasts (no shows yet):**
-     - ✅ No search field or "Import OPML" in the toolbar.
-     - ✅ The empty state is centred, with "Find a sleep podcast".
+     - ✅ The empty state is centred on the screen, not stuck in its bottom half.
      - ✅ At the largest text size it scrolls instead of clipping.
-   - **Add sheet:**
-     - ✅ "Find a sleep podcast" opens on live "Sleep stories" results, each with an add icon.
-     - ✅ "+" opens on four starter chips.
-     - ✅ It has a Cancel button.
-     - ✅ "Import from another podcast app (OPML)" opens the file picker after the sheet closes.
    - **Settings:**
      - ✅ It opens on Sleep, then Podcasts at night, Focus, Sound, Display, Podcasts, Backup and
        Diagnostics, in sentence case.
      - ✅ The Focus steppers change the next Pomodoro phase.
      - ✅ Backup export, restore and "Export last night's log" still work.
+
+### N. Podcasts tab: Tonight shelf + hardening (added 2026-10-09, simulator-checked only)
+1. **Resume where you drifted off.** Play an episode for 20+ min, set the ring to 45, pause, kill
+   the app. Podcasts tab: ✅ "Tonight" shows that episode with the right time left and, when it's
+   longer than the ring, "Runs past your 45-min night". **Resume** starts at the spot (lock
+   screen shows the right title); **Back 5 min** starts 5 minutes earlier; either one starts the
+   45-min timer (it's a Sleep start from rest). Focus titles the shelf "Continue", no night note.
+2. **Up next.** The row under it plays the newest unplayed episode of that show. Finish the resumed
+   episode → the shelf shows only the next one; nothing to offer → no shelf at all.
+3. **Show page.** A show you're partway through says **Resume** (with the episode and time left);
+   otherwise **Play Latest**. "…" → Play All / Shuffle with a non-empty queue asks "Replace your
+   queue?" (Replace Queue / Add to End / Cancel); with an empty queue it just plays.
+4. **Show notes** read as plain paragraphs (no `<p>`/`<a href>`), opening paragraphs first, "More"
+   for the rest.
+5. **Downloads tell the truth.** Airplane mode → Episode options → Download Offline. ✅ An amber
+   cloud-warning icon (VoiceOver: "Download failed"), menu offers "Retry Download"; never the
+   Downloaded tick. Back online → retry → tick.
+6. **Adding shows.** + → search: shows you follow say "In your library"; tapping another shows a
+   spinner on that row (others disabled), then the sheet closes with a success haptic and the
+   show is first in the list with its real name and count. A bad link / a web page → plain error.
+7. **Import from another app.** + → Import Subscriptions → pick an OPML export. ✅ The sheet lists
+   the shows (palette colours in both modes; shows you follow marked and not selected); Import →
+   sheet closes, then "Shows imported · Added N shows".
+8. **Library counts stay current.** Open a show whose feed has new episodes, go back. ✅ Its row
+   count updates without a relaunch. Pull to refresh offline → "You're offline…" under the list;
+   a show whose feed fails → "Couldn't refresh <show>".
+9. **Resume is right after a podcast-only pause, and audible in the tail.** Play an episode,
+   lock, listen 10+ min, pause from the lock screen (or AirPods), reopen Podcasts. ✅ Tonight's
+   time left matches where you paused (not where you locked). With a timer in its ambient tail
+   (podcast stopped, sounds fading), tap Resume. ✅ The timer cancels and the podcast is audible
+   and keeps playing. Tap Resume / Back 5 min while that episode is already playing. ✅ No
+   dropout (it seeks in place); Back 5 min jumps 5 min from *now*. In the tail, tapping an episode
+   row or swiping Play also cancels the timer. After an end-of-episode timer stop, Resume on that
+   still-loaded episode starts it over instead of playing its last second and advancing.
+10. **Edges.** Paste a link already in your library → "already in your library". Paste a blog's
+   RSS (no audio) → "That link has no episodes to play". Search offline / gibberish → the
+   unreachable / "No shows found" notes. An OPML file with no shows → "No shows found". A show
+   page offline before it ever loaded → "You're offline" with Try Again (not a long spinner);
+   a failed refresh with saved episodes → the "Showing saved episodes" line. Search your shows
+   for nothing → "No shows match". Swipe a row both ways: white labels on the deep amber / blue.
+   Start an add, tap Cancel, open + again → the old add never lands or closes the new sheet.
+11. **Large text + VoiceOver.** At an accessibility text size the show page keeps only Resume + "…"
+   above the list; rows drop the thumbnail and wrap the title; the Tonight buttons stack.
+   VoiceOver reads each episode row as "…, Unplayed / In progress / Played".
 
 ---
 

@@ -1,113 +1,104 @@
 import SwiftUI
 
+/// Pick which shows to bring over from another app's OPML export. On the app palette (it was
+/// hard-coded black/gray/gold, so Focus got a warm amber sheet), with the system's own toolbar
+/// actions, and shows you already follow marked instead of silently skipped.
 struct OPMLSelectionView: View {
     let feeds: [OPMLFeed]
+    /// Feed links already in the library: shown as "In your library" and left out of the import.
+    var subscribedUrls: Set<String> = []
     let onImport: ([OPMLFeed]) -> Void
-    
-    @Environment(\.presentationMode) var presentationMode
+
+    @Environment(\.dismiss) private var dismiss
     @State private var selectedUrls: Set<String> = []
-    
+
+    @AppStorage("focusMode") private var focusMode = false
+    private var pal: Palette { Palette(focusMode: focusMode) }
+
+    private var importable: [OPMLFeed] { feeds.filter { !subscribedUrls.contains($0.url) } }
+    private var allSelected: Bool { !importable.isEmpty && selectedUrls.count == importable.count }
+
     var body: some View {
-        ZStack {
-            Color.black.ignoresSafeArea()
-            
-            VStack(spacing: 0) {
-                // Header
-                HStack {
-                    Button(action: { presentationMode.wrappedValue.dismiss() }) {
-                        Text("Cancel")
-                            .font(.system(.headline, design: .rounded))
-                            .foregroundColor(.gray)
+        NavigationStack {
+            List {
+                Section {
+                    ForEach(feeds, id: \.url) { feed in
+                        row(feed)
+                            .listRowBackground(pal.text.opacity(0.05))
                     }
-                    Spacer()
-                    Text("OPML Import")
-                        .font(.system(.title3, design: .rounded).bold())
-                        .foregroundColor(.white)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.5)   // shrink before shoving "Import" off the row
-                    Spacer()
-                    Button(action: {
-                        let selected = feeds.filter { selectedUrls.contains($0.url) }
-                        onImport(selected)
-                        presentationMode.wrappedValue.dismiss()
-                    }) {
-                        Text("Import")
-                            .font(.system(.headline, design: .rounded))
-                            .foregroundColor(selectedUrls.isEmpty ? .gray : Color(red: 0.9, green: 0.7, blue: 0.4))
+                } header: {
+                    HStack {
+                        Text("\(selectedUrls.count) of \(PodcastText.showCount(importable.count)) selected")
+                            .foregroundColor(pal.dim)
+                        Spacer()
+                        if !importable.isEmpty {
+                            Button(allSelected ? "Deselect All" : "Select All") {
+                                selectedUrls = allSelected ? [] : Set(importable.map(\.url))
+                            }
+                            .foregroundColor(pal.accent)
+                            .frame(minHeight: 44)
+                        }
+                    }
+                    .font(.system(.subheadline, design: .rounded))
+                    .textCase(nil)
+                }
+            }
+            .listStyle(.insetGrouped)
+            .scrollContentBackground(.hidden)
+            .background(pal.bg.ignoresSafeArea())
+            .navigationTitle("Import Shows")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Import") {
+                        onImport(feeds.filter { selectedUrls.contains($0.url) })
+                        dismiss()
                     }
                     .disabled(selectedUrls.isEmpty)
                 }
-                .padding()
-                .background(Color.white.opacity(0.05))
-                
-                // Select All Bar
-                HStack {
-                    Button(action: {
-                        if selectedUrls.count == feeds.count {
-                            selectedUrls.removeAll()
-                        } else {
-                            selectedUrls = Set(feeds.map { $0.url })
-                        }
-                    }) {
-                        Text(selectedUrls.count == feeds.count ? "Deselect All" : "Select All")
-                            .font(.system(.subheadline, design: .rounded).bold())
-                            .foregroundColor(Color(red: 0.9, green: 0.7, blue: 0.4))
-                    }
-                    Spacer()
-                    Text("\(selectedUrls.count) / \(feeds.count) Selected")
-                        .font(.system(.caption, design: .rounded))
-                        .foregroundColor(.gray)
-                }
-                .padding(.horizontal, 20)
-                .padding(.vertical, 16)
-                
-                // List
-                ScrollView {
-                    VStack(spacing: 16) {
-                        ForEach(feeds, id: \.url) { feed in
-                            Button(action: {
-                                if selectedUrls.contains(feed.url) {
-                                    selectedUrls.remove(feed.url)
-                                } else {
-                                    selectedUrls.insert(feed.url)
-                                }
-                            }) {
-                                HStack(spacing: 16) {
-                                    Image(systemName: selectedUrls.contains(feed.url) ? "checkmark.circle.fill" : "circle")
-                                        .font(.title2)
-                                        .foregroundColor(selectedUrls.contains(feed.url) ? Color(red: 0.9, green: 0.7, blue: 0.4) : .gray)
-                                        .accessibilityHidden(true)
-
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text(feed.name)
-                                            .font(.system(.headline, design: .rounded))
-                                            .foregroundColor(.white)
-                                            .lineLimit(2)
-                                            .minimumScaleFactor(0.75)
-                                        Text(feed.url)
-                                            .font(.system(.caption2, design: .rounded))
-                                            .foregroundColor(.gray)
-                                            .lineLimit(1)
-                                            .minimumScaleFactor(0.7)
-                                    }
-                                    Spacer()
-                                }
-                                .padding()
-                                .background(Color.white.opacity(0.05))
-                                .cornerRadius(12)
-                            }
-                            .accessibilityLabel(feed.name)
-                            .accessibilityValue(selectedUrls.contains(feed.url) ? "Selected" : "Not selected")
-                            .accessibilityAddTraits(selectedUrls.contains(feed.url) ? [.isButton, .isSelected] : .isButton)
-                        }
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 20)
-                }
             }
         }
+        .tint(pal.accent)
         .onAppear {
-            selectedUrls = Set(feeds.map { $0.url })
+            selectedUrls = Set(importable.map(\.url))
         }
+    }
+
+    private func row(_ feed: OPMLFeed) -> some View {
+        let subscribed = subscribedUrls.contains(feed.url)
+        let selected = selectedUrls.contains(feed.url)
+        return Button {
+            if selected { selectedUrls.remove(feed.url) } else { selectedUrls.insert(feed.url) }
+        } label: {
+            HStack(spacing: UI.md) {
+                Image(systemName: subscribed ? "checkmark" : (selected ? "checkmark.circle.fill" : "circle"))
+                    .font(.title3)
+                    .foregroundColor(subscribed ? pal.dim : (selected ? pal.accent : pal.dim))
+                    .frame(width: 28)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(feed.name)
+                        .font(.system(.headline, design: .rounded))
+                        .foregroundColor(subscribed ? pal.dim : pal.text)
+                        .fixedSize(horizontal: false, vertical: true)
+                    // The site, not the raw feed URL: enough to tell two same-named shows apart.
+                    Text(subscribed ? "In your library" : (URL(string: feed.url)?.host ?? feed.url))
+                        .font(.system(.footnote, design: .rounded))
+                        .foregroundColor(pal.dim)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 0)
+            }
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(subscribed)
+        .accessibilityLabel(subscribed ? "\(feed.name), in your library" : feed.name)
+        .accessibilityValue(subscribed ? "" : (selected ? "Selected" : "Not selected"))
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }

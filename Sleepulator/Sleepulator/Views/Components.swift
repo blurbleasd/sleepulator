@@ -306,16 +306,10 @@ struct ChipRow: View {
                             .foregroundColor(isSel ? palette.text : palette.dim)
                             .background {
                                 if isSel {
-                                    Capsule().fill(palette.accent.opacity(0.18))
-                                        .overlay(
-                                            Capsule().strokeBorder(
-                                                LinearGradient(colors: [palette.accent.opacity(0.7),
-                                                                        palette.accent.opacity(0.15)],
-                                                               startPoint: .top, endPoint: .bottom),
-                                                lineWidth: 1))
+                                    EmberCapsule(pal: palette)
                                         .matchedGeometryEffect(id: "chippill", in: pill)
                                 } else {
-                                    Capsule().fill(palette.text.opacity(0.08))
+                                    EmberCapsule(pal: palette, lit: false)
                                 }
                             }
                     }
@@ -340,4 +334,44 @@ struct ChipRow: View {
     }
 
     private static let fade: CGFloat = 28
+}
+
+/// The *ember* capsule: a dim accent tint with a top-lit accent hairline, lit from within. ChipRow's
+/// selected chip and EmberButtonStyle share it; `lit: false` is the faint neutral capsule beside it.
+struct EmberCapsule: View {
+    let pal: Palette
+    var lit = true
+
+    var body: some View {
+        if lit {
+            Capsule().fill(pal.accent.opacity(0.18))
+                .overlay(
+                    Capsule().strokeBorder(
+                        LinearGradient(colors: [pal.accent.opacity(0.7), pal.accent.opacity(0.15)],
+                                       startPoint: .top, endPoint: .bottom),
+                        lineWidth: 1))
+        } else {
+            Capsule().fill(pal.text.opacity(0.08))
+        }
+    }
+}
+
+/// The night surfaces' button: an ember capsule (see `EmberCapsule`) with a cream label, the same
+/// treatment ChipRow uses for selection. A solid full-saturation accent
+/// slab is the brightest thing on a 2am screen; this reads as the primary action without the
+/// glare. `quiet` is the secondary companion: a faint neutral capsule with a dim label.
+struct EmberButtonStyle: ButtonStyle {
+    let pal: Palette
+    var quiet = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(.subheadline, design: .rounded).weight(.semibold))
+            .foregroundColor(quiet ? pal.dim : pal.text)
+            .padding(.horizontal, UI.lg)
+            .frame(minHeight: 44)
+            .background { EmberCapsule(pal: pal, lit: !quiet) }
+            .contentShape(Capsule())
+            .opacity(configuration.isPressed ? 0.6 : 1)
+    }
 }

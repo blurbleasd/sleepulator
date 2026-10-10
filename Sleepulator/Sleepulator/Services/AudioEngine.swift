@@ -519,6 +519,7 @@ final class AudioEngine: ObservableObject {
             self?.podTitle = title
             self?.loadPodcast(url, id: id, resume: resume)
         }
+        queueManager.userStartedPlaybackFn = { [weak self] in self?.cancelTailForManualStart() }
         queueManager.pausePodcastFn = { [weak self] in
             guard let self else { return }
             self.podPlayer.pause()
@@ -999,7 +1000,9 @@ final class AudioEngine: ObservableObject {
         // night diverges), else the next episode inherits the previous one's position.
         let loadedIsHead = podPlayer.currentEpisodeId == head?.id
         let livePosition = podPlayer.currentPositionSeconds ?? 0
-        let position: Double? = (loadedIsHead && livePosition > 5) ? livePosition : nil
+        // Mid-swap (isLoadingItem) the id is already the new episode's but the position is still
+        // the old item's; filing that pair would resume the new episode at the old one's offset.
+        let position: Double? = (loadedIsHead && !podPlayer.isLoadingItem && livePosition > 5) ? livePosition : nil
         let mix = SavedMix(
             name: "Last Night",
             noiseOn: noiseOn,
@@ -1227,6 +1230,47 @@ final class AudioEngine: ObservableObject {
         playbackProgress.progress = 0
         let finalUrlStr = resolveAudioUrl(urlStr)
         podPlayer.play(url: finalUrlStr, id: id, title: podTitle, resume: resume, startAt: startAt)
+    }
+
+    /// A person chose to start a podcast (a row, a swipe, Up next, Resume, Play All). During the
+    /// ambient tail that means "I'm awake": cancel the timer, as `podPlayer.onResume` does for a
+    /// resume. A fresh `play()` never fires that hook, so without this the podcast plays at the
+    /// tail's near-zero fade and is then stopped. Not on the queue's own auto-advance.
+    private func cancelTailForManualStart() {
+        guard sleepTimer.inTail else { return }
+        Log.timer.notice("podcast started manually during ambient tail — cancelling sleep timer so it's audible")
+        sleepTimer.cancelTimer()
+    }
+
+    /// Saved episode positions, from the player's in-memory map (fresher than positions.json).
+    var savedEpisodePositions: [String: Double] { podPlayer.savedPositions }
+
+    /// Start an episode from the Podcasts tab (the Tonight shelf's Resume, Back 5 min and Up next;
+    /// the show page's Resume and Play Latest). `position` is where to start when it isn't loaded
+    /// (nil = its saved position); `backUp` starts that much earlier.
+    /// - Cancels the ambient tail first (`cancelTailForManualStart`).
+    /// - When the episode is already loaded (and settled, not mid-swap), it continues from where
+    ///   the player actually is instead of rebuilding the item: stored positions lag the live one.
+    ///   If it's spent (played to the end, or within the near-end margin of its real length, e.g.
+    ///   after an end-of-episode timer stop), it starts over rather than play a second and advance.
+    func resumeEpisode(_ episode: Episode, at position: TimeInterval?, backUp: TimeInterval = 0) {
+        cancelTailForManualStart()
+        queueManager.moveToHead(episode)
+        if podPlayer.hasPlayer, !podPlayer.isLoadingItem, podPlayer.currentEpisodeId == episode.id,
+           let live = podPlayer.currentPositionSeconds {
+            let length = podcastDuration.isFinite && podcastDuration > 0 ? podcastDuration : episode.duration
+            let spent = podPlayer.didPlayToEnd
+                || (live >= TonightShelf.minimumResumePosition && !TonightShelf.isResumable(position: live, duration: length))
+            if spent {
+                podPlayer.seekTo(seconds: 0)
+            } else if backUp > 0 {
+                podPlayer.seekTo(seconds: max(0, live - backUp))
+            }
+            if !isPodPlaying { resumePodcast() }
+            return
+        }
+        let startAt = position.map { max(0, $0 - backUp) }
+        loadPodcast(episode.audioUrl, id: episode.id, resume: true, startAt: startAt)
     }
 
     /// Start a sleep timer that ends when the current episode finishes (fading the ambient bed
