@@ -203,6 +203,9 @@ struct VolumeBar: View {
     /// steps it by the skip interval, and a seek must commit on each step, which the stand-in
     /// Slider below can't do).
     var customAccessibility: Bool = false
+    /// Snap to this increment (the sleep timer's 5-minute detents), with a selection tick per
+    /// detent. Nil (the default) is the continuous fader.
+    var step: Double? = nil
     var onEditingChanged: ((Bool) -> Void)? = nil
     @State private var editing = false
     /// True only while a finger is down. Unlike `editing` it resets by itself when the system
@@ -213,13 +216,19 @@ struct VolumeBar: View {
     @State private var lastX: CGFloat = 0
     /// Whether this gesture has moved past the tap threshold (gates tap-to-set on release).
     @State private var moved = false
+    /// A stepped bar's unsnapped drag position. Snapping `value` itself each frame would round a
+    /// slow drag's small deltas straight back, so the thumb could never leave its detent.
+    @State private var raw: Double = 0
 
     var body: some View {
         if customAccessibility {
             fader
         } else {
             // Hand VoiceOver a standard adjustable slider — the real value stays the source of truth.
-            fader.accessibilityRepresentation { Slider(value: $value, in: range) }
+            // A stepped bar adjusts one detent per swipe.
+            fader.accessibilityRepresentation {
+                if let step { Slider(value: $value, in: range, step: step) } else { Slider(value: $value, in: range) }
+            }
         }
     }
 
@@ -258,6 +267,7 @@ struct VolumeBar: View {
                         if !editing {
                             editing = true
                             lastX = g.translation.width   // establish the grab origin
+                            raw = value
                             moved = false
                             onEditingChanged?(true)
                             return
@@ -272,13 +282,19 @@ struct VolumeBar: View {
                         let vDist = max(0, abs(g.location.y - center) - trackH / 2)
                         let fine = 1.0 / (1.0 + Double(vDist) / 30.0)
                         let dv = Double(dx / w) * span * fine
-                        value = min(range.upperBound, max(range.lowerBound, value + dv))
+                        if let step {
+                            raw = min(range.upperBound, max(range.lowerBound, raw + dv))
+                            snap(raw, to: step)
+                        } else {
+                            value = min(range.upperBound, max(range.lowerBound, value + dv))
+                        }
                     }
                     .onEnded { g in
                         // Settings-only: a tap (no meaningful drag) jumps to the tapped position.
                         if tapToSet && !moved {
                             let f = Double(min(max(g.location.x / w, 0), 1))
-                            value = range.lowerBound + f * span
+                            let target = range.lowerBound + f * span
+                            if let step { snap(target, to: step) } else { value = target }
                         }
                         editing = false
                         onEditingChanged?(false)
@@ -293,6 +309,15 @@ struct VolumeBar: View {
             }
         }
         .frame(height: 28)
+    }
+
+    /// Writes `v` rounded to the nearest detent, ticking only when that crosses into a new one.
+    private func snap(_ v: Double, to step: Double) {
+        let snapped = min(range.upperBound,
+                          max(range.lowerBound, range.lowerBound + ((v - range.lowerBound) / step).rounded() * step))
+        guard snapped != value else { return }
+        value = snapped
+        UISelectionFeedbackGenerator().selectionChanged()
     }
 }
 
