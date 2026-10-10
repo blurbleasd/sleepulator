@@ -56,6 +56,19 @@ inline float hash21(float2 p) {
     return fract(p.x * p.y);
 }
 
+// Star-cell hash on the cell's integer bits. `hash21` above is fine for noise, but on integer
+// cell ids it repeats: 345.45 × 20 and 123.34 × 50 are whole numbers, so the star field came out
+// as the same strip of stars every 20 cells down (thirds of the screen in Deep space, every 80 pt
+// in Aurora and Still water). `salt` picks an independent stream per use.
+inline float hashCell(float2 cell, uint salt) {
+    uint2 q = uint2(int2(cell));
+    uint h = q.x * 1597334677u ^ q.y * 3812015801u ^ salt * 2654435761u;
+    h ^= h >> 16; h *= 2246822519u;
+    h ^= h >> 13; h *= 3266489917u;
+    h ^= h >> 16;
+    return float(h) * (1.0 / 4294967296.0);
+}
+
 inline float vnoise(float2 p) {
     float2 i = floor(p);
     float2 f = fract(p);
@@ -170,13 +183,13 @@ half4 auroraField(float2 pos, half4 color,
     float2 sp  = pos / 4.0;
     float2 sg  = floor(sp);
     float2 sf  = fract(sp) - 0.5;
-    float  sh  = hash21(sg);
-    float2 soff = (float2(hash21(sg + 3.1), hash21(sg + 5.7)) - 0.5) * 0.7;
+    float  sh  = hashCell(sg, 0u);
+    float2 soff = (float2(hashCell(sg, 1u), hashCell(sg, 2u)) - 0.5) * 0.7;
     float  sd  = length(sf - soff);
     float star = step(0.986, sh) * exp(-(sd * sd) / 0.04) * smoothstep(0.05, 0.65, vY);
-    float ph     = hash21(sg + 19.7) * 6.28318530718;    // full 0..2π phase spread
-    float fr     = 0.5 + 1.6 * hash21(sg + 47.3);        // per-star rate, 0.5..2.1 rad/s
-    float steady = step(hash21(sg + 71.1), 0.35);        // ~35% don't twinkle at all
+    float ph     = hashCell(sg, 3u) * 6.28318530718;     // full 0..2π phase spread
+    float fr     = 0.5 + 1.6 * hashCell(sg, 4u);         // per-star rate, 0.5..2.1 rad/s
+    float steady = step(hashCell(sg, 5u), 0.35);         // ~35% don't twinkle at all
     float tw     = mix(0.55 + 0.45 * sin(time * fr + ph), 0.9, steady);
     col += float3(1.0, 0.88, 0.74) * star * tw * 0.5 * (1.0 - clamp(lum * 3.0, 0.0, 1.0));
 

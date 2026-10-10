@@ -18,6 +18,9 @@ struct HomeView: View {
     var nowPlayingPresented: Bool = false
     /// Bumped by ContentView on every mini-player tap: Home interaction, pushes the countdown back.
     var miniPlayerTouches: Int = 0
+    /// The night ring's centre (global), measured here and owned by ContentView: Breathe centres
+    /// its glow on it, and the veil's glance draws the ember there.
+    @Binding var orbCenter: CGPoint?
     /// One-time first-run coachmark: points at "Build mix" so a new user discovers that the app
     /// layers noise + binaural + podcasts. Set once the user dismisses it (or builds a mix).
     @AppStorage("hasCompletedFirstRun") private var hasCompletedFirstRun = false
@@ -426,7 +429,8 @@ struct HomeView: View {
                 sleepTimer: audio.sleepTimer,
                 pomodoro: audio.pomodoro,
                 audioLevel: { [weak audio] in audio?.audioLevel ?? 0 },
-                tilt: { tiltSource.tilt }
+                tilt: { tiltSource.tilt },
+                focalPoint: audio.focusMode ? nil : orbCenter
             ))
             .onAppear { reconcileMotion() }
             .onDisappear { tiltSource.stop() }
@@ -512,6 +516,10 @@ struct HomeView: View {
                                       dragging: $ringDragging,
                                       openOptions: openTimerOptions)
                         }
+                        .onGeometryChange(for: CGPoint.self) { proxy in
+                            let f = proxy.frame(in: .global)
+                            return CGPoint(x: f.midX, y: f.midY)
+                        } action: { orbCenter = $0 }
 
                         NightLine(resumeText: statusText(),
                                   playing: audio.isAnythingPlaying,

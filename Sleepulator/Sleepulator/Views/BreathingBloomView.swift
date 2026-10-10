@@ -12,6 +12,10 @@ struct BreathingBloomView: View {
     /// only the glow: the near-black background holds, so the fade reads as the light dying,
     /// not the scene going transparent.
     var sleepTimer: SleepTimerService? = nil
+    /// Where the glow centres (global coordinates): Home passes the night ring's centre, so the
+    /// bloom breathes around the ring and its ember instead of ~60 pt below them. Nil centres it
+    /// on the screen (the breathing on-ramp).
+    var focus: CGPoint? = nil
 
     // A soft candle/amber warmth on near-black. Warm = cozy + sleep-appropriate.
     var tint: Color = Color(red: 1.0, green: 0.84, blue: 0.6)
@@ -61,6 +65,9 @@ struct BreathingBloomView: View {
     private func bloom(_ b: Double, nightDim: Double) -> some View {
         GeometryReader { geo in
             let d = min(geo.size.width, geo.size.height)
+            let origin = geo.frame(in: .global).origin
+            let center = focus.map { CGPoint(x: $0.x - origin.x, y: $0.y - origin.y) }
+                ?? CGPoint(x: geo.size.width / 2, y: geo.size.height / 2)
             ZStack {
                 Circle()
                     .fill(RadialGradient(colors: [tint.opacity(0.16), .clear],
@@ -78,7 +85,7 @@ struct BreathingBloomView: View {
             // carries a full, followable breath.
             .scaleEffect(0.75 + 0.25 * b)
             .opacity((0.45 + 0.30 * b) * nightDim)
-            .position(x: geo.size.width / 2, y: geo.size.height / 2)
+            .position(center)
         }
     }
 }

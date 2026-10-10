@@ -142,6 +142,12 @@ struct RainGlassView: View {
         }
     }
 
+    /// A drop on glass, not a streak through the air: it clings, slips a short way, and clings
+    /// again, meandering only while it moves. The head is a lens (a mostly clear body, a bright
+    /// meniscus along its lower edge, a pinpoint highlight up top) and behind it lies a faint wet
+    /// path with a few beads left on the pane. The old drop slid continuously with a bright
+    /// head and a fading tail, which read as meteors falling past a window.
+    ///
     /// - Parameter night: `nightProgress` (0 at the start of a sleep timer, →1 as it expires;
     ///   0 when idle). As it rises the rain eases off — each drop fades over a window, with
     ///   higher-`phase` drops retiring first, so the glass thins gradually to a still pane.
@@ -156,21 +162,44 @@ struct RainGlassView: View {
 
         let fall = size.height + 80
         let cycle = (t * d.speed + d.phase).truncatingRemainder(dividingBy: 1.0)
-        let y = pow(cycle, 1.3) * fall - 40          // accelerate as it slides (off-screen wrap)
-        let x = d.x * size.width + sin(t * d.wobFreq + d.phase * 6.283) * d.wobAmp
+        // Stick-slip: five holds per fall, each slip taking the last 40% of its step, eased.
+        let steps = 5.0
+        let u = cycle * steps
+        let step = u.rounded(.down)
+        let s = max(0, min(1, (u - step - 0.6) / 0.4))
+        let y = (step + s * s * (3 - 2 * s)) / steps * fall - 40
+        // The meander follows the drop's height, so a clinging drop holds still.
+        func xAt(_ yy: Double) -> Double {
+            d.x * size.width + sin(yy / 60 + d.phase * 6.283) * d.wobAmp
+        }
+        let x = xAt(y)
 
-        // Trail: a fading capsule above the head.
-        let trail = Path(roundedRect: CGRect(x: x - d.r * 0.5, y: y - d.len, width: d.r, height: d.len),
-                         cornerRadius: d.r * 0.5)
-        ctx.fill(trail, with: .linearGradient(
-            Gradient(colors: [water.opacity(0), water.opacity(op * 0.5)]),
-            startPoint: CGPoint(x: x, y: y - d.len), endPoint: CGPoint(x: x, y: y)))
+        // The wet path: a hair-thin line where the drop cleared the pane, and beads it left.
+        let len = min(d.len, y + 40)
+        if len > 2 {
+            let path = Path { pp in
+                for i in 0...8 {
+                    let yy = y - len * Double(i) / 8
+                    let pt = CGPoint(x: xAt(yy), y: yy)
+                    if i == 0 { pp.move(to: pt) } else { pp.addLine(to: pt) }
+                }
+            }
+            ctx.stroke(path, with: .color(water.opacity(op * 0.14)), lineWidth: max(0.6, d.r * 0.35))
+            for k in 1...3 {
+                let by = y - len * Double(k) * 0.28
+                let br = d.r * (0.45 - 0.1 * Double(k))
+                ctx.fill(Path(ellipseIn: CGRect(x: xAt(by) - br, y: by - br, width: br * 2, height: br * 2)),
+                         with: .color(water.opacity(op * (0.45 - 0.1 * Double(k)))))
+            }
+        }
 
-        // Head + a small catch-light.
-        ctx.fill(Path(ellipseIn: CGRect(x: x - d.r, y: y - d.r, width: d.r * 2, height: d.r * 2)),
-                 with: .color(water.opacity(op)))
-        ctx.fill(Path(ellipseIn: CGRect(x: x - d.r * 0.4, y: y - d.r * 0.7,
-                                        width: d.r * 0.6, height: d.r * 0.6)),
-                 with: .color(water.opacity(op * 0.7)))
+        // The head, a lens: a sliding drop sags a little longer than it is wide.
+        let h = d.r * 2.3
+        ctx.fill(Path(ellipseIn: CGRect(x: x - d.r, y: y - h * 0.5, width: d.r * 2, height: h)),
+                 with: .color(water.opacity(op * 0.22)))
+        ctx.fill(Path(ellipseIn: CGRect(x: x - d.r * 0.8, y: y + h * 0.12, width: d.r * 1.6, height: h * 0.32)),
+                 with: .color(water.opacity(op * 0.8)))                       // meniscus
+        ctx.fill(Path(ellipseIn: CGRect(x: x - d.r * 0.55, y: y - h * 0.36, width: d.r * 0.45, height: d.r * 0.45)),
+                 with: .color(water.opacity(op * 0.7)))                       // highlight
     }
 }

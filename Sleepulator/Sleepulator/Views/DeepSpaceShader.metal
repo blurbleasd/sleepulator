@@ -38,6 +38,18 @@ inline float hash21(float2 p) {
     p += dot(p, p + 34.345);
     return fract(p.x * p.y);
 }
+// Star-cell hash on the cell's integer bits. `hash21` above is fine for noise, but on integer
+// cell ids it repeats: 345.45 × 20 and 123.34 × 50 are whole numbers, so the star field came out
+// as the same strip of stars every 20 cells down (thirds of the screen in Deep space, every 80 pt
+// in Aurora and Still water). `salt` picks an independent stream per use.
+inline float hashCell(float2 cell, uint salt) {
+    uint2 q = uint2(int2(cell));
+    uint h = q.x * 1597334677u ^ q.y * 3812015801u ^ salt * 2654435761u;
+    h ^= h >> 16; h *= 2246822519u;
+    h ^= h >> 13; h *= 3266489917u;
+    h ^= h >> 16;
+    return float(h) * (1.0 / 4294967296.0);
+}
 inline float vnoise(float2 p) {
     float2 i = floor(p), f = fract(p);
     float2 u = f * f * (3.0 - 2.0 * f);
@@ -75,7 +87,7 @@ inline float3 starTier(float2 uv, float drift, float twinkle, float depth, float
     p.y += drift * (0.002 + depth * 0.004);      // a slow downward drift
     float2 g = p * (60.0 + depth * 120.0);
     float2 id = floor(g);
-    float h = hash21(id + depth * 17.0);
+    float h = hashCell(id, 1u + uint(depth * 2.0));   // one stream per tier
     if (h < thresh) return float3(0.0);
     float2 st = fract(g) - 0.5;
     float d = length(st);

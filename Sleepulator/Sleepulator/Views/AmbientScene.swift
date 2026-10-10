@@ -28,6 +28,9 @@ struct SceneContext {
     /// live, never observed. `.zero` when no motion-using scene is active. Closure for the same
     /// reasons as `audioLevel`.
     var tilt: () -> SIMD2<Float> = { .zero }
+    /// The night ring's centre (global coordinates), for a scene with one focal glow (Breathe)
+    /// that should sit where the ring and its ember sit. Nil when unmeasured, or in Focus.
+    var focalPoint: CGPoint? = nil
 }
 
 /// A self-contained ambient backdrop for the home screen. The point of the protocol is that
@@ -186,7 +189,7 @@ struct BreathingBloomScene: AmbientScene {
     let mood = SceneMood.sleep
 
     func makeBackdrop(_ ctx: SceneContext) -> AnyView {
-        AnyView(BreathingBloomView(paused: ctx.paused, sleepTimer: ctx.sleepTimer))
+        AnyView(BreathingBloomView(paused: ctx.paused, sleepTimer: ctx.sleepTimer, focus: ctx.focalPoint))
     }
 }
 

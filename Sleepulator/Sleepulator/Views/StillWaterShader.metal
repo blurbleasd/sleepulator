@@ -47,6 +47,18 @@ inline float hash21(float2 p) {
     p += dot(p, p + 34.345);
     return fract(p.x * p.y);
 }
+// Star-cell hash on the cell's integer bits. `hash21` above is fine for noise, but on integer
+// cell ids it repeats: 345.45 × 20 and 123.34 × 50 are whole numbers, so the star field came out
+// as the same strip of stars every 20 cells down (thirds of the screen in Deep space, every 80 pt
+// in Aurora and Still water). `salt` picks an independent stream per use.
+inline float hashCell(float2 cell, uint salt) {
+    uint2 q = uint2(int2(cell));
+    uint h = q.x * 1597334677u ^ q.y * 3812015801u ^ salt * 2654435761u;
+    h ^= h >> 16; h *= 2246822519u;
+    h ^= h >> 13; h *= 3266489917u;
+    h ^= h >> 16;
+    return float(h) * (1.0 / 4294967296.0);
+}
 inline float vnoise(float2 p) {
     float2 i = floor(p), f = fract(p);
     float2 u = f * f * (3.0 - 2.0 * f);
@@ -76,6 +88,10 @@ half4 stillWaterField(float2 pos, half4 color,
     using namespace sw;
 
     float2 uv = pos / size;
+    // Round shapes are measured in screen widths: `uv` stretches y by the screen's aspect (≈2.2 on
+    // a phone), which drew the moon as a tall oval and the ripples as tall loops.
+    float2 wv = pos / size.x;
+    float2 moonW = MOON * size / size.x;
     float p = clamp(night, 0.0, 1.0);
     float a = clamp(audio, 0.0, 1.0);
     float motion = 1.0 - 0.5 * p;              // stills ripple *amplitude* toward night
@@ -93,9 +109,9 @@ half4 stillWaterField(float2 pos, half4 color,
     }
 
     // --- moon disc + halo ---
-    float md = distance(uv, MOON);
-    col += MOONLIGHT * smoothstep(0.045, 0.0, md) * 0.6 * moonDim;   // disc
-    col += float3(0.55, 0.36, 0.20) * smoothstep(0.28, 0.0, md) * 0.14 * moonDim;  // halo
+    float md = distance(wv, moonW);                   // in screen widths
+    col += MOONLIGHT * smoothstep(0.050, 0.0, md) * 0.6 * moonDim;   // disc
+    col += float3(0.55, 0.36, 0.20) * smoothstep(0.30, 0.0, md) * 0.14 * moonDim;  // halo
 
     // --- water surface ---
     if (uv.y >= HORIZON) {
@@ -110,9 +126,13 @@ half4 stillWaterField(float2 pos, half4 color,
 
         // Concentric ripples spreading from a few points — perturb the wave field locally
         // (extra sparkle rings) instead of being drawn as outlines. Far sources still first.
+        // Measured in screen widths and foreshortened like a circle seen across water: wide and
+        // flat, never taller than wide.
         float ripple = 0.0;
         for (int i = 0; i < 3; i++) {
-            float dist = distance(uv, SRC[i]);
+            float2 rd = wv - SRC[i] * size / size.x;
+            rd.y *= 2.6;
+            float dist = length(rd);
             float prog = fract(t * 0.10 + RPH[i]);
             float r    = prog * 0.55;
             float ring = smoothstep(0.045, 0.0, abs(dist - r)) * (1.0 - prog);
@@ -166,12 +186,12 @@ half4 stillWaterField(float2 pos, half4 color,
         float2 sp  = pos / 4.0;
         float2 sg  = floor(sp);
         float2 sf  = fract(sp) - 0.5;
-        float  sh  = hash21(sg);
-        float2 soff = (float2(hash21(sg + 3.1), hash21(sg + 5.7)) - 0.5) * 0.7;
+        float  sh  = hashCell(sg, 0u);
+        float2 soff = (float2(hashCell(sg, 1u), hashCell(sg, 2u)) - 0.5) * 0.7;
         float  sd  = length(sf - soff);
         float star = step(0.986, sh) * exp(-(sd * sd) / 0.04) * smoothstep(0.0, 0.5, (HORIZON - uv.y) / HORIZON);
         float tw   = 0.55 + 0.45 * sin(time * 1.7 + sh * 100.0);
-        float nearMoon = smoothstep(0.0, 0.25, md);
+        float nearMoon = smoothstep(0.0, 0.25, md);   // screen widths
         col += float3(1.0, 0.88, 0.74) * star * tw * 0.45 * (1.0 - 0.6 * p) * nearMoon;
     }
 

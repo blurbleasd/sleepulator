@@ -23,6 +23,8 @@ struct ContentView: View {
     @State private var miniPlayerTop: CGFloat?
     /// Every touch anywhere in the window, and whether something is presented: the veil's inputs.
     @State private var windowActivity = WindowActivity()
+    /// The night ring's centre (global), measured by Home.
+    @State private var orbCenter: CGPoint?
 
     // Mode-aware: the tab bar tint (and everything it accents) follows Sleep / Focus. It stayed
     // Sleep amber in Focus while Home turned cyan.
@@ -119,7 +121,8 @@ struct ContentView: View {
         ZStack(alignment: .bottom) {
             TabView(selection: $selectedTab) {
                 HomeView(audio: audio, mixStore: audio.mixStore, selectedTab: $selectedTab,
-                         nowPlayingPresented: showNowPlaying, miniPlayerTouches: miniPlayerTouches)
+                         nowPlayingPresented: showNowPlaying, miniPlayerTouches: miniPlayerTouches,
+                         orbCenter: $orbCenter)
                     // Home reserves the bar's room only when the bar shows on Home (not on Sleep
                     // Home at rest). The screensaver fade doesn't count: HomeView freezes it.
                     .environment(\.miniPlayerTop, miniPlayerShownOnHome ? miniPlayerTop : nil)
