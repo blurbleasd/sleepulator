@@ -321,7 +321,10 @@ this section is where you do it. Do it in a dark room at your real bedtime brigh
 10. **Mini-player on Sleep Home.** At rest with only a queue ("Up next"), no bar on Sleep Home; load an
    episode → the bar appears and Home's controls rise to clear it; pause/play the podcast → nothing
    moves. Focus Home, Podcasts and Settings always show it, and nothing sits under it at the
-   largest text size.
+   largest text size. On Focus Home, check that both Build mix and Focus session show above the
+   bar and that Focus session starts the Pomodoro. Check this on the smallest supported phone too
+   (iPhone SE) at the largest text size. The whole row once sat hidden under the bar; this was
+   fixed 2026-10-09 and simulator-checked, and `HomeLayoutUITests` now covers it.
 11. **Focus colours everywhere.** In Focus, the tab bar, mini-player, Now Playing, Podcasts and
    Settings are cyan, not amber.
 12. **Veil after a restart.** While playing, restart the timer from the sheet or the ring. ✅ The

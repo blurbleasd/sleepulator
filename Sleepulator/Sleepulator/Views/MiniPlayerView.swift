@@ -50,6 +50,10 @@ struct MiniPlayerView: View {
         // Home's controls. The transport buttons adopt the Large Content Viewer, so a long press
         // still shows them large.
         .dynamicTypeSize(...DynamicTypeSize.accessibility2)
+        // The UI tests find the bar by this, whatever state it shows; `.contain` keeps its
+        // controls separate elements for VoiceOver.
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("miniPlayer")
         .padding(.bottom, 80) // float above the tab bar
         .sheet(isPresented: $showNowPlaying) {
             NowPlayingSheet(audio: audio, queue: audio.queueManager, progress: progress, isPresented: $showNowPlaying, pal: pal)

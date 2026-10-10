@@ -383,6 +383,7 @@ struct HomeView: View {
             .overlay(Capsule().stroke(pal.accent.opacity(0.28), lineWidth: 0.5))
         }
         .frame(minHeight: 44)
+        .accessibilityShowsLargeContentViewer()
     }
 
     private var focusSessionButton: some View {
@@ -397,8 +398,12 @@ struct HomeView: View {
                 startRadius: 5,
                 endRadius: 620
             )
-            .ignoresSafeArea()
+            // Measured INSIDE `.ignoresSafeArea()`, where the gradient is laid out full-bleed.
+            // Measured after it, the reading is the un-expanded frame: the tab bar's top edge
+            // (791 pt on an iPhone 17 Pro), so `homeClearance` took the tab bar off twice and
+            // left Focus's Build mix / Focus session row under the mini-player.
             .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY } action: { screenMaxY = $0 }
+            .ignoresSafeArea()
 
             // Backdrop is the selected AmbientScene for the current mode (Phase 1 of
             // SCREENSAVER-LIBRARY-SPEC): scenes live behind a protocol + registry, so adding
@@ -532,6 +537,10 @@ struct HomeView: View {
                         buildMixButton
                     }
                 }
+                // Capped like the mini-player it sits above: past accessibility size 2 the stacked
+                // pair outgrew a small phone (iPhone SE) and pushed the orb's line into "Build mix".
+                // The buttons adopt the Large Content Viewer, so a long press still shows them large.
+                .dynamicTypeSize(...DynamicTypeSize.accessibility2)
                 .frame(maxWidth: .infinity)
                 .anchorPreference(key: CoachmarkAnchorKey.self, value: .bounds) { [.mixRow: $0] }
                 // Clear of the floating mini-player by its measured height, when it shows on Home

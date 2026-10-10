@@ -24,7 +24,12 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   - `Models/Models.swift` — `Podcast`, `Episode`, `SavedMix`, `NoiseType`.
   - `PrivacyInfo.xcprivacy`, `Info.plist`.
 - **Widget** — `SleepulatorWidget/` (sleep-timer Live Activity).
-- **Tests** — `SleepulatorTests/` (XCTest). Three files, many suites: `AudioMathTests.swift`;
+- **UI tests** — `SleepulatorUITests/` (XCUITest, in the shared scheme so CI runs it).
+  `HomeLayoutUITests` checks Focus's Build mix / Focus session row clears the mini-player and
+  that a tap starts the Pomodoro. The target is made by `Sleepulator/setup_ui_tests.rb`
+  (idempotent; re-run it after adding a file there). It runs in the same app the unit tests are
+  hosted in, so a UI test must leave persisted state (mode, night length) as it found it.
+- **Tests** — `SleepulatorTests/` (XCTest). Many suites across several files, notably `AudioMathTests.swift`;
   `AudioStateTests.swift` (also holds `PodcastParserTests`, `OPMLParserTests`,
   `StorageManagerTests`, `NetRetryTests`, `CacheEvictionTests`, the sleep-timer suites, Home's
   pure UI rules (`SessionGuardsTests`, `NightRingMathTests`, `MiniPlayerClearanceTests`,
@@ -95,9 +100,13 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   `Palette(bedtime:)` is legacy and only ever yields Sleep amber.
 - **Mini-player clearance is measured, not guessed.** ContentView measures the floating bar's top
   edge and hands each tab `\.miniPlayerTop` (nil on Sleep Home unless a podcast plays). A screen
-  that ends at the bottom edge (a tab root, a pushed show page) applies `.miniPlayerClearance()`;
-  Home passes `frozen:` under the screensaver. No fixed bottom spacers: the old 112 / 80 / 60 pt
-  guesses broke as soon as the bar grew with text size.
+  that ends at the bottom edge (a tab root, a pushed show page) applies `.miniPlayerClearance()`.
+  Home computes its own (`HomeView.homeClearance`) from the screen's bottom edge minus the insets
+  anchored while the tab bar shows, so it holds still under the screensaver. No fixed bottom
+  spacers: the old 112 / 80 / 60 pt guesses broke as soon as the bar grew with text size.
+  To measure a full-bleed view, put `.onGeometryChange` *before* its `.ignoresSafeArea()`.
+  Placed after it, you get the un-expanded frame (the tab bar's top edge, not the screen's). That
+  bug once hid Focus's whole bottom row under the bar; `HomeLayoutUITests` now guards it.
 - **Dark-only.** `Info.plist` sets `UIUserInterfaceStyle = Dark` and a `UILaunchScreen` filled
   with the `LaunchBackground` color; the generated launch screen is off
   (`INFOPLIST_KEY_UILaunchScreen_Generation = NO`; it followed the system appearance and flashed

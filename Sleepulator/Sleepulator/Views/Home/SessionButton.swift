@@ -23,6 +23,8 @@ struct SessionButton: View {
             .contentShape(Rectangle())
         }
         .frame(minHeight: 44)
+        // Home caps this row's text size; a long press shows it large.
+        .accessibilityShowsLargeContentViewer()
         // Spoken in words: "29m" reads as "29 meters".
         .accessibilityLabel(pomodoro.isRunning
                             ? "Stop focus session, \(minutesLeft) minutes left"
