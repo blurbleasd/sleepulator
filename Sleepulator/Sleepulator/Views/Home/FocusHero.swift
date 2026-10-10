@@ -7,9 +7,10 @@ import SwiftUI
 // The arc depletes *continuously*, driven off the phase end-date via a `TimelineView` sampling
 // `pomodoro.progress(at:)`, instead of the old 1 Hz `.trim` + `.animation(.linear)` that stepped
 // once a second. A small lit cap rides the arc's leading edge — the one bright cue, appropriate to
-// Focus's calm-*alert* mood (not the 2am sleep surface). The schedule is `paused` when the screen
-// is backgrounded / low-luminance so the 30 Hz redraw can't run unseen (the restraint the orb and
-// scenes share); when running-but-visible it always reflects true remaining time.
+// Focus's calm-*alert* mood (not the 2am sleep surface). When `paused` (backgrounded, low-luminance,
+// or Settings ▸ Moving scenes off) the 30 Hz loop gives way to a static ring that steps with the
+// 1 Hz tick, so the redraw can't run unseen (the restraint the orb and scenes share) and the ring
+// never shows anything but the true time left.
 struct FocusHero: View {
     @ObservedObject var audio: AudioEngine
     // Observe the Pomodoro directly — a nested ObservableObject reached via `audio`
@@ -17,8 +18,8 @@ struct FocusHero: View {
     @ObservedObject var pomodoro: PomodoroService
     let pal: Palette
     let tap: () -> Void
-    /// True when the hero isn't visibly animating (backgrounded / low-luminance) — stop the ring's
-    /// redraw and freeze the inner orb.
+    /// True when the hero shouldn't animate (backgrounded, low-luminance, or Settings ▸ Moving
+    /// scenes off) — stop the ring's redraw loop and freeze the inner orb.
     var paused: Bool = false
 
     private static let ringSize: CGFloat = 214
@@ -37,9 +38,19 @@ struct FocusHero: View {
                 .frame(width: Self.ringSize, height: Self.ringSize)
 
             if pomodoro.isRunning {
-                TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: paused)) { tl in
-                    ring(progress: pomodoro.progress(at: tl.date),
-                         phaseElapsed: pomodoro.phaseElapsed(at: tl.date))
+                // An if/else swap, not `TimelineView(.animation(paused:))`: the `paused:` schedule
+                // stops driving frames on ProMotion devices (device 2026-07-11, see ShaderBackdrop),
+                // so the ring stepped on the Pomodoro's 1 Hz publish instead of depleting. The ring
+                // has no pose to hold — it's the time left — so the static ring draws the published
+                // 1 Hz `progress` (this view observes `pomodoro`, so it still steps, and agrees with
+                // the readout's countdown) with no refill ease.
+                if paused {
+                    ring(progress: pomodoro.progress, phaseElapsed: Self.refillDuration)
+                } else {
+                    TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { tl in
+                        ring(progress: pomodoro.progress(at: tl.date),
+                             phaseElapsed: pomodoro.phaseElapsed(at: tl.date))
+                    }
                 }
             }
 

@@ -515,6 +515,31 @@ longest, so the window is widest). Export logs after each.
    log shows `ignoring the end of a podcast item that's since been replaced`, and nothing else
    moved.
 
+### R. Orb breath + Focus ring on ProMotion (added 2026-10-10, simulator-checked only)
+`OrbButton` and `FocusHero`'s ring moved off `TimelineView(.animation(paused:))`, which stops
+driving frames on 120 Hz screens (device 2026-07-11, see `ShaderBackdrop`). They now swap to a
+static frame when paused, as the scenes do. The simulator animates either way, so only a
+ProMotion iPhone shows the difference. Before the fix the orb likely moved only when something
+else redrew Home, and the ring stepped once a second on the Pomodoro's tick.
+
+1. **The orb breathes.** Sleep, nothing playing (so the controls stay up and nothing else
+   redraws Home). Watch the orb for a minute without touching. ✅ The glow swells and settles
+   smoothly on a ~4.5 s breath, every breath: no stalls, no once-a-second steps. Repeat in
+   Focus, nothing playing, no session.
+2. **The Focus ring depletes.** Focus, start a session, and watch the ring for a minute,
+   tapping an empty patch of screen every few seconds so the controls don't fade (they go after
+   10 s). ✅ The arc shortens continuously and the lit cap glides along it, with no
+   once-a-second ticks. Tap End interval. ✅ The new phase's arc eases in over about half a
+   second rather than snapping.
+3. **Freezes still freeze, and come back true.** Sleep, sound playing: let the controls fade to
+   the screensaver, wait a minute, tap to wake. ✅ The orb picks up its breath where it left off,
+   no jump. Focus mid-session: let the controls fade, wait a minute, tap to wake. ✅ The ring is
+   already at the true time left as it fades in, and carries on smoothly. Settings ▸ Moving
+   scenes off, back to Home. ✅ The orb holds still and the ring steps once a second in time
+   with the countdown (never stuck, never wrong). Turn it back on. ✅ Smooth again. Lock the
+   phone for 30 s mid-session and unlock. ✅ The ring shows the true time left, not where it
+   stopped.
+
 ---
 
 ## Quick release checklist
