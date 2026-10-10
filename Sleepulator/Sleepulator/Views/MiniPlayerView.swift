@@ -50,9 +50,14 @@ struct MiniPlayerView: View {
         // Home's controls. The transport buttons adopt the Large Content Viewer, so a long press
         // still shows them large.
         .dynamicTypeSize(...DynamicTypeSize.accessibility2)
+        // The UI tests find the bar by this, whatever state it shows; `.contain` keeps its
+        // controls separate elements for VoiceOver.
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("miniPlayer")
         .padding(.bottom, 80) // float above the tab bar
         .sheet(isPresented: $showNowPlaying) {
             NowPlayingSheet(audio: audio, queue: audio.queueManager, progress: progress, isPresented: $showNowPlaying, pal: pal)
+                .presentationDragIndicator(.visible)
         }
     }
 
@@ -176,9 +181,11 @@ struct MiniPlayerView: View {
     @ViewBuilder
     private var idleBar: some View {
         HStack(spacing: 6) {
-            Image(systemName: "play.circle.fill")
-                .font(.system(size: min(playGlyph, 40)))
-                .foregroundColor(pal.dim.opacity(0.5))
+            // Not a play button: with nothing loaded there's nothing to play, and a dim ▶ that did
+            // nothing read as broken. A plain podcast mark instead.
+            Image(systemName: "dot.radiowaves.left.and.right")
+                .font(.body)
+                .foregroundColor(pal.dim)
                 .frame(minWidth: 44, minHeight: 44)
 
             Text("Nothing playing")

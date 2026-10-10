@@ -78,11 +78,17 @@ struct NowPlayingSheet: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 30) {
-                // Drag indicator
-                Capsule()
-                    .fill(pal.dim)
-                    .frame(width: 40, height: 5)
-                    .padding(.top, 10)
+                // The system's drag indicator (MiniPlayerView) replaces a hand-drawn one; Done is
+                // the way out for anyone who doesn't swipe.
+                HStack {
+                    Spacer()
+                    Button("Done") { isPresented = false }
+                        .font(.body.weight(.semibold))
+                        .foregroundColor(pal.accent)
+                        .frame(minWidth: 44, minHeight: 44)
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 14)
                 
                 // Cover Art
                 if let first = queue.queue.first, let urlStr = first.artworkUrl, let url = URL(string: urlStr) {

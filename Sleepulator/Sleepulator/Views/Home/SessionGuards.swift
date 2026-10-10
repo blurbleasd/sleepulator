@@ -45,6 +45,35 @@ enum SessionGuards {
         autoNightDim && !focusMode && timerActive && playing
     }
 
+    enum Begin: Equatable { case resume, firstBed, transport }
+
+    /// What the orb starts from rest: the last mix if there is one, else (only before any session
+    /// has started) the layered first bed, noise + binaural, so the first tap shows what the app
+    /// does; else the transport's own resume. Its own flag, not the first-run tip's: dismissing
+    /// the tip (touching the ring counts) used to cost the first bed, and play started bare Brown.
+    static func begin(hasResumableMix: Bool, firstSessionStarted: Bool) -> Begin {
+        if hasResumableMix { return .resume }
+        return firstSessionStarted ? .transport : .firstBed
+    }
+
+    enum VeilTimeout: Equatable { case drop, wait, stand }
+
+    /// What the veil's countdown does when it runs out (~60 s after the last touch). The veil is
+    /// part of the root view, so a sheet, dialog or full-screen cover sits above it: dropping it
+    /// then left that presentation lit on a black screen (a red "Switch to Focus?" at 2am). It
+    /// waits another round instead, which also spares the untouched breathing exercise.
+    static func veilTimeout(mayDim: Bool, presenting: Bool) -> VeilTimeout {
+        guard mayDim else { return .stand }
+        return presenting ? .wait : .drop
+    }
+
+    /// Whether the status bar and home indicator go: under the veil, and under the Sleep
+    /// screensaver, where a white clock and battery were the brightest thing in a dark room all
+    /// night. Focus's screensaver keeps them; it's the daytime desk, where the clock is useful.
+    static func hidesSystemOverlays(nightDimmed: Bool, screensaver: Bool, focusMode: Bool) -> Bool {
+        nightDimmed || (screensaver && !focusMode)
+    }
+
     /// Play in Sleep honours the night ring: the minutes to time, or nil in Focus (the Pomodoro is
     /// its timer), for All night, or when a countdown is already running (resuming from a pause
     /// keeps the night you set). The stored length is sanitized: a restored backup could hold

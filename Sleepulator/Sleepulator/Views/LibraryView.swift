@@ -193,23 +193,33 @@ struct LibraryView: View {
                 .searchable(text: $searchText, prompt: "Search your shows")
                 .refreshable { await refreshAll() }
 
-                // Empty state — the screen was a black void with no subscriptions.
-                if podcasts.isEmpty {
-                    VStack(spacing: 14) {
-                        Image(systemName: "dot.radiowaves.left.and.right")
-                            .font(.system(size: 46))
-                            .foregroundColor(pal.accent.opacity(0.55))
-                        Text("No podcasts yet")
-                            .font(.system(.title3, design: .rounded).bold())
-                            .foregroundColor(pal.text)
-                        Text("Tap + to find a show by name, or to bring your subscriptions over from another podcast app.")
-                            .font(.subheadline)
-                            .foregroundColor(pal.dim)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal, 44)
+                // Empty state — the screen was a black void with no subscriptions. An overlay on
+                // the list, so it has the whole screen: as a sibling below the (empty) list in this
+                // VStack it only ever got the bottom half. Centred when it fits; it scrolls when the
+                // largest text sizes don't (it used to clip).
+                .overlay {
+                    if podcasts.isEmpty {
+                        GeometryReader { proxy in
+                            ScrollView {
+                                VStack(spacing: 14) {
+                                    Image(systemName: "dot.radiowaves.left.and.right")
+                                        .font(.system(size: 46))
+                                        .foregroundColor(pal.accent.opacity(0.55))
+                                    Text("No podcasts yet")
+                                        .font(.system(.title3, design: .rounded).bold())
+                                        .foregroundColor(pal.text)
+                                    Text("Tap + to find a show by name, or to bring your subscriptions over from another podcast app.")
+                                        .font(.subheadline)
+                                        .foregroundColor(pal.dim)
+                                        .multilineTextAlignment(.center)
+                                        .padding(.horizontal, 44)
+                                }
+                                .padding(.vertical, 24)
+                                .frame(maxWidth: .infinity, minHeight: proxy.size.height)
+                            }
+                            .scrollBounceBehavior(.basedOnSize)
+                        }
                     }
-                    .frame(maxHeight: .infinity)
-                    .allowsHitTesting(false)
                 }
             }
             // Room for the floating mini-player (the empty state used to sit under it).

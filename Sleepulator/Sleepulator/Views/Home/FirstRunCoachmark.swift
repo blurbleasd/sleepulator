@@ -20,11 +20,14 @@ struct CoachmarkContent: Equatable {
     /// Whether the full card points down at Build mix (the first-run copy is about it).
     let pointsDown: Bool
 
+    /// One title for both cards: the brief one (what most phones show under the night line) used
+    /// to promise "Layer your own soundscape" over a line about the orb and ring. Layering is
+    /// taught in the mixer itself, the first time it opens (MixDrawer).
     static let firstRun = CoachmarkContent(
-        icon: "square.stack.3d.up.fill",
-        title: "Layer your own soundscape",
-        message: "Tap the orb to start. Drag its ring to set how long it plays before fading out, and open Build mix to stack noise, binaural beats, and your own podcasts.",
-        briefMessage: "Tap the orb to start; drag its ring to set how long.",
+        icon: "hand.tap.fill",
+        title: "Tap the orb to begin",
+        message: "Drag its ring to set how long it plays before it fades out. Build mix, below, layers noise, binaural beats and your own podcasts.",
+        briefMessage: "Drag its ring to set how long it plays.",
         pointsDown: true)
 
     static let nightRing = CoachmarkContent(

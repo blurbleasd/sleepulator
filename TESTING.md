@@ -326,7 +326,10 @@ this section is where you do it. Do it in a dark room at your real bedtime brigh
 10. **Mini-player on Sleep Home.** At rest with only a queue ("Up next"), no bar on Sleep Home; load an
    episode → the bar appears and Home's controls rise to clear it; pause/play the podcast → nothing
    moves. Focus Home, Podcasts and Settings always show it, and nothing sits under it at the
-   largest text size.
+   largest text size. On Focus Home, check that both Build mix and Focus session show above the
+   bar and that Focus session starts the Pomodoro. Check this on the smallest supported phone too
+   (iPhone SE) at the largest text size. The whole row once sat hidden under the bar; this was
+   fixed 2026-10-09 and simulator-checked, and `HomeLayoutUITests` now covers it.
 11. **Focus colours everywhere.** In Focus, the tab bar, mini-player, Now Playing, Podcasts and
    Settings are cyan, not amber.
 12. **Veil after a restart.** While playing, restart the timer from the sheet or the ring. ✅ The
@@ -337,6 +340,43 @@ this section is where you do it. Do it in a dark room at your real bedtime brigh
    (first run already done). ✅ Sleep Home shows the note once, below the night line, never over
    the ring or the line; "Got it", dragging the ring, or opening timer options retires it for good.
    A fresh install sees only the first-run card, never this note.
+15. **A dark night, start to finish** (added 2026-10-09, simulator-checked only). Sleep, a timer
+   set, playing:
+   - The Sleep screensaver and the veil show no clock, battery or home indicator. Focus's
+     screensaver still shows the clock.
+   - Adjust the mix for over a minute in small touches. ✅ The veil never drops while you're
+     touching. ✅ It drops a minute after the last touch.
+   - Leave the mixer (or the timer sheet) open and untouched for 2+ min. ✅ The veil doesn't
+     drop under it. ✅ Close it; the veil drops a minute later.
+   - Tap Focus mid-session. ✅ A centred alert shows both "Switch to Focus" and "Stay in Sleep",
+     and nothing is red.
+16. **The ember: time left, no tap** (added 2026-10-10, simulator-checked only). On an OLED
+   iPhone in a dark room, at night brightness, start Sleep with a 45-minute night and let the
+   controls fade.
+   - ✅ A faint amber arc of the night left stays in the ring's place. A dark-adapted eye can
+     read it, and it never lights the room (it's ~8% amber).
+   - ✅ No arc for "All night", and none in Focus.
+   - ✅ Tap the veil once: the ember shows the time left with no controls, then the dark returns.
+   - Check the first session on a fresh install: the first-run card stays up about 15 s before
+     the fade. It comes back with the controls on a tap, and it's never held up all night.
+17. **First run teaches one thing at a time** (added 2026-10-10, simulator-checked only). On a
+   fresh install:
+   - ✅ The card's title and line are both about the orb and its ring, on both the full and the
+     brief card.
+   - Drag the ring first (that retires the card), then Play. ✅ Both noise and binaural start
+     (e.g. Brown + Deep), not a bare noise.
+   - ✅ The first Build mix shows one line under "Your mix" about turning on several sounds. It
+     doesn't show on the next open.
+18. **Podcasts empty state and Settings** (added 2026-10-10, simulator-checked only). The add
+   sheet and the rest of the tab are §N's.
+   - **Podcasts (no shows yet):**
+     - ✅ The empty state is centred on the screen, not stuck in its bottom half.
+     - ✅ At the largest text size it scrolls instead of clipping.
+   - **Settings:**
+     - ✅ It opens on Sleep, then Podcasts at night, Focus, Sound, Display, Podcasts, Backup and
+       Diagnostics, in sentence case.
+     - ✅ The Focus steppers change the next Pomodoro phase.
+     - ✅ Backup export, restore and "Export last night's log" still work.
 
 ### N. Podcasts tab: Tonight shelf + hardening (added 2026-10-09, simulator-checked only)
 1. **Resume where you drifted off.** Play an episode for 20+ min, set the ring to 45, pause, kill

@@ -113,7 +113,7 @@ struct NightRing: View {
     /// The drawn ring; the frame adds touch slop around it for the handle.
     static let ringSize: CGFloat = 214
     static let frameSize: CGFloat = 250
-    private static let line: CGFloat = 4
+    static let line: CGFloat = 4
     private static let handleSlop: CGFloat = 34
     private var radius: CGFloat { (Self.ringSize - Self.line) / 2 }
 
