@@ -293,8 +293,9 @@ struct LibraryView: View {
     private func subtitle(for podcast: Podcast) -> String {
         let total = podcast.episodes.count
         guard total > 0 else { return "Tap to load episodes" }
-        let unplayed = podcast.episodes.reduce(0) { $0 + (queue.finishedEpisodes.contains($1.id) ? 0 : 1) }
-        return unplayed == 0 ? "All caught up · \(total)" : "\(unplayed) unplayed · \(total)"
+        // A count, not an unplayed backlog: "600 unplayed · 600" read as a to-do list for a show
+        // you fall asleep to, and sleep episodes get replayed anyway.
+        return total == 1 ? "1 episode" : "\(total) episodes"
     }
 
     // MARK: - Feed Loading

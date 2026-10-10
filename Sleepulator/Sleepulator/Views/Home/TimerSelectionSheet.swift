@@ -154,12 +154,18 @@ struct TimerSelectionSheet: View {
                 UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                 isPresented = false
             }) {
+                // Ember, like the chips and the mode switch: a solid amber slab was the brightest
+                // surface in Sleep, at the moment you're settling down.
                 Text(SessionGuards.timerCommitTitle(playing: playing, timerActive: timerActive))
                     .font(.headline.bold())
-                    .foregroundColor(pal.bg)
+                    .foregroundColor(pal.text)
                     .frame(maxWidth: .infinity, minHeight: 44)
                     .padding()
-                    .background(Capsule().fill(pal.accent))
+                    .background(Capsule().fill(pal.accent.opacity(0.22)))
+                    .overlay(Capsule().strokeBorder(
+                        LinearGradient(colors: [pal.accent.opacity(0.75), pal.accent.opacity(0.2)],
+                                       startPoint: .top, endPoint: .bottom),
+                        lineWidth: 1))
             }
             .accessibilityHint(playing ? "" : "Starts your mix, then the timer")
             .padding(.horizontal, 40)

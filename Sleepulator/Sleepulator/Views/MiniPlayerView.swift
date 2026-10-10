@@ -57,6 +57,7 @@ struct MiniPlayerView: View {
         .padding(.bottom, 80) // float above the tab bar
         .sheet(isPresented: $showNowPlaying) {
             NowPlayingSheet(audio: audio, queue: audio.queueManager, progress: progress, isPresented: $showNowPlaying, pal: pal)
+                .presentationDragIndicator(.visible)
         }
     }
 
@@ -180,9 +181,11 @@ struct MiniPlayerView: View {
     @ViewBuilder
     private var idleBar: some View {
         HStack(spacing: 6) {
-            Image(systemName: "play.circle.fill")
-                .font(.system(size: min(playGlyph, 40)))
-                .foregroundColor(pal.dim.opacity(0.5))
+            // Not a play button: with nothing loaded there's nothing to play, and a dim ▶ that did
+            // nothing read as broken. A plain podcast mark instead.
+            Image(systemName: "dot.radiowaves.left.and.right")
+                .font(.body)
+                .foregroundColor(pal.dim)
                 .frame(minWidth: 44, minHeight: 44)
 
             Text("Nothing playing")

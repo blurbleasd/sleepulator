@@ -1,4 +1,5 @@
 import SwiftUI
+import os
 
 struct PodcastDetailView: View {
     @State var podcast: Podcast
@@ -46,12 +47,12 @@ struct PodcastDetailView: View {
             pal.bg.ignoresSafeArea()
 
             if !connectivity.isOnline && podcast.episodes.isEmpty {
-                stateMessage("You're offline — connect to load feeds.", color: .red)
+                problem("You're offline. Connect to load this show's episodes.", retry: false)
             } else if isLoading && podcast.episodes.isEmpty {
                 ProgressView()
                     .progressViewStyle(CircularProgressViewStyle(tint: pal.accent))
             } else if let err = errorMessage, podcast.episodes.isEmpty {
-                stateMessage(err, color: .red)
+                problem(err, retry: true)
             } else if podcast.episodes.isEmpty {
                 stateMessage("No episodes found.", color: pal.dim)
             } else {
@@ -110,6 +111,26 @@ struct PodcastDetailView: View {
             .foregroundColor(color)
             .multilineTextAlignment(.center)
             .padding()
+    }
+
+    /// A load that went wrong: palette amber and a warning glyph, like the Podcasts list (system
+    /// red was the loudest colour in the app at night), with a way to try again.
+    @ViewBuilder private func problem(_ text: String, retry: Bool) -> some View {
+        VStack(spacing: 14) {
+            Label(text, systemImage: "exclamationmark.triangle.fill")
+                .foregroundColor(pal.accent)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+            if retry {
+                Button("Try again") { loadFeed() }
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundColor(pal.text)
+                    .padding(.horizontal, 22).padding(.vertical, 11)
+                    .background(Capsule().fill(pal.text.opacity(0.10)))
+                    .frame(minHeight: 44)
+            }
+        }
+        .padding(.horizontal, 32)
     }
 
     // Compact, fixed header (artwork + name + Play All / Shuffle). Kept deliberately short so a
@@ -229,8 +250,13 @@ struct PodcastDetailView: View {
                     self.refreshDownloaded()
                 }
             } catch {
+                Log.network.error("Show feed load failed: \(error.localizedDescription, privacy: .public)")
                 DispatchQueue.main.async {
-                    self.errorMessage = error.localizedDescription
+                    // Plain recovery copy, not the raw system error (logged above).
+                    let offline = (error as? URLError)?.code == .notConnectedToInternet
+                    self.errorMessage = offline
+                        ? "You're offline. Connect to load this show's episodes."
+                        : "Couldn't load this show's episodes."
                     self.isLoading = false
                 }
             }

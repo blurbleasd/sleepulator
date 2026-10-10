@@ -520,6 +520,10 @@ struct HomeView: View {
                                   pal: pal,
                                   openOptions: openTimerOptions)
                             .anchorPreference(key: CoachmarkAnchorKey.self, value: .bounds) { [.nightLine: $0] }
+                            // Mid-drag the orb shows the length being set, large; the line under it
+                            // still showed the old one. Step it out of the way until the drag ends.
+                            .opacity(ringDragging ? 0 : 1)
+                            .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: ringDragging)
 
                         if !activeLayers.isEmpty {
                             LayerPills(layers: activeLayers, pal: pal)

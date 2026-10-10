@@ -324,7 +324,20 @@ struct ChipRow: View {
                     .accessibilityAddTraits(isSel ? .isSelected : [])
                 }
             }
-            .padding(.horizontal, UI.xs)
+            .padding(.leading, UI.xs)
+            // Room past the last chip, so it can scroll fully clear of the fade below.
+            .padding(.trailing, Self.fade)
+        }
+        // Chips that run off the edge fade out instead of being cut mid-word ("Gree"), which
+        // also says the row scrolls.
+        .mask {
+            HStack(spacing: 0) {
+                Rectangle()
+                LinearGradient(colors: [.black, .clear], startPoint: .leading, endPoint: .trailing)
+                    .frame(width: Self.fade)
+            }
         }
     }
+
+    private static let fade: CGFloat = 28
 }

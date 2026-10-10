@@ -489,6 +489,36 @@ final class AudioEngineBehaviorTests: XCTestCase {
         XCTAssertEqual(engine.noiseType, "green")    // green is a real sound now (NoiseType.migrate)
     }
 
+    func testEachModeKeepsItsOwnPickAcrossARoundTrip() {
+        // Brown used to come back from Focus as Pink: Focus snapped it to Pink, which Sleep also has.
+        let engine = AudioEngine()
+        engine.focusMode = false
+        engine.noiseType = "brown"
+        engine.binauralPreset = "theta"
+        engine.focusMode = true
+        XCTAssertTrue(AudioEngine.focusNoises.contains(engine.noiseType))
+        engine.noiseType = "white"
+        engine.focusMode = false
+        XCTAssertEqual(engine.noiseType, "brown")
+        XCTAssertEqual(engine.binauralPreset, "theta")
+        engine.focusMode = true
+        XCTAssertEqual(engine.noiseType, "white", "Focus keeps its own pick too")
+        engine.focusMode = false
+        for kind in ["noise", "binaural"] {
+            for focus in [false, true] { UserDefaults.standard.removeObject(forKey: AudioEngine.pickKey(kind, focus: focus)) }
+        }
+    }
+
+    func testLandingPrefersTheModesOwnPickThenTheCurrentSound() {
+        let focus = AudioEngine.focusNoises
+        XCTAssertEqual(AudioEngine.landing(current: "pink", remembered: "white", palette: focus, fallback: "brown"), "white")
+        XCTAssertEqual(AudioEngine.landing(current: "pink", remembered: nil, palette: focus, fallback: "brown"), "pink")
+        XCTAssertEqual(AudioEngine.landing(current: "brown", remembered: "rain", palette: focus, fallback: "brown"), focus.first,
+                       "neither belongs: the palette's first")
+        XCTAssertEqual(AudioEngine.landing(current: "x", remembered: nil, palette: [], fallback: "brown"), "brown",
+                       "an emptied palette never crashes the all-night path")
+    }
+
     func testModeSwitchReconcilesSoundsIntoPalette() {
         let engine = AudioEngine()
         engine.focusMode = false

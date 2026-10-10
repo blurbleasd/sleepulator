@@ -71,8 +71,11 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   must not be iCloud-backed). `isExcludedFromBackup`, ~2GB LRU cap (`AudioDownloader`).
 - **Persistence is per-key JSON** via `StorageManager`; one oversized write must not abort the
   rest. `PersistenceMigrator` owns the fragile launch-time legacy reads.
-- **Sound palettes are mode-scoped** — Sleep and Focus deliberately share no sounds
-  (`AudioEngine.reconcileSoundsToMode`).
+- **Sound palettes are mode-scoped.** Sleep and Focus share no sounds except Pink noise
+  (`AudioEngine.reconcileSoundsToMode`). Each mode remembers its own last noise and binaural pick
+  (`lastPick.*` keys), and a mode switch restores that pick. Without it, Sleep's Brown came back
+  from Focus as Pink: Focus snapped it to Pink, which Sleep also has. Launch and restore don't
+  apply the memory; there, the current sound is already that mode's latest pick.
 - **The sleep timer starts from the Home orb's night ring.** `NightRing` sets
   `nightLengthMinutes` (0 = All night, the default, so an update never starts timing anyone out).
   Any Sleep session starting from rest starts the timer at that length: `AudioEngine.noteSessionStart`
