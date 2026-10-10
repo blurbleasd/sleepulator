@@ -118,6 +118,10 @@ final class PodcastPlayer: NSObject {
     var onTitleUpdate: ((String) -> Void)?
     var onPlaybackFailed: ((String) -> Void)?
     var onPlaybackNote: ((String?) -> Void)?
+    /// The limiter tap couldn't attach to this stream (HLS / no audio track); it plays
+    /// unprocessed. Its own signal rather than a note, so the views can say it quietly where it
+    /// belongs instead of raising a warning banner at night.
+    var onLimiterUnavailable: (() -> Void)?
     var onTimeUpdate: ((Double, Double) -> Void)?
     var backgroundTick: (() -> Void)?
     /// Fired when playback resumes (in-app tap, lock-screen play, or post-interruption). Lets the
@@ -405,10 +409,9 @@ final class PodcastPlayer: NSObject {
                 if Task.isCancelled { return }
                 if !success {
                     // Benign: the tap can't attach to some streams (HLS / no audio track).
-                    // Playback continues unprocessed — surface a gentle, non-destructive
-                    // note. Do NOT use onPlaybackFailed, which flips the transport to
-                    // "paused" and shows a red "Failed:" banner for a working stream.
-                    onPlaybackNote?("Volume limiter off for this stream")
+                    // Playback continues unprocessed. Do NOT use onPlaybackFailed, which flips the
+                    // transport to "paused" for a working stream.
+                    onLimiterUnavailable?()
                 }
             }
 

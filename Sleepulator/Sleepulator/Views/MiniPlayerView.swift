@@ -12,6 +12,8 @@ struct MiniPlayerView: View {
     /// Owned by ContentView so Home's screensaver knows the full player is up (it must not fade
     /// Home, the tab bar and this bar behind the sheet).
     @Binding var showNowPlaying: Bool
+    /// A touch in the full player, for the night veil's countdown (see NowPlayingSheet).
+    var onSheetInteraction: () -> Void = {}
     @ScaledMetric(relativeTo: .title) private var playGlyph: CGFloat = 32
 
     /// Mode-aware like Home: Focus is cool everywhere, not just on Home. Read from the persisted
@@ -53,7 +55,8 @@ struct MiniPlayerView: View {
         .dynamicTypeSize(...DynamicTypeSize.accessibility2)
         .padding(.bottom, 80) // float above the tab bar
         .sheet(isPresented: $showNowPlaying) {
-            NowPlayingSheet(audio: audio, queue: audio.queueManager, progress: progress, isPresented: $showNowPlaying, pal: pal)
+            NowPlayingSheet(audio: audio, queue: audio.queueManager, progress: progress,
+                            isPresented: $showNowPlaying, pal: pal, onInteraction: onSheetInteraction)
         }
     }
 
@@ -104,20 +107,16 @@ struct MiniPlayerView: View {
             // Play/Pause — its own button, NOT nested inside the open-player button. While the
             // episode loads it's a spinner (a tap there used to resume the previous item); after
             // a failure it retries.
+            // The orb's dark disc, small: a solid amber disc here outshone the orb on Sleep Home.
             if phase == .loading {
-                ProgressView()
-                    .tint(pal.accent)
-                    .frame(minWidth: 44, minHeight: 44)
+                PlayerDiscButton(systemImage: nil, diameter: min(playGlyph + 6, 40), pal: pal) {}
+                    .disabled(true)
                     .accessibilityLabel("Loading episode")
             } else {
                 let failed = phase == .failed
-                Button(action: { failed ? audio.retryLoadedEpisode() : audio.togglePodcast() }) {
-                    Image(systemName: failed ? "arrow.clockwise.circle.fill"
-                          : audio.isPodPlaying ? "pause.circle.fill" : "play.circle.fill")
-                        .font(.system(size: min(playGlyph, 40)))
-                        .foregroundColor(pal.accent)
-                        .frame(minWidth: 44, minHeight: 44)
-                        .contentShape(Rectangle())
+                PlayerDiscButton(systemImage: failed ? "arrow.clockwise" : audio.isPodPlaying ? "pause.fill" : "play.fill",
+                                 diameter: min(playGlyph + 6, 40), pal: pal) {
+                    failed ? audio.retryLoadedEpisode() : audio.togglePodcast()
                 }
                 .accessibilityShowsLargeContentViewer()
                 .accessibilityLabel(failed ? "Try again" : audio.isPodPlaying ? "Pause podcast" : "Play podcast")
@@ -146,7 +145,7 @@ struct MiniPlayerView: View {
 
                         Text(statusText)
                             .font(.caption2)
-                            .foregroundColor(phase == .failed || audio.playbackNote != nil ? pal.accent : pal.dim)
+                            .foregroundColor(phase == .failed ? pal.accent : pal.dim)
                             .lineLimit(1)
                     }
                     Spacer()
@@ -166,12 +165,10 @@ struct MiniPlayerView: View {
     @ViewBuilder
     private func upNextBar(_ next: Episode) -> some View {
         HStack(spacing: 6) {
-            Button(action: { audio.playAll(queue.queue) }) {
-                Image(systemName: "play.circle.fill")
-                    .font(.system(size: min(playGlyph, 40)))
-                    .foregroundColor(pal.accent)
+            PlayerDiscButton(systemImage: "play.fill", diameter: min(playGlyph + 6, 40), pal: pal) {
+                audio.playAll(queue.queue)
             }
-            .frame(minWidth: 44, minHeight: 44)
+            .accessibilityShowsLargeContentViewer()
             .accessibilityLabel("Play queue")
 
             Button(action: { showNowPlaying = true }) {

@@ -1,6 +1,11 @@
 import SwiftUI
 import MediaPlayer
 
+/// The full player. Sleep is its hard case: opened in a dark room to check the time left or step
+/// back 15 seconds, then left alone. It speaks Home's night language (OrbButton, VolumeBar,
+/// ChipRow): depth from darkness, accents as hairlines and glyphs, no solid fills, nothing
+/// cold-white. In Sleep the artwork sits back a long way and the title is held to two lines;
+/// Focus, a daytime mode, keeps the artwork full.
 struct NowPlayingSheet: View {
     @ObservedObject var audio: AudioEngine
     /// Observed directly so the Up Next queue list refreshes after Phase 3 dropped the
@@ -10,10 +15,13 @@ struct NowPlayingSheet: View {
     @ObservedObject var progress: PlaybackProgress
     @Binding var isPresented: Bool
     let pal: Palette
+    /// Any touch in the sheet. The night veil counts its 60 s from the last interaction; without
+    /// this, a sheet in use could be swept away when the veil drops (ContentView).
+    var onInteraction: () -> Void = {}
 
     @State private var isDraggingScrubber = false
     @State private var scrubProgress: Double = 0.0
-    @ScaledMetric(relativeTo: .largeTitle) private var playGlyph: CGFloat = 64
+    @ScaledMetric(relativeTo: .largeTitle) private var playDisc: CGFloat = 76
     @Environment(\.dynamicTypeSize) private var typeSize
 
     /// One source for what's playing and what follows (see NowPlayingState).
@@ -25,6 +33,8 @@ struct NowPlayingSheet: View {
     }
     /// The scrubber and skips work only once the player knows where it is.
     private var canSeek: Bool { [.playing, .paused, .finished].contains(phase) }
+    /// Sleep's dusk palette, the dark-room case.
+    private var night: Bool { pal.warm }
 
     @ViewBuilder
     private func queueRow(ep: Episode, isFirst: Bool, isLast: Bool) -> some View {
@@ -51,8 +61,9 @@ struct NowPlayingSheet: View {
                 .frame(minWidth: 44, minHeight: 44)
                 .accessibilityLabel("Move \(ep.title) down")
             }
+            // Dim like its neighbours: an accent disc made "remove" the loudest thing in each row.
             Button(action: { queue.remove(ep) }) {
-                Image(systemName: "xmark.circle.fill").foregroundColor(pal.accent).font(.title3)
+                Image(systemName: "xmark.circle.fill").foregroundColor(pal.dim).font(.title3)
             }
             .frame(minWidth: 44, minHeight: 44)
             .accessibilityLabel("Remove \(ep.title) from queue")
@@ -81,7 +92,7 @@ struct NowPlayingSheet: View {
     }
 
     /// Under the title: what the player is doing when that needs saying. A failure gets its way
-    /// out right here, not a raw system error.
+    /// out right here, not a raw system error. Notes are information, not alarms: dim, not amber.
     @ViewBuilder
     private var statusLine: some View {
         switch phase {
@@ -114,7 +125,7 @@ struct NowPlayingSheet: View {
             if let note = audio.playbackNote {
                 Text(note)
                     .font(.subheadline)
-                    .foregroundColor(pal.accent)
+                    .foregroundColor(pal.dim)
                     .multilineTextAlignment(.center)
             }
         }
@@ -126,6 +137,10 @@ struct NowPlayingSheet: View {
         return "Up next · \(PlayerClock.spoken(d))"
     }
 
+    /// The position fader: Home's VolumeBar, not the system Slider, whose iOS 26 thumb was a
+    /// pure-white capsule, the brightest object on the Sleep sheet. Relative drag, so a graze
+    /// can't throw you 50 minutes, with fine trim when the finger drifts off the track. In Sleep
+    /// the thumb is the dim tone, not cream.
     @ViewBuilder
     private var scrubber: some View {
         if phase == .live {
@@ -137,23 +152,45 @@ struct NowPlayingSheet: View {
             // than a placeholder "-0:01".
             let duration = canSeek ? progress.duration : (state.hero?.duration ?? 0)
             let elapsed = canSeek ? (isDraggingScrubber ? scrubProgress * duration : progress.elapsed) : 0
+            let skip = audio.skipInterval
             VStack(spacing: 4) {
-                Slider(value: Binding(
-                    get: { canSeek ? (isDraggingScrubber ? scrubProgress : progress.progress) : 0 },
-                    set: { newVal in
-                        scrubProgress = newVal
-                        isDraggingScrubber = true
+                VolumeBar(
+                    value: Binding(
+                        get: { canSeek ? (isDraggingScrubber ? scrubProgress : progress.progress) : 0 },
+                        set: { scrubProgress = $0 }
+                    ),
+                    accent: night ? pal.accent.opacity(0.75) : pal.accent,
+                    thumbColor: night ? pal.dim : pal.text,
+                    style: .channel,
+                    customAccessibility: true,
+                    onEditingChanged: { editing in
+                        onInteraction()
+                        if editing {
+                            scrubProgress = progress.progress
+                            isDraggingScrubber = true
+                        } else {
+                            isDraggingScrubber = false
+                            audio.seekPodcast(to: scrubProgress)
+                        }
                     }
-                ), in: 0...1) { editing in
-                    if !editing {
-                        isDraggingScrubber = false
-                        audio.seekPodcast(to: scrubProgress)
+                )
+                .allowsHitTesting(canSeek)
+                .opacity(canSeek ? 1 : 0.4)
+                // VoiceOver steps by the skip interval, committing each step. (A stand-in Slider
+                // moved in ~10% jumps, about 8 minutes of a long episode.)
+                .accessibilityElement()
+                .accessibilityLabel("Playback position")
+                .accessibilityValue(duration > 0
+                                    ? "\(PlayerClock.spoken(elapsed)) of \(PlayerClock.spoken(duration))"
+                                    : "Not started")
+                .accessibilityAdjustableAction { direction in
+                    guard canSeek else { return }
+                    switch direction {
+                    case .increment: audio.seekPodcast(seconds: skip)
+                    case .decrement: audio.seekPodcast(seconds: -skip)
+                    @unknown default: break
                     }
                 }
-                .tint(pal.accent)
-                .disabled(!canSeek)
-                .accessibilityLabel("Playback position")
-                .accessibilityValue("\(PlayerClock.spoken(elapsed)) of \(PlayerClock.spoken(duration))")
 
                 HStack {
                     Text(duration > 0 ? PlayerClock.string(elapsed) : "--:--")
@@ -165,34 +202,34 @@ struct NowPlayingSheet: View {
                 .accessibilityHidden(true)
             }
             .padding(.horizontal, 30)
+
+            // The one quiet word on the limiter: here, in dim, where the podcast is. It used to
+            // be an amber ⚠ banner on Home and replaced "Playing" in the mini-player all night.
+            if audio.limiterOffForStream {
+                Text("Night Limiter can't soften this stream")
+                    .font(.caption)
+                    .foregroundColor(pal.dim)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 30)
+            }
         }
     }
 
     @ViewBuilder
     private var playButton: some View {
-        let size = min(playGlyph, 80)
+        let d = min(playDisc, 92)
         switch phase {
         case .loading:
-            ProgressView()
-                .controlSize(.large)
-                .tint(pal.accent)
-                .frame(width: size, height: size)
+            PlayerDiscButton(systemImage: nil, diameter: d, pal: pal) {}
+                .disabled(true)
                 .accessibilityLabel("Loading episode")
         case .failed:
-            Button(action: { audio.retryLoadedEpisode() }) {
-                Image(systemName: "arrow.clockwise.circle.fill")
-                    .font(.system(size: size))
-                    .foregroundColor(pal.accent)
-            }
-            .frame(minWidth: 64, minHeight: 64)
-            .accessibilityLabel("Try again")
+            PlayerDiscButton(systemImage: "arrow.clockwise", diameter: d, pal: pal) { audio.retryLoadedEpisode() }
+                .accessibilityLabel("Try again")
         default:
-            Button(action: { audio.togglePodcast() }) {
-                Image(systemName: audio.isPodPlaying ? "pause.circle.fill" : "play.circle.fill")
-                    .font(.system(size: size))
-                    .foregroundColor(pal.accent)
+            PlayerDiscButton(systemImage: audio.isPodPlaying ? "pause.fill" : "play.fill", diameter: d, pal: pal) {
+                audio.togglePodcast()
             }
-            .frame(minWidth: 64, minHeight: 64)
             .accessibilityLabel(audio.isPodPlaying ? "Pause" : "Play")
         }
     }
@@ -206,18 +243,20 @@ struct NowPlayingSheet: View {
                     .frame(width: 40, height: 5)
                     .padding(.top, 10)
 
-                EpisodeArtwork(url: state.hero?.artworkUrl, pal: pal, size: 250)
-                    // Show artwork is often near-white and was the brightest thing in the app at
-                    // night; in Sleep it sits back a step (Focus keeps it full).
-                    .opacity(pal.warm ? 0.78 : 1)
+                // Sleep: a smaller, desaturated cover under a dark scrim, so the show's (often
+                // near-white) art no longer outshines everything else at 2am. Focus keeps it full.
+                EpisodeArtwork(url: state.hero?.artworkUrl, pal: pal, size: night ? 150 : 250,
+                               dim: night ? 0.5 : 0)
                     .shadow(color: .black.opacity(0.3), radius: 20, x: 0, y: 10)
 
                 // Title & status
                 VStack(spacing: 8) {
                     Text(state.hero?.title ?? "Nothing queued")
-                        .font(.title2.bold())
+                        .font(night ? .headline : .title3.weight(.semibold))
                         .foregroundColor(pal.text)
                         .multilineTextAlignment(.center)
+                        .lineLimit(night ? 2 : 3)
+                        .truncationMode(.tail)
                         .padding(.horizontal)
 
                     if state.hero == nil {
@@ -339,6 +378,47 @@ struct NowPlayingSheet: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(pal.bg.ignoresSafeArea())
+        // Taps anywhere count as interaction for the night veil (simultaneous: never steals one).
+        .simultaneousGesture(TapGesture().onEnded { onInteraction() })
+    }
+}
+
+/// Play/pause in the orb's language (OrbButton): a dark disc, an accent hairline, an accent
+/// glyph. Press tightens, never brightens. It replaces the solid accent `play.circle.fill`, the
+/// loudest control on the 2am screen (and on Sleep Home, louder than the orb beside it).
+/// `systemImage` nil shows a spinner (loading).
+struct PlayerDiscButton: View {
+    let systemImage: String?
+    let diameter: CGFloat
+    let pal: Palette
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            ZStack {
+                Circle().fill(Color(white: 0.09).opacity(0.85))
+                Circle().stroke(pal.accent.opacity(0.35), lineWidth: 1)
+                if let systemImage {
+                    Image(systemName: systemImage)
+                        .font(.system(size: diameter * 0.36, weight: .medium, design: .rounded))
+                        .foregroundColor(pal.accent)
+                } else {
+                    ProgressView().tint(pal.accent)
+                }
+            }
+            .frame(width: diameter, height: diameter)
+            .frame(minWidth: 44, minHeight: 44)
+            .contentShape(Circle())
+        }
+        .buttonStyle(PressTightens())
+    }
+}
+
+private struct PressTightens: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.94 : 1)
+            .animation(.spring(response: 0.3, dampingFraction: 0.9), value: configuration.isPressed)
     }
 }
 
@@ -349,6 +429,10 @@ struct EpisodeArtwork: View {
     let url: String?
     let pal: Palette
     let size: CGFloat
+    /// 0…1: how far the art sits back, as darkness laid over it (and half its colour drained at
+    /// full). Darkness, not transparency: the app's depth comes from dark, and `.opacity` on the
+    /// image didn't hold once a colour filter joined it (white still measured 255 on screen).
+    var dim: Double = 0
 
     var body: some View {
         Group {
@@ -356,6 +440,7 @@ struct EpisodeArtwork: View {
                 AsyncImage(url: u) { phase in
                     if let image = phase.image {
                         image.resizable().aspectRatio(contentMode: .fill)
+                            .saturation(1 - dim)
                     } else {
                         placeholder
                     }
@@ -365,6 +450,7 @@ struct EpisodeArtwork: View {
             }
         }
         .frame(width: size, height: size)
+        .overlay(Color.black.opacity(dim))
         .clipShape(RoundedRectangle(cornerRadius: UI.cardRadius))
         .accessibilityHidden(true)
     }

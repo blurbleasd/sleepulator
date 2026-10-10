@@ -260,6 +260,10 @@ final class AudioEngine: ObservableObject {
     @Published private(set) var loadedEpisode: Episode?
     /// The loaded episode wouldn't play. Cleared by the next load.
     @Published private(set) var podcastFailed = false
+    /// The Night Limiter couldn't attach to the loaded stream, so it plays unsoftened. Said quietly
+    /// in the full player only: as a playback note it raised an amber ⚠ banner on Home and replaced
+    /// "Playing" in the mini-player, all night, for a stream that was working. Cleared by the next load.
+    @Published private(set) var limiterOffForStream = false
     // Read-only passthroughs to the playbackProgress slice. Plain computed (NOT @Published):
     // reading them never subscribes a view to the 1 Hz progress stream — only PlaybackProgress
     // observers (the now-playing views) do. Internal readers (seek, end-of-episode) and the
@@ -590,6 +594,10 @@ final class AudioEngine: ObservableObject {
         // onPlaybackFailed, this never changes isPodPlaying — the audio is fine.
         podPlayer.onPlaybackNote = { [weak self] note in
             DispatchQueue.main.async { self?.playbackNote = note }
+        }
+
+        podPlayer.onLimiterUnavailable = { [weak self] in
+            DispatchQueue.main.async { self?.limiterOffForStream = true }
         }
         
         podPlayer.onQueueAdvance = { [weak self] finishedEpId, didFinish in
@@ -1204,6 +1212,7 @@ final class AudioEngine: ObservableObject {
     func loadPodcast(_ urlStr: String, id: String, resume: Bool = true, startAt: TimeInterval? = nil) {
         playbackNote = nil
         podcastFailed = false
+        limiterOffForStream = false
         // Resolve the title from the queue by id — the single point of truth for "what's loading."
         // Callers that pre-set podTitle (queueManager.loadPodcastFn) agree with this; callers that
         // didn't (resumeMix / the StartSleepulatorMix intent) used to pass a STALE podTitle into

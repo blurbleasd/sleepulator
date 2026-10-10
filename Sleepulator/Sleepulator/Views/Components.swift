@@ -199,6 +199,10 @@ struct VolumeBar: View {
     /// When true a tap (no drag) jumps the value to the tapped position. Off for the mixer (a
     /// graze must not jolt the bed); on for Settings, where tap-to-set is expected.
     var tapToSet: Bool = false
+    /// The caller supplies its own accessibility element (the podcast scrubber does: VoiceOver
+    /// steps it by the skip interval, and a seek must commit on each step, which the stand-in
+    /// Slider below can't do).
+    var customAccessibility: Bool = false
     var onEditingChanged: ((Bool) -> Void)? = nil
     @State private var editing = false
     /// Last drag translation, for incremental (relative) movement — see the gesture.
@@ -207,6 +211,15 @@ struct VolumeBar: View {
     @State private var moved = false
 
     var body: some View {
+        if customAccessibility {
+            fader
+        } else {
+            // Hand VoiceOver a standard adjustable slider — the real value stays the source of truth.
+            fader.accessibilityRepresentation { Slider(value: $value, in: range) }
+        }
+    }
+
+    private var fader: some View {
         GeometryReader { geo in
             let w = max(geo.size.width, 1)
             let span = max(range.upperBound - range.lowerBound, 0.0001)
@@ -268,8 +281,6 @@ struct VolumeBar: View {
             )
         }
         .frame(height: 28)
-        // Hand VoiceOver a standard adjustable slider — the real value stays the source of truth.
-        .accessibilityRepresentation { Slider(value: $value, in: range) }
     }
 }
 

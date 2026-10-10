@@ -139,7 +139,8 @@ struct ContentView: View {
             // inset — that docks it ON the UIKit tab bar). Tabs reserve room for it themselves from
             // its measured top edge (`miniPlayerTop`, MiniPlayerClearance).
             MiniPlayerView(audio: audio, progress: audio.playbackProgress, queue: audio.queueManager,
-                           selectedTab: $selectedTab, showNowPlaying: $showNowPlaying)
+                           selectedTab: $selectedTab, showNowPlaying: $showNowPlaying,
+                           onSheetInteraction: { if !nightDimmed { scheduleDim() } })
                 .simultaneousGesture(TapGesture().onEnded { miniPlayerTouches &+= 1 })
                 .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).minY } action: { top in
                     miniPlayerTop = top
@@ -199,6 +200,10 @@ struct ContentView: View {
             // Freeze the backdrop scene only when the veil actually occludes the screen —
             // it keeps animating through the lighter controls-faded screensaver.
             audio.screenDimmed = dimmed
+            // The veil can't cover a presented sheet, so an open Now Playing stayed lit all
+            // night above it. Touches in the sheet reset the countdown (onSheetInteraction), so
+            // this only closes a player that's been left alone for the veil's minute.
+            if dimmed && showNowPlaying { showNowPlaying = false }
         }
         .onChange(of: scenePhase) { _, phase in
             // Fail-safe: if iOS suspended us through a duration timer's deadline, the in-process
