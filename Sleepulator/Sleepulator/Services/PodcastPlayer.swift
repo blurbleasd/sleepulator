@@ -148,7 +148,7 @@ final class PodcastPlayer: NSObject {
     /// the OLD item lands under the NEW episode's id and the resume-seek jumps the next track partway
     /// in (the "next podcast doesn't start at the beginning" race). The sleep-timer keep-alive
     /// (backgroundTick) is intentionally NOT gated by this — it must keep firing across a swap.
-    private var isLoadingItem = false
+    private(set) var isLoadingItem = false
     /// Read-only outside so tests can drive the item-level failure notifications.
     private(set) var currentItem: AVPlayerItem?
     private var currentTitle: String = "No episode loaded"
@@ -169,6 +169,9 @@ final class PodcastPlayer: NSObject {
     /// and is audible — the fix for "podcast plays but there's no sound."
     private var fadeMult: Float = 1.0
     private var cachedPositions: [String: Double]?
+    /// Saved positions as the player holds them in memory: fresher than positions.json, which is
+    /// written through async queues after each pause and every 30 s.
+    var savedPositions: [String: Double] { cachedPositions ?? [:] }
     private var lastFlushTime = Date.distantPast
 
     /// When playback was last paused/stopped — drives the adaptive rewind on the next resume.

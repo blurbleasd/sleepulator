@@ -110,18 +110,29 @@ final class PodcastQueueManager: ObservableObject {
         finishedEpisodes = Set(finishedOrder)   // triggers the persist in didSet
     }
 
+    /// Called when a person starts playback here (a row, a swipe, Play All), not on the
+    /// queue's own auto-advance. AudioEngine cancels the ambient tail on it.
+    var userStartedPlaybackFn: (() -> Void)?
+
     func playEpisode(_ episode: Episode) {
-        if !self.queue.contains(where: { $0.id == episode.id }) {
-            self.queue.insert(episode, at: 0)
-        } else {
-            self.queue.removeAll(where: { $0.id == episode.id })
-            self.queue.insert(episode, at: 0)
-        }
+        userStartedPlaybackFn?()
+        moveToHead(episode)
         loadPodcastFn?(episode.audioUrl, episode.id, episode.title, true)
+    }
+
+    /// Put `episode` first in the queue (dropping any other copy of it) in one write: one persist,
+    /// one publish. No write when it's already the head.
+    func moveToHead(_ episode: Episode) {
+        guard queue.first?.id != episode.id || queue.dropFirst().contains(where: { $0.id == episode.id }) else { return }
+        var q = queue
+        q.removeAll { $0.id == episode.id }
+        q.insert(episode, at: 0)
+        queue = q
     }
 
     func playAll(_ episodes: [Episode]) {
         guard let first = episodes.first else { return }
+        userStartedPlaybackFn?()
         self.queue = episodes
         loadPodcastFn?(first.audioUrl, first.id, first.title, true)
     }
@@ -188,6 +199,7 @@ final class PodcastQueueManager: ObservableObject {
     func skipToNext(currentId: String?) -> Bool {
         var rest = queue.filter { $0.id != currentId }
         guard !rest.isEmpty else { return false }
+        userStartedPlaybackFn?()   // a person's Next: lifts the ambient tail like any other pick
         let next = rest.remove(at: shuffleQueue ? Int.random(in: 0..<rest.count) : 0)
         queue = [next] + rest
         loadPodcastFn?(next.audioUrl, next.id, next.title, true)
