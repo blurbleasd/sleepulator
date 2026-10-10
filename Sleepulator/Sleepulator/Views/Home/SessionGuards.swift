@@ -39,10 +39,12 @@ enum SessionGuards {
             cancel: "Stay in Focus")
     }
 
-    /// The night veil drops only over a sleep session that is actually playing. A countdown over
-    /// silence (timer running, everything paused) used to blank the screen on nothing.
-    static func mayNightDim(autoNightDim: Bool, focusMode: Bool, timerActive: Bool, playing: Bool) -> Bool {
-        autoNightDim && !focusMode && timerActive && playing
+    /// The night veil drops over a Sleep session that is actually playing, timed or All night. A
+    /// countdown over silence (timer running, everything paused) used to blank the screen on
+    /// nothing. It used to need a timer too, so All night, the default, never got the veil: the
+    /// scene showed at bedtime brightness until auto-lock.
+    static func mayNightDim(autoNightDim: Bool, focusMode: Bool, playing: Bool) -> Bool {
+        autoNightDim && !focusMode && playing
     }
 
     enum Begin: Equatable { case resume, firstBed, transport }

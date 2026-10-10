@@ -1564,11 +1564,10 @@ final class SessionGuardsTests: XCTestCase {
     }
 
     func testVeilNeverDropsOverSilence() {
-        XCTAssertFalse(SessionGuards.mayNightDim(autoNightDim: true, focusMode: false, timerActive: true, playing: false))
-        XCTAssertTrue(SessionGuards.mayNightDim(autoNightDim: true, focusMode: false, timerActive: true, playing: true))
-        XCTAssertFalse(SessionGuards.mayNightDim(autoNightDim: true, focusMode: true, timerActive: true, playing: true))
-        XCTAssertFalse(SessionGuards.mayNightDim(autoNightDim: false, focusMode: false, timerActive: true, playing: true))
-        XCTAssertFalse(SessionGuards.mayNightDim(autoNightDim: true, focusMode: false, timerActive: false, playing: true))
+        XCTAssertFalse(SessionGuards.mayNightDim(autoNightDim: true, focusMode: false, playing: false))
+        XCTAssertTrue(SessionGuards.mayNightDim(autoNightDim: true, focusMode: false, playing: true))
+        XCTAssertFalse(SessionGuards.mayNightDim(autoNightDim: true, focusMode: true, playing: true))
+        XCTAssertFalse(SessionGuards.mayNightDim(autoNightDim: false, focusMode: false, playing: true))
     }
 
     func testTheFirstSessionIsTheLayeredBedHoweverTheTipWasDismissed() {
@@ -2046,6 +2045,67 @@ final class NightTimerSessionStartTests: XCTestCase {
         length = 60
         e.noiseOn = true                                       // resume, or a podcast stall ending
         XCTAssertEqual(e.sleepTimer.timerRemaining, 30 * 60, accuracy: 2)
+    }
+}
+
+/// The untimed ("All night") night: it settles on the clock, a short pause keeps it, a long one
+/// ends it. Before, All night (the default) had nightProgress 0 all night, so no scene darkened.
+final class UntimedNightTests: XCTestCase {
+    private let t0 = Date(timeIntervalSinceReferenceDate: 1_000_000)
+
+    func testItSettlesAcrossFortyFiveMinutes() {
+        XCTAssertEqual(UntimedNight.progress(start: nil, stoppedAt: nil, now: t0), 0)
+        XCTAssertEqual(UntimedNight.progress(start: t0, stoppedAt: nil, now: t0), 0)
+        XCTAssertEqual(UntimedNight.progress(start: t0, stoppedAt: nil, now: t0 + 22.5 * 60), 0.5, accuracy: 1e-9)
+        XCTAssertEqual(UntimedNight.progress(start: t0, stoppedAt: nil, now: t0 + 6 * 3600), 1)
+    }
+
+    func testAShortPauseKeepsTheNightAndALongOneEndsIt() {
+        let stop = t0 + 3600
+        XCTAssertEqual(UntimedNight.progress(start: t0, stoppedAt: stop, now: stop + 60), 1)
+        XCTAssertEqual(UntimedNight.progress(start: t0, stoppedAt: stop, now: stop + 31 * 60), 0)
+        XCTAssertEqual(UntimedNight.start(previous: t0, stoppedAt: stop, now: stop + 5 * 60), t0)
+        XCTAssertEqual(UntimedNight.start(previous: t0, stoppedAt: stop, now: stop + 31 * 60), stop + 31 * 60)
+        XCTAssertEqual(UntimedNight.start(previous: nil, stoppedAt: nil, now: stop), stop)
+    }
+
+    func testATimerStillOwnsTheNightWhileItRuns() {
+        let timer = SleepTimerService()
+        timer.backstop = NoopBackstop()
+        var now = t0
+        timer.now = { now }
+        timer.noteSleepSessionStarted()
+        now = t0 + 45 * 60
+        XCTAssertEqual(timer.nightProgress, 1, accuracy: 1e-9)
+        timer.startSleepTimer(minutes: 30)
+        XCTAssertEqual(timer.nightProgress, 0, accuracy: 0.01)    // the timer's own night
+        timer.cancelTimer()
+    }
+
+    func testAllNightOnTheEngineSettlesAndFocusEndsIt() {
+        let e = AudioEngine()
+        e.sleepTimer.backstop = NoopBackstop()
+        e.nightLengthProvider = { 0 }                             // All night
+        e.focusMode = false
+        var now = t0
+        e.sleepTimer.now = { now }
+        defer { e.noiseOn = false; e.sleepTimer.cancelTimer(); e.focusMode = false }
+
+        e.noiseOn = true
+        now = t0 + 22.5 * 60
+        XCTAssertEqual(e.sleepTimer.nightProgress, 0.5, accuracy: 1e-6)
+        e.noiseOn = false                                         // headphones out
+        now = t0 + 25 * 60
+        e.noiseOn = true                                          // back in: the same night
+        XCTAssertEqual(e.sleepTimer.nightProgress, 25.0 / 45.0, accuracy: 1e-6)
+
+        e.focusMode = true
+        XCTAssertEqual(e.sleepTimer.nightProgress, 0)
+    }
+
+    private final class NoopBackstop: SleepTimerBackstopScheduling {
+        func schedule(after seconds: TimeInterval) {}
+        func cancel() {}
     }
 }
 

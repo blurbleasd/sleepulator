@@ -127,6 +127,13 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   (`timerOnPlay`, the mode-switch confirm over a live session, "the night veil only drops over
   sound") live in `SessionGuards`, unit-tested: change them there, not in view code. Tests that
   start sessions set `engine.nightLengthProvider` rather than relying on the simulator's defaults.
+- **All night gets a night too.** With no timer, `nightProgress` settles on the clock
+  (`UntimedNight`: 0 → 1 over 45 min from the Sleep session's start; a pause under 30 min keeps
+  the night, a longer one ends it). AudioEngine reports the session's edges
+  (`noteSessionEdge`) and a switch to Focus ends it. It's visual only (scenes darken and still,
+  comets and meteors retire past 0.4, the orb calms); the audio fade never reads it. Views that
+  observe the timer for darkening (`NightDarken`, `NightFade`) also re-read it every 20 s, since
+  an untimed night publishes nothing. Before this, All night (the default) never darkened at all.
 - **The stop-with-episode timer runs on the playback clock.** "Stop after this episode" (the timer
   sheet and the Sleep player's chip, `startEndOfEpisodeTimer`) is offered and starts only while the
   episode plays. A pause hands it to the wall clock with the same end
@@ -174,7 +181,8 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   cancel button, which left a lone red button on a dark screen.
 - **The night veil runs from the last touch.** ContentView drops it 60 s after the last touch
   anywhere in the window (`WindowActivity`: a recognizer that observes every touch, sheets
-  included, and claims none). If a sheet, dialog or full-screen cover is up when the countdown
+  included, and claims none), over any playing Sleep session, timed or All night
+  (`SessionGuards.mayNightDim`). If a sheet, dialog or full-screen cover is up when the countdown
   ends, the veil waits another round (`SessionGuards.veilTimeout`). The veil is part of the root
   view, so it can't cover them. The status bar and home indicator hide under the veil and the
   Sleep screensaver (`SessionGuards.hidesSystemOverlays`); Focus keeps its clock. The pending

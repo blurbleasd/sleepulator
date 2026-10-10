@@ -9,10 +9,6 @@ struct ContentView: View {
     @State private var nightDimmed = false
     @State private var veilCaptionShown = true
     @State private var veilCaptionHide: DispatchWorkItem?
-    /// Tracks the timer's active/idle state so the dim side-effect fires only on the transition,
-    /// not on every per-second `timerRemaining` publish (which would reschedule the 60 s dim work
-    /// item forever and it would never fire).
-    @State private var timerWasActive = false
     /// The mini-player's full Now Playing sheet. Lifted here so HomeView can count it as a
     /// presentation (no screensaver fade behind it), alongside its own sheets.
     @State private var showNowPlaying = false
@@ -29,8 +25,6 @@ struct ContentView: View {
     // Mode-aware: the tab bar tint (and everything it accents) follows Sleep / Focus. It stayed
     // Sleep amber in Focus while Home turned cyan.
     var pal: Palette { Palette(focusMode: audio.focusMode) }
-
-    private var timerActive: Bool { audio.sleepTimer.timerRemaining > 0 }
 
     // The screensaver may only hide chrome while Home is the *active* tab. Without the
     // selectedTab guard, an idle-fade timer that fires after you've switched to Podcasts /
@@ -56,26 +50,21 @@ struct ContentView: View {
                                           focusMode: audio.focusMode)
     }
 
-    // App-wide night-dim: ~60s after the last touch in a sleep session, drop a black veil over
-    // the whole app (tabs + mini-player) so a bedside screen goes dark. Tap to wake. Any touch
-    // anywhere (Home, the mixer, any sheet) re-arms it (`WindowActivity`), as do tab changes.
-    // When the timer ends we only cancel the pending dim, never force the screen bright mid-night.
-    // Only over a session that's actually playing (SessionGuards.mayNightDim): a timer counting
-    // down over paused audio used to blank the screen on a silent room.
+    // App-wide night-dim: ~60s after the last touch in a Sleep session, timed or All night, drop
+    // a black veil over the whole app (tabs + mini-player) so a bedside screen goes dark. Tap to
+    // wake. Any touch anywhere (Home, the mixer, any sheet) re-arms it (`WindowActivity`), as do
+    // tab changes. When the sound stops we only cancel the pending dim, never force the screen
+    // bright mid-night. Only over a session that's actually playing (SessionGuards.mayNightDim):
+    // a timer counting down over paused audio used to blank the screen on a silent room.
     private var mayDim: Bool {
         SessionGuards.mayNightDim(autoNightDim: autoNightDim, focusMode: audio.focusMode,
-                                  timerActive: timerActive, playing: audio.isAnythingPlaying)
+                                  playing: audio.isAnythingPlaying)
     }
 
-    /// `timerActiveNow` is the value just published: `$timerRemaining` emits in willSet, so
-    /// reading the property inside `onReceive` still sees the old value (0 on a fresh start) and
-    /// the veil never armed. The work item re-reads the live state when it fires.
-    private func scheduleDim(timerActiveNow: Bool? = nil) {
+    /// Restarts the veil's minute. The work item re-reads the live state when it fires.
+    private func scheduleDim() {
         windowActivity.pendingDim?.cancel()
-        let armed = SessionGuards.mayNightDim(autoNightDim: autoNightDim, focusMode: audio.focusMode,
-                                              timerActive: timerActiveNow ?? timerActive,
-                                              playing: audio.isAnythingPlaying)
-        guard armed else { return }
+        guard mayDim else { return }
         let work = DispatchWorkItem {
             let assistive = UIAccessibility.isVoiceOverRunning || UIAccessibility.isSwitchControlRunning
             switch SessionGuards.veilTimeout(mayDim: self.mayDim, presenting: self.windowActivity.isPresenting,
@@ -201,15 +190,6 @@ struct ContentView: View {
             // Any touch is interaction: restart the countdown. On the veil itself, its own tap
             // wakes (and re-arms) instead.
             windowActivity.onTouch = { if !nightDimmed { scheduleDim() } }
-        }
-        // Drive dim scheduling off the timer's published countdown, but only act on the
-        // active↔idle transition (sleepTimer is no longer forwarded through `audio`, so the body
-        // won't re-render each tick — and we must NOT reschedule the dim every second).
-        .onReceive(audio.sleepTimer.$timerRemaining) { remaining in
-            let active = remaining > 0
-            guard active != timerWasActive else { return }
-            timerWasActive = active
-            if active { scheduleDim(timerActiveNow: true) } else { cancelDim() }
         }
         // Pausing drops the pending dim (never forces the screen bright); resuming re-arms it.
         .onChange(of: audio.isAnythingPlaying) { _, playing in

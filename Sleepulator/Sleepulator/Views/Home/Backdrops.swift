@@ -127,8 +127,9 @@ struct StarfieldView: View {
 // choice). The self-rescheduling loop is cancelled on disappear so it can't outlive the view.
 //
 // Transients sleep too: the loop also stops while `paused` (it used to keep waking the main
-// queue under the all-night veil), each meteor dims with `nightProgress`, and past ~0.6 the
-// sky stops producing them entirely — a bright streak at 4am is a wake risk, not a delight.
+// queue under the all-night veil), each meteor dims with `nightProgress`, and past 0.4 the sky
+// stops producing them entirely (about 18 minutes into an untimed night) — a bright streak at
+// 4am is a wake risk, not a delight.
 struct ShootingStarView: View {
     /// True only when the screen is occluded by the deep night-dim veil — stop scheduling.
     var paused: Bool = false
@@ -207,11 +208,11 @@ struct ShootingStarView: View {
         let appear = DispatchWorkItem {
             // Sampled at fire time so an hours-old schedule can't fire a bedtime-bright meteor.
             let night = sleepTimer?.nightProgress ?? 0
-            guard night < 0.6 else {
+            guard night < 0.4 else {
                 schedule(first: false)   // keep the loop alive; the sky may lighten (timer reset)
                 return
             }
-            brightness = 1 - night      // ember-faint as the night deepens
+            brightness = 1 - 1.5 * night   // ember-faint as the night deepens (0.4 at the cut-off)
             seed &+= 1
             progress = 0
             active = true

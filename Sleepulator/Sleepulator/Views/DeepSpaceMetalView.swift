@@ -22,8 +22,8 @@ struct DeepSpaceMetalView: View {
 
     /// Keep in sync with `COMET_SEC` / `COMET_WIN` in `DeepSpaceShader.metal` — used only to
     /// dodge the comet on the frozen frame (below), so drift here costs a wasted nudge, not a bug.
-    private static let cometSec: Float = 40.0
-    private static let cometWin: Float = 0.16
+    private static let cometSec: Float = 120.0
+    private static let cometWin: Float = 0.05
 
     var body: some View {
         ShaderBackdrop(paused: paused, nightSlowdown: 0.4,
@@ -33,10 +33,10 @@ struct DeepSpaceMetalView: View {
             // cyclic clock out of it — toward the NEAREST edge, to keep the shift small. Star
             // positions can't move (tier drift rides `phase`, untouched here); only twinkle
             // pose, the breath, and the dither shift, sub-perceptual on a static frame. Skipped
-            // once the shader has night-gated the comet away (`win *= 1 − smoothstep(.35,.75,p)`)
+            // once the shader has night-gated the comet away (`win *= 1 − smoothstep(.15,.40,p)`)
             // — no comet, nothing to dodge.
             var t = s.elapsed
-            if s.frozen && s.night < 0.75 {
+            if s.frozen && s.night < 0.40 {
                 let ph = (t / Self.cometSec) - (t / Self.cometSec).rounded(.down)
                 let clear = Self.cometWin + 0.02          // window plus margin
                 if ph < clear {

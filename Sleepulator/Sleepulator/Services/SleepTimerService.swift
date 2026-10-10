@@ -70,6 +70,35 @@ final class NotificationBackstopScheduler: SleepTimerBackstopScheduling {
 /// The unguarded case: iOS suspends the app *with audio somehow still owed a stop* and the user
 /// never foregrounds it. That requires the audio path to already be dead (no tap ticks), so
 /// there is nothing left to stop — accepted. Verify on device per TESTING.md §3C.
+/// The night on an untimed ("All night") Sleep session, the default. It used to get none of the
+/// night design: no timer meant `nightProgress` stayed 0, so the scenes never darkened or
+/// stilled, and comets and meteors fired at bedtime strength until auto-lock. Now the night
+/// settles on the clock, reaching the same dark, still end state a timer reaches at its fade.
+/// Pure, so the rules are unit-tested.
+enum UntimedNight {
+    /// How long an untimed night takes to settle fully.
+    static let settle: TimeInterval = 45 * 60
+    /// A pause shorter than this (headphones out, a call, a podcast between episodes) keeps the
+    /// night it had: resuming at 2am must not light the scenes back up to bedtime.
+    static let resumeWindow: TimeInterval = 30 * 60
+
+    /// Where a session starting now begins its night: the night already under way if the sound
+    /// stopped less than `resumeWindow` ago (or never stopped), else a new night from now.
+    static func start(previous: Date?, stoppedAt: Date?, now: Date) -> Date {
+        guard let previous else { return now }
+        guard let stoppedAt else { return previous }
+        return now.timeIntervalSince(stoppedAt) < resumeWindow ? previous : now
+    }
+
+    /// 0 → 1 across `settle` from the night's start. Back to 0 once the sound has been off for
+    /// longer than `resumeWindow`: that night is over, and the next evening opens at bedtime.
+    static func progress(start: Date?, stoppedAt: Date?, now: Date) -> Double {
+        guard let start else { return 0 }
+        if let stoppedAt, now.timeIntervalSince(stoppedAt) >= resumeWindow { return 0 }
+        return min(1, max(0, now.timeIntervalSince(start) / settle))
+    }
+}
+
 final class SleepTimerService: ObservableObject {
     /// What kind of timer is running. `.endOfEpisode` is driven by the podcast playback clock
     /// (via `externalTick`) rather than the wall-clock GCD timer, so it tracks pauses/seeks/speed.
@@ -83,11 +112,38 @@ final class SleepTimerService: ObservableObject {
     /// how far through the night it should be. 0 when no timer is running.
     @Published var timerTotal: TimeInterval = 0
 
-    /// 0 at the start of a sleep timer, →1 as it runs out; 0 when idle. Drives the
-    /// setting-moon position and the sky-darkening overlay.
+    /// 0 at the start of the night, →1 as it settles; 0 when idle. With a timer it runs across
+    /// the timer; on an untimed ("All night") Sleep night it runs on the clock (`UntimedNight`).
+    /// Visual only: it darkens, stills and quiets the scenes and calms the orb. The audio fade
+    /// has its own path (`updateFadeMultFn`), so an untimed night never fades the sound.
     var nightProgress: Double {
-        guard timerTotal > 0 else { return 0 }
-        return min(1, max(0, 1 - timerRemaining / timerTotal))
+        if timerTotal > 0 { return min(1, max(0, 1 - timerRemaining / timerTotal)) }
+        return UntimedNight.progress(start: untimedStart, stoppedAt: untimedStoppedAt, now: now())
+    }
+
+    // MARK: The untimed night
+    /// When the current Sleep night's sound started, and when it last stopped (nil while playing).
+    /// AudioEngine reports the session's edges; a short pause keeps the night (`UntimedNight`).
+    private(set) var untimedStart: Date?
+    private(set) var untimedStoppedAt: Date?
+    /// The clock, injectable for tests.
+    var now: () -> Date = Date.init
+
+    /// A Sleep session started playing from rest.
+    func noteSleepSessionStarted() {
+        untimedStart = UntimedNight.start(previous: untimedStart, stoppedAt: untimedStoppedAt, now: now())
+        untimedStoppedAt = nil
+    }
+
+    /// The Sleep session's sound stopped (a pause, a call, the timer's stop).
+    func noteSleepSessionStopped() {
+        if untimedStart != nil, untimedStoppedAt == nil { untimedStoppedAt = now() }
+    }
+
+    /// Leaving Sleep ends the night outright.
+    func endUntimedNight() {
+        untimedStart = nil
+        untimedStoppedAt = nil
     }
 
     private var sleepTimer: DispatchSourceTimer?

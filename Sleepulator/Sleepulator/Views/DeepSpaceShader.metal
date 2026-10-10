@@ -8,7 +8,7 @@ using namespace metal;
 // ----------------------------------------------------------------------------
 // A new generative showpiece (the catalog's "Deep space" entry). Volumetric feel
 // from layered, colour-ramped FBM; depth from multiple star tiers that parallax
-// by the gyro; a comet sweeps every ~40s instead of the night-sky meteor.
+// by the gyro; a comet sweeps every two minutes instead of the night-sky meteor.
 //
 // -- ATTRIBUTION / LICENSE ---------------------------------------------------
 // Original implementation. Standard hash + value-noise + FBM (public domain) and
@@ -30,8 +30,10 @@ namespace neb {
 // ---- tunables --------------------------------------------------------------------
 constant int   OCTAVES   = 5;      // nebula detail — the battery knob (drop to 4 if warm).
 constant float DRIFT      = 0.012; // nebula drift speed
-constant float COMET_SEC  = 40.0;  // seconds between comets
-constant float COMET_WIN  = 0.16;  // fraction of the cycle a comet is visible
+// One comet every two minutes, ~6 s on screen. At 40 s apart it was a white streak across a
+// sleeping partner's peripheral vision every few breaths, not a rare delight.
+constant float COMET_SEC  = 120.0; // seconds between comets
+constant float COMET_WIN  = 0.05;  // fraction of the cycle a comet is visible (6 s)
 
 inline float hash21(float2 p) {
     p = fract(p * float2(123.34, 345.45));
@@ -140,11 +142,12 @@ half4 nebulaField(float2 pos, half4 color,
 
     // --- a rare comet, sweeping diagonally every COMET_SEC ---
     // Transients sleep too: the comet fades out as the night deepens and is gone past
-    // p ≈ 0.75 — a bright streak at 4am is a wake risk, not a delight.
+    // p ≈ 0.4 (about 18 minutes into an untimed night) — a bright streak at 4am is a wake risk,
+    // not a delight.
     float idx = floor(time / COMET_SEC);
     float ph  = fract(time / COMET_SEC);
-    float win = smoothstep(0.0, 0.02, ph) * smoothstep(COMET_WIN, COMET_WIN - 0.05, ph);
-    win *= 1.0 - smoothstep(0.35, 0.75, p);
+    float win = smoothstep(0.0, 0.006, ph) * smoothstep(COMET_WIN, COMET_WIN - 0.015, ph);
+    win *= 1.0 - smoothstep(0.15, 0.40, p);
     if (win > 0.001) {
         float seg = ph / COMET_WIN;
         float2 s = float2(-0.15 * aspect, 0.12 + hash21(float2(idx, 1.0)) * 0.30);

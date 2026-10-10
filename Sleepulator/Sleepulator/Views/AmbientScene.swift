@@ -80,14 +80,16 @@ struct NightSkyScene: AmbientScene {
 }
 
 /// The sleep sky-darkening overlay, isolated so it re-renders on each timer tick (it observes the
-/// timer directly) rather than relying on its parent's per-second re-render.
+/// timer directly) rather than relying on its parent's per-second re-render. An untimed night
+/// settles on the clock with nothing published, so it also re-reads every 20 s.
 private struct NightDarken: View {
     @ObservedObject var timer: SleepTimerService
     var body: some View {
-        Color.black
-            .opacity(timer.nightProgress * 0.35)
-            .ignoresSafeArea()
-            .allowsHitTesting(false)
+        TimelineView(.periodic(from: .now, by: 20)) { _ in
+            Color.black.opacity(timer.nightProgress * 0.35)
+        }
+        .ignoresSafeArea()
+        .allowsHitTesting(false)
     }
 }
 
@@ -103,7 +105,10 @@ struct NightFade<Content: View>: View {
     var maxDim: Double = 0.8
     @ViewBuilder var content: Content
     var body: some View {
-        content.opacity(1 - maxDim * timer.nightProgress)
+        // Re-read every 20 s too: an untimed night settles on the clock with nothing published.
+        TimelineView(.periodic(from: .now, by: 20)) { _ in
+            content.opacity(1 - maxDim * timer.nightProgress)
+        }
     }
 }
 
