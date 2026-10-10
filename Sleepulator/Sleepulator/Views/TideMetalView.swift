@@ -55,7 +55,9 @@ struct TideMetalView: View {
         // while the surface wave bobbed +/-5%. Two-thirds of the signal was drowned by its own
         // decoration, which is why the scene said nothing about the session.
         let level = FocusDrivers.fill(isRunning: running, isWork: work, progress: prog)
-            .map { 0.08 + 0.84 * $0 } ?? 0.26   // idle: a low resting tide, no reading implied
+            // Idle: the tide is out, a line along the bottom edge. It rested at 0.26, which is
+            // exactly where the Build mix / Focus session row sits, so its crest ran through them.
+            .map { 0.08 + 0.84 * $0 } ?? 0.04
         let tint = running ? (work ? Self.workTint : Self.restTint) : Self.idleTint
 
         if let now {

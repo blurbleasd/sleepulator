@@ -34,8 +34,10 @@ constant float3 BASE_BOT = float3(0.004, 0.006, 0.018);
 constant float NECK_Y   = 0.5;
 constant float NECK_HW  = 0.045;   // half-width at the neck
 constant float BULB_HW  = 0.34;    // half-width at the extremes
-constant float TOP_Y    = 0.10;    // top of the upper bulb
-constant float BOT_Y    = 0.90;    // bottom of the lower bulb
+// The glass sits clear of the mode switcher up top and the mini-player below (it ran from 0.10
+// to 0.90, the top bulb lit behind "Sleep / Focus").
+constant float TOP_Y    = 0.17;    // top of the upper bulb
+constant float BOT_Y    = 0.83;    // bottom of the lower bulb
 
 inline float hash21(float2 p) {
     p = fract(p * float2(123.34, 345.45));
@@ -66,7 +68,7 @@ inline float bump(float d2, float invR2) {
 /// Half-width of the hourglass silhouette at height `y`: widest at the two ends, pinched to
 /// `NECK_HW` at the neck. The exponent makes the taper funnel-like rather than conical.
 inline float silhouette(float y) {
-    float d = clamp(abs(y - NECK_Y) / NECK_Y, 0.0, 1.0);
+    float d = clamp(abs(y - NECK_Y) / (NECK_Y - TOP_Y), 0.0, 1.0);   // 0 neck → 1 the bulb's end
     // Exponent < 1 bulges the walls out near the neck, so the bulbs read as rounded glass.
     // At 1.45 the taper was straight-sided and the silhouette looked like a funnel, not an
     // hourglass — and the shape is the whole metaphor.

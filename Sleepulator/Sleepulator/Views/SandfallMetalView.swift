@@ -52,7 +52,9 @@ struct SandfallMetalView: View {
         // bolder, but it threw away the one genuinely time-meaningful metaphor in the app, where
         // "how full is the bottom bulb" IS the answer. `fill` 0→1 across a work interval drains
         // the top bulb into the bottom; a break runs it back.
-        let fill = FocusDrivers.fill(isRunning: running, isWork: work, progress: prog) ?? 0.0
+        // At rest an hourglass has its sand below; a session flips it. Idle used to show the top
+        // bulb full and nothing falling, which read as a stalled timer.
+        let fill = FocusDrivers.fill(isRunning: running, isWork: work, progress: prog) ?? 1.0
         let sand = running ? (work ? Self.workSand : Self.restSand) : Self.idleSand
 
         if let now {

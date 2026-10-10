@@ -117,7 +117,9 @@ half4 tideField(float2 pos, half4 color,
     float below2 = below * below;
     float crest = bump(below2, 1.0 / (2.56 * 0.0032 * 0.0032));
     float glint = pow(fbm(float2(x * 9.0 - phase * 0.5, phase * 0.4)), 3.0);
-    col += mix(tint, float3(1.0), 0.80) * crest * (1.5 + 1.9 * e) * (0.55 + 0.9 * glint);
+    // Capped below white (was mix 0.80, × 1.5 + 1.9e): the line keeps its tint and stays the
+    // brightest thing on screen without clipping to a pure-white bar.
+    col += mix(tint, float3(1.0), 0.65) * crest * (1.1 + 1.5 * e) * (0.55 + 0.9 * glint);
 
     // A wider, dimmer shoulder just under the crest gives the surface thickness.
     float shoulder = bump(below2, 1.0 / (2.56 * 0.022 * 0.022));

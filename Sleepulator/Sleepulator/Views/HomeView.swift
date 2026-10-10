@@ -432,6 +432,12 @@ struct HomeView: View {
                 tilt: { tiltSource.tilt },
                 focalPoint: audio.focusMode ? nil : orbCenter
             ))
+            // Focus scenes step back while the controls show and take the stage once the
+            // screensaver hands them the screen. Full strength under live controls, Tide's crest
+            // ran near-white through "Focus session" and Sandfall's bulb washed out the mode
+            // switcher. Sleep scenes are already dim enough to sit under the controls.
+            .opacity(audio.focusMode && !audio.ambientScreensaver ? 0.55 : 1)
+            .animation(.easeInOut(duration: 0.9), value: audio.ambientScreensaver)
             .onAppear { reconcileMotion() }
             .onDisappear { tiltSource.stop() }
             .onChange(of: audio.screenDimmed) { _, _ in reconcileMotion() }
