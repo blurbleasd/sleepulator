@@ -1416,7 +1416,7 @@ final class PodcastPlayerRebuildTests: XCTestCase {
     }
 
     /// 16-bit mono PCM WAV, a very quiet 220 Hz tone (real samples, not digital zero).
-    private static func quietWav(seconds: Int, sampleRate: Int = 44_100) -> Data {
+    static func quietWav(seconds: Int, sampleRate: Int = 44_100) -> Data {
         let count = seconds * sampleRate
         var pcm = Data(capacity: count * 2)
         for i in 0..<count {
@@ -2370,14 +2370,14 @@ final class PlayerQueueActionTests: XCTestCase {
             engine.queueManager.playEpisode(ep("1"))
             XCTAssertEqual(engine.loadedEpisode?.id, "1")
             XCTAssertTrue(engine.episodeLoading)
-            // What a failure does: the player reports it, then the queue advances without it.
+            // What a failure does: the player reports it, then the episode ends as a failure.
             engine.handlePodcastFailure(episodeId: "1")
-            engine.queueManager.advanceQueue(finishedEpId: "1")
+            engine.episodeDidEnd("1", didFinish: false)
             XCTAssertTrue(engine.podcastFailed)
             XCTAssertFalse(engine.episodeLoading)
             XCTAssertEqual(engine.playbackNote, NowPlayingState.failedCopy)
             XCTAssertEqual(engine.loadedEpisode?.id, "1", "the player is still on it")
-            XCTAssertEqual(engine.queueManager.queue.map(\.id), ["2"])
+            XCTAssertEqual(engine.queueManager.queue.map(\.id), ["1", "2"], "a failure keeps it queued")
             XCTAssertFalse(engine.finishedEpisodes.contains("1"), "a failure is not a listen")
 
             engine.retryLoadedEpisode()
@@ -2407,10 +2407,11 @@ final class PlayerQueueActionTests: XCTestCase {
             engine.queueManager.queue = [ep("1"), ep("2"), ep("3")]
             engine.queueManager.playEpisode(ep("1"))
             engine.handlePodcastFailure(episodeId: "1")
-            engine.queueManager.advanceQueue(finishedEpId: "1")
+            engine.episodeDidEnd("1", didFinish: false)
             XCTAssertEqual(engine.loadedEpisode?.id, "2")
             XCTAssertFalse(engine.podcastFailed, "the next load clears it")
-            XCTAssertEqual(engine.queueManager.queue.map(\.id), ["2", "3"])
+            XCTAssertEqual(engine.queueManager.queue.map(\.id), ["2", "1", "3"],
+                           "the failed one stays queued, right behind the one now playing")
             XCTAssertFalse(engine.finishedEpisodes.contains("1"))
         }
     }
@@ -2423,10 +2424,67 @@ final class PlayerQueueActionTests: XCTestCase {
             engine.queueManager.queue = [ep("1"), ep("2"), ep("3")]
             engine.queueManager.playEpisode(ep("1"))
             engine.handlePodcastFailure(episodeId: "1")
-            engine.queueManager.advanceQueue(finishedEpId: "1")
+            engine.episodeDidEnd("1", didFinish: false)
             engine.skipToNextEpisode()
             XCTAssertEqual(engine.loadedEpisode?.id, "2")
             XCTAssertEqual(engine.queueManager.queue.map(\.id), ["2", "3"])
+        }
+    }
+
+    // The phone goes offline at bedtime: every load fails within a second or two. Auto-Play used
+    // to advance as if each one had finished, dropping it from the queue, so the whole queue was
+    // gone by morning. Now it gives up after a few and the queue reads as it did.
+    func testAnOfflineNightKeepsTheQueue() {
+        let engine = quietEngine()
+        withAutoPlay(true, engine) {
+            engine.queueManager.shuffleQueue = false
+            engine.queueManager.queue = (1...5).map { ep("\($0)") }
+            engine.queueManager.playEpisode(ep("1"))
+            var failures = 0
+            while let id = engine.loadedEpisode?.id, failures < 10 {
+                engine.handlePodcastFailure(episodeId: id)
+                engine.episodeDidEnd(id, didFinish: false)
+                failures += 1
+                if engine.loadedEpisode?.id == id { break }   // nothing new loaded: Auto-Play stopped
+            }
+            XCTAssertEqual(failures, PodcastQueueManager.failureLimit, "Auto-Play gives up, not drains")
+            XCTAssertEqual(engine.queueManager.queue.map(\.id), ["1", "2", "3", "4", "5"])
+            XCTAssertTrue(engine.finishedEpisodes.isDisjoint(with: ["1", "2", "3"]), "a failure is not a listen")
+            XCTAssertTrue(engine.podcastFailed, "the player says so and offers Try again")
+        }
+    }
+
+    // A failure in the sleep-aware hold (or the ambient tail) plays nothing next, and keeps the
+    // episode: it used to be dropped like a finished one.
+    func testAFailureDuringTheHoldKeepsTheEpisodeAndPlaysNothing() {
+        let engine = quietEngine()
+        let savedHold = UserDefaults.standard.object(forKey: "holdQueueDuringSleepTimer")
+        UserDefaults.standard.set(true, forKey: "holdQueueDuringSleepTimer")
+        defer { UserDefaults.standard.set(savedHold, forKey: "holdQueueDuringSleepTimer") }
+        withAutoPlay(true, engine) {
+            engine.queueManager.shuffleQueue = false
+            engine.queueManager.queue = [ep("1"), ep("2")]
+            engine.queueManager.playEpisode(ep("1"))
+            engine.sleepTimer.startSleepTimer(minutes: 30)
+            defer { engine.sleepTimer.cancelTimer() }
+            engine.episodeDidEnd("1", didFinish: false)
+            XCTAssertEqual(engine.loadedEpisode?.id, "1", "nothing else starts while you sleep")
+            XCTAssertEqual(engine.queueManager.queue.map(\.id), ["1", "2"])
+        }
+    }
+
+    // A failure reaches the engine through the main queue. One from an episode a newer pick has
+    // already replaced must leave that pick alone: with Auto-Play off its stop would hold the new
+    // load paused, and it would shuffle the queue under it.
+    func testAStaleFailureReportLeavesTheNewPickAlone() {
+        let engine = quietEngine()
+        withAutoPlay(false, engine) {
+            engine.queueManager.queue = [ep("1"), ep("2")]
+            engine.queueManager.playEpisode(ep("1"))
+            engine.queueManager.playEpisode(ep("2"))
+            engine.episodeDidEnd("1", didFinish: false)
+            XCTAssertTrue(engine.podcastIsPlayingOrStarting, "the pick still starts")
+            XCTAssertEqual(engine.queueManager.queue.map(\.id), ["2", "1"])
         }
     }
 
@@ -2877,5 +2935,384 @@ final class QueueMoveToHeadTests: XCTestCase {
         qm.moveToHead(ep("d"))
         XCTAssertEqual(qm.queue.map(\.id), ["d", "c", "a", "b"])
         sub.cancel()
+    }
+}
+
+/// Auto-Play after a failure: the failed episode stays queued, and a run of failures (the phone
+/// offline) stops after `failureLimit` instead of walking, and emptying, the whole queue.
+@MainActor
+final class PodcastFailureStreakTests: XCTestCase {
+    private var qm: PodcastQueueManager!
+    private var saved: (autoPlay: Bool, shuffle: Bool)!
+    private var loads: [(id: String, resume: Bool)] = []
+    private var pauses = 0
+
+    override func setUp() {
+        qm = PodcastQueueManager()
+        saved = (qm.autoPlay, qm.shuffleQueue)
+        qm.autoPlay = true
+        qm.shuffleQueue = false
+        loads = []
+        pauses = 0
+        qm.loadPodcastFn = { [unowned self] _, id, _, resume in self.loads.append((id, resume)) }
+        qm.pausePodcastFn = { [unowned self] in self.pauses += 1 }
+        qm.queue = (1...5).map(ep)
+    }
+
+    override func tearDown() {
+        qm.autoPlay = saved.autoPlay
+        qm.shuffleQueue = saved.shuffle
+        qm = nil
+    }
+
+    private func ep(_ n: Int) -> Episode {
+        Episode(id: "\(n)", title: "Ep \(n)", audioUrl: "file:///nonexistent/streak-\(n).mp3", duration: 100)
+    }
+
+    private var ids: [String] { qm.queue.map(\.id) }
+
+    func testFailuresMoveOnThenStopWithTheQueueAsItWas() {
+        XCTAssertTrue(qm.advancePastFailure(failedEpId: "1"))
+        XCTAssertEqual(loads.last?.id, "2")
+        XCTAssertEqual(loads.last?.resume, false, "from the start, like any auto-advance")
+        XCTAssertEqual(ids, ["2", "1", "3", "4", "5"], "now playing at the head, the failed one behind it")
+
+        XCTAssertTrue(qm.advancePastFailure(failedEpId: "2"))
+        XCTAssertEqual(loads.last?.id, "3", "never back to one that already failed in this run")
+        XCTAssertEqual(ids, ["3", "1", "2", "4", "5"])
+
+        XCTAssertFalse(qm.advancePastFailure(failedEpId: "3"))
+        XCTAssertEqual(loads.count, 2, "stopped at the limit")
+        XCTAssertEqual(pauses, 1)
+        XCTAssertEqual(ids, ["1", "2", "3", "4", "5"], "the morning queue reads as it did at bedtime")
+        XCTAssertTrue(qm.finishedEpisodes.isDisjoint(with: ["1", "2", "3"]))
+    }
+
+    func testAFinishStartsTheCountOver() {
+        qm.advancePastFailure(failedEpId: "1")             // → 2
+        qm.advancePastFailure(failedEpId: "2")             // → 3
+        qm.advanceQueue(finishedEpId: "3")                 // 3 plays to its end: loads work
+        XCTAssertEqual(loads.last?.id, "1", "the failed ones get another go")
+        XCTAssertTrue(qm.advancePastFailure(failedEpId: "1"), "a fresh run, not the third in a row")
+        XCTAssertEqual(loads.last?.id, "2")
+    }
+
+    func testAPersonsPickStartsTheCountOver() {
+        qm.advancePastFailure(failedEpId: "1")
+        qm.advancePastFailure(failedEpId: "2")
+        qm.playEpisode(ep(4))
+        XCTAssertTrue(qm.advancePastFailure(failedEpId: "4"))
+    }
+
+    func testWithAutoPlayOffAFailureStopsAndKeepsTheEpisode() {
+        qm.autoPlay = false
+        XCTAssertFalse(qm.advancePastFailure(failedEpId: "1"))
+        XCTAssertTrue(loads.isEmpty)
+        XCTAssertEqual(pauses, 1)
+        XCTAssertEqual(ids, ["1", "2", "3", "4", "5"])
+    }
+
+    func testNothingStartsWhenTheNightSaysStop() {
+        // The ambient tail and the sleep-aware hold pass `mayContinue: false`.
+        XCTAssertFalse(qm.advancePastFailure(failedEpId: "1", mayContinue: false))
+        XCTAssertTrue(loads.isEmpty)
+        XCTAssertEqual(ids, ["1", "2", "3", "4", "5"])
+    }
+
+    func testTheOnlyEpisodeFailingStops() {
+        qm.queue = [ep(1)]
+        XCTAssertFalse(qm.advancePastFailure(failedEpId: "1"))
+        XCTAssertTrue(loads.isEmpty)
+        XCTAssertEqual(ids, ["1"])
+    }
+
+    func testShuffleNeverPicksOneThatFailedThisRun() {
+        qm.shuffleQueue = true
+        for _ in 0..<20 {
+            qm.resetFailureStreak()
+            qm.queue = (1...6).map(ep)
+            loads = []
+            XCTAssertTrue(qm.advancePastFailure(failedEpId: "1"))
+            let second = try! XCTUnwrap(loads.last?.id)
+            XCTAssertNotEqual(second, "1")
+            XCTAssertTrue(qm.advancePastFailure(failedEpId: second))
+            XCTAssertFalse(["1", second].contains(loads.last!.id))
+            XCTAssertEqual(Set(ids), Set((1...6).map { "\($0)" }), "nothing dropped")
+        }
+    }
+}
+
+/// A pause, a stop or a call while an episode is still loading must stick. The load awaits the
+/// limiter tap (up to 1.5 s) and the resume-seek, then used to play regardless, undoing the pause.
+/// Real AVPlayer (simulator), like `PodcastPlayerRebuildTests`.
+@MainActor
+final class PodcastLoadHoldTests: XCTestCase {
+    private var fileURL: URL!
+
+    override func setUpWithError() throws {
+        fileURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("hold-\(UUID().uuidString).wav")
+        try PodcastPlayerRebuildTests.quietWav(seconds: 20).write(to: fileURL)
+    }
+
+    override func tearDownWithError() throws {
+        try? FileManager.default.removeItem(at: fileURL)
+    }
+
+    private func waitUntil(_ timeout: TimeInterval = 8, _ condition: () -> Bool) async -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if condition() { return true }
+            try? await Task.sleep(nanoseconds: 20_000_000)
+        }
+        return condition()
+    }
+
+    private func settle(_ seconds: Double = 1.5) async {
+        try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+    }
+
+    func testAPauseDuringALoadHoldsTheEpisodePaused() async {
+        let p = PodcastPlayer()
+        defer { p.stop() }
+        var reports: [Bool] = []
+        p.onPlaybackStateChanged = { reports.append($0) }
+        let id = "hold-\(UUID().uuidString)"
+        p.play(url: fileURL.absoluteString, id: id, title: "Held", resume: false)
+        XCTAssertTrue(p.isStartingPlayback)
+        p.pause()                                     // the lock screen, inside the load window
+        XCTAssertFalse(p.isStartingPlayback)
+
+        let landed = await waitUntil { p.hasPlayer && !p.isLoadingItem }
+        XCTAssertTrue(landed, "the load still lands")
+        await settle()
+        XCTAssertEqual(reports, [false], "it must not report playing after the pause")
+        XCTAssertLessThan(p.currentPositionSeconds ?? 0, 0.3, "the clock must not run")
+        XCTAssertEqual(p.currentEpisodeId, id, "the new episode is loaded, paused")
+
+        p.resume()                                    // and a later play starts it
+        let playing = await waitUntil { (p.currentPositionSeconds ?? 0) > 0.5 }
+        XCTAssertTrue(playing)
+        XCTAssertEqual(reports.last, true)
+    }
+
+    func testTheTimersStopDuringAnAutoAdvanceIsNotUndone() async {
+        let p = PodcastPlayer()
+        defer { p.stop() }
+        p.play(url: fileURL.absoluteString, id: "a-\(UUID().uuidString)", title: "A", resume: false)
+        let first = await waitUntil { (p.currentPositionSeconds ?? 0) > 0.3 }
+        XCTAssertTrue(first, "the first episode never played")
+
+        var reports: [Bool] = []
+        p.onPlaybackStateChanged = { reports.append($0) }
+        let next = "b-\(UUID().uuidString)"
+        p.play(url: fileURL.absoluteString, id: next, title: "B", resume: false)   // the queue moves on
+        p.stop()                                      // ...and the sleep timer's terminal stop lands
+        let landed = await waitUntil { !p.isLoadingItem }
+        XCTAssertTrue(landed)
+        await settle()
+        XCTAssertEqual(reports, [false], "the next episode must not start after everything stopped")
+        XCTAssertEqual(p.currentEpisodeId, next)
+        XCTAssertLessThan(p.currentPositionSeconds ?? 0, 0.3)
+    }
+
+    func testAPlayDuringALoadAfterAPauseStillStartsIt() async {
+        // Guard against over-correcting: pause then play inside the window plays the NEW episode.
+        let p = PodcastPlayer()
+        defer { p.stop() }
+        var reports: [Bool] = []
+        p.onPlaybackStateChanged = { reports.append($0) }
+        p.play(url: fileURL.absoluteString, id: "r-\(UUID().uuidString)", title: "R", resume: false)
+        p.pause()
+        XCTAssertTrue(p.resume(), "a play mid-load is handled, not refused")
+        XCTAssertTrue(p.isStartingPlayback)
+        let playing = await waitUntil { (p.currentPositionSeconds ?? 0) > 0.5 }
+        XCTAssertTrue(playing)
+        XCTAssertEqual(reports.last, true)
+    }
+
+    func testAnAirPodsToggleDuringALoadPauses() async {
+        // Mid-load there's no playing AVPlayer to read, so a toggle used to do nothing (or resume).
+        let p = PodcastPlayer()
+        defer { p.stop() }
+        var reports: [Bool] = []
+        p.onPlaybackStateChanged = { reports.append($0) }
+        p.play(url: fileURL.absoluteString, id: "t-\(UUID().uuidString)", title: "T", resume: false)
+        XCTAssertFalse(p.toggle(), "a toggle over a starting load means pause")
+        _ = await waitUntil { p.hasPlayer && !p.isLoadingItem }
+        await settle()
+        XCTAssertEqual(reports, [false])
+        XCTAssertLessThan(p.currentPositionSeconds ?? 0, 0.3)
+    }
+
+    // MARK: Through the engine
+
+    private final class NoopBackstop: SleepTimerBackstopScheduling {
+        func schedule(after seconds: TimeInterval) {}
+        func cancel() {}
+    }
+
+    private func sleepEngine(nightMinutes: Double) -> AudioEngine {
+        let e = AudioEngine()
+        e.sleepTimer.backstop = NoopBackstop()
+        e.nightLengthProvider = { nightMinutes }
+        e.focusMode = false
+        return e
+    }
+
+    private func interruption(_ type: AVAudioSession.InterruptionType, shouldResume: Bool = false) -> Notification {
+        var info: [AnyHashable: Any] = [AVAudioSessionInterruptionTypeKey: type.rawValue]
+        if type == .ended {
+            info[AVAudioSessionInterruptionOptionKey] =
+                (shouldResume ? AVAudioSession.InterruptionOptions.shouldResume : []).rawValue
+        }
+        return Notification(name: AVAudioSession.interruptionNotification, object: nil, userInfo: info)
+    }
+
+    func testPlayOnAFirstLoadPausedMidwayResumesThatLoad() {
+        // No AVPlayer exists until a first load lands, so Play used to start the queue's head
+        // instead (Resume Last Night's episode swapped for another one).
+        let e = sleepEngine(nightMinutes: 0)
+        defer { e.stopAll() }
+        e.queueManager.queue = [Episode(id: "head-\(UUID().uuidString)", title: "Head",
+                                        audioUrl: fileURL.absoluteString, duration: 20)]
+        let id = "last-night-\(UUID().uuidString)"
+        e.loadPodcast(fileURL.absoluteString, id: id, fallbackTitle: "Last night")
+        e.pauseAll()
+        XCTAssertFalse(e.podcastIsPlayingOrStarting)
+        e.togglePodcast()                              // the Play the paused load shows
+        XCTAssertTrue(e.podcastIsPlayingOrStarting)
+        XCTAssertEqual(e.loadedEpisode?.id, id, "the same episode, not the queue head")
+    }
+
+    func testTheTerminalStopDuringALoadArmsNoFreshNight() async {
+        // The reported symptom: the next episode started after "everything stopped", and that
+        // idle → playing edge armed a brand-new night timer over it.
+        let e = sleepEngine(nightMinutes: 45)
+        defer { e.stopAll(); e.sleepTimer.cancelTimer() }
+        e.loadPodcast(fileURL.absoluteString, id: "stop-\(UUID().uuidString)", resume: false)
+        XCTAssertTrue(e.podcastIsPlayingOrStarting)
+        e.stopAll()
+        XCTAssertFalse(e.podcastIsPlayingOrStarting)
+        let landed = await waitUntil { e.hasLoadedEpisode }
+        XCTAssertTrue(landed)
+        await settle()
+        XCTAssertFalse(e.isPodPlaying, "stopped means stopped")
+        XCTAssertEqual(e.sleepTimer.timerRemaining, 0, "no night timer armed over a stopped app")
+    }
+
+    func testACallDuringALoadHoldsItAndItsEndBringsItBack() async {
+        let e = sleepEngine(nightMinutes: 0)
+        defer { e.stopAll() }
+        e.loadPodcast(fileURL.absoluteString, id: "call-\(UUID().uuidString)", resume: false)
+        XCTAssertFalse(e.isPodPlaying, "mid-load: not reported playing yet")
+        e.handleInterruption(note: interruption(.began))
+        XCTAssertFalse(e.podcastIsPlayingOrStarting, "the call pauses the load in flight")
+        _ = await waitUntil { e.hasLoadedEpisode }
+        await settle()
+        XCTAssertFalse(e.isPodPlaying, "the episode must not start under the call")
+
+        e.handleInterruption(note: interruption(.ended, shouldResume: true))
+        let resumed = await waitUntil { e.isPodPlaying }
+        XCTAssertTrue(resumed, "the call's end brings back what was starting")
+    }
+
+    // Value: protects=headphones out during a load holds it; fails_when=the route handler checks isPodPlaying only; why_new=only the call path was tested; seam=none
+    func testHeadphonesOutDuringALoadKeepsItOffTheSpeaker() async {
+        // AirPods out right after tapping an episode: it must not start on the speaker and wake the room.
+        let e = sleepEngine(nightMinutes: 0)
+        defer { e.stopAll() }
+        e.loadPodcast(fileURL.absoluteString, id: "route-\(UUID().uuidString)", resume: false)
+        XCTAssertTrue(e.podcastIsPlayingOrStarting)
+        // Through the real observer (AudioSessionController hops it to main).
+        NotificationCenter.default.post(name: AVAudioSession.routeChangeNotification, object: nil, userInfo: [
+            AVAudioSessionRouteChangeReasonKey: AVAudioSession.RouteChangeReason.oldDeviceUnavailable.rawValue])
+        _ = await waitUntil { e.hasLoadedEpisode }
+        await settle()
+        XCTAssertFalse(e.isPodPlaying, "the episode must not start on the speaker")
+        XCTAssertFalse(e.podcastIsPlayingOrStarting)
+    }
+}
+
+/// An episode's end is filed under the episode its ITEM was loaded for. `.AVPlayerItemDidPlayToEndTime`
+/// can be posted off the main thread, so a Next tapped right at the natural end could swap the new
+/// episode in first, and the late end then marked the NEW episode played, erased its position and
+/// (with delete-on-completion) deleted its download.
+@MainActor
+final class PodcastItemEndTests: XCTestCase {
+    private var urls: [URL] = []
+
+    override func tearDownWithError() throws {
+        urls.forEach { try? FileManager.default.removeItem(at: $0) }
+        urls = []
+    }
+
+    private func wav(seconds: Int) throws -> String {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("end-\(UUID().uuidString).wav")
+        try PodcastPlayerRebuildTests.quietWav(seconds: seconds).write(to: url)
+        urls.append(url)
+        return url.absoluteString
+    }
+
+    private func waitUntil(_ timeout: TimeInterval = 8, _ condition: () -> Bool) async -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if condition() { return true }
+            try? await Task.sleep(nanoseconds: 20_000_000)
+        }
+        return condition()
+    }
+
+    func testALateEndFromTheReplacedItemLeavesTheNewEpisodeAlone() throws {
+        let p = PodcastPlayer()
+        defer { p.stop() }
+        var advances: [(id: String?, finished: Bool)] = []
+        p.onQueueAdvance = { advances.append(($0, $1)) }
+        let newId = "next-\(UUID().uuidString)"
+        p.setPositions(p.savedPositions.merging([newId: 120]) { $1 })   // where B was left
+
+        p.play(url: try wav(seconds: 20), id: "old-\(UUID().uuidString)", title: "A", resume: false)
+        let oldItem = try XCTUnwrap(p.currentItem)
+        p.play(url: try wav(seconds: 20), id: newId, title: "B")         // Next, at A's very end
+        // A's end, arriving after the swap.
+        p.itemDidFinishPlaying(Notification(name: .AVPlayerItemDidPlayToEndTime, object: oldItem))
+
+        XCTAssertTrue(advances.isEmpty, "a replaced item's end must not move the queue")
+        XCTAssertEqual(p.savedPositions[newId], 120, "the new episode's place survives")
+        XCTAssertFalse(p.didPlayToEnd, "the new episode isn't spent")
+    }
+
+    func testALateStallFromTheReplacedItemIsIgnored() async throws {
+        let p = PodcastPlayer()
+        defer { p.stop() }
+        var notes: [String] = []
+        p.onPlaybackNote = { if let n = $0 { notes.append(n) } }
+        p.play(url: try wav(seconds: 20), id: "old-\(UUID().uuidString)", title: "A", resume: false)
+        let oldItem = try XCTUnwrap(p.currentItem)
+        p.play(url: try wav(seconds: 20), id: "new-\(UUID().uuidString)", title: "B", resume: false)
+        p.itemStalled(Notification(name: .AVPlayerItemPlaybackStalled, object: oldItem))
+        try? await Task.sleep(nanoseconds: 200_000_000)               // past its hop to main
+        XCTAssertFalse(notes.contains("Buffering…"), "no stall watch against the episode now loading")
+
+        p.itemStalled(Notification(name: .AVPlayerItemPlaybackStalled, object: p.currentItem))
+        let watched = await waitUntil(2) { notes.contains("Buffering…") }
+        XCTAssertTrue(watched, "the loaded item's own stall still counts")
+    }
+
+    func testARealEndAdvancesUnderItsOwnEpisode() async throws {
+        // End to end on a real item: the observer (now taking the notification) still fires, and
+        // the end is filed under the episode that played.
+        let p = PodcastPlayer()
+        defer { p.stop() }
+        var advances: [(id: String?, finished: Bool)] = []
+        p.onQueueAdvance = { advances.append(($0, $1)) }
+        let id = "short-\(UUID().uuidString)"
+        p.play(url: try wav(seconds: 1), id: id, title: "Short", resume: false)
+        let ended = await waitUntil(10) { !advances.isEmpty }
+        XCTAssertTrue(ended, "a one-second episode must reach its end")
+        XCTAssertEqual(advances.first?.id, id)
+        XCTAssertEqual(advances.first?.finished, true)
+        XCTAssertTrue(p.didPlayToEnd)
+        XCTAssertNil(p.savedPositions[id], "a finished episode keeps no resume point")
     }
 }

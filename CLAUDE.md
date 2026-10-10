@@ -43,7 +43,9 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   pure UI rules (`SessionGuardsTests`, `NightRingMathTests`, `MiniPlayerClearanceTests`,
   `HomeScreensaverPolicyTests`), the podcast rules (`PodcastTextTests`, `ShowNotesPreviewTests`,
   `ShowNotesEdgeTests`, `TonightShelfTests`, `QueueMoveToHeadTests`), the player rules
-  (`NowPlayingStateTests`, `NightLineCopyTests`, `PlayerQueueActionTests`), and more);
+  (`NowPlayingStateTests`, `NightLineCopyTests`, `PlayerQueueActionTests`,
+  `PodcastFailureStreakTests`), the real-AVPlayer suites (`PodcastPlayerRebuildTests`,
+  `PodcastLoadHoldTests`, `PodcastItemEndTests`), and more);
   `PersistenceTests.swift` (`PersistenceMigrator` / `MixStore`); `BackupRoundTripTests.swift`;
   `FocusDriversTests.swift`; `GenerativeAudioEngineTests.swift` (`GenerativeMediaResetTests`).
 
@@ -82,12 +84,29 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   exported log's `podcast resume:` / `rebuilding the AVPlayer` lines before touching volume code.
 - **Now playing is `AudioEngine.loadedEpisode`, never the queue head.** Every load sets it (all
   loads go through `loadPodcast`; an unqueued episode gets a title-only stand-in), and it outlives
-  the queue moving on (a failure, the sleep-aware hold, a removal). The player views resolve the
+  the queue moving on (the sleep-aware hold, a removal). The player views resolve the
   hero and Up Next through `NowPlayingState`, not `queue.first` / `dropFirst()`, and the player's
   queue edits pin the loaded episode, not `queue[0]` (`PodcastQueueManager.skipToNext`,
   `moveInUpNext`, `shuffleRemainingQueue(nowPlayingId:)`, `remove`/`restore` for Undo). Next is a
   skip, not a finish: it never marks played or deletes the download, and plays on with Auto-Play
   off. Failures carry their episode id; `handlePodcastFailure` ignores one from a replaced item.
+- **A pause during a load sticks.** `PodcastPlayer.play()` only plays after the tap attach (up to
+  1.5 s) and the resume-seek, so it arms `playWhenLoaded`; `pause()` / `stop()` clear it and the
+  load lands paused. Mid-load, `resume()` / `toggle()` act on that pending load, never on the
+  previous item still in the AVPlayer. The engine's pauses that aren't a tap on a control showing
+  `isPodPlaying` (a call, headphones out, Pause All, Apple Music) read
+  `podcastIsPlayingOrStarting`. Before this, a lock-screen pause, a call or the timer's terminal
+  stop during an auto-advance was undone, and the playing edge could arm a fresh night timer.
+- **Item-level news is filed by item.** The end, stall and failure handlers check
+  `item === currentItem` and use `currentItemId`, never `currentId`.
+  `.AVPlayerItemDidPlayToEndTime` can arrive off main after a Next has swapped the next episode
+  in; filed under `currentId` it marked the NEW episode played and deleted its download.
+- **A failure is not a finish.** `AudioEngine.episodeDidEnd(didFinish: false)` goes to
+  `PodcastQueueManager.advancePastFailure`. The episode stays queued with its download. Auto-Play
+  moves on only outside the tail and the hold, never to one that already failed in this run, and
+  stops after `failureLimit` (3) in a row with the failed ones back at the head. A finish or a
+  person's pick resets the count. Offline, every load fails, and advancing on each one emptied
+  the queue overnight.
 - **Downloads live in Application Support**, not Documents (Apple 2.5.x: re-downloadable content
   must not be iCloud-backed). `isExcludedFromBackup`, ~2GB LRU cap (`AudioDownloader`).
 - **Persistence is per-key JSON** via `StorageManager`; one oversized write must not abort the
