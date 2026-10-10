@@ -29,7 +29,8 @@ Suites in `SleepulatorTests/` (six files, many suites):
   `StorageManagerTests` (backup recovery), `NetRetryTests`, `CacheEvictionTests`, the
   sleep-timer suites (backstop, cancel, end-of-episode), layering, mode reconciliation, and the
   Podcasts-tab rules (`PodcastTextTests`, `ShowNotesPreviewTests`, `ShowNotesEdgeTests`,
-  `TonightShelfTests`, `QueueMoveToHeadTests`).
+  `TonightShelfTests`, `QueueMoveToHeadTests`), and the player rules (`NowPlayingStateTests`,
+  `NightLineCopyTests`, `PlayerQueueActionTests`).
 - `PersistenceTests.swift` — legacy `SavedMix` → `SoundPreset` migration, library seeding,
   position-map coercion, `MixStore` reloads.
 - `BackupRoundTripTests.swift` — settings Export → Import round-trip and its key allowlist.
@@ -381,6 +382,52 @@ this section is where you do it. Do it in a dark room at your real bedtime brigh
 11. **Large text + VoiceOver.** At an accessibility text size the show page keeps only Resume + "…"
    above the list; rows drop the thumbnail and wrap the title; the Tonight buttons stack.
    VoiceOver reads each episode row as "…, Unplayed / In progress / Played".
+
+### O. Podcast player: the night line, failures + the veil (added 2026-10-10, simulator-checked only)
+Sleep unless noted, in a dark room at bedtime brightness. The timer, tail, veil and live-stream
+changes are the ones a simulator can't settle.
+
+1. **The veil closes an idle player, not one in use.** Sounds + an episode playing, a timer
+   running. Open Now Playing and leave it alone. ✅ When the night veil drops (~60 s) the sheet
+   closes and the screen goes black; it never stays lit above the veil. Close it, wait ~50 s,
+   open it again → it isn't swept away seconds later (opening restarts the minute). Keep using it
+   (scrub, skip, reorder Up Next) for 2+ minutes → it stays. With VoiceOver on, and with Switch
+   Control, leave it open → the veil never closes it.
+2. **"Stop after this episode" only while playing.** Play an episode of known length, open the
+   player. ✅ The hairline chip shows under the night line; pause → it goes (from the timer sheet
+   too) and the transport doesn't move. Tap it while playing → the line reads "Stops with this
+   episode · in N min". Then take the AirPods out (or pause from the lock screen) and leave the
+   phone. ✅ The night still ends on time: at the promised minute the sounds fade and stop (or
+   the tail runs), though the podcast stays paused. Export logs: `end-of-episode timer: podcast
+   paused, …s left now counted on the wall clock`.
+3. **The ambient tail after a stop-with-episode.** Timer sheet → "Keep sounds going after the
+   podcast stops" at 10 min. Bed + an episode; scrub to its last ~3 min; tap "Stop after this
+   episode" (the line adds "· sounds go on 10 min"); lock. ✅ At the episode's end the podcast
+   stops, the next episode does NOT start, and the bed carries on ("Sounds fading · N min left"),
+   then everything stops ~10 min later. Repeat with two or three episodes: every run gets the
+   tail, never a hard stop at the episode's end. In the tail, tap Next or an Up Next title → the
+   timer cancels and that episode is audible.
+4. **A failed episode offers a way on.** Airplane mode, play an episode that isn't downloaded (or
+   one whose enclosure 404s or won't parse). ✅ The player reads "Couldn't play this episode" with
+   **Try again** and, when something's queued after it, **Play next**; the play disc is a retry
+   arrow; the mini-player says the same. No raw system error, no spinner over the previous
+   episode's audio, and lock-screen Play doesn't resume the previous episode under this one's
+   name. Back online → Try again plays it. Play next plays Up Next's first row even with Auto-Play
+   off. With Auto-Play on, a failure moves straight on. The failed episode is never marked played.
+5. **A live stream keeps a clock.** Play a live or 24/7 stream from a feed. ✅ "Live · 12:34"
+   counts up where the scrubber was (not a bar stuck at 0:00, not a spinner); back/forward 15
+   work; no "Stop after this episode" chip; the night line reads "Timer ends in …" or "Plays all
+   night".
+6. **The Night Limiter line, only with the limiter on.** Limiter off (the default): play a stream
+   the tap can't attach to (HLS). ✅ No limiter wording anywhere. Turn the limiter on in Settings
+   and load it again. ✅ One dim line in the full player, "Night Limiter can't soften this
+   stream"; no amber banner on Home, and the mini-player keeps its normal status. A regular MP3
+   episode with the limiter on → no line.
+7. **Build mix clears the loaded bar on a small phone.** On the smallest supported iPhone (SE /
+   mini), Sleep Home with an episode loaded. ✅ Build mix sits fully above the mini-player and
+   takes taps; in Focus, so does Focus session. Check with the tab bar showing, after the
+   screensaver hides it, and at the largest text size. (The fix was measured on an iPhone 17 Pro
+   only.)
 
 ---
 
