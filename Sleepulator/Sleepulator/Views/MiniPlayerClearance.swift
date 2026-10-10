@@ -20,6 +20,14 @@ enum MiniPlayerClearanceMath {
         guard let miniTop, safeBottom > 0 else { return 0 }
         return max(0, safeBottom - miniTop + gap)
     }
+
+    /// The screen's bottom edge (global Y) from a view that fills its container: the frame ends at
+    /// the container's safe-area edge, and the inset is what lies beyond it. A frame measured after
+    /// `.ignoresSafeArea()` does NOT reach the screen edge (it reports the same safe-area edge), so
+    /// it can't stand in for this.
+    static func screenBottom(frameMaxY: CGFloat, safeAreaBottom: CGFloat) -> CGFloat {
+        frameMaxY + safeAreaBottom
+    }
 }
 
 /// Reserves exactly the space the mini-player covers, measured, instead of the hand-tuned 112 /

@@ -1612,6 +1612,20 @@ final class MiniPlayerClearanceTests: XCTestCase {
     func testBarBelowTheEdgeNeedsNothingExtra() {
         XCTAssertEqual(MiniPlayerClearanceMath.clearance(safeBottom: 600, miniTop: 700), 0)
     }
+
+    // Regression (Build mix vanished whenever an episode was loaded): Home read the screen bottom
+    // off a frame that stops at the safe-area edge (791 on an iPhone 17 Pro, the tab bar's top)
+    // and then subtracted the tab bar again: 791 − 83 − 694 + 12 = 26, which left the row behind
+    // the bar. The screen bottom is the root's frame edge plus its inset, and it holds whether
+    // the tab bar shows (inset 83) or the screensaver has hidden it (inset 34).
+    func testHomeClearsTheLoadedBarOnAnIPhone17Pro() {
+        let anchored: CGFloat = 83, miniTop: CGFloat = 694
+        let shown = MiniPlayerClearanceMath.screenBottom(frameMaxY: 791, safeAreaBottom: 83)
+        let screensaver = MiniPlayerClearanceMath.screenBottom(frameMaxY: 840, safeAreaBottom: 34)
+        XCTAssertEqual(shown, 874)
+        XCTAssertEqual(screensaver, shown, "stable while the tab bar hides")
+        XCTAssertEqual(MiniPlayerClearanceMath.clearance(safeBottom: shown - anchored, miniTop: miniTop), 109)
+    }
 }
 
 

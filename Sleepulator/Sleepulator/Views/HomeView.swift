@@ -398,7 +398,6 @@ struct HomeView: View {
                 endRadius: 620
             )
             .ignoresSafeArea()
-            .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY } action: { screenMaxY = $0 }
 
             // Backdrop is the selected AmbientScene for the current mode (Phase 1 of
             // SCREENSAVER-LIBRARY-SPEC): scenes live behind a protocol + registry, so adding
@@ -611,6 +610,15 @@ struct HomeView: View {
                 .transition(.opacity)
             }
         }
+        // The screen's bottom edge, from the root: its frame ends at the safe-area edge and its
+        // inset is what lies beyond (MiniPlayerClearanceMath.screenBottom). This used to be read
+        // off the backdrop gradient, on the theory that `.ignoresSafeArea()` stretched it to the
+        // screen edge. Its geometry stays at the safe-area edge, so the tab bar was subtracted
+        // twice and Build mix sat behind the mini-player whenever an episode was loaded.
+        .onGeometryChange(for: CGFloat.self) { proxy in
+            MiniPlayerClearanceMath.screenBottom(frameMaxY: proxy.frame(in: .global).maxY,
+                                                 safeAreaBottom: proxy.safeAreaInsets.bottom)
+        } action: { screenMaxY = $0 }
         .onGeometryChange(for: EdgeInsets.self) { $0.safeAreaInsets } action: { insets in
             liveInsets = insets
             // Anchor only while the tab bar shows, so the lift is exactly what hiding it took away.
