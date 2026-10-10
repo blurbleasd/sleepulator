@@ -650,6 +650,11 @@ struct HomeView: View {
                 .transition(.opacity)
             }
         }
+        // Home's own accessibility shape. Without it SwiftUI gives this container the night ring's
+        // (NightRing's `.contentShape(.accessibility, RingBand…)`): a 250 pt square around the
+        // orb, which clipped every other control on Sleep Home out of the accessibility hit test
+        // (XCUITest called the mode switcher and Build mix unhittable).
+        .contentShape(.accessibility, Rectangle())
         .onGeometryChange(for: EdgeInsets.self) { $0.safeAreaInsets } action: { insets in
             liveInsets = insets
             // Anchor only while the tab bar shows, so the lift is exactly what hiding it took away.
