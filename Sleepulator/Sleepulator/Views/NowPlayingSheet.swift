@@ -1,5 +1,4 @@
 import SwiftUI
-import MediaPlayer
 
 /// The full player. Sleep is its hard case: opened in a dark room to check the time left or step
 /// back 15 seconds, then left alone. It speaks Home's night language (OrbButton, VolumeBar,
@@ -17,7 +16,6 @@ struct NowPlayingSheet: View {
     @ObservedObject var queue: PodcastQueueManager
     /// High-frequency playback position, observed directly (see PlaybackProgress).
     @ObservedObject var progress: PlaybackProgress
-    @Binding var isPresented: Bool
     let pal: Palette
     /// Any touch in the sheet. The night veil counts its 60 s from the last interaction; without
     /// this, a sheet in use could be swept away when the veil drops (ContentView).
@@ -216,10 +214,10 @@ struct NowPlayingSheet: View {
         }
     }
 
-    /// "Up next · 1 hour, 16 minutes" for an episode waiting at the head of the queue.
+    /// "Up next · 1 hr 16 min" for an episode waiting at the head of the queue.
     private var readyLine: String {
         guard let d = state.hero?.duration, d > 0 else { return "Up next" }
-        return "Up next · \(PlayerClock.spoken(d))"
+        return "Up next · \(PlayerClock.short(d))"
     }
 
     // MARK: Scrubber
@@ -319,7 +317,8 @@ struct NowPlayingSheet: View {
             PlayerDiscButton(systemImage: audio.isPodPlaying ? "pause.fill" : "play.fill", diameter: d, pal: pal) {
                 audio.togglePodcast()
             }
-            .accessibilityLabel(audio.isPodPlaying ? "Pause" : "Play")
+            // The same names as the mini-player's button (the orb's are "Pause all audio" / "Play").
+            .accessibilityLabel(audio.isPodPlaying ? "Pause podcast" : "Play podcast")
         }
     }
 
@@ -344,12 +343,6 @@ struct NowPlayingSheet: View {
         let artSize: CGFloat = (night ? 150 : 250) * (typeSize.isAccessibilitySize ? 0.6 : 1)
         ScrollView {
             VStack(spacing: UI.xxl) {
-                // Drag indicator
-                Capsule()
-                    .fill(pal.dim)
-                    .frame(width: 40, height: 5)
-                    .padding(.top, 10)
-
                 // Sleep: a smaller, desaturated cover under a dark scrim, so the show's (often
                 // near-white) art no longer outshines everything else at 2am. Focus keeps it full.
                 EpisodeArtwork(url: state.hero?.artworkUrl, pal: pal, size: artSize,
@@ -395,27 +388,27 @@ struct NowPlayingSheet: View {
                     }
                 }
 
-                // Speed & Audio Options
-                HStack {
-                    Text("Speed:")
+                // Speed: a Picker inside the menu, so the current speed carries a checkmark.
+                HStack(spacing: UI.sm) {
+                    Text("Speed")
                         .font(.subheadline)
                         .foregroundColor(pal.dim)
 
                     Menu {
-                        ForEach([0.8, 1.0, 1.2, 1.5, 2.0], id: \.self) { speed in
-                            Button(action: { audio.playbackSpeed = speed }) {
-                                Text(String(format: "%.1fx", speed))
+                        Picker("Speed", selection: Binding(get: { audio.playbackSpeed },
+                                                           set: { audio.playbackSpeed = $0 })) {
+                            ForEach([0.8, 1.0, 1.2, 1.5, 2.0], id: \.self) { speed in
+                                Text(PlayerClock.speedLabel(speed)).tag(speed)
                             }
                         }
                     } label: {
-                        Text(String(format: "%.1fx", audio.playbackSpeed))
+                        Text(PlayerClock.speedLabel(audio.playbackSpeed))
                             .font(.headline)
+                            .monospacedDigit()
                             .foregroundColor(pal.accent)
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 8)
+                            .padding(.horizontal, UI.lg)
                             .frame(minHeight: 44)
-                            .background(pal.text.opacity(0.1))
-                            .clipShape(Capsule())
+                            .background(Capsule().fill(pal.text.opacity(0.08)))
                     }
                     .accessibilityLabel("Playback speed")
                     .accessibilityValue(String(format: "%.1f times", audio.playbackSpeed))
@@ -426,8 +419,10 @@ struct NowPlayingSheet: View {
                     upNextSection
                 }
 
-                Spacer().frame(height: 40)
+                Spacer().frame(height: UI.xxl)
             }
+            // Clear of the system grabber.
+            .padding(.top, UI.xxl)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(pal.bg.ignoresSafeArea())
@@ -465,7 +460,7 @@ struct NowPlayingSheet: View {
                     // Durations of 0 (unknown/live) are simply not counted.
                     let secs = state.upNext.reduce(0.0) { $0 + max(0, $1.duration ?? 0) }
                     let count = state.upNext.count
-                    Text("\(count) episode\(count == 1 ? "" : "s")" + (secs > 60 ? " · \(Int(secs) / 3600 > 0 ? "\(Int(secs) / 3600)h " : "")\((Int(secs) % 3600) / 60)m" : ""))
+                    Text("\(count) episode\(count == 1 ? "" : "s")" + (secs > 60 ? " · \(PlayerClock.short(secs))" : ""))
                         .font(.caption)
                         .foregroundColor(pal.dim)
                 }

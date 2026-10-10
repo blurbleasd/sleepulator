@@ -1984,6 +1984,15 @@ final class NowPlayingStateTests: XCTestCase {
         XCTAssertEqual(PlayerClock.string(.nan), "0:00")
     }
 
+    func testShortLengthsAndSpeeds() {
+        XCTAssertEqual(PlayerClock.short(66 * 60 + 41), "1 hr 7 min")
+        XCTAssertEqual(PlayerClock.short(45 * 60), "45 min")
+        XCTAssertEqual(PlayerClock.short(120 * 60), "2 hr")
+        XCTAssertEqual(PlayerClock.short(10), "1 min", "never \"0 min\"")
+        XCTAssertEqual(PlayerClock.speedLabel(1.0), "1\u{00D7}")
+        XCTAssertEqual(PlayerClock.speedLabel(1.2), "1.2\u{00D7}")
+    }
+
     func testSpokenTimeUsesWords() {
         XCTAssertFalse(PlayerClock.spoken(4607).contains(":"))
         XCTAssertFalse(PlayerClock.spoken(0).isEmpty)

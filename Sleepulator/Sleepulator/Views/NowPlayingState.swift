@@ -65,6 +65,22 @@ nonisolated enum PlayerClock {
         return h > 0 ? String(format: "%d:%02d:%02d", h, m, s) : String(format: "%d:%02d", m, s)
     }
 
+    /// "1×", "1.2×": the multiplication sign, and no trailing ".0".
+    static func speedLabel(_ speed: Double) -> String {
+        let s = speed == speed.rounded() ? String(Int(speed)) : String(format: "%.1f", speed)
+        return s + "\u{00D7}"
+    }
+
+    /// "1 hr 16 min", "45 min", "2 hr": a length at a glance, to the nearest minute (never "0 min").
+    /// The player's one short style for durations (Up Next totals, a waiting episode); the
+    /// night line's countdowns share it (NightLineCopy.span, which rounds up).
+    static func short(_ seconds: Double) -> String {
+        let mins = max(1, Int(((seconds.isFinite ? max(0, seconds) : 0) / 60).rounded()))
+        let h = mins / 60, m = mins % 60
+        if h == 0 { return "\(m) min" }
+        return m == 0 ? "\(h) hr" : "\(h) hr \(m) min"
+    }
+
     /// "1 hour, 16 minutes": minutes are the useful grain when listening; seconds only under one.
     static func spoken(_ seconds: Double) -> String {
         let total = seconds.isFinite ? max(0, seconds) : 0

@@ -35,6 +35,9 @@ struct MiniPlayerView: View {
                 idleBar
             }
         }
+        // The progress line runs along the top edge; clipped, it follows the card's corners
+        // instead of poking square past them.
+        .clipShape(RoundedRectangle(cornerRadius: UI.cardRadius))
         // A real material under the dusk tint: at 85% flat fill, the rows scrolling beneath
         // ghosted through and overprinted the subtitle. Reduce Transparency is honoured by the
         // material itself.
@@ -56,7 +59,10 @@ struct MiniPlayerView: View {
         .padding(.bottom, 80) // float above the tab bar
         .sheet(isPresented: $showNowPlaying) {
             NowPlayingSheet(audio: audio, queue: audio.queueManager, progress: progress,
-                            isPresented: $showNowPlaying, pal: pal, onInteraction: onSheetInteraction)
+                            pal: pal, onInteraction: onSheetInteraction)
+                // The system grabber (the hand-drawn one scrolled away with the content).
+                .presentationDragIndicator(.visible)
+                .presentationBackground(pal.bg)
         }
     }
 
@@ -140,7 +146,6 @@ struct MiniPlayerView: View {
                             .font(.subheadline.bold())
                             .foregroundColor(pal.text)
                             .lineLimit(1)
-                            .minimumScaleFactor(0.8)
                             .truncationMode(.tail)
 
                         Text(statusText)
@@ -178,7 +183,6 @@ struct MiniPlayerView: View {
                             .font(.subheadline.bold())
                             .foregroundColor(pal.text)
                             .lineLimit(1)
-                            .minimumScaleFactor(0.8)
                             .truncationMode(.tail)
                         // Counts what follows this episode, the way the full player's Up Next does
                         // (it used to count the head too: "5 in queue" over a list of 4).
@@ -201,23 +205,45 @@ struct MiniPlayerView: View {
 
     // MARK: Idle — nothing loaded, empty queue
 
+    /// Off the Podcasts tab it leads there; on it, it just says so. (It used to show a half-lit
+    /// play glyph, 2.6:1, that looked like a disabled button and did nothing.)
     @ViewBuilder
     private var idleBar: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "play.circle.fill")
-                .font(.system(size: min(playGlyph, 40)))
-                .foregroundColor(pal.dim.opacity(0.5))
+        if selectedTab != 1 {
+            Button(action: { selectedTab = 1 }) {
+                idleContent(leads: true).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Nothing playing")
+            .accessibilityHint("Opens Podcasts")
+        } else {
+            idleContent(leads: false)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Nothing playing")
+        }
+    }
+
+    private func idleContent(leads: Bool) -> some View {
+        HStack(spacing: UI.sm) {
+            Image(systemName: "music.note.list")
+                .font(.title3)
+                .foregroundColor(pal.dim)
                 .frame(minWidth: 44, minHeight: 44)
 
-            Text("Nothing playing")
-                .font(.subheadline)
-                .foregroundColor(pal.dim)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Nothing playing")
+                    .font(.subheadline)
+                    .foregroundColor(pal.dim)
+                if leads {
+                    Text("Find an episode in Podcasts")
+                        .font(.caption2)
+                        .foregroundColor(pal.dim)
+                }
+            }
 
             Spacer()
         }
-        .padding(.horizontal, 16)
+        .padding(.horizontal, UI.lg)
         .padding(.vertical, 10)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Nothing playing")
     }
 }
