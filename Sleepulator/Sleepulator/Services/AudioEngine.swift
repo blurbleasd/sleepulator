@@ -616,37 +616,7 @@ final class AudioEngine: ObservableObject {
         }
         
         podPlayer.onQueueAdvance = { [weak self] finishedEpId, didFinish in
-            DispatchQueue.main.async {
-                guard let self = self else { return }
-                // Only a natural end marks the episode played. A failed / stalled-lost stream
-                // must NOT be recorded as heard (it would vanish under "hide finished episodes").
-                if didFinish, let id = finishedEpId {
-                    self.queueManager.markFinished(id)
-                }
-                // End-of-episode sleep timer: stop everything when this episode ends rather than
-                // rolling into the next one. (externalTick normally fires the stop just before the
-                // natural end; this covers the exact boundary if the last tick missed it.)
-                if self.sleepTimer.isEndOfEpisode {
-                    self.sleepTimer.episodeEnded()   // the tail if one's set, else the stop
-                    return
-                }
-                // In the ambient tail the podcast is done for the night: tidy the queue, play nothing.
-                // (Auto-advancing here played the next episode under the tail, then cut it off.)
-                if self.sleepTimer.inTail {
-                    self.queueManager.advanceQueue(finishedEpId: finishedEpId, suppressAutoPlay: true)
-                    return
-                }
-                // Sleep-aware hold: with a sleep timer running you're presumably asleep — burning
-                // through the queue marks episodes you never heard as finished. When the option
-                // is on, finish the current episode, tidy the queue (head drops, next is cued for
-                // morning), and let the ambient bed carry the rest of the night.
-                if self.sleepTimer.timerRemaining > 0,
-                   UserDefaults.standard.bool(forKey: "holdQueueDuringSleepTimer") {
-                    self.queueManager.advanceQueue(finishedEpId: finishedEpId, suppressAutoPlay: true)
-                    return
-                }
-                self.queueManager.advanceQueue(finishedEpId: finishedEpId)
-            }
+            DispatchQueue.main.async { self?.episodeDidEnd(finishedEpId, didFinish: didFinish) }
         }
         
         podPlayer.onNearEnd = { [weak self] in
@@ -914,6 +884,48 @@ final class AudioEngine: ObservableObject {
         isPodPlaying = false
     }
 
+    /// The loaded episode ended: `didFinish` for a natural end, false for a failed or lost stream.
+    /// (Internal: the tests drive it directly.)
+    func episodeDidEnd(_ finishedEpId: String?, didFinish: Bool) {
+        // Only a natural end marks the episode played. A failed / stalled-lost stream
+        // must NOT be recorded as heard (it would vanish under "hide finished episodes").
+        if didFinish, let id = finishedEpId {
+            queueManager.markFinished(id)
+        }
+        // End-of-episode sleep timer: stop everything when this episode ends rather than
+        // rolling into the next one. (externalTick normally fires the stop just before the
+        // natural end; this covers the exact boundary if the last tick missed it.)
+        if sleepTimer.isEndOfEpisode {
+            sleepTimer.episodeEnded()   // the tail if one's set, else the stop
+            return
+        }
+        // Sleep-aware hold: with a sleep timer running you're presumably asleep — burning
+        // through the queue marks episodes you never heard as finished. When the option
+        // is on, finish the current episode, tidy the queue (head drops, next is cued for
+        // morning), and let the ambient bed carry the rest of the night.
+        let holding = sleepTimer.timerRemaining > 0
+            && UserDefaults.standard.bool(forKey: "holdQueueDuringSleepTimer")
+        // A failure is not a finish: the episode stays queued, and Auto-Play moves on to the next
+        // one only while something may play (not in the tail or the hold) and only so many times in
+        // a row. Offline every load fails within a second or two, and treating each failure like a
+        // finish emptied the whole queue before morning.
+        if !didFinish {
+            // Reported through the main queue: a failure from an episode a newer pick has since
+            // replaced must not stop (and so hold) that pick, or move the queue under it.
+            if let id = finishedEpId, id != podPlayer.currentEpisodeId { return }
+            queueManager.advancePastFailure(failedEpId: finishedEpId,
+                                            mayContinue: !sleepTimer.inTail && !holding)
+            return
+        }
+        // In the ambient tail the podcast is done for the night: tidy the queue, play nothing.
+        // (Auto-advancing here played the next episode under the tail, then cut it off.)
+        if sleepTimer.inTail || holding {
+            queueManager.advanceQueue(finishedEpId: finishedEpId, suppressAutoPlay: true)
+            return
+        }
+        queueManager.advanceQueue(finishedEpId: finishedEpId)
+    }
+
     /// The limiter tap couldn't attach to this stream. Only worth a word when the Night Limiter is
     /// actually on (it ships off by default, and the tap still carries volume and the fade).
     func handleLimiterUnavailable() {
@@ -921,14 +933,15 @@ final class AudioEngine: ObservableObject {
         limiterOffForStream = true
     }
 
-    /// Try the loaded episode again after it failed. The failure already took it out of the queue
-    /// (advance, not marked played), so this puts it back at the head and reloads it.
+    /// Try the loaded episode again after it failed. The failure kept it queued (not marked
+    /// played; see `episodeDidEnd`), so this brings it back to the head and reloads it.
     func retryLoadedEpisode() {
         guard let ep = loadedEpisode else { return }
         // A stand-in (Resume Last Night's episode, no longer queued) is retried as it was loaded:
         // queueing it would write a title-only placeholder into queue.json for good.
         if ep.id == standInEpisodeId {
             cancelTailForManualStart()   // a person's pick, like playEpisode's
+            queueManager.resetFailureStreak()
             loadPodcast(ep.audioUrl, id: ep.id, fallbackTitle: ep.title)
             return
         }
@@ -1321,6 +1334,7 @@ final class AudioEngine: ObservableObject {
     ///   after an end-of-episode timer stop), it starts over rather than play a second and advance.
     func resumeEpisode(_ episode: Episode, at position: TimeInterval?, backUp: TimeInterval = 0) {
         cancelTailForManualStart()
+        queueManager.resetFailureStreak()   // a person's pick: Auto-Play may move on from it again
         queueManager.moveToHead(episode)
         if podPlayer.hasPlayer, !podPlayer.isLoadingItem, podPlayer.currentEpisodeId == episode.id,
            let live = podPlayer.currentPositionSeconds {

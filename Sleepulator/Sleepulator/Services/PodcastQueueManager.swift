@@ -1,6 +1,7 @@
 import Foundation
 import Combine
 import SwiftUI
+import os
 
 final class PodcastQueueManager: ObservableObject {
     @Published var queue: [Episode] = [] {
@@ -116,6 +117,7 @@ final class PodcastQueueManager: ObservableObject {
 
     func playEpisode(_ episode: Episode) {
         userStartedPlaybackFn?()
+        resetFailureStreak()
         moveToHead(episode)
         loadPodcastFn?(episode.audioUrl, episode.id, episode.title, true)
     }
@@ -133,6 +135,7 @@ final class PodcastQueueManager: ObservableObject {
     func playAll(_ episodes: [Episode]) {
         guard let first = episodes.first else { return }
         userStartedPlaybackFn?()
+        resetFailureStreak()
         self.queue = episodes
         loadPodcastFn?(first.audioUrl, first.id, first.title, true)
     }
@@ -159,9 +162,10 @@ final class PodcastQueueManager: ObservableObject {
     
     /// Move an episode one place up (`step` -1) or down (+1) within Up Next: the queue as the
     /// player lists it, which leaves out the episode the player is on. That episode can sit
-    /// anywhere in the queue, or nowhere (a failure or the sleep-aware hold drops it), so the
-    /// head-pinned `moveUp`/`moveDown` (index > 1) could do nothing or move it. Swapping the two
-    /// queue slots of neighbours in Up Next leaves the playing episode where it is.
+    /// anywhere in the queue, or nowhere (the sleep-aware hold drops it; Resume Last Night can load
+    /// one that isn't queued), so the head-pinned `moveUp`/`moveDown` (index > 1) could do nothing
+    /// or move it. Swapping the two queue slots of neighbours in Up Next leaves the playing episode
+    /// where it is.
     /// `nowPlayingId` nil means nothing is loaded: the head is what plays next, and stays put.
     func moveInUpNext(_ episode: Episode, by step: Int, nowPlayingId: String?) {
         let pinned = nowPlayingId ?? queue.first?.id
@@ -200,6 +204,7 @@ final class PodcastQueueManager: ObservableObject {
         var rest = queue.filter { $0.id != currentId }
         guard !rest.isEmpty else { return false }
         userStartedPlaybackFn?()   // a person's Next: lifts the ambient tail like any other pick
+        resetFailureStreak()
         let next = rest.remove(at: shuffleQueue ? Int.random(in: 0..<rest.count) : 0)
         queue = [next] + rest
         loadPodcastFn?(next.audioUrl, next.id, next.title, true)
@@ -207,7 +212,7 @@ final class PodcastQueueManager: ObservableObject {
     }
 
     /// Shuffle Up Next. Like `moveInUpNext`, the episode that stays put is the one the player is
-    /// on, wherever it sits (or nowhere, after a failure or the sleep-aware hold); only with nothing
+    /// on, wherever it sits (or nowhere: the sleep-aware hold, Resume Last Night); only with nothing
     /// loaded is it the head. Pinning `queue[0]` regardless froze Up Next's first row, the very
     /// episode Next and auto-advance play, whenever the loaded episode had left the queue.
     func shuffleRemainingQueue(nowPlayingId: String? = nil) {
@@ -223,6 +228,7 @@ final class PodcastQueueManager: ObservableObject {
     /// delete-on-completion) but do NOT start the next episode — used by the sleep-aware
     /// hold, so the morning queue is clean while the night stays ambient-only.
     func advanceQueue(finishedEpId: String? = nil, suppressAutoPlay: Bool = false) {
+        resetFailureStreak()   // an episode played to its end: loads are working
         // Remove the episode that ACTUALLY finished, identified by id — not just the head. The
         // head is normally the playing episode, but if the queue was reordered (or the head
         // removed) while it played, `removeFirst()` would drop the wrong episode and, with
@@ -259,5 +265,48 @@ final class PodcastQueueManager: ObservableObject {
         
         // Fresh start: the next queued track must begin at 0, never resume a stale/poisoned position.
         loadPodcastFn?(next.audioUrl, next.id, next.title, false)
+    }
+
+    /// Auto-Play gives up after this many failed or lost episodes in a row.
+    static let failureLimit = 3
+    /// Failed or lost episodes since one last played to its end or a person started one.
+    private(set) var failuresInARow = 0
+    /// Their ids, in the order they failed (the queue's order: each failure moves to the next).
+    private var failedInARow: [String] = []
+
+    /// A person started an episode, or one played to its end: Auto-Play may try again.
+    func resetFailureStreak() {
+        failuresInARow = 0
+        failedInARow = []
+    }
+
+    /// The loaded episode failed, or its stream was lost. Unlike `advanceQueue` this never takes
+    /// the episode out of the queue or deletes its download: a failure isn't a listen, and offline
+    /// every load fails within a second or two, so advancing as for a finish emptied the whole
+    /// queue before morning. With Auto-Play on and `mayContinue` (false in the ambient tail and the
+    /// sleep-aware hold), play the first queued episode that hasn't failed in this run, at the head
+    /// with the failed ones right behind it. Otherwise, or after `failureLimit` failures in a row,
+    /// stop with the failed episodes back at the head in the order they were queued. Returns
+    /// whether another episode was started.
+    @discardableResult
+    func advancePastFailure(failedEpId: String?, mayContinue: Bool = true) -> Bool {
+        failuresInARow += 1
+        if let id = failedEpId, !failedInARow.contains(id) { failedInARow.append(id) }
+        let failed = failedInARow.compactMap { id in queue.first { $0.id == id } }
+        let others = queue.filter { !failedInARow.contains($0.id) }
+        guard mayContinue, autoPlay, failuresInARow < Self.failureLimit, !others.isEmpty else {
+            if failuresInARow >= Self.failureLimit {
+                Log.audio.notice("auto-play stopped: \(self.failuresInARow, privacy: .public) failed episodes in a row, all kept queued")
+            }
+            let arranged = failed + others
+            if arranged.map(\.id) != queue.map(\.id) { queue = arranged }
+            pausePodcastFn?()
+            return false
+        }
+        let next = others[shuffleQueue ? Int.random(in: 0..<others.count) : 0]
+        queue = [next] + failed + others.filter { $0.id != next.id }
+        // From the start, as any auto-advance (see `advanceQueue`).
+        loadPodcastFn?(next.audioUrl, next.id, next.title, false)
+        return true
     }
 }

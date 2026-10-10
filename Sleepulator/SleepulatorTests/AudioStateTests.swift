@@ -2310,14 +2310,14 @@ final class PlayerQueueActionTests: XCTestCase {
             engine.queueManager.playEpisode(ep("1"))
             XCTAssertEqual(engine.loadedEpisode?.id, "1")
             XCTAssertTrue(engine.episodeLoading)
-            // What a failure does: the player reports it, then the queue advances without it.
+            // What a failure does: the player reports it, then the episode ends as a failure.
             engine.handlePodcastFailure(episodeId: "1")
-            engine.queueManager.advanceQueue(finishedEpId: "1")
+            engine.episodeDidEnd("1", didFinish: false)
             XCTAssertTrue(engine.podcastFailed)
             XCTAssertFalse(engine.episodeLoading)
             XCTAssertEqual(engine.playbackNote, NowPlayingState.failedCopy)
             XCTAssertEqual(engine.loadedEpisode?.id, "1", "the player is still on it")
-            XCTAssertEqual(engine.queueManager.queue.map(\.id), ["2"])
+            XCTAssertEqual(engine.queueManager.queue.map(\.id), ["1", "2"], "a failure keeps it queued")
             XCTAssertFalse(engine.finishedEpisodes.contains("1"), "a failure is not a listen")
 
             engine.retryLoadedEpisode()
@@ -2347,10 +2347,11 @@ final class PlayerQueueActionTests: XCTestCase {
             engine.queueManager.queue = [ep("1"), ep("2"), ep("3")]
             engine.queueManager.playEpisode(ep("1"))
             engine.handlePodcastFailure(episodeId: "1")
-            engine.queueManager.advanceQueue(finishedEpId: "1")
+            engine.episodeDidEnd("1", didFinish: false)
             XCTAssertEqual(engine.loadedEpisode?.id, "2")
             XCTAssertFalse(engine.podcastFailed, "the next load clears it")
-            XCTAssertEqual(engine.queueManager.queue.map(\.id), ["2", "3"])
+            XCTAssertEqual(engine.queueManager.queue.map(\.id), ["2", "1", "3"],
+                           "the failed one stays queued, right behind the one now playing")
             XCTAssertFalse(engine.finishedEpisodes.contains("1"))
         }
     }
@@ -2363,10 +2364,67 @@ final class PlayerQueueActionTests: XCTestCase {
             engine.queueManager.queue = [ep("1"), ep("2"), ep("3")]
             engine.queueManager.playEpisode(ep("1"))
             engine.handlePodcastFailure(episodeId: "1")
-            engine.queueManager.advanceQueue(finishedEpId: "1")
+            engine.episodeDidEnd("1", didFinish: false)
             engine.skipToNextEpisode()
             XCTAssertEqual(engine.loadedEpisode?.id, "2")
             XCTAssertEqual(engine.queueManager.queue.map(\.id), ["2", "3"])
+        }
+    }
+
+    // The phone goes offline at bedtime: every load fails within a second or two. Auto-Play used
+    // to advance as if each one had finished, dropping it from the queue, so the whole queue was
+    // gone by morning. Now it gives up after a few and the queue reads as it did.
+    func testAnOfflineNightKeepsTheQueue() {
+        let engine = quietEngine()
+        withAutoPlay(true, engine) {
+            engine.queueManager.shuffleQueue = false
+            engine.queueManager.queue = (1...5).map { ep("\($0)") }
+            engine.queueManager.playEpisode(ep("1"))
+            var failures = 0
+            while let id = engine.loadedEpisode?.id, failures < 10 {
+                engine.handlePodcastFailure(episodeId: id)
+                engine.episodeDidEnd(id, didFinish: false)
+                failures += 1
+                if engine.loadedEpisode?.id == id { break }   // nothing new loaded: Auto-Play stopped
+            }
+            XCTAssertEqual(failures, PodcastQueueManager.failureLimit, "Auto-Play gives up, not drains")
+            XCTAssertEqual(engine.queueManager.queue.map(\.id), ["1", "2", "3", "4", "5"])
+            XCTAssertTrue(engine.finishedEpisodes.isDisjoint(with: ["1", "2", "3"]), "a failure is not a listen")
+            XCTAssertTrue(engine.podcastFailed, "the player says so and offers Try again")
+        }
+    }
+
+    // A failure in the sleep-aware hold (or the ambient tail) plays nothing next, and keeps the
+    // episode: it used to be dropped like a finished one.
+    func testAFailureDuringTheHoldKeepsTheEpisodeAndPlaysNothing() {
+        let engine = quietEngine()
+        let savedHold = UserDefaults.standard.object(forKey: "holdQueueDuringSleepTimer")
+        UserDefaults.standard.set(true, forKey: "holdQueueDuringSleepTimer")
+        defer { UserDefaults.standard.set(savedHold, forKey: "holdQueueDuringSleepTimer") }
+        withAutoPlay(true, engine) {
+            engine.queueManager.shuffleQueue = false
+            engine.queueManager.queue = [ep("1"), ep("2")]
+            engine.queueManager.playEpisode(ep("1"))
+            engine.sleepTimer.startSleepTimer(minutes: 30)
+            defer { engine.sleepTimer.cancelTimer() }
+            engine.episodeDidEnd("1", didFinish: false)
+            XCTAssertEqual(engine.loadedEpisode?.id, "1", "nothing else starts while you sleep")
+            XCTAssertEqual(engine.queueManager.queue.map(\.id), ["1", "2"])
+        }
+    }
+
+    // A failure reaches the engine through the main queue. One from an episode a newer pick has
+    // already replaced must leave that pick alone: with Auto-Play off its stop would hold the new
+    // load paused, and it would shuffle the queue under it.
+    func testAStaleFailureReportLeavesTheNewPickAlone() {
+        let engine = quietEngine()
+        withAutoPlay(false, engine) {
+            engine.queueManager.queue = [ep("1"), ep("2")]
+            engine.queueManager.playEpisode(ep("1"))
+            engine.queueManager.playEpisode(ep("2"))
+            engine.episodeDidEnd("1", didFinish: false)
+            XCTAssertTrue(engine.podcastIsPlayingOrStarting, "the pick still starts")
+            XCTAssertEqual(engine.queueManager.queue.map(\.id), ["2", "1"])
         }
     }
 
@@ -2775,6 +2833,110 @@ final class QueueMoveToHeadTests: XCTestCase {
         qm.moveToHead(ep("d"))
         XCTAssertEqual(qm.queue.map(\.id), ["d", "c", "a", "b"])
         sub.cancel()
+    }
+}
+
+/// Auto-Play after a failure: the failed episode stays queued, and a run of failures (the phone
+/// offline) stops after `failureLimit` instead of walking, and emptying, the whole queue.
+@MainActor
+final class PodcastFailureStreakTests: XCTestCase {
+    private var qm: PodcastQueueManager!
+    private var saved: (autoPlay: Bool, shuffle: Bool)!
+    private var loads: [(id: String, resume: Bool)] = []
+    private var pauses = 0
+
+    override func setUp() {
+        qm = PodcastQueueManager()
+        saved = (qm.autoPlay, qm.shuffleQueue)
+        qm.autoPlay = true
+        qm.shuffleQueue = false
+        loads = []
+        pauses = 0
+        qm.loadPodcastFn = { [unowned self] _, id, _, resume in self.loads.append((id, resume)) }
+        qm.pausePodcastFn = { [unowned self] in self.pauses += 1 }
+        qm.queue = (1...5).map(ep)
+    }
+
+    override func tearDown() {
+        qm.autoPlay = saved.autoPlay
+        qm.shuffleQueue = saved.shuffle
+        qm = nil
+    }
+
+    private func ep(_ n: Int) -> Episode {
+        Episode(id: "\(n)", title: "Ep \(n)", audioUrl: "file:///nonexistent/streak-\(n).mp3", duration: 100)
+    }
+
+    private var ids: [String] { qm.queue.map(\.id) }
+
+    func testFailuresMoveOnThenStopWithTheQueueAsItWas() {
+        XCTAssertTrue(qm.advancePastFailure(failedEpId: "1"))
+        XCTAssertEqual(loads.last?.id, "2")
+        XCTAssertEqual(loads.last?.resume, false, "from the start, like any auto-advance")
+        XCTAssertEqual(ids, ["2", "1", "3", "4", "5"], "now playing at the head, the failed one behind it")
+
+        XCTAssertTrue(qm.advancePastFailure(failedEpId: "2"))
+        XCTAssertEqual(loads.last?.id, "3", "never back to one that already failed in this run")
+        XCTAssertEqual(ids, ["3", "1", "2", "4", "5"])
+
+        XCTAssertFalse(qm.advancePastFailure(failedEpId: "3"))
+        XCTAssertEqual(loads.count, 2, "stopped at the limit")
+        XCTAssertEqual(pauses, 1)
+        XCTAssertEqual(ids, ["1", "2", "3", "4", "5"], "the morning queue reads as it did at bedtime")
+        XCTAssertTrue(qm.finishedEpisodes.isDisjoint(with: ["1", "2", "3"]))
+    }
+
+    func testAFinishStartsTheCountOver() {
+        qm.advancePastFailure(failedEpId: "1")             // → 2
+        qm.advancePastFailure(failedEpId: "2")             // → 3
+        qm.advanceQueue(finishedEpId: "3")                 // 3 plays to its end: loads work
+        XCTAssertEqual(loads.last?.id, "1", "the failed ones get another go")
+        XCTAssertTrue(qm.advancePastFailure(failedEpId: "1"), "a fresh run, not the third in a row")
+        XCTAssertEqual(loads.last?.id, "2")
+    }
+
+    func testAPersonsPickStartsTheCountOver() {
+        qm.advancePastFailure(failedEpId: "1")
+        qm.advancePastFailure(failedEpId: "2")
+        qm.playEpisode(ep(4))
+        XCTAssertTrue(qm.advancePastFailure(failedEpId: "4"))
+    }
+
+    func testWithAutoPlayOffAFailureStopsAndKeepsTheEpisode() {
+        qm.autoPlay = false
+        XCTAssertFalse(qm.advancePastFailure(failedEpId: "1"))
+        XCTAssertTrue(loads.isEmpty)
+        XCTAssertEqual(pauses, 1)
+        XCTAssertEqual(ids, ["1", "2", "3", "4", "5"])
+    }
+
+    func testNothingStartsWhenTheNightSaysStop() {
+        // The ambient tail and the sleep-aware hold pass `mayContinue: false`.
+        XCTAssertFalse(qm.advancePastFailure(failedEpId: "1", mayContinue: false))
+        XCTAssertTrue(loads.isEmpty)
+        XCTAssertEqual(ids, ["1", "2", "3", "4", "5"])
+    }
+
+    func testTheOnlyEpisodeFailingStops() {
+        qm.queue = [ep(1)]
+        XCTAssertFalse(qm.advancePastFailure(failedEpId: "1"))
+        XCTAssertTrue(loads.isEmpty)
+        XCTAssertEqual(ids, ["1"])
+    }
+
+    func testShuffleNeverPicksOneThatFailedThisRun() {
+        qm.shuffleQueue = true
+        for _ in 0..<20 {
+            qm.resetFailureStreak()
+            qm.queue = (1...6).map(ep)
+            loads = []
+            XCTAssertTrue(qm.advancePastFailure(failedEpId: "1"))
+            let second = try! XCTUnwrap(loads.last?.id)
+            XCTAssertNotEqual(second, "1")
+            XCTAssertTrue(qm.advancePastFailure(failedEpId: second))
+            XCTAssertFalse(["1", second].contains(loads.last!.id))
+            XCTAssertEqual(Set(ids), Set((1...6).map { "\($0)" }), "nothing dropped")
+        }
     }
 }
 

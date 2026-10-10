@@ -111,8 +111,8 @@ final class PodcastPlayer: NSObject {
     
     var onPlaybackStateChanged: ((Bool) -> Void)?
     /// Advance past the current episode. `didFinish` is true only for a natural end-of-episode
-    /// (the owner marks it played); false for a failed/stalled/lost stream, which must advance the
-    /// queue WITHOUT recording the episode as heard.
+    /// (the owner marks it played); false for a failed/stalled/lost stream, which must move on
+    /// WITHOUT recording the episode as heard (the owner keeps it queued).
     var onQueueAdvance: ((_ finishedId: String?, _ didFinish: Bool) -> Void)?
     var onNearEnd: (() -> Void)?
     var onTitleUpdate: ((String) -> Void)?
