@@ -189,7 +189,13 @@ struct TimerSelectionSheet: View {
                         audio.startEndOfEpisodeTimer()
                         isPresented = false
                     }) {
-                        Label("Stop at end of episode", systemImage: "text.append")
+                        Label {
+                            // Large text wraps it to two lines; centre the second under the first.
+                            // Set on the Text itself: the Label's title ignores it from outside.
+                            Text("Stop at end of episode").multilineTextAlignment(.center)
+                        } icon: {
+                            Image(systemName: "text.append")
+                        }
                             .font(.subheadline.weight(.semibold))
                             // Dim, not full accent: amber text read as bright as the cream commit
                             // above it. The accent hairline still marks it as a button.
