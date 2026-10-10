@@ -160,6 +160,9 @@ final class PodcastPlayer: NSObject {
     var isStartingPlayback: Bool { isLoadingItem && playWhenLoaded }
     /// Read-only outside so tests can drive the item-level failure notifications.
     private(set) var currentItem: AVPlayerItem?
+    /// The episode id `currentItem` was loaded for, set with it. Item-level news (end, stall,
+    /// failure) is filed under this, never under `currentId`, which a malformed URL moves on alone.
+    private var currentItemId: String?
     private var currentTitle: String = "No episode loaded"
     private var playbackSpeed: Float = 1.0
     /// Seconds for the skip-back / skip-forward controls and lock-screen commands.
@@ -419,11 +422,12 @@ final class PodcastPlayer: NSObject {
 
         currentItem?.removeObserver(self, forKeyPath: "status")
         self.currentItem = playerItem
+        self.currentItemId = id
 
         NotificationCenter.default.removeObserver(self, name: .AVPlayerItemDidPlayToEndTime, object: nil)
-        NotificationCenter.default.addObserver(self, selector: #selector(itemDidFinishPlaying), name: .AVPlayerItemDidPlayToEndTime, object: playerItem)
+        NotificationCenter.default.addObserver(self, selector: #selector(itemDidFinishPlaying(_:)), name: .AVPlayerItemDidPlayToEndTime, object: playerItem)
         NotificationCenter.default.removeObserver(self, name: .AVPlayerItemPlaybackStalled, object: nil)
-        NotificationCenter.default.addObserver(self, selector: #selector(itemStalled), name: .AVPlayerItemPlaybackStalled, object: playerItem)
+        NotificationCenter.default.addObserver(self, selector: #selector(itemStalled(_:)), name: .AVPlayerItemPlaybackStalled, object: playerItem)
         NotificationCenter.default.removeObserver(self, name: .AVPlayerItemFailedToPlayToEndTime, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(itemFailedToPlayToEnd(_:)), name: .AVPlayerItemFailedToPlayToEndTime, object: playerItem)
 
@@ -709,10 +713,30 @@ final class PodcastPlayer: NSObject {
         applyVolumeToStates()
     }
     
-    @objc private func itemDidFinishPlaying() {
+    /// `.AVPlayerItemDidPlayToEndTime`, which can be posted off the main thread. The episode that
+    /// ended is the one the notification's ITEM was loaded for, never whatever `currentId` says by
+    /// the time this runs: a Next tapped right at an episode's natural end swaps the new episode in
+    /// first, and the old item's end then marked the NEW one played, erased its saved position and,
+    /// with delete-on-completion, deleted its download. An end from an item that's since been
+    /// replaced is dropped: the load that replaced it already moved the queue on. Internal so the
+    /// tests can deliver a late one.
+    @objc func itemDidFinishPlaying(_ note: Notification) {
+        let item = note.object as? AVPlayerItem
+        if Thread.isMainThread {
+            finishItem(item)
+        } else {
+            DispatchQueue.main.async { [weak self] in self?.finishItem(item) }
+        }
+    }
+
+    private func finishItem(_ item: AVPlayerItem?) {
+        guard let item, item === currentItem else {
+            Log.audio.notice("ignoring the end of a podcast item that's since been replaced")
+            return
+        }
         cancelStallWatchdog()
         didPlayToEnd = true              // spent — a later resume must not replay its tail
-        let finishedId = currentId
+        let finishedId = currentItemId
         if let id = finishedId {
             cachedPositions?.removeValue(forKey: id)
             flushPositionsToDisk()
@@ -724,16 +748,21 @@ final class PodcastPlayer: NSObject {
     /// while the lock screen still says "playing". Surface an honest note and arm a watchdog that
     /// only gives up once the stream is genuinely dead — not merely slow. `.AVPlayerItemPlaybackStalled`
     /// is posted on an arbitrary thread, so hop to main before touching any watchdog state (all of
-    /// it is main-confined).
-    @objc private func itemStalled() {
-        DispatchQueue.main.async { [weak self] in self?.beginStallWatch() }
+    /// it is main-confined). Only the loaded item's stall counts: a late one from the item just
+    /// replaced would arm the watchdog against the episode now loading. Internal for the tests.
+    @objc func itemStalled(_ note: Notification) {
+        let item = note.object as? AVPlayerItem
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let item, item === self.currentItem else { return }
+            self.beginStallWatch()
+        }
     }
 
     private func beginStallWatch() {
         guard stallWatchdog == nil else { return }   // one watch per stall episode
         Log.audio.notice("podcast stream stalled — buffering")
         onPlaybackNote?("Buffering…")
-        armStallWatchdog(for: currentId, attempt: 0)
+        armStallWatchdog(for: currentItemId, attempt: 0)
     }
 
     /// Fires ~30s later. Only advances when the stream is genuinely stuck: a slow-but-alive stream
@@ -896,8 +925,8 @@ final class PodcastPlayer: NSObject {
                 cancelStallWatchdog()
                 let errorMsg = item.error?.localizedDescription ?? "Unknown error"
                 Log.audio.error("AVPlayerItem failed: \(errorMsg, privacy: .public)")
-                onPlaybackFailed?(currentId)
-                onQueueAdvance?(currentId, false)   // failed — advance but do NOT mark it played
+                onPlaybackFailed?(currentItemId)
+                onQueueAdvance?(currentItemId, false)   // failed — move on but do NOT mark it played
             }
         }
     }

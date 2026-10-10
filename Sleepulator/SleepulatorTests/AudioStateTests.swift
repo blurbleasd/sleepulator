@@ -2953,3 +2953,86 @@ final class PodcastLoadHoldTests: XCTestCase {
         XCTAssertTrue(resumed, "the call's end brings back what was starting")
     }
 }
+
+/// An episode's end is filed under the episode its ITEM was loaded for. `.AVPlayerItemDidPlayToEndTime`
+/// can be posted off the main thread, so a Next tapped right at the natural end could swap the new
+/// episode in first, and the late end then marked the NEW episode played, erased its position and
+/// (with delete-on-completion) deleted its download.
+@MainActor
+final class PodcastItemEndTests: XCTestCase {
+    private var urls: [URL] = []
+
+    override func tearDownWithError() throws {
+        urls.forEach { try? FileManager.default.removeItem(at: $0) }
+        urls = []
+    }
+
+    private func wav(seconds: Int) throws -> String {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("end-\(UUID().uuidString).wav")
+        try PodcastPlayerRebuildTests.quietWav(seconds: seconds).write(to: url)
+        urls.append(url)
+        return url.absoluteString
+    }
+
+    private func waitUntil(_ timeout: TimeInterval = 8, _ condition: () -> Bool) async -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if condition() { return true }
+            try? await Task.sleep(nanoseconds: 20_000_000)
+        }
+        return condition()
+    }
+
+    func testALateEndFromTheReplacedItemLeavesTheNewEpisodeAlone() throws {
+        let p = PodcastPlayer()
+        defer { p.stop() }
+        var advances: [(id: String?, finished: Bool)] = []
+        p.onQueueAdvance = { advances.append(($0, $1)) }
+        let newId = "next-\(UUID().uuidString)"
+        p.setPositions(p.savedPositions.merging([newId: 120]) { $1 })   // where B was left
+
+        p.play(url: try wav(seconds: 20), id: "old-\(UUID().uuidString)", title: "A", resume: false)
+        let oldItem = try XCTUnwrap(p.currentItem)
+        p.play(url: try wav(seconds: 20), id: newId, title: "B")         // Next, at A's very end
+        // A's end, arriving after the swap.
+        p.itemDidFinishPlaying(Notification(name: .AVPlayerItemDidPlayToEndTime, object: oldItem))
+
+        XCTAssertTrue(advances.isEmpty, "a replaced item's end must not move the queue")
+        XCTAssertEqual(p.savedPositions[newId], 120, "the new episode's place survives")
+        XCTAssertFalse(p.didPlayToEnd, "the new episode isn't spent")
+    }
+
+    func testALateStallFromTheReplacedItemIsIgnored() async throws {
+        let p = PodcastPlayer()
+        defer { p.stop() }
+        var notes: [String] = []
+        p.onPlaybackNote = { if let n = $0 { notes.append(n) } }
+        p.play(url: try wav(seconds: 20), id: "old-\(UUID().uuidString)", title: "A", resume: false)
+        let oldItem = try XCTUnwrap(p.currentItem)
+        p.play(url: try wav(seconds: 20), id: "new-\(UUID().uuidString)", title: "B", resume: false)
+        p.itemStalled(Notification(name: .AVPlayerItemPlaybackStalled, object: oldItem))
+        try? await Task.sleep(nanoseconds: 200_000_000)               // past its hop to main
+        XCTAssertFalse(notes.contains("Buffering…"), "no stall watch against the episode now loading")
+
+        p.itemStalled(Notification(name: .AVPlayerItemPlaybackStalled, object: p.currentItem))
+        let watched = await waitUntil(2) { notes.contains("Buffering…") }
+        XCTAssertTrue(watched, "the loaded item's own stall still counts")
+    }
+
+    func testARealEndAdvancesUnderItsOwnEpisode() async throws {
+        // End to end on a real item: the observer (now taking the notification) still fires, and
+        // the end is filed under the episode that played.
+        let p = PodcastPlayer()
+        defer { p.stop() }
+        var advances: [(id: String?, finished: Bool)] = []
+        p.onQueueAdvance = { advances.append(($0, $1)) }
+        let id = "short-\(UUID().uuidString)"
+        p.play(url: try wav(seconds: 1), id: id, title: "Short", resume: false)
+        let ended = await waitUntil(10) { !advances.isEmpty }
+        XCTAssertTrue(ended, "a one-second episode must reach its end")
+        XCTAssertEqual(advances.first?.id, id)
+        XCTAssertEqual(advances.first?.finished, true)
+        XCTAssertTrue(p.didPlayToEnd)
+        XCTAssertNil(p.savedPositions[id], "a finished episode keeps no resume point")
+    }
+}
