@@ -52,6 +52,11 @@ enum Theme {
     static let focusGlow   = Color(red: 0.10, green: 0.24, blue: 0.46) // cool blue glow
     static let focusText   = Color(red: 0.93, green: 0.96, blue: 1.0)  // cool white
     static let focusDim    = Color(red: 0.56, green: 0.66, blue: 0.82) // cool muted
+
+    // Deep accents: fills for system controls that always draw a white label (swipe actions).
+    // White on the accent itself was 2.18:1 (Sleep) / 1.85:1 (Focus); these keep the hue at AA.
+    static let emberDeep = Color(red: 0.52, green: 0.32, blue: 0.13) // white label 6.5:1
+    static let focusDeep = Color(red: 0.06, green: 0.36, blue: 0.52) // white label 7.2:1
 }
 
 struct Palette {
@@ -73,4 +78,7 @@ struct Palette {
     }
     // Home drives its palette by mode: warm Sleep vs cool Focus.
     init(focusMode: Bool) { self = focusMode ? .focus : .sleep }
+
+    /// Fill for swipe actions and other system controls with a fixed white label.
+    var actionFill: Color { warm ? Theme.emberDeep : Theme.focusDeep }
 }

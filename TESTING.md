@@ -333,6 +333,35 @@ this section is where you do it. Do it in a dark room at your real bedtime brigh
    the ring or the line; "Got it", dragging the ring, or opening timer options retires it for good.
    A fresh install sees only the first-run card, never this note.
 
+### N. Podcasts tab: Tonight shelf + hardening (added 2026-10-09, simulator-checked only)
+1. **Resume where you drifted off.** Play an episode for 20+ min, set the ring to 45, pause, kill
+   the app. Podcasts tab: ✅ "Tonight" shows that episode with the right time left and, when it's
+   longer than the ring, "Runs past your 45-min night". **Resume** starts at the spot (lock
+   screen shows the right title); **Back 5 min** starts 5 minutes earlier; either one starts the
+   45-min timer (it's a Sleep start from rest). Focus titles the shelf "Continue", no night note.
+2. **Up next.** The row under it plays the newest unplayed episode of that show. Finish the resumed
+   episode → the shelf shows only the next one; nothing to offer → no shelf at all.
+3. **Show page.** A show you're partway through says **Resume** (with the episode and time left);
+   otherwise **Play Latest**. "…" → Play All / Shuffle with a non-empty queue asks "Replace your
+   queue?" (Replace / Add to End / Cancel); with an empty queue it just plays.
+4. **Show notes** read as plain paragraphs (no `<p>`/`<a href>`), opening paragraphs first, "More"
+   for the rest.
+5. **Downloads tell the truth.** Airplane mode → Episode options → Download Offline. ✅ An amber
+   cloud-warning icon (VoiceOver: "Download failed"), menu offers "Retry Download"; never the
+   Downloaded tick. Back online → retry → tick.
+6. **Adding shows.** + → search: shows you follow say "In your library"; tapping another shows a
+   spinner on that row (others disabled), then the sheet closes with a success haptic and the
+   show is first in the list with its real name and count. A bad link / a web page → plain error.
+7. **Import from another app.** + → Import Subscriptions → pick an OPML export. ✅ The sheet lists
+   the shows (palette colours in both modes; shows you follow marked and not selected); Import →
+   sheet closes, then "Shows imported · Added N shows".
+8. **Library counts stay current.** Open a show whose feed has new episodes, go back. ✅ Its row
+   count updates without a relaunch. Pull to refresh offline → "You're offline…" under the list;
+   a show whose feed fails → "Couldn't refresh <show>".
+9. **Large text + VoiceOver.** At an accessibility text size the show page keeps only Resume + "…"
+   above the list; rows drop the thumbnail and wrap the title; the Tonight buttons stack.
+   VoiceOver reads each episode row as "…, Unplayed / In progress / Played".
+
 ---
 
 ## Quick release checklist

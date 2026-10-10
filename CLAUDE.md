@@ -19,16 +19,21 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
     NowPlayingSheet, MiniPlayerView, SettingsView, BreathingView, the `AmbientScene` backdrop
     library, Components, Theme, `MiniPlayerClearance`, `SoundNames`). `Views/Home/` holds Home's
     pieces: the orb + `NightRing`, `ModeSwitcher`, `MixDrawer`, `TimerSelectionSheet`, and the
-    pure, unit-tested rules `SessionGuards` and `HomeScreensaverPolicy`.
+    pure, unit-tested rules `SessionGuards` and `HomeScreensaverPolicy`. `TonightShelfView` is
+    the Podcasts tab's "Tonight" (Focus: "Continue") shelf.
   - `Services/` — the engine + plumbing (below).
-  - `Models/Models.swift` — `Podcast`, `Episode`, `SavedMix`, `NoiseType`.
+  - `Models/Models.swift` — `Podcast`, `Episode`, `SavedMix`, `NoiseType`. `Models/PodcastText.swift`
+    (show-notes HTML → plain text, counts, durations, placeholder names) and
+    `Models/TonightShelf.swift` (what the Tonight shelf and the show page's Resume offer) are
+    pure, unit-tested podcast rules.
   - `PrivacyInfo.xcprivacy`, `Info.plist`.
 - **Widget** — `SleepulatorWidget/` (sleep-timer Live Activity).
 - **Tests** — `SleepulatorTests/` (XCTest). Three files, many suites: `AudioMathTests.swift`;
   `AudioStateTests.swift` (also holds `PodcastParserTests`, `OPMLParserTests`,
   `StorageManagerTests`, `NetRetryTests`, `CacheEvictionTests`, the sleep-timer suites, Home's
   pure UI rules (`SessionGuardsTests`, `NightRingMathTests`, `MiniPlayerClearanceTests`,
-  `HomeScreensaverPolicyTests`), and more); `PersistenceTests.swift` (`PersistenceMigrator` /
+  `HomeScreensaverPolicyTests`), the podcast rules (`PodcastTextTests`, `ShowNotesPreviewTests`,
+  `TonightShelfTests`), and more); `PersistenceTests.swift` (`PersistenceMigrator` /
   `MixStore`).
 
 ## Services (the core)
@@ -107,6 +112,17 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   Close the sheet, then ask (`HomeView.requestMode`).
 - **One name per sound.** Name sounds through `SoundNames` (binaurals are "Deep", "Drift", …,
   never "Delta" / "Theta").
+- **Podcasts is split by depth.** The library and its Tonight shelf follow the 2am rules (artwork
+  dimmed to 0.78 in Sleep, `EmberButtonStyle`, no solid accent slabs); a show's page and the Add
+  sheet are the brighter browsing surfaces. Swipe actions draw a fixed white label, so tint them
+  `pal.actionFill` (the deep accent), never `pal.accent` (2.18:1).
+- **SwiftUI drops a state update whose new value `==` the old.** `Podcast` hashes by id but its
+  `==` also compares what the library row shows; id-only `==` left rows stale after a show page
+  loaded more episodes. Keep row-visible fields in `==` (and keep it O(1)).
+- **List rows restyle `Label`.** Inside a `List` row, `Label` gets a wide icon column; build
+  icon + text pairs in rows from an `HStack`. A sheet's data must reach it through
+  `.sheet(item:)`, not a separate `@State` read only inside the sheet closure (the OPML picker
+  opened empty that way).
 
 ## Build / run
 - **Native Xcode build** — open `Sleepulator/Sleepulator.xcodeproj`. NOT Capacitor/CLI; there's

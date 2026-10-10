@@ -1198,6 +1198,18 @@ final class AudioEngine: ObservableObject {
         podPlayer.play(url: finalUrlStr, id: id, title: podTitle, resume: resume, startAt: startAt)
     }
 
+    /// Start `episode` at an explicit position (the Podcasts tab's Tonight shelf: Resume and
+    /// Back 5 min), moving it to the queue head the way `PodcastQueueManager.playEpisode` does,
+    /// in one queue write. `startAt` nil falls back to the saved position.
+    func playEpisode(_ episode: Episode, startAt: TimeInterval?) {
+        var q = queueManager.queue
+        q.removeAll { $0.id == episode.id }
+        q.insert(episode, at: 0)
+        queueManager.queue = q
+        podTitle = episode.title
+        loadPodcast(episode.audioUrl, id: episode.id, resume: true, startAt: startAt)
+    }
+
     /// Start a sleep timer that ends when the current episode finishes (fading the ambient bed
     /// down over the last stretch). No-op without a loaded episode of known, finite length, so we
     /// never start a timer that would instantly fire on an unknown-duration live stream.

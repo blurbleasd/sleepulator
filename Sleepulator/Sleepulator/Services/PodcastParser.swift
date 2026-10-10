@@ -44,7 +44,14 @@ class PodcastParser: NSObject, XMLParserDelegate {
             }
             return try Data(contentsOf: tempFileUrl)
         }
-        return try parse(data: data)
+        let feed = try parse(data: data)
+        // Show-notes arrive as HTML; flatten them to plain text off the main actor (a
+        // 750-episode feed of markup is real work, and this parser runs on main).
+        let raw = feed.episodes
+        let episodes = await Task.detached(priority: .userInitiated) {
+            PodcastText.withPlainShowNotes(raw)
+        }.value
+        return ParsedFeed(title: feed.title, artworkUrl: feed.artworkUrl, episodes: episodes)
     }
 
     /// Parse feed XML from in-memory bytes. Split out from the network fetch so the parsing

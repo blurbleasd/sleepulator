@@ -1,4 +1,5 @@
 import SwiftUI
+import os
 
 struct PodcastDetailView: View {
     @State var podcast: Podcast
@@ -13,6 +14,9 @@ struct PodcastDetailView: View {
     /// "focusMode" key (AudioEngine writes it) so this view needn't observe the whole engine.
     @AppStorage("focusMode") private var focusMode = false
     var pal: Palette { Palette(focusMode: focusMode) }
+    /// At accessibility text sizes the pinned header took half the screen and left ~1.5 episodes
+    /// visible; there it keeps only the actions (the show's name is already in the nav bar).
+    @Environment(\.dynamicTypeSize) private var typeSize
     
     @State private var isLoading = false
     @State private var errorMessage: String? = nil
@@ -23,6 +27,38 @@ struct PodcastDetailView: View {
     // Which episodes are downloaded — computed once on appear / after a feed load, so the rows
     // don't each do a synchronous disk stat + MD5 hash in onAppear while scrolling.
     @State private var downloadedUrls: Set<String> = []
+    /// The night ring's length (0 = All night), for the Resume line's "runs past your night" note.
+    @AppStorage("nightLengthMinutes") private var nightLength: Double = 0
+    /// Episodes waiting on "Replace your queue?" (Play All / Shuffle over a non-empty queue).
+    @State private var pendingPlayAll: [Episode]? = nil
+
+    /// The episode Resume would continue, if any: last night's from this show, else the newest
+    /// one you're partway through.
+    private var resumeTarget: (episode: Episode, position: TimeInterval)? {
+        TonightShelf.showResumeTarget(podcast: podcast,
+                                      lastEpisodeId: audio.lastMix?.podcastId,
+                                      lastPosition: audio.lastMix?.podcastPosition,
+                                      savedPositions: episodePositions,
+                                      finished: audio.finishedEpisodes)
+    }
+
+    private func playPrimary() {
+        if let target = resumeTarget {
+            audio.playEpisode(target.episode, startAt: target.position)
+        } else if let latest = TonightShelf.latestUnplayed(in: podcast, finished: audio.finishedEpisodes, excluding: nil)
+                    ?? podcast.episodes.first {
+            audio.queueManager.playEpisode(latest)
+        }
+    }
+
+    /// Play All / Shuffle replace the queue; ask first when there's something in it to lose.
+    private func requestPlayAll(_ episodes: [Episode]) {
+        if audio.queueManager.queue.isEmpty {
+            audio.playAll(episodes)
+        } else {
+            pendingPlayAll = episodes
+        }
+    }
 
     private func progress(for ep: Episode) -> Double {
         guard let pos = episodePositions[ep.id], let dur = ep.duration, dur > 0 else { return 0 }
@@ -45,15 +81,17 @@ struct PodcastDetailView: View {
         ZStack {
             pal.bg.ignoresSafeArea()
 
-            if !connectivity.isOnline && podcast.episodes.isEmpty {
-                stateMessage("You're offline — connect to load feeds.", color: .red)
-            } else if isLoading && podcast.episodes.isEmpty {
+            if isLoading && podcast.episodes.isEmpty {
                 ProgressView()
                     .progressViewStyle(CircularProgressViewStyle(tint: pal.accent))
+            } else if !connectivity.isOnline && podcast.episodes.isEmpty {
+                unavailable("You're offline", systemImage: "wifi.slash",
+                            detail: "Connect to load this show's episodes.")
             } else if let err = errorMessage, podcast.episodes.isEmpty {
-                stateMessage(err, color: .red)
+                unavailable("Couldn't load episodes", systemImage: "exclamationmark.triangle", detail: err)
             } else if podcast.episodes.isEmpty {
-                stateMessage("No episodes found.", color: pal.dim)
+                unavailable("No episodes yet", systemImage: "dot.radiowaves.left.and.right",
+                            detail: "This feed doesn't have any episodes to play.")
             } else {
                 // Header is PINNED above the List (not the first scrolling row). When it lived
                 // inside the List, an inline title + always-on search drawer + the async feed
@@ -62,13 +100,21 @@ struct PodcastDetailView: View {
                 VStack(spacing: 0) {
                     compactHeader
 
+                    // A failed refresh with saved episodes still on screen used to say nothing.
+                    if let err = errorMessage {
+                        staleNotice(err)
+                    }
+
                     // List (not ScrollView + LazyVStack) so rows recycle: a long feed no longer
                     // keeps every scrolled-past row realized — that retention, hit by the audio
                     // re-render storm, was the scroll overload + slow recovery.
                     List {
                         Section {
                             if visibleEpisodes.isEmpty {
-                                Text(episodeSearch.isEmpty ? "All episodes played!" : "No episodes match \u{201C}\(episodeSearch)\u{201D}")
+                                Text(episodeSearch.isEmpty
+                                     ? "You've finished every episode. Turn off Hide Finished Episodes in Settings to see them again."
+                                     : "No episodes match \u{201C}\(episodeSearch)\u{201D}")
+                                    .multilineTextAlignment(.center)
                                     .foregroundColor(pal.dim)
                                     .frame(maxWidth: .infinity, alignment: .center)
                                     .padding()
@@ -98,6 +144,16 @@ struct PodcastDetailView: View {
         .navigationTitle(podcast.name)
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $episodeSearch, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search episodes")
+        .confirmationDialog("Replace your queue?",
+                            isPresented: Binding(get: { pendingPlayAll != nil }, set: { if !$0 { pendingPlayAll = nil } }),
+                            titleVisibility: .visible,
+                            presenting: pendingPlayAll) { episodes in
+            Button("Replace Queue") { audio.playAll(episodes) }
+            Button("Add to End") { _ = audio.queueManager.addAllToQueue(episodes) }
+            Button("Cancel", role: .cancel) {}
+        } message: { _ in
+            Text("Your queue has \(PodcastText.episodeCount(audio.queueManager.queue.count)) in it.")
+        }
         .onAppear {
             episodePositions = StorageManager.shared.load(from: "positions.json") ?? [:]
             refreshDownloaded()
@@ -105,11 +161,37 @@ struct PodcastDetailView: View {
         }
     }
 
-    @ViewBuilder private func stateMessage(_ text: String, color: Color) -> some View {
-        Text(text)
-            .foregroundColor(color)
-            .multilineTextAlignment(.center)
-            .padding()
+    /// Empty, offline and error states, with a way to try again. These were bare lines of
+    /// system-red text, one of them the raw system error.
+    private func unavailable(_ title: String, systemImage: String, detail: String) -> some View {
+        ContentUnavailableView {
+            Label(title, systemImage: systemImage)
+                .foregroundStyle(pal.text)
+        } description: {
+            Text(detail)
+                .foregroundStyle(pal.dim)
+        } actions: {
+            Button("Try Again") { loadFeed() }
+                .buttonStyle(.bordered)
+                .tint(pal.accent)
+        }
+    }
+
+    /// One quiet line between the header and a list of saved episodes when the refresh failed.
+    private func staleNotice(_ err: String) -> some View {
+        HStack(spacing: UI.sm) {
+            Label(err, systemImage: "exclamationmark.triangle.fill")
+                .font(.footnote)
+                .foregroundColor(pal.accent)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: UI.sm)
+            Button("Try Again") { loadFeed() }
+                .font(.footnote.weight(.semibold))
+                .foregroundColor(pal.accent)
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .padding(.horizontal, UI.lg)
     }
 
     // Compact, fixed header (artwork + name + Play All / Shuffle). Kept deliberately short so a
@@ -117,81 +199,91 @@ struct PodcastDetailView: View {
     // glance. The artwork frame is reserved (88×88) so an async image load can't shift layout.
     @ViewBuilder private var compactHeader: some View {
         VStack(spacing: 14) {
-            HStack(spacing: 14) {
-                if let artStr = podcast.artworkUrl, let url = URL(string: artStr) {
-                    CachedAsyncImage(url: url, size: 88, cornerRadius: 14)
-                        .shadow(color: .black.opacity(0.15), radius: 6, y: 3)
-                } else {
-                    Image(systemName: "dot.radiowaves.left.and.right")
-                        .font(.system(size: 34))
-                        .foregroundColor(pal.accent)
-                        .frame(width: 88, height: 88)
-                        .background(pal.text.opacity(0.08))
-                        .cornerRadius(14)
-                }
-
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(podcast.name)
-                        .font(.system(.title3, design: .rounded).weight(.bold))
-                        .foregroundColor(pal.text)
-                        .lineLimit(3)
-                        .multilineTextAlignment(.leading)
-                    if !podcast.episodes.isEmpty {
-                        Text("\(podcast.episodes.count) episodes")
-                            .font(.system(.caption, design: .rounded))
-                            .foregroundColor(pal.dim)
+            if !typeSize.isAccessibilitySize {
+                HStack(spacing: 14) {
+                    if let artStr = podcast.artworkUrl, let url = URL(string: artStr) {
+                        CachedAsyncImage(url: url, size: 88, cornerRadius: 14)
+                    } else {
+                        Image(systemName: "dot.radiowaves.left.and.right")
+                            .font(.system(size: 34))
+                            .foregroundColor(pal.accent)
+                            .frame(width: 88, height: 88)
+                            .background(pal.text.opacity(0.08))
+                            .cornerRadius(14)
                     }
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(podcast.name)
+                            .font(.system(.title3, design: .rounded).weight(.bold))
+                            .foregroundColor(pal.text)
+                            .lineLimit(3)
+                            .multilineTextAlignment(.leading)
+                        if !podcast.episodes.isEmpty {
+                            Text(PodcastText.episodeCount(podcast.episodes.count))
+                                .font(.system(.caption, design: .rounded))
+                                .foregroundColor(pal.dim)
+                        }
+                    }
+                    Spacer(minLength: 0)
                 }
-                Spacer(minLength: 0)
             }
 
-            // Action buttons
-            HStack(spacing: 12) {
-                Button(action: {
-                    audio.playAll(podcast.episodes)
-                }) {
-                    Label("Play All", systemImage: "play.fill")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundColor(pal.bg)   // on pal.accent = 8.85:1 (white was 2.18:1, fails AA)
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 10)
-                        .background(pal.accent)
-                        .cornerRadius(22)
-                }
-                .disabled(podcast.episodes.isEmpty)
+            // One clear next step: pick up the episode you're partway through, else the newest.
+            // Play All (every episode, replacing your queue) used to be the loudest button here.
+            VStack(alignment: .leading, spacing: UI.xs) {
+                HStack(spacing: UI.sm) {
+                    Button(action: playPrimary) {
+                        Label(resumeTarget == nil ? "Play Latest" : "Resume", systemImage: "play.fill")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundColor(pal.bg)   // on pal.accent = 8.85:1 (white was 2.18:1, fails AA)
+                            .padding(.horizontal, UI.xl)
+                            .frame(minHeight: 44)
+                            .background(pal.accent, in: Capsule())
+                    }
+                    .disabled(podcast.episodes.isEmpty)
 
-                Button(action: {
-                    audio.playAll(podcast.episodes.shuffled())
-                }) {
-                    Label("Shuffle", systemImage: "shuffle")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundColor(pal.accent)
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 10)
-                        .background(pal.bg)
-                        .cornerRadius(22)
-                        .overlay(RoundedRectangle(cornerRadius: 22).stroke(pal.accent, lineWidth: 1))
-                }
-                .disabled(podcast.episodes.isEmpty)
+                    Menu {
+                        Button { requestPlayAll(podcast.episodes) } label: {
+                            Label("Play All", systemImage: "play.square.stack")
+                        }
+                        Button { requestPlayAll(podcast.episodes.shuffled()) } label: {
+                            Label("Shuffle", systemImage: "shuffle")
+                        }
+                        // Append the currently-shown (filtered) episodes to the queue — respects Hide
+                        // Finished + the search filter, unlike Play All / Shuffle which take every episode.
+                        Button {
+                            _ = audio.queueManager.addAllToQueue(visibleEpisodes)
+                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        } label: {
+                            Label("Add \(PodcastText.episodeCount(visibleEpisodes.count)) to Queue", systemImage: "text.badge.plus")
+                        }
+                        .disabled(visibleEpisodes.isEmpty)
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundColor(pal.accent)
+                            .frame(width: 44, height: 44)
+                            .background(pal.text.opacity(0.08), in: Capsule())
+                    }
+                    .disabled(podcast.episodes.isEmpty)
+                    .accessibilityLabel("More actions")
 
-                // Append the currently-shown (filtered) episodes to the queue — respects Hide
-                // Finished + the search filter, unlike Play All / Shuffle which take every episode.
-                Button(action: {
-                    audio.queueManager.addAllToQueue(visibleEpisodes)
-                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                }) {
-                    Image(systemName: "text.badge.plus")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundColor(pal.accent)
-                        .frame(width: 46, height: 40)
-                        .background(pal.bg)
-                        .cornerRadius(22)
-                        .overlay(RoundedRectangle(cornerRadius: 22).stroke(pal.accent, lineWidth: 1))
+                    Spacer(minLength: 0)
                 }
-                .disabled(visibleEpisodes.isEmpty)
-                .accessibilityLabel("Add \(visibleEpisodes.count) shown episodes to queue")
 
-                Spacer(minLength: 0)
+                if let target = resumeTarget {
+                    let remaining = TonightShelf.remaining(duration: target.episode.duration, position: target.position)
+                    let cue = PodcastText.nightCue(remaining: remaining, nightMinutes: nightLength, focusMode: focusMode)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(target.episode.title)
+                            .foregroundColor(pal.dim)
+                            .lineLimit(1)
+                        Text([PodcastText.timeLeft(remaining), cue].compactMap { $0 }.joined(separator: " · "))
+                            .foregroundColor(cue == nil ? pal.dim : pal.accent)
+                    }
+                    .font(.footnote)
+                    .accessibilityElement(children: .combine)
+                }
             }
         }
         .padding(.horizontal, 16)
@@ -200,7 +292,7 @@ struct PodcastDetailView: View {
     }
     
     func loadFeed() {
-        guard let url = URL(string: podcast.url) else { return }
+        guard let url = URL(string: podcast.url), !isLoading else { return }
         isLoading = true
         errorMessage = nil
         
@@ -213,10 +305,8 @@ struct PodcastDetailView: View {
                     if self.podcast.artworkUrl == nil && feed.artworkUrl != nil {
                         self.podcast.artworkUrl = feed.artworkUrl
                     }
-                    if self.podcast.name.isEmpty || self.podcast.name == "Podcast" || self.podcast.name.contains(".com") {
-                        if !feed.title.isEmpty {
-                            self.podcast.name = feed.title
-                        }
+                    if !feed.title.isEmpty, PodcastText.isPlaceholderName(self.podcast.name, feedURL: self.podcast.url) {
+                        self.podcast.name = feed.title
                     }
                     // Update in library
                     if let idx = libraryPodcasts.firstIndex(where: { $0.id == podcast.id }) {
@@ -229,8 +319,19 @@ struct PodcastDetailView: View {
                     self.refreshDownloaded()
                 }
             } catch {
+                Log.network.error("Show feed load failed: \(error.localizedDescription, privacy: .public)")
+                // Plain recovery copy instead of the raw system error (logged above).
+                let offline = (error as? URLError)?.code == .notConnectedToInternet
                 DispatchQueue.main.async {
-                    self.errorMessage = error.localizedDescription
+                    if self.podcast.episodes.isEmpty {
+                        self.errorMessage = offline
+                            ? "You're offline. Connect and try again."
+                            : "The show's feed didn't load. Check your connection and try again."
+                    } else {
+                        self.errorMessage = offline
+                            ? "You're offline. Showing saved episodes."
+                            : "Couldn't refresh. Showing saved episodes."
+                    }
                     self.isLoading = false
                 }
             }
