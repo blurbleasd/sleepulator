@@ -358,7 +358,20 @@ this section is where you do it. Do it in a dark room at your real bedtime brigh
 8. **Library counts stay current.** Open a show whose feed has new episodes, go back. ✅ Its row
    count updates without a relaunch. Pull to refresh offline → "You're offline…" under the list;
    a show whose feed fails → "Couldn't refresh <show>".
-9. **Large text + VoiceOver.** At an accessibility text size the show page keeps only Resume + "…"
+9. **Resume is right after a podcast-only pause, and audible in the tail.** Play an episode,
+   lock, listen 10+ min, pause from the lock screen (or AirPods), reopen Podcasts. ✅ Tonight's
+   time left matches where you paused (not where you locked). With a timer in its ambient tail
+   (podcast stopped, sounds fading), tap Resume. ✅ The timer cancels and the podcast is audible
+   and keeps playing. Tap Resume / Back 5 min while that episode is already playing. ✅ No
+   dropout (it seeks in place); Back 5 min jumps 5 min from *now*.
+10. **Edges.** Paste a link already in your library → "already in your library". Paste a blog's
+   RSS (no audio) → "That link has no episodes to play". Search offline / gibberish → the
+   unreachable / "No shows found" notes. An OPML file with no shows → "No shows found". A show
+   page offline before it ever loaded → "You're offline" with Try Again (not a long spinner);
+   a failed refresh with saved episodes → the "Showing saved episodes" line. Search your shows
+   for nothing → "No shows match". Swipe a row both ways: white labels on the deep amber / blue.
+   Start an add, tap Cancel, open + again → the old add never lands or closes the new sheet.
+11. **Large text + VoiceOver.** At an accessibility text size the show page keeps only Resume + "…"
    above the list; rows drop the thumbnail and wrap the title; the Tonight buttons stack.
    VoiceOver reads each episode row as "…, Unplayed / In progress / Played".
 

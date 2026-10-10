@@ -1198,15 +1198,27 @@ final class AudioEngine: ObservableObject {
         podPlayer.play(url: finalUrlStr, id: id, title: podTitle, resume: resume, startAt: startAt)
     }
 
-    /// Start `episode` at an explicit position (the Podcasts tab's Tonight shelf: Resume and
-    /// Back 5 min), moving it to the queue head the way `PodcastQueueManager.playEpisode` does,
-    /// in one queue write. `startAt` nil falls back to the saved position.
-    func playEpisode(_ episode: Episode, startAt: TimeInterval?) {
-        var q = queueManager.queue
-        q.removeAll { $0.id == episode.id }
-        q.insert(episode, at: 0)
-        queueManager.queue = q
-        podTitle = episode.title
+    /// Start an episode from the Podcasts tab (the Tonight shelf's Resume, Back 5 min and Up next;
+    /// the show page's Resume and Play Latest). `position` is where to start (nil = its saved
+    /// position); `backUp` starts that much earlier.
+    /// - A manual start during the ambient tail cancels the timer, as `podPlayer.onResume` does:
+    ///   a fresh `play()` never fires that hook, so the podcast would play at the tail's
+    ///   near-zero fade and then be stopped by it.
+    /// - When the episode is already loaded, it continues from where the player actually is
+    ///   (stored positions lag the live one) instead of rebuilding the item.
+    func resumeEpisode(_ episode: Episode, at position: TimeInterval?, backUp: TimeInterval = 0) {
+        if sleepTimer.inTail {
+            Log.timer.notice("podcast started from the Podcasts tab during ambient tail — cancelling sleep timer so it's audible")
+            sleepTimer.cancelTimer()
+        }
+        queueManager.moveToHead(episode)
+        if podPlayer.hasPlayer, podPlayer.currentEpisodeId == episode.id,
+           let live = podPlayer.currentPositionSeconds {
+            if backUp > 0 { podPlayer.seekTo(seconds: max(0, live - backUp)) }
+            if !isPodPlaying { resumePodcast() }
+            return
+        }
+        let startAt = position.map { max(0, $0 - backUp) }
         loadPodcast(episode.audioUrl, id: episode.id, resume: true, startAt: startAt)
     }
 

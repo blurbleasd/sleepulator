@@ -42,12 +42,17 @@ struct PodcastDetailView: View {
                                       finished: audio.finishedEpisodes)
     }
 
-    private func playPrimary() {
-        if let target = resumeTarget {
-            audio.playEpisode(target.episode, startAt: target.position)
+    private func playPrimary(_ target: (episode: Episode, position: TimeInterval)?) {
+        if let target {
+            audio.resumeEpisode(target.episode, at: target.position)
         } else if let latest = TonightShelf.latestUnplayed(in: podcast, finished: audio.finishedEpisodes, excluding: nil)
                     ?? podcast.episodes.first {
-            audio.queueManager.playEpisode(latest)
+            // Saved a moment short of the end (an end-of-episode timer stop): start it over rather
+            // than play two seconds and auto-advance.
+            let saved = episodePositions[latest.id] ?? 0
+            let spent = saved >= TonightShelf.minimumResumePosition
+                && !TonightShelf.isResumable(position: saved, duration: latest.duration)
+            audio.resumeEpisode(latest, at: spent ? 0 : nil)
         }
     }
 
@@ -81,12 +86,14 @@ struct PodcastDetailView: View {
         ZStack {
             pal.bg.ignoresSafeArea()
 
-            if isLoading && podcast.episodes.isEmpty {
-                ProgressView()
-                    .progressViewStyle(CircularProgressViewStyle(tint: pal.accent))
-            } else if !connectivity.isOnline && podcast.episodes.isEmpty {
+            // Offline wins over loading: the feed session waits for connectivity, so a fetch started
+            // offline would otherwise show a spinner for minutes.
+            if !connectivity.isOnline && podcast.episodes.isEmpty {
                 unavailable("You're offline", systemImage: "wifi.slash",
                             detail: "Connect to load this show's episodes.")
+            } else if isLoading && podcast.episodes.isEmpty {
+                ProgressView()
+                    .progressViewStyle(CircularProgressViewStyle(tint: pal.accent))
             } else if let err = errorMessage, podcast.episodes.isEmpty {
                 unavailable("Couldn't load episodes", systemImage: "exclamationmark.triangle", detail: err)
             } else if podcast.episodes.isEmpty {
@@ -194,10 +201,13 @@ struct PodcastDetailView: View {
         .padding(.horizontal, UI.lg)
     }
 
-    // Compact, fixed header (artwork + name + Play All / Shuffle). Kept deliberately short so a
-    // pinned header doesn't eat the episode list, and laid out horizontally so it reads at a
-    // glance. The artwork frame is reserved (88×88) so an async image load can't shift layout.
+    // Compact, fixed header: artwork + name, then Resume / Play Latest and a "…" menu (Play All,
+    // Shuffle, Add to Queue). Kept deliberately short so a pinned header doesn't eat the episode
+    // list; at accessibility text sizes the artwork and name drop (the nav bar has the name). The
+    // artwork frame is reserved (88×88) so an async image load can't shift layout.
     @ViewBuilder private var compactHeader: some View {
+        // Once per render: this view observes the engine, so the header re-renders often.
+        let target = resumeTarget
         VStack(spacing: 14) {
             if !typeSize.isAccessibilitySize {
                 HStack(spacing: 14) {
@@ -232,8 +242,8 @@ struct PodcastDetailView: View {
             // Play All (every episode, replacing your queue) used to be the loudest button here.
             VStack(alignment: .leading, spacing: UI.xs) {
                 HStack(spacing: UI.sm) {
-                    Button(action: playPrimary) {
-                        Label(resumeTarget == nil ? "Play Latest" : "Resume", systemImage: "play.fill")
+                    Button { playPrimary(target) } label: {
+                        Label(target == nil ? "Play Latest" : "Resume", systemImage: "play.fill")
                             .font(.subheadline.weight(.semibold))
                             .foregroundColor(pal.bg)   // on pal.accent = 8.85:1 (white was 2.18:1, fails AA)
                             .padding(.horizontal, UI.xl)
@@ -271,7 +281,7 @@ struct PodcastDetailView: View {
                     Spacer(minLength: 0)
                 }
 
-                if let target = resumeTarget {
+                if let target {
                     let remaining = TonightShelf.remaining(duration: target.episode.duration, position: target.position)
                     let cue = PodcastText.nightCue(remaining: remaining, nightMinutes: nightLength, focusMode: focusMode)
                     VStack(alignment: .leading, spacing: 2) {
@@ -301,13 +311,7 @@ struct PodcastDetailView: View {
             do {
                 let feed = try await parser.parseFeed(url: url)
                 DispatchQueue.main.async {
-                    self.podcast.episodes = feed.episodes
-                    if self.podcast.artworkUrl == nil && feed.artworkUrl != nil {
-                        self.podcast.artworkUrl = feed.artworkUrl
-                    }
-                    if !feed.title.isEmpty, PodcastText.isPlaceholderName(self.podcast.name, feedURL: self.podcast.url) {
-                        self.podcast.name = feed.title
-                    }
+                    self.podcast.merge(title: feed.title, artworkUrl: feed.artworkUrl, episodes: feed.episodes)
                     // Update in library
                     if let idx = libraryPodcasts.firstIndex(where: { $0.id == podcast.id }) {
                         libraryPodcasts[idx] = self.podcast
@@ -321,7 +325,7 @@ struct PodcastDetailView: View {
             } catch {
                 Log.network.error("Show feed load failed: \(error.localizedDescription, privacy: .public)")
                 // Plain recovery copy instead of the raw system error (logged above).
-                let offline = (error as? URLError)?.code == .notConnectedToInternet
+                let offline = PodcastText.isOffline(error)
                 DispatchQueue.main.async {
                     if self.podcast.episodes.isEmpty {
                         self.errorMessage = offline

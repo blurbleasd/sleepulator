@@ -1,6 +1,7 @@
 import XCTest
 import AVFoundation
 import SwiftUI
+import Combine
 @testable import Sleepulator
 
 @MainActor
@@ -817,6 +818,33 @@ final class ModelIdentityTests: XCTestCase {
         XCTAssertTrue(set.contains(b), "Set membership must follow ==/hash (broke with synthesized hash)")
         set.insert(b)
         XCTAssertEqual(set.count, 1, "inserting an equal value must not grow the set")
+    }
+
+    /// The stale-row regression: each row-visible field alone must break equality, or SwiftUI
+    /// keeps showing "40 unplayed · 40" after the show page loaded 750 episodes.
+    func testPodcastEqualitySeesEachRowFieldAlone() {
+        let e1 = Episode(id: "1", title: "t", audioUrl: "u", duration: nil, pubDate: nil, description: nil)
+        let e2 = Episode(id: "2", title: "t2", audioUrl: "u2", duration: nil, pubDate: nil, description: nil)
+        let base = Podcast(id: "p", name: "N", url: "feed", episodes: [e1])
+        let more = Podcast(id: "p", name: "N", url: "feed", episodes: [e2, e1])
+        XCTAssertNotEqual(base, more, "the page loaded more episodes")
+        XCTAssertNotEqual(base, Podcast(id: "p", name: "N", url: "feed", episodes: [e2]), "newest changed, same count")
+        XCTAssertNotEqual(base, Podcast(id: "p", name: "N", url: "feed", episodes: [e1], artworkUrl: "art"), "artwork arrived")
+        XCTAssertNotEqual(base, Podcast(id: "p", name: "Real Title", url: "feed", episodes: [e1]), "placeholder name replaced")
+        XCTAssertEqual(base.hashValue, more.hashValue)
+    }
+
+    func testMergeFoldsAFeedIntoAStoredShow() {
+        let e1 = Episode(id: "1", title: "t", audioUrl: "u", duration: nil, pubDate: nil, description: nil)
+        var stub = Podcast(id: "https://feeds.example.com/a", name: "feeds.example.com", url: "https://feeds.example.com/a", episodes: [])
+        stub.merge(title: "Real Show", artworkUrl: "art", episodes: [e1])
+        XCTAssertEqual(stub.name, "Real Show")
+        XCTAssertEqual(stub.artworkUrl, "art")
+        XCTAssertEqual(stub.episodes.map(\.id), ["1"])
+        var named = Podcast(id: "x", name: "My Name", url: "https://feeds.example.com/x", episodes: [], artworkUrl: "mine")
+        named.merge(title: "Feed Title", artworkUrl: "theirs", episodes: [])
+        XCTAssertEqual(named.name, "My Name", "a real name is kept")
+        XCTAssertEqual(named.artworkUrl, "mine", "existing artwork is kept")
     }
 
     /// Podcast hashes by id alone, but == also compares what the library row shows: SwiftUI drops
@@ -1984,16 +2012,54 @@ final class TonightShelfTests: XCTestCase {
         XCTAssertTrue(TonightShelf.plan(library: lib, lastEpisodeId: "gone", lastPosition: 500, savedPositions: [:], finished: []).isEmpty)
     }
 
-    func testResumeUsesTheSnapshotPositionOverTheSavedMap() throws {
+    /// The saved-positions map is written on every pause; the Last Night snapshot only on
+    /// pause-all / stop / backgrounding, so after a podcast-only pause it's stale and must lose.
+    func testResumePrefersTheSavedPositionOverAStaleSnapshot() throws {
         let lib = [show([ep("new", daysAgo: 1), ep("b", daysAgo: 3)])]
-        let plan = TonightShelf.plan(library: lib, lastEpisodeId: "b", lastPosition: 1_200, savedPositions: ["b": 900], finished: [])
+        let plan = TonightShelf.plan(library: lib, lastEpisodeId: "b", lastPosition: 1_200, savedPositions: ["b": 2_400], finished: [])
         let resume = try XCTUnwrap(plan.resume)
         XCTAssertEqual(resume.episode.id, "b")
-        XCTAssertEqual(resume.position, 1_200)
-        XCTAssertEqual(resume.remaining, 2_400)
+        XCTAssertEqual(resume.position, 2_400)
+        XCTAssertEqual(resume.remaining, 1_200)
         XCTAssertEqual(plan.next?.episode.id, "new", "next is the newest unplayed, not the resumed one")
-        // No snapshot position: the saved map is the fallback.
-        XCTAssertEqual(TonightShelf.plan(library: lib, lastEpisodeId: "b", lastPosition: nil, savedPositions: ["b": 900], finished: []).resume?.position, 900)
+        // Nothing saved for it yet: the snapshot is the fallback.
+        XCTAssertEqual(TonightShelf.plan(library: lib, lastEpisodeId: "b", lastPosition: 1_200, savedPositions: [:], finished: []).resume?.position, 1_200)
+    }
+
+    func testANearlyFinishedSnapshotIsNeitherResumedNorNext() {
+        let lib = [show([ep("new", daysAgo: 1), ep("b", daysAgo: 3)])]
+        let plan = TonightShelf.plan(library: lib, lastEpisodeId: "b", lastPosition: 3_590, savedPositions: [:], finished: [])
+        XCTAssertNil(plan.resume, "10 s left isn't worth resuming")
+        XCTAssertEqual(plan.next?.episode.id, "new")
+        // The show page agrees.
+        XCTAssertNil(TonightShelf.showResumeTarget(podcast: lib[0], lastEpisodeId: "b", lastPosition: 3_590,
+                                                   savedPositions: [:], finished: []))
+        // A spent snapshot in a one-episode show leaves nothing to offer.
+        XCTAssertTrue(TonightShelf.plan(library: [show([ep("b", daysAgo: 3)])], lastEpisodeId: "b", lastPosition: 3_590,
+                                        savedPositions: [:], finished: []).isEmpty)
+    }
+
+    func testResumeAloneWhenNothingElseIsUnplayedAndTheThirtySecondEdge() {
+        let lib = [show([ep("only", daysAgo: 2)])]
+        let plan = TonightShelf.plan(library: lib, lastEpisodeId: "only", lastPosition: 30, savedPositions: [:], finished: [])
+        XCTAssertEqual(plan.resume?.position, 30, "30 s is under way")
+        XCTAssertNil(plan.next)
+        XCTAssertFalse(plan.isEmpty)
+    }
+
+    func testShowResumeTargetFallsThroughPastLastNight() {
+        let p = show([ep("new", daysAgo: 1), ep("mid", daysAgo: 4), ep("old", daysAgo: 8)])
+        XCTAssertEqual(TonightShelf.showResumeTarget(podcast: p, lastEpisodeId: "old", lastPosition: 600,
+                                                     savedPositions: ["mid": 900], finished: ["old"])?.episode.id, "mid",
+                       "last night's episode is finished")
+        XCTAssertEqual(TonightShelf.showResumeTarget(podcast: p, lastEpisodeId: "old", lastPosition: 10,
+                                                     savedPositions: ["mid": 900], finished: [])?.episode.id, "mid",
+                       "last night's episode barely started")
+    }
+
+    func testBackUpLabelsFollowTheInterval() {
+        XCTAssertEqual(TonightShelf.backUpLabel, "Back \(Int(TonightShelf.backUpInterval / 60)) min")
+        XCTAssertEqual(TonightShelf.backUpPosition(from: TonightShelf.backUpInterval + 1), 1)
     }
 
     func testABarelyStartedEpisodeIsOfferedAsNext() {
@@ -2073,5 +2139,91 @@ final class ShowNotesPreviewTests: XCTestCase {
         let preview = PodcastText.notesPreview(long)
         XCTAssertTrue(preview.hasSuffix("word\u{2026}"))
         XCTAssertLessThan(preview.count, long.count)
+    }
+}
+
+
+final class ShowNotesEdgeTests: XCTestCase {
+    /// Stored notes are already plain and can quote angle brackets; showing them must not strip
+    /// them as tags (EpisodeRowView goes through displayShowNotes).
+    func testDisplayKeepsQuotedAngleBracketsInStoredNotes() {
+        let stored = PodcastText.plainShowNotes("<p>Write to &lt;hello@show.example&gt; or press &lt;Enter&gt;.</p>")
+        XCTAssertEqual(stored, "Write to <hello@show.example> or press <Enter>.")
+        XCTAssertEqual(PodcastText.displayShowNotes(stored), stored)
+        // Notes cached before the parser cleaned them still get cleaned for display.
+        XCTAssertEqual(PodcastText.displayShowNotes("<p>Old <b>cached</b> notes</p>"), "Old cached notes")
+    }
+
+    func testCapPrefersAParagraphThenHardCutsUnspacedText() {
+        let a = String(repeating: "a", count: 60)
+        let notes = a + "\n\n" + Array(repeating: "b", count: 100).joined(separator: " ")
+        XCTAssertEqual(PodcastText.plainShowNotes(notes, limit: 100), a + "\u{2026}")
+        let cjk = String(repeating: "夜", count: 200)
+        XCTAssertEqual(PodcastText.plainShowNotes(cjk, limit: 50), String(repeating: "夜", count: 50) + "\u{2026}")
+    }
+
+    /// A malformed <itunes:duration> ("inf", "1e30") must not trap the row or the shelf.
+    func testDurationRejectsNonFiniteAndAbsurdLengths() {
+        XCTAssertNil(PodcastText.duration(.infinity))
+        XCTAssertNil(PodcastText.duration(.nan))
+        XCTAssertNil(PodcastText.duration(1e30))
+        XCTAssertNil(PodcastText.timeLeft(.infinity))
+        XCTAssertEqual(PodcastText.duration(PodcastText.longestDuration), "720 hr")
+    }
+
+    func testPlaceholderCoversOPMLLinkNamesAndTheFallbackName() throws {
+        let feed = "https://feeds.simplecast.com/Sl5CSM3S"
+        XCTAssertTrue(PodcastText.isPlaceholderName(feed, feedURL: feed), "OPML names an untitled outline after its link")
+        XCTAssertTrue(PodcastText.isPlaceholderName("https://elsewhere.example/rss", feedURL: feed))
+        let url = try XCTUnwrap(URL(string: "https://www.example.com/rss"))
+        XCTAssertEqual(PodcastText.fallbackName(for: url), "example.com")
+        XCTAssertTrue(PodcastText.isPlaceholderName(PodcastText.fallbackName(for: url), feedURL: url.absoluteString))
+    }
+
+    func testOfflineErrors() {
+        XCTAssertTrue(PodcastText.isOffline(URLError(.notConnectedToInternet)))
+        XCTAssertFalse(PodcastText.isOffline(URLError(.timedOut)))
+        XCTAssertFalse(PodcastText.isOffline(CocoaError(.fileNoSuchFile)))
+    }
+
+    /// The step parseFeed runs after parsing: what gets stored is plain, capped text.
+    @MainActor
+    func testFinalizedFeedHasPlainShowNotes() async throws {
+        let xml = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <rss><channel><title>T</title>
+          <item><guid>1</guid><enclosure url="https://e.example/1.mp3" type="audio/mpeg"/>
+            <description><![CDATA[<p>Hello <a href="https://x.example">there</a> &amp; welcome</p>]]></description></item>
+          <item><guid>2</guid><enclosure url="https://e.example/2.mp3" type="audio/mpeg"/>
+            <description><![CDATA[<p>\(String(repeating: "word ", count: 1_000))</p>]]></description></item>
+        </channel></rss>
+        """
+        let parsed = try PodcastParser().parse(data: Data(xml.utf8))
+        let feed = await PodcastParser.finalize(parsed)
+        XCTAssertEqual(feed.episodes.first?.description, "Hello there & welcome")
+        XCTAssertLessThanOrEqual(feed.episodes.last?.description?.count ?? .max, PodcastText.showNotesLimit + 1)
+    }
+}
+
+@MainActor
+final class QueueMoveToHeadTests: XCTestCase {
+    private func ep(_ id: String) -> Episode {
+        Episode(id: id, title: id.uppercased(), audioUrl: "", duration: 100, pubDate: nil, description: nil)
+    }
+
+    /// The Podcasts tab's resume path re-heads the queue in one write (one persist, one publish).
+    func testMoveToHeadIsOneWriteAndNoWriteWhenAlreadyFirst() {
+        let qm = PodcastQueueManager()
+        qm.queue = [ep("a"), ep("b"), ep("c")]
+        var writes = 0
+        let sub = qm.$queue.dropFirst().sink { _ in writes += 1 }
+        qm.moveToHead(ep("c"))
+        XCTAssertEqual(qm.queue.map(\.id), ["c", "a", "b"])
+        XCTAssertEqual(writes, 1)
+        qm.moveToHead(ep("c"))
+        XCTAssertEqual(writes, 1, "already the head: nothing to write")
+        qm.moveToHead(ep("d"))
+        XCTAssertEqual(qm.queue.map(\.id), ["d", "c", "a", "b"])
+        sub.cancel()
     }
 }

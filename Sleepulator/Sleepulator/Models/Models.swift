@@ -25,6 +25,14 @@ nonisolated struct Podcast: Identifiable, Codable, Hashable {
             && lhs.episodes.first?.id == rhs.episodes.first?.id
     }
     func hash(into hasher: inout Hasher) { hasher.combine(id) }
+
+    /// Fold a freshly parsed feed into the stored show: its episodes, artwork when the show had
+    /// none, and its title when the stored name was only a placeholder (`PodcastText`).
+    mutating func merge(title: String, artworkUrl: String?, episodes: [Episode]) {
+        self.episodes = episodes
+        if self.artworkUrl == nil { self.artworkUrl = artworkUrl }
+        if !title.isEmpty, PodcastText.isPlaceholderName(name, feedURL: url) { name = title }
+    }
 }
 
 /// `nonisolated` for the same reason as `Podcast` — a plain data model that must decode and be

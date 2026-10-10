@@ -111,13 +111,18 @@ final class PodcastQueueManager: ObservableObject {
     }
 
     func playEpisode(_ episode: Episode) {
-        if !self.queue.contains(where: { $0.id == episode.id }) {
-            self.queue.insert(episode, at: 0)
-        } else {
-            self.queue.removeAll(where: { $0.id == episode.id })
-            self.queue.insert(episode, at: 0)
-        }
+        moveToHead(episode)
         loadPodcastFn?(episode.audioUrl, episode.id, episode.title, true)
+    }
+
+    /// Put `episode` first in the queue (dropping any other copy of it) in one write: one persist,
+    /// one publish. No write when it's already the head.
+    func moveToHead(_ episode: Episode) {
+        guard queue.first?.id != episode.id || queue.dropFirst().contains(where: { $0.id == episode.id }) else { return }
+        var q = queue
+        q.removeAll { $0.id == episode.id }
+        q.insert(episode, at: 0)
+        queue = q
     }
 
     func playAll(_ episodes: [Episode]) {

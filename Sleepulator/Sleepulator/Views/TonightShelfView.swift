@@ -13,9 +13,6 @@ struct TonightShelfView: View {
     let onBackUp: () -> Void
     let onPlayNext: () -> Void
 
-    /// Artwork is the brightest pixel block on the row; Sleep dims it the way NowPlayingSheet does.
-    private var artOpacity: Double { focusMode ? 1 : 0.78 }
-
     var body: some View {
         Group {
             if let resume = plan.resume {
@@ -80,10 +77,10 @@ struct TonightShelfView: View {
         .buttonStyle(EmberButtonStyle(pal: pal))
 
         Button(action: onBackUp) {
-            iconLabel("Back 5 min", systemImage: "arrow.counterclockwise")
+            iconLabel(TonightShelf.backUpLabel, systemImage: "arrow.counterclockwise")
         }
         .buttonStyle(EmberButtonStyle(pal: pal, quiet: true))
-        .accessibilityLabel("Resume 5 minutes earlier")
+        .accessibilityLabel(TonightShelf.backUpSpokenLabel)
     }
 
     private func iconLabel(_ title: String, systemImage: String) -> some View {
@@ -134,7 +131,8 @@ struct TonightShelfView: View {
                     .cornerRadius(10)
             }
         }
-        .opacity(artOpacity)
+        // Artwork is the brightest block on the row; Sleep dims it (Palette.artOpacity).
+        .opacity(pal.artOpacity)
         .accessibilityHidden(true)
     }
 }

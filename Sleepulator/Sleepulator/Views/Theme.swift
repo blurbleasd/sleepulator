@@ -81,4 +81,7 @@ struct Palette {
 
     /// Fill for swipe actions and other system controls with a fixed white label.
     var actionFill: Color { warm ? Theme.emberDeep : Theme.focusDeep }
+    /// Cover art opacity: dimmed in Sleep (artwork is the brightest block on a 2am list), full in
+    /// Focus.
+    var artOpacity: Double { warm ? 0.78 : 1 }
 }

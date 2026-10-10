@@ -14,8 +14,9 @@ nonisolated enum PodcastText {
     /// Feed show-notes arrive as HTML (`<p>`, `<a href>`, `<strong>`, entities). `Text` renders
     /// markup literally, which put a wall of raw tags in front of someone in bed. This flattens
     /// it to plain text with paragraph breaks and list bullets, and caps the length at a
-    /// paragraph or word boundary. Idempotent on its own output, so it's safe to run again on
-    /// episodes cached before it existed.
+    /// paragraph or word boundary. Run it once, on raw notes: its output can quote angle
+    /// brackets (`<hello@show.example>`) that a second pass would strip as tags. Stored notes go
+    /// through `displayShowNotes` instead.
     static func plainShowNotes(_ raw: String, limit: Int = showNotesLimit) -> String {
         var text = decodeEntities(stripTags(raw))
         // Some feeds double-encode (`&lt;p&gt;`), so a decode can surface a second layer of tags.
@@ -37,6 +38,12 @@ nonisolated enum PodcastText {
         }
         let preview = kept.joined(separator: "\n\n")
         return preview.count > budget + 120 ? truncate(preview, limit: budget) : preview
+    }
+
+    /// Stored show-notes ready to show: notes saved before the parser flattened them still hold
+    /// markup, so clean those; already-plain notes pass through untouched.
+    static func displayShowNotes(_ stored: String) -> String {
+        looksLikeMarkup(stored) ? plainShowNotes(stored) : stored
     }
 
     /// `episodes` with every description flattened by `plainShowNotes`; empty notes become nil.
@@ -209,9 +216,13 @@ nonisolated enum PodcastText {
         return "\(unplayed) unplayed of \(total)"
     }
 
-    /// "1 hr 3 min", "42 min", "<1 min"; nil when the feed gave no length.
+    /// Longer than this is a malformed `<itunes:duration>` ("inf", "1e30"), not a real episode;
+    /// converting it to Int would trap.
+    static let longestDuration: TimeInterval = 30 * 86_400
+
+    /// "1 hr 3 min", "42 min", "<1 min"; nil when the feed gave no usable length.
     static func duration(_ seconds: TimeInterval?) -> String? {
-        guard let seconds, seconds > 0 else { return nil }
+        guard let seconds, seconds.isFinite, seconds > 0, seconds <= longestDuration else { return nil }
         let total = Int(seconds)
         if total < 60 { return "<1 min" }
         let hours = total / 3600, minutes = (total % 3600) / 60
@@ -240,16 +251,32 @@ nonisolated enum PodcastText {
         return "Runs past your \(nightLabel(minutes: Int(nightMinutes))) night"
     }
 
+    // MARK: - Errors
+
+    /// True when a feed or search request failed because the phone is offline.
+    static func isOffline(_ error: Error) -> Bool {
+        guard let code = (error as? URLError)?.code else { return false }
+        return code == .notConnectedToInternet || code == .dataNotAllowed
+    }
+
     // MARK: - Show names
 
+    /// The name a show gets when its feed has no title: the link's host without "www.", else
+    /// "Podcast". `isPlaceholderName` recognises exactly these, so a later load can replace them.
+    static func fallbackName(for url: URL) -> String {
+        url.host?.replacingOccurrences(of: "www.", with: "") ?? "Podcast"
+    }
+
     /// True when a stored show name is a stand-in rather than the show's real title: empty, the
-    /// generic "Podcast", or the feed's host name (a link added before its feed ever loaded showed
-    /// up in the library as "feeds.simplecast.com"). Callers swap in the feed's title.
+    /// generic "Podcast", the feed's host (`fallbackName`; a link added before its feed loaded
+    /// showed up as "feeds.simplecast.com"), or a whole link (an OPML entry with no title is named
+    /// after its feed URL). Callers swap in the feed's title.
     static func isPlaceholderName(_ name: String, feedURL: String) -> Bool {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty || trimmed == "Podcast" { return true }
-        guard let host = URL(string: feedURL)?.host?.lowercased() else { return false }
         let lower = trimmed.lowercased()
-        return lower == host || "www." + lower == host || lower == host.replacingOccurrences(of: "www.", with: "")
+        if lower == feedURL.lowercased() || lower.hasPrefix("http://") || lower.hasPrefix("https://") { return true }
+        guard let url = URL(string: feedURL), let host = url.host?.lowercased() else { return false }
+        return lower == host || lower == fallbackName(for: url).lowercased()
     }
 }

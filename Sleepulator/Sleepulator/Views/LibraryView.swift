@@ -15,7 +15,14 @@ struct LibraryView: View {
     @ObservedObject var mixStore: MixStore
     @State private var feedUrlInput = ""
     @State private var podcasts: [Podcast] = []
+    /// library.json is read once, then this view's state is the source of truth (the show page
+    /// edits it through a binding; a Backup restore posts SleepulatorLibraryReload). Re-reading
+    /// on every appear reverted shows that an import or refresh had loaded but not yet saved.
+    @State private var didLoadLibrary = false
     @State private var isLoading = false
+    /// The in-flight add, cancelled if its sheet closes: a slow feed used to finish later, add
+    /// the show you'd cancelled and close the next Add sheet you'd opened.
+    @State private var addTask: Task<Void, Never>? = nil
     @State private var errorMessage: String? = nil
 
     @State private var searchText = ""
@@ -61,6 +68,7 @@ struct LibraryView: View {
     }
 
     var body: some View {
+        let plan = tonight
         NavigationStack {
             ZStack {
                 // Background
@@ -81,24 +89,23 @@ struct LibraryView: View {
                     List {
                     // Pick up where you drifted off, before the archive. Hidden while searching
                     // your shows, and absent (never an empty card) when there's nothing to resume.
-                    if searchText.isEmpty, !tonight.isEmpty {
-                        let plan = tonight
+                    if searchText.isEmpty, !plan.isEmpty {
                         Section {
                             TonightShelfView(plan: plan, pal: pal, focusMode: focusMode, nightMinutes: nightLength,
                                              onResume: {
                                                  guard let r = plan.resume else { return }
                                                  UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                                                 audio.playEpisode(r.episode, startAt: r.position)
+                                                 audio.resumeEpisode(r.episode, at: r.position)
                                              },
                                              onBackUp: {
                                                  guard let r = plan.resume else { return }
                                                  UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                                                 audio.playEpisode(r.episode, startAt: TonightShelf.backUpPosition(from: r.position))
+                                                 audio.resumeEpisode(r.episode, at: r.position, backUp: TonightShelf.backUpInterval)
                                              },
                                              onPlayNext: {
                                                  guard let n = plan.next else { return }
                                                  UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                                                 queue.playEpisode(n.episode)
+                                                 audio.resumeEpisode(n.episode, at: nil)
                                              })
                         } header: {
                             Text(focusMode ? "Continue" : "Tonight")
@@ -116,7 +123,7 @@ struct LibraryView: View {
                                         // Dimmed in Sleep like the Tonight shelf and NowPlayingSheet:
                                         // cover art is the brightest block on a 2am list.
                                         CachedAsyncImage(url: url, size: 64, cornerRadius: 12)
-                                            .opacity(focusMode ? 1 : 0.78)
+                                            .opacity(pal.artOpacity)
                                     } else {
                                         Image(systemName: "dot.radiowaves.left.and.right")
                                             .foregroundColor(pal.accent)
@@ -140,7 +147,8 @@ struct LibraryView: View {
                             .listRowBackground(pal.text.opacity(0.05))
                             // Quick "play latest" without opening the show, when episodes are loaded.
                             .swipeActions(edge: .leading, allowsFullSwipe: true) {
-                                if let latest = podcast.episodes.first {
+                                if let latest = TonightShelf.latestUnplayed(in: podcast, finished: queue.finishedEpisodes, excluding: nil)
+                                    ?? podcast.episodes.first {
                                     Button {
                                         queue.playEpisode(latest)
                                     } label: {
@@ -234,7 +242,10 @@ struct LibraryView: View {
                 }
             }
             .onAppear {
-                loadPodcasts()
+                if !didLoadLibrary {
+                    loadPodcasts()
+                    didLoadLibrary = true
+                }
                 loadPositions()
             }
             // A new snapshot (you paused or stopped) can change what the shelf offers.
@@ -246,6 +257,9 @@ struct LibraryView: View {
             }
         }
         .sheet(isPresented: $showAddSheet, onDismiss: {
+            addTask?.cancel()
+            addTask = nil
+            isLoading = false
             if importAfterAddSheet {
                 importAfterAddSheet = false
                 opmlImporting = true
@@ -324,11 +338,7 @@ struct LibraryView: View {
     /// row had none, and the real title when the stored name was only a placeholder.
     private func apply(_ feed: PodcastParser.ParsedFeed, toPodcastWithId id: String) {
         guard let idx = podcasts.firstIndex(where: { $0.id == id }) else { return }
-        podcasts[idx].episodes = feed.episodes
-        if podcasts[idx].artworkUrl == nil { podcasts[idx].artworkUrl = feed.artworkUrl }
-        if !feed.title.isEmpty, PodcastText.isPlaceholderName(podcasts[idx].name, feedURL: podcasts[idx].url) {
-            podcasts[idx].name = feed.title
-        }
+        podcasts[idx].merge(title: feed.title, artworkUrl: feed.artworkUrl, episodes: feed.episodes)
     }
 
     /// Pull-to-refresh: reload every feed, then say which ones failed instead of dropping them.
@@ -408,40 +418,40 @@ struct LibraryView: View {
         isLoading = true
         errorMessage = nil
 
-        Task {
-            let parser = PodcastParser()
+        addTask = Task {
             do {
-                let feed = try await parser.parseFeed(url: url)
-                // A web page or an empty file parses as a feed with nothing in it.
-                guard !(feed.title.isEmpty && feed.episodes.isEmpty) else {
-                    throw URLError(.cannotParseResponse)
-                }
-                let name = !feed.title.isEmpty ? feed.title : (url.host?.replacingOccurrences(of: "www.", with: "") ?? "Podcast")
+                let feed = try await PodcastParser().parseFeed(url: url)
+                try Task.checkCancellation()
+                // A web page, a blog's RSS or an empty feed parses with no playable episodes.
+                guard !feed.episodes.isEmpty else { throw NotAPodcastFeed() }
+                let name = !feed.title.isEmpty ? feed.title : PodcastText.fallbackName(for: url)
                 let pod = Podcast(id: url.absoluteString, name: name, url: url.absoluteString, episodes: feed.episodes, artworkUrl: feed.artworkUrl)
-
-                DispatchQueue.main.async {
-                    if !self.podcasts.contains(where: { $0.id == pod.id }) {
-                        self.podcasts.insert(pod, at: 0)
-                        self.savePodcasts()
-                    }
-                    self.feedUrlInput = ""
-                    self.isLoading = false
-                    self.showAddSheet = false
-                    UINotificationFeedbackGenerator().notificationOccurred(.success)
+                if !podcasts.contains(where: { $0.id == pod.id }) {
+                    podcasts.insert(pod, at: 0)
+                    savePodcasts()
                 }
+                feedUrlInput = ""
+                isLoading = false
+                showAddSheet = false
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
             } catch {
+                // Cancelled because the sheet closed: say nothing, change nothing.
+                guard !Task.isCancelled else { return }
                 Log.network.error("Feed parse error: \(error.localizedDescription, privacy: .public)")
-                DispatchQueue.main.async {
-                    self.isLoading = false
-                    // Plain recovery copy, not the raw system error (logged above).
-                    let offline = (error as? URLError)?.code == .notConnectedToInternet
-                    self.errorMessage = offline
-                        ? "You're offline. Connect and try again."
-                        : "Couldn't load that feed. Check it's a podcast RSS link and try again."
+                isLoading = false
+                // Plain recovery copy, not the raw system error (logged above).
+                if error is NotAPodcastFeed {
+                    errorMessage = "That link has no episodes to play. Check it's the show's podcast feed."
+                } else if PodcastText.isOffline(error) {
+                    errorMessage = "You're offline. Connect and try again."
+                } else {
+                    errorMessage = "Couldn't load that feed. Check it's a podcast RSS link and try again."
                 }
             }
         }
     }
+
+    private struct NotAPodcastFeed: Error {}
 
     private func savePodcasts() {
         StorageManager.shared.save(podcasts, to: "library.json")
@@ -485,7 +495,8 @@ struct AddPodcastSheet: View {
     private enum SearchState { case idle, searching, done, failed }
 
     private var trimmedQuery: String { searchQuery.trimmingCharacters(in: .whitespacesAndNewlines) }
-    private var isLink: Bool { trimmedQuery.lowercased().hasPrefix("http") }
+    private var isLink: Bool { Self.isFeedLink(trimmedQuery) }
+    private static func isFeedLink(_ text: String) -> Bool { text.lowercased().hasPrefix("http") }
 
     var body: some View {
         NavigationStack {
@@ -709,8 +720,7 @@ struct AddPodcastSheet: View {
         errorMessage = nil
         let query = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        if query.lowercased().starts(with: "http") {
-            feedUrlInput = query
+        if Self.isFeedLink(query) {
             searchResults = []
             searchState = .idle
             return
@@ -775,6 +785,7 @@ struct EpisodeRowView: View {
     /// Plain-text show-notes, flattened when first expanded (cached episodes can predate the
     /// parser's own cleanup). The first few lines show until "More".
     @State private var notesText: String? = nil
+    @State private var notesPreview: String? = nil
     @State private var showAllNotes = false
     /// At accessibility sizes the thumbnail goes and the date/length stack, so the title keeps
     /// room beside the notes and options controls instead of truncating to a few words.
@@ -807,7 +818,9 @@ struct EpisodeRowView: View {
 
     private func toggleNotes() {
         if notesText == nil, let desc = ep.description {
-            notesText = PodcastText.plainShowNotes(desc)
+            let notes = PodcastText.displayShowNotes(desc)
+            notesText = notes
+            notesPreview = PodcastText.notesPreview(notes)
         }
         withAnimation(.easeInOut(duration: 0.2)) { isExpanded.toggle() }
         if !isExpanded { showAllNotes = false }
@@ -820,7 +833,9 @@ struct EpisodeRowView: View {
             downloadProgress = 0.01
             do {
                 _ = try await AudioDownloader.shared.download(url: url) { prog in
-                    DispatchQueue.main.async { downloadProgress = prog }
+                    // Progress arrives off the completion's ordering: once the attempt has settled
+                    // (progress back to nil), a late update would leave a spinner forever.
+                    DispatchQueue.main.async { if downloadProgress != nil { downloadProgress = prog } }
                 }
                 // Through the main queue so it lands after any progress update already queued.
                 DispatchQueue.main.async {
@@ -1019,7 +1034,7 @@ struct EpisodeRowView: View {
 
             if isExpanded, let notes = notesText, !notes.isEmpty {
                 VStack(alignment: .leading, spacing: UI.xs) {
-                    let preview = PodcastText.notesPreview(notes)
+                    let preview = notesPreview ?? notes
                     Text(showAllNotes ? notes : preview)
                         .font(.system(.footnote, design: .rounded))
                         .foregroundColor(pal.text.opacity(0.8))

@@ -116,6 +116,13 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   dimmed to 0.78 in Sleep, `EmberButtonStyle`, no solid accent slabs); a show's page and the Add
   sheet are the brighter browsing surfaces. Swipe actions draw a fixed white label, so tint them
   `pal.actionFill` (the deep accent), never `pal.accent` (2.18:1).
+- **Podcasts-tab starts go through `AudioEngine.resumeEpisode`.** The Tonight shelf (Resume,
+  Back 5 min, Up next) and the show page (Resume, Play Latest) use it: it cancels the ambient
+  tail (a fresh `play()` never fires `podPlayer.onResume`, so the podcast would play at the tail's
+  near-zero fade and then be stopped), continues an already-loaded episode from the live player,
+  and re-heads the queue in one write (`PodcastQueueManager.moveToHead`). Resume positions prefer
+  `positions.json` (written on every pause) over the Last Night snapshot (stale after a
+  podcast-only pause). LibraryView reads library.json once; its state is the source of truth.
 - **SwiftUI drops a state update whose new value `==` the old.** `Podcast` hashes by id but its
   `==` also compares what the library row shows; id-only `==` left rows stale after a show page
   loaded more episodes. Keep row-visible fields in `==` (and keep it O(1)).

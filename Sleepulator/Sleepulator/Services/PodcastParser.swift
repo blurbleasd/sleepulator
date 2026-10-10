@@ -45,8 +45,13 @@ class PodcastParser: NSObject, XMLParserDelegate {
             return try Data(contentsOf: tempFileUrl)
         }
         let feed = try parse(data: data)
-        // Show-notes arrive as HTML; flatten them to plain text off the main actor (a
-        // 750-episode feed of markup is real work, and this parser runs on main).
+        return await Self.finalize(feed)
+    }
+
+    /// The step between parsing and storing: show-notes arrive as HTML, so flatten them to
+    /// plain, capped text off the main actor (a 750-episode feed of markup is real work, and this
+    /// parser runs on main). Split out so it's testable without the network.
+    static func finalize(_ feed: ParsedFeed) async -> ParsedFeed {
         let raw = feed.episodes
         let episodes = await Task.detached(priority: .userInitiated) {
             PodcastText.withPlainShowNotes(raw)
