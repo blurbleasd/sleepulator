@@ -24,8 +24,9 @@ struct MiniPlayerView: View {
         // "Up next" when the queue has items but nothing's loaded yet, and a quiet "Nothing
         // playing" otherwise — so transport/queue access is always one tap away.
         VStack(spacing: 0) {
-            if audio.hasLoadedEpisode {
-                loadedBar
+            // The loaded episode, not the queue head: the queue can move on without it.
+            if let loaded = audio.loadedEpisode {
+                loadedBar(loaded)
             } else if let next = queue.queue.first {
                 upNextBar(next)
             } else {
@@ -56,10 +57,32 @@ struct MiniPlayerView: View {
         }
     }
 
-    // MARK: Loaded — full transport (unchanged behaviour)
+    // MARK: Loaded — full transport
+
+    private var phase: NowPlayingState.Phase {
+        NowPlayingState.phase(isLoaded: audio.loadedEpisode != nil, failed: audio.podcastFailed,
+                              isPlaying: audio.isPodPlaying,
+                              elapsed: progress.elapsed, duration: progress.duration)
+    }
+
+    /// What the player is doing, always shown; a note (buffering, stream lost) joins it rather
+    /// than replacing it.
+    private var statusText: String {
+        let state: String
+        switch phase {
+        case .failed: return "Couldn't play this episode"
+        case .loading: state = "Loading…"
+        case .live: state = "Live"
+        case .finished: state = queue.queue.isEmpty ? "Queue finished" : "Finished"
+        case .playing: state = "Playing"
+        case .paused, .ready: state = "Paused"
+        }
+        if let note = audio.playbackNote { return "\(state) · \(note)" }
+        return state
+    }
 
     @ViewBuilder
-    private var loadedBar: some View {
+    private func loadedBar(_ episode: Episode) -> some View {
         // Thin progress bar
         ProgressView(value: max(0, min(1, progress.progress)))
             .progressViewStyle(LinearProgressViewStyle(tint: pal.accent))
@@ -78,16 +101,27 @@ struct MiniPlayerView: View {
             .accessibilityShowsLargeContentViewer()
             .accessibilityLabel("Skip back \(Int(audio.skipInterval)) seconds")
 
-            // Play/Pause — its own button, NOT nested inside the open-player button.
-            Button(action: { audio.togglePodcast() }) {
-                Image(systemName: audio.isPodPlaying ? "pause.circle.fill" : "play.circle.fill")
-                    .font(.system(size: min(playGlyph, 40)))
-                    .foregroundColor(pal.accent)
+            // Play/Pause — its own button, NOT nested inside the open-player button. While the
+            // episode loads it's a spinner (a tap there used to resume the previous item); after
+            // a failure it retries.
+            if phase == .loading {
+                ProgressView()
+                    .tint(pal.accent)
                     .frame(minWidth: 44, minHeight: 44)
-                    .contentShape(Rectangle())
+                    .accessibilityLabel("Loading episode")
+            } else {
+                let failed = phase == .failed
+                Button(action: { failed ? audio.retryLoadedEpisode() : audio.togglePodcast() }) {
+                    Image(systemName: failed ? "arrow.clockwise.circle.fill"
+                          : audio.isPodPlaying ? "pause.circle.fill" : "play.circle.fill")
+                        .font(.system(size: min(playGlyph, 40)))
+                        .foregroundColor(pal.accent)
+                        .frame(minWidth: 44, minHeight: 44)
+                        .contentShape(Rectangle())
+                }
+                .accessibilityShowsLargeContentViewer()
+                .accessibilityLabel(failed ? "Try again" : audio.isPodPlaying ? "Pause podcast" : "Play podcast")
             }
-            .accessibilityShowsLargeContentViewer()
-            .accessibilityLabel(audio.isPodPlaying ? "Pause podcast" : "Play podcast")
 
             Button(action: { audio.seekPodcast(seconds: audio.skipInterval) }) {
                 Image(systemName: audio.skipForwardSymbol)
@@ -103,30 +137,24 @@ struct MiniPlayerView: View {
             Button(action: { showNowPlaying = true }) {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(audio.podTitle)
+                        Text(episode.title)
                             .font(.subheadline.bold())
                             .foregroundColor(pal.text)
                             .lineLimit(1)
                             .minimumScaleFactor(0.8)
                             .truncationMode(.tail)
 
-                        if let note = audio.playbackNote {
-                            Text(note)
-                                .font(.caption2)
-                                .foregroundColor(pal.accent)
-                                .lineLimit(1)
-                        } else {
-                            Text(audio.isPodPlaying ? "Playing" : "Paused")
-                                .font(.caption2)
-                                .foregroundColor(pal.dim)
-                        }
+                        Text(statusText)
+                            .font(.caption2)
+                            .foregroundColor(phase == .failed || audio.playbackNote != nil ? pal.accent : pal.dim)
+                            .lineLimit(1)
                     }
                     Spacer()
                 }
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Now playing: \(audio.podTitle)")
+            .accessibilityLabel("Now playing: \(episode.title), \(statusText)")
             .accessibilityHint("Opens the full player")
         }
         .padding(.horizontal, 16)
@@ -155,7 +183,10 @@ struct MiniPlayerView: View {
                             .lineLimit(1)
                             .minimumScaleFactor(0.8)
                             .truncationMode(.tail)
-                        Text(queue.queue.count == 1 ? "Up next" : "Up next · \(queue.queue.count) in queue")
+                        // Counts what follows this episode, the way the full player's Up Next does
+                        // (it used to count the head too: "5 in queue" over a list of 4).
+                        let more = queue.queue.count - 1
+                        Text(more == 0 ? "Up next" : "Up next · \(more) more after it")
                             .font(.caption2)
                             .foregroundColor(pal.dim)
                     }

@@ -146,16 +146,43 @@ final class PodcastQueueManager: ObservableObject {
         queue.move(fromOffsets: source, toOffset: destination)
     }
     
-    func moveUp(episode: Episode) {
-        guard let idx = queue.firstIndex(where: { $0.id == episode.id }), idx > 1 else { return }
-        queue.swapAt(idx, idx - 1)
+    /// Move an episode one place up (`step` -1) or down (+1) within Up Next: the queue as the
+    /// player lists it, which leaves out the episode the player is on. That episode can sit
+    /// anywhere in the queue, or nowhere (a failure or the sleep-aware hold drops it), so the
+    /// head-pinned `moveUp`/`moveDown` (index > 1) could do nothing or move it. Swapping the two
+    /// queue slots of neighbours in Up Next leaves the playing episode where it is.
+    /// `nowPlayingId` nil means nothing is loaded: the head is what plays next, and stays put.
+    func moveInUpNext(_ episode: Episode, by step: Int, nowPlayingId: String?) {
+        let pinned = nowPlayingId ?? queue.first?.id
+        let upNext = queue.filter { $0.id != pinned }
+        guard let i = upNext.firstIndex(where: { $0.id == episode.id }),
+              upNext.indices.contains(i + step),
+              let a = queue.firstIndex(where: { $0.id == episode.id }),
+              let b = queue.firstIndex(where: { $0.id == upNext[i + step].id }) else { return }
+        queue.swapAt(a, b)
     }
-    
-    func moveDown(episode: Episode) {
-        guard let idx = queue.firstIndex(where: { $0.id == episode.id }), idx > 0, idx < queue.count - 1 else { return }
-        queue.swapAt(idx, idx + 1)
+
+    /// Take an episode out of the queue. Never touches its download.
+    func remove(_ episode: Episode) {
+        queue.removeAll { $0.id == episode.id }
     }
-    
+
+    /// The player's Next: drop the episode being skipped and play the one after it. A skip is not
+    /// a finish, so unlike `advanceQueue` it never deletes the download (delete-on-completion is
+    /// for episodes you heard) and never marks it played. It plays the next one whatever Auto-Play
+    /// says: Auto-Play is about an episode ending on its own, not a tap on Next (which used to
+    /// pause and silently drop the episode). Shuffle picks the next one as it does at an episode's
+    /// end. Returns false, changing nothing, when nothing follows.
+    @discardableResult
+    func skipToNext(currentId: String?) -> Bool {
+        var rest = queue.filter { $0.id != currentId }
+        guard !rest.isEmpty else { return false }
+        let next = rest.remove(at: shuffleQueue ? Int.random(in: 0..<rest.count) : 0)
+        queue = [next] + rest
+        loadPodcastFn?(next.audioUrl, next.id, next.title, true)
+        return true
+    }
+
     func shuffleRemainingQueue() {
         guard queue.count > 1 else { return }
         let current = queue[0]

@@ -442,6 +442,13 @@ final class PodcastPlayer: NSObject {
                                     self.hasFiredNearEnd = true
                                     self.onNearEnd?()
                                 }
+                            } else if item.status == .readyToPlay {
+                                // A live stream: ready, but no end. Report the clock with no
+                                // duration (0) so the player can say "Live" instead of sitting on
+                                // 0:00 forever. Every duration consumer already ignores 0. (Before
+                                // readyToPlay every item's duration is indefinite, so a loading
+                                // episode isn't mistaken for a live one.)
+                                self.onTimeUpdate?(time.seconds, 0)
                             }
                         }
 

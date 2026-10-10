@@ -254,6 +254,12 @@ final class AudioEngine: ObservableObject {
     
     @Published var podTitle = "No episode loaded"
     var hasLoadedEpisode: Bool { podPlayer.hasPlayer }
+    /// The episode the player is on: set by every load (all loads go through `loadPodcast`) and
+    /// kept after the queue moves on without it. The player views resolve "now playing" from this,
+    /// never from the queue head (see NowPlayingState). nil until the first load.
+    @Published private(set) var loadedEpisode: Episode?
+    /// The loaded episode wouldn't play. Cleared by the next load.
+    @Published private(set) var podcastFailed = false
     // Read-only passthroughs to the playbackProgress slice. Plain computed (NOT @Published):
     // reading them never subscribes a view to the 1 Hz progress stream — only PlaybackProgress
     // observers (the now-playing views) do. Internal readers (seek, end-of-episode) and the
@@ -570,9 +576,12 @@ final class AudioEngine: ObservableObject {
             }
         }
         
-        podPlayer.onPlaybackFailed = { [weak self] errorMsg in
+        podPlayer.onPlaybackFailed = { [weak self] _ in
             DispatchQueue.main.async {
-                self?.playbackNote = "Failed: \(errorMsg)"
+                // The system's reason ("The operation could not be completed") is logged by the
+                // player; on screen it only alarmed. The player views offer Try again / Play next.
+                self?.playbackNote = "Couldn't play this episode"
+                self?.podcastFailed = true
                 self?.isPodPlaying = false
             }
         }
@@ -850,6 +859,20 @@ final class AudioEngine: ObservableObject {
     
     func togglePodcast() {
         if isPodPlaying { podPlayer.pause() } else { resumePodcast() }
+    }
+
+    /// The player's Next: skip to the next queued episode. Safe by construction: it never deletes
+    /// the skipped episode's download or marks it played, and plays the next one even with
+    /// Auto-Play off (see `PodcastQueueManager.skipToNext`).
+    func skipToNextEpisode() {
+        queueManager.skipToNext(currentId: loadedEpisode?.id ?? podPlayer.currentEpisodeId)
+    }
+
+    /// Try the loaded episode again after it failed. The failure already took it out of the queue
+    /// (advance, not marked played), so this puts it back at the head and reloads it.
+    func retryLoadedEpisode() {
+        guard let ep = loadedEpisode else { return }
+        queueManager.playEpisode(ep)
     }
 
     // MARK: Apple Music (Focus-only parallel source)
@@ -1180,6 +1203,7 @@ final class AudioEngine: ObservableObject {
 
     func loadPodcast(_ urlStr: String, id: String, resume: Bool = true, startAt: TimeInterval? = nil) {
         playbackNote = nil
+        podcastFailed = false
         // Resolve the title from the queue by id — the single point of truth for "what's loading."
         // Callers that pre-set podTitle (queueManager.loadPodcastFn) agree with this; callers that
         // didn't (resumeMix / the StartSleepulatorMix intent) used to pass a STALE podTitle into
@@ -1187,6 +1211,9 @@ final class AudioEngine: ObservableObject {
         // audio played. Falls back to the existing podTitle for an episode not in the queue.
         if let ep = queueManager.queue.first(where: { $0.id == id }) {
             podTitle = ep.title
+            loadedEpisode = ep
+        } else if loadedEpisode?.id != id {
+            loadedEpisode = Episode(id: id, title: podTitle, audioUrl: urlStr)
         }
         // A fresh load invalidates the previous episode's progress NOW. The observer only ticks
         // during playback, so without this a snapshot taken between load and first tick (e.g.
