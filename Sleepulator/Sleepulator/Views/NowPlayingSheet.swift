@@ -31,6 +31,8 @@ struct NowPlayingSheet: View {
     @State private var seekUndo: Double?
     /// The last queue removal, offered back for a few seconds.
     @State private var removed: RemovedEpisode?
+    /// Home's Sleep timer sheet, opened from the night line.
+    @State private var showTimerOptions = false
     @ScaledMetric(relativeTo: .largeTitle) private var playDisc: CGFloat = 76
     @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -51,6 +53,16 @@ struct NowPlayingSheet: View {
     private var canSeek: Bool { [.playing, .paused, .finished].contains(phase) }
     /// Sleep's dusk palette, the dark-room case.
     private var night: Bool { pal.warm }
+    /// How tonight ends for this episode: Sleep only (Focus's timer is the Pomodoro), and only once
+    /// the player knows where it is.
+    private var showsNightLine: Bool {
+        night && state.isLoaded && [.playing, .paused, .finished, .live].contains(phase)
+    }
+    /// Wall-clock seconds to the episode's end at the current speed; nil when the length isn't known.
+    private var episodeRemaining: Double? {
+        guard canSeek, progress.duration > 0 else { return nil }
+        return max(0, progress.duration - progress.elapsed) / max(0.1, audio.playbackSpeed)
+    }
 
     private func withMotion(_ change: () -> Void) {
         if reduceMotion { change() } else { withAnimation(.easeOut(duration: 0.25)) { change() } }
@@ -363,7 +375,17 @@ struct NowPlayingSheet: View {
                 }
 
                 if state.hero != nil {
-                    scrubber
+                    VStack(spacing: UI.sm) {
+                        scrubber
+                        if showsNightLine {
+                            PlayerNightLine(sleepTimer: audio.sleepTimer,
+                                            episodeRemaining: episodeRemaining,
+                                            canStopAfter: canSeek && progress.duration > 5,
+                                            pal: pal,
+                                            openTimerOptions: { showTimerOptions = true },
+                                            stopAfterEpisode: { audio.startEndOfEpisodeTimer() })
+                        }
+                    }
 
                     // Back · play · forward: symmetric, play centred under the thumb.
                     HStack(spacing: UI.xxl) {
@@ -416,6 +438,19 @@ struct NowPlayingSheet: View {
                 undoToast(removed)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
+        }
+        .sheet(isPresented: $showTimerOptions) {
+            // Home's own timer sheet. From here something is loaded, so "Play & start timer" (shown
+            // when paused) resumes the episode; the timer starts first, so the session-start rule
+            // keeps the length chosen here rather than the ring's.
+            TimerSelectionSheet(audio: audio, isPresented: $showTimerOptions, pal: pal,
+                                playAndStart: { minutes in
+                                    audio.sleepTimer.startSleepTimer(minutes: minutes)
+                                    audio.resumePodcast()
+                                })
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+                .presentationBackground(pal.bg)
         }
     }
 
@@ -488,6 +523,63 @@ struct NowPlayingSheet: View {
         .padding(.horizontal, UI.lg)
         .padding(.bottom, UI.lg)
         .accessibilityElement(children: .combine)
+    }
+}
+
+/// The Sleep player's night line: how tonight ends for this episode (NightLineCopy), opening the
+/// timer options, with a one-tap "Stop after this episode" beneath it. Observes the timer itself,
+/// so its 1 Hz countdown re-renders only this.
+struct PlayerNightLine: View {
+    @ObservedObject var sleepTimer: SleepTimerService
+    let episodeRemaining: Double?
+    /// A finite-length episode is loaded, so a stop-with-episode timer can be set.
+    let canStopAfter: Bool
+    let pal: Palette
+    let openTimerOptions: () -> Void
+    let stopAfterEpisode: () -> Void
+    @AppStorage("ambientTailMinutes") private var tailMinutes = 0
+
+    var body: some View {
+        let line = NightLineCopy.line(timerRemaining: sleepTimer.timerRemaining,
+                                      endOfEpisode: sleepTimer.isEndOfEpisode,
+                                      inTail: sleepTimer.inTail,
+                                      episodeRemaining: episodeRemaining,
+                                      tailMinutes: tailMinutes)
+        VStack(spacing: UI.xs) {
+            Button(action: openTimerOptions) {
+                Label(line, systemImage: "moon.zzz")
+                    .font(.caption)
+                    .foregroundColor(pal.dim)
+                    .multilineTextAlignment(.center)
+                    // Two lines held open: the countdown's wording changes length as the minutes
+                    // pass, and the transport below mustn't move with it.
+                    .lineLimit(2, reservesSpace: true)
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Sleep timer: \(line)")
+            .accessibilityHint("Opens the timer options")
+
+            // Held open when the chip isn't offered, so setting it doesn't pull the transport up.
+            ZStack {
+                Color.clear.frame(height: 44)
+                if canStopAfter && !sleepTimer.isEndOfEpisode && !sleepTimer.inTail {
+                    Button(action: stopAfterEpisode) {
+                        Label("Stop after this episode", systemImage: "text.append")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundColor(pal.text)
+                            .padding(.horizontal, UI.lg)
+                            .frame(minHeight: 44)
+                            .overlay(Capsule().strokeBorder(pal.accent.opacity(0.35), lineWidth: 1))
+                            .contentShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityHint("Sets the sleep timer to end with this episode")
+                }
+            }
+        }
+        .padding(.horizontal, UI.xxl)
     }
 }
 

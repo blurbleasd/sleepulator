@@ -1474,6 +1474,50 @@ final class ClarityCopyTests: XCTestCase {
     }
 }
 
+/// The Sleep player's night line: does tonight's timer cut this story off, or does it end first?
+final class NightLineCopyTests: XCTestCase {
+    private func line(timer: Double, eoe: Bool = false, tail: Bool = false,
+                      episode: Double?, tailMinutes: Int = 0) -> String {
+        NightLineCopy.line(timerRemaining: timer, endOfEpisode: eoe, inTail: tail,
+                           episodeRemaining: episode, tailMinutes: tailMinutes)
+    }
+
+    func testNoTimerPlaysAllNight() {
+        XCTAssertEqual(line(timer: 0, episode: 1000), "Plays all night")
+    }
+
+    func testTimerCutsTheEpisodeShort() {
+        XCTAssertEqual(line(timer: 38 * 60, episode: 61 * 60),
+                       "Timer ends in 38 min · 23 min before this episode does")
+    }
+
+    func testEpisodeEndsFirst() {
+        XCTAssertEqual(line(timer: 52 * 60, episode: 38 * 60), "This episode ends 14 min before the timer")
+    }
+
+    func testWithinAMinuteTheyEndTogether() {
+        XCTAssertEqual(line(timer: 30 * 60, episode: 30 * 60 + 40), "Timer ends with this episode · in 30 min")
+    }
+
+    func testStopWithEpisodeMentionsTheTail() {
+        XCTAssertEqual(line(timer: 17 * 60, eoe: true, episode: 17 * 60), "Stops with this episode · in 17 min")
+        XCTAssertEqual(line(timer: 17 * 60, eoe: true, episode: 17 * 60, tailMinutes: 30),
+                       "Stops with this episode · in 17 min · sounds go on 30 min")
+    }
+
+    func testTailAndUnknownLength() {
+        XCTAssertEqual(line(timer: 12 * 60, tail: true, episode: nil), "Sounds fading · 12 min left")
+        XCTAssertEqual(line(timer: 38 * 60, episode: nil), "Timer ends in 38 min")
+    }
+
+    func testSpanRoundsUpAndShowsHours() {
+        XCTAssertEqual(NightLineCopy.span(1), "1 min")
+        XCTAssertEqual(NightLineCopy.span(61), "2 min", "a countdown never claims less than is left")
+        XCTAssertEqual(NightLineCopy.span(72 * 60), "1 hr 12 min")
+        XCTAssertEqual(NightLineCopy.span(120 * 60), "2 hr")
+    }
+}
+
 /// The night ring: a 120-minute dial from 12 o'clock, snapping to 5, 0 = All night.
 final class NightRingMathTests: XCTestCase {
     func testAngleMapsToSnappedMinutes() {
