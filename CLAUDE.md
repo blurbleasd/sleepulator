@@ -34,7 +34,9 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
 - **Widget** — `SleepulatorWidget/` (sleep-timer Live Activity).
 - **UI tests** — `SleepulatorUITests/` (XCUITest, in the shared scheme so CI runs it).
   `HomeLayoutUITests` checks Focus's Build mix / Focus session row clears the mini-player and
-  that a tap starts the Pomodoro. The target is made by `Sleepulator/setup_ui_tests.rb`
+  that a tap starts the Pomodoro. `NightVeilUITests` waits out the veil's minute on an untimed
+  night (~80 s), glances, wakes, and checks Focus's readout; it passes settings as launch
+  arguments (plist literals, the argument domain) so persisted mode and night length stay put. The target is made by `Sleepulator/setup_ui_tests.rb`
   (idempotent; re-run it after adding a file there). It runs in the same app the unit tests are
   hosted in, so a UI test must leave persisted state (mode, night length) as it found it.
 - **Tests** — `SleepulatorTests/` (XCTest). Six files, many suites: `AudioMathTests.swift`;
@@ -133,11 +135,14 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   (`noteSessionEdge`) and a switch to Focus ends it. It's visual only (scenes darken and still,
   comets and meteors retire past 0.4, the orb calms); the audio fade never reads it. Views that
   observe the timer for darkening (`NightDarken`, `NightFade`) also re-read it every 20 s while
-  unpaused, since an untimed night publishes nothing. The night never brightens at a timer
+  the screen is in sight (`SceneContext.occluded`; with "Moving scenes" off it still darkens),
+  since an untimed night publishes nothing. The night never brightens on its own at a timer
   boundary: a timer started mid-night settles on from where the night already is
-  (`SleepTimerService.timedBase`), and a natural end leaves it settled (`settleNight`; `stopAll`
-  resets the timer's total). Switching Focus → Sleep with the sound playing starts the night like
-  Play (`AudioEngine.beginSleepNight`). Before this, All night (the default) never darkened.
+  (`SleepTimerService.timedBase`), the ambient tail re-bases instead of dropping back, a cancel
+  hands the reached night to the untimed clock, and a natural end leaves it settled until the
+  resume window passes (`fireTerminalStop` → `settleNight`; `stopAll` resets the timer's total).
+  Only a +15m bump eases it back, by design. Switching Focus → Sleep with the sound playing starts
+  the night like Play (`AudioEngine.beginSleepNight`). Before this, All night never darkened.
 - **The stop-with-episode timer runs on the playback clock.** "Stop after this episode" (the timer
   sheet and the Sleep player's chip, `startEndOfEpisodeTimer`) is offered and starts only while the
   episode plays. A pause hands it to the wall clock with the same end
@@ -186,16 +191,17 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
 - **The night veil runs from the last touch.** ContentView drops it 60 s after the last touch
   anywhere in the window (`WindowActivity`: a recognizer that observes every touch, sheets
   included, and claims none), over a playing Sleep session: everywhere while a timer runs, on
-  Home for All night (`SessionGuards.mayNightDim`; on other tabs it would black out daytime
-  listening), and never under VoiceOver or Switch Control (`veilTimeout`). If a sheet, dialog or full-screen cover is up when the countdown
+  Home or the Now Playing sheet for All night (`SessionGuards.mayNightDim`; on other tabs it would
+  black out daytime listening), and never under VoiceOver or Switch Control (`veilTimeout`). If a sheet, dialog or full-screen cover is up when the countdown
   ends, the veil waits another round (`SessionGuards.veilTimeout`). The veil is part of the root
   view, so it can't cover them. The status bar and home indicator hide under the veil and the
   Sleep screensaver (`SessionGuards.hidesSystemOverlays`); Focus keeps its clock. The pending
   countdown lives on `WindowActivity`, not in `@State`: it changes on every touch. The first tap
   on the veil is a glance (`VeilGlance`: the ember and the night line, dim on black, for 6 s);
   a second tap lifts the veil and wakes the controls (`SessionGuards.veilTap`: a tap within
-  0.8 s is ignored, and one counts as the wake until the glance has faded). VoiceOver and Switch
-  Control wake in one. Under the veil the tabs are hidden from accessibility, so only it answers.
+  0.8 s is ignored, and one counts as the wake until the glance has faded; timed on the
+  monotonic clock). If VoiceOver or Switch Control turns on while the veil is down, one tap wakes.
+  Under the veil the tabs are hidden from accessibility, so only it answers.
 - **One name per sound.** Name sounds through `SoundNames` (binaurals are "Deep", "Drift", …,
   never "Delta" / "Theta").
 - **Podcasts is split by depth.** The library and its Tonight shelf follow the 2am rules (artwork

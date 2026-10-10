@@ -150,7 +150,8 @@ everything below is display-link / render behavior only a device shows.
 
 1. **Freeze is truly static.** Start a Sleep mix + timer, let the veil engage. In Xcode's Debug
    navigator (or Instruments → Core Animation), FPS ≈ 0 and no CA commits from the app while
-   the veil is up (NightDarken / NightFade re-read the night every 20 s only while unpaused). Repeat with each of: Night sky, Aurora, Embers, Still water, Deep space,
+   the veil is up, beyond a 1 Hz commit from the timer's observers on a timed night (NightDarken,
+   NightFade, the ring); on All night ≈ 0. Repeat with each of: Night sky, Aurora, Embers, Still water, Deep space,
    Breathe, Rain on glass. ✅ No redraws, no meteor wakeups (Night sky), gyro off (Aurora /
    Deep space — check with the Energy Log that CoreMotion isn't running).
 2. **Freeze-in-place, not reset.** Tap to wake after ≥ 10 min under the veil. ✅ Every scene
@@ -532,21 +533,25 @@ need the phone. Room dark, phone on the nightstand, brightness where you'd leave
 3. **All night gets the veil on the Sleep screen.** Ring set to All night, Play, don't touch.
    ✅ The veil drops about a minute later. (Auto-Lock set to Never so the veil, not iOS, darkens
    it.) Then play All night from the Podcasts tab and read a show page for over a minute. ✅ No
-   veil there; with a timer running, ✅ it drops on any tab. With VoiceOver on, ✅ it never drops.
+   veil there, but open the full player and leave it: ✅ it closes and the veil drops. With a timer
+   running, ✅ it drops on any tab. With VoiceOver on, ✅ it never drops.
    Focus with sound playing, switch to Sleep, don't touch. ✅ The veil arms (and the ring's timer
    starts if one is set).
 4. **All night settles.** All night, Deep space or Night sky, Auto-Lock Never, veil off in
    Settings so you can watch: check at 0, 20 and 45 min. ✅ The scene darkens and slows; no comet
    or meteor after ~18 min; by 45 min it holds its darkest, stillest state. Pull the headphones
    for a minute and reconnect. ✅ It doesn't brighten back to bedtime. Then drag the ring to
-   30m. ✅ Nothing brightens: the timer settles on from where the night was. Let a short timer end
+   30m, and later back to All night. ✅ Nothing brightens either way. With an ambient tail set and
+   a podcast in the mix, ✅ the scene holds as the podcast stops. Repeat 4 with Settings → Moving
+   scenes off: ✅ the still sky still darkens over the 45 minutes. Let a short timer end
    on its own and wake the screen within half an hour. ✅ The scene is still at its darkest.
 5. **The glance.** On a 30-min night, let the veil drop, then tap once. ✅ Only the faint ember
    and a dim "Nm left" appear at once (softly), and are gone after ~6 s (faded by ~8 s). A quick
    double-tap still shows the glance. Tap again while it shows or fades. ✅ The scene and the
-   controls come back together. A tap on the "Tap to wake" words works too. On All night, ✅ the glance says "All night" with
-   no ember. With VoiceOver on, ✅ one double-tap wakes. Voice Control: "Tap Wake". ✅ The first
-   shows the glance, the second wakes.
+   controls come back together. A tap on the "Tap to wake" words works too. On All night, ✅ the
+   glance says "All night" with no ember. Let the veil drop, then turn VoiceOver on (Accessibility
+   Shortcut): ✅ one double-tap wakes. Voice Control: "Tap Wake". ✅ The first shows the glance,
+   the second wakes, and nothing else on screen answers "Wake".
 6. **Focus scenes step back under the controls.** Focus, each scene, sound playing. ✅ With the
    controls up the scene is dimmed and "Focus session" reads clearly; after 10 s the controls fade
    and the scene rises to full. Tide at rest is a low line at the bottom edge. Sandfall at rest

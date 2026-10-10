@@ -54,18 +54,24 @@ final class NightVeilUITests: XCTestCase {
 
         // No timer runs (All night), yet the veil still drops ~60 s after the last touch.
         XCTAssertTrue(veil.waitForExistence(timeout: 80), "No veil over an untimed night")
+        // Under the veil only the veil answers: Home's "Show controls" layer used to stay in the
+        // accessibility tree and answer "Wake" too, waking hidden chrome under the black.
+        XCTAssertFalse(wake.exists, "Home's wake layer still answers under the veil")
 
-        // A sleepy tap anywhere on the black (off the centred "Tap to wake" caption).
+        // A sleepy tap anywhere on the black.
         let tapPoint = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.25))
 
         // First tap: the glance. The veil stays (the glance itself is hidden from accessibility).
         // Held past the veil's 1.6 s fade-out, so a wake in progress can't pass for a glance.
         tapPoint.tap()
+        let firstTap = Date()
         XCTAssertTrue(holds(for: 2) { veil.exists }, "The first tap woke the screen instead of a glance")
 
-        // Second tap (while the glance shows or fades, 8 s; SessionGuards.veilTap): the veil lifts and Home's controls are back and
-        // take taps (the orb, still offering Pause), not a bare scene behind the screensaver's
-        // "Show controls" layer that needs a third tap.
+        // Second tap, while the glance shows or fades (8 s, SessionGuards.veilTap): the veil lifts
+        // and Home's controls are back and take taps (the orb, still offering Pause), not a bare
+        // scene behind the screensaver's "Show controls" layer that needs a third tap.
+        let gap = Date().timeIntervalSince(firstTap)
+        XCTAssertLessThan(gap, 7.5, "Runner too slow: the second tap would land after the glance (\(gap) s)")
         tapPoint.tap()
         let woke = waitUntil(timeout: 5) {
             !veil.exists && !wake.exists && pause.exists && pause.isHittable

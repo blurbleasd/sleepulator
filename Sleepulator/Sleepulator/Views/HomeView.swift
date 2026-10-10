@@ -218,6 +218,9 @@ struct HomeView: View {
 
     var pal: Palette { Palette(focusMode: audio.focusMode) }
 
+    /// Spacing in the orb's stack (orb, night line, pills). The veil's glance places its line from it.
+    static let heroSpacing: CGFloat = 20
+
     // The currently-playing layers, shown as pills under the orb.
     private var activeLayers: [String] {
         var p: [String] = []
@@ -426,6 +429,7 @@ struct HomeView: View {
                 palette: pal,
                 reduceMotion: reduceMotion,
                 paused: scenesFrozen,
+                occluded: audio.screenDimmed || scenePhase != .active || isLuminanceReduced,
                 sleepTimer: audio.sleepTimer,
                 pomodoro: audio.pomodoro,
                 audioLevel: { [weak audio] in audio?.audioLevel ?? 0 },
@@ -486,7 +490,7 @@ struct HomeView: View {
 
                 Spacer()
 
-                VStack(spacing: 20) {
+                VStack(spacing: Self.heroSpacing) {
                     if audio.focusMode {
                         // Focus: the depleting Pomodoro ring is the hero. The orb still
                         // play/pauses audio; the ring + readout report the session. Freeze the

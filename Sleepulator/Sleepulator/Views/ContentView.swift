@@ -13,7 +13,9 @@ struct ContentView: View {
     /// used to bring the whole scene back (and still no number) just to check the time. Timing
     /// rules live in `SessionGuards.veilTap`.
     @State private var veilGlanceShown = false
-    @State private var veilGlanceAt: Date?
+    /// When the glance showed, on the monotonic clock (`systemUptime`): a wall-clock step back
+    /// would otherwise read as a fresh glance and swallow every tap.
+    @State private var veilGlanceAt: TimeInterval?
     @State private var veilGlanceHide: DispatchWorkItem?
     /// The mini-player's full Now Playing sheet. Lifted here so HomeView can count it as a
     /// presentation (no screensaver fade behind it), alongside its own sheets.
@@ -63,12 +65,14 @@ struct ContentView: View {
     // pending dim, never force the screen bright mid-night. Only over a session that's actually
     // playing (SessionGuards.mayNightDim): a timer counting down over paused audio used to blank
     // the screen on a silent room.
-    private var mayDim: Bool { mayDimNow(timerActive: audio.sleepTimer.timerRemaining > 0) }
-
-    private func mayDimNow(timerActive: Bool) -> Bool {
+    /// `timerActive` overrides the published value for the one caller that runs in its willSet.
+    /// The Now Playing sheet counts as the bedside screen too: it's the brightest night surface,
+    /// and an idle one closes so the veil can drop (`veilTimeout`).
+    private func mayDim(timerActive: Bool? = nil) -> Bool {
         SessionGuards.mayNightDim(autoNightDim: autoNightDim, focusMode: audio.focusMode,
-                                  playing: audio.isAnythingPlaying, timerActive: timerActive,
-                                  onHome: selectedTab == 0)
+                                  playing: audio.isAnythingPlaying,
+                                  timerActive: timerActive ?? (audio.sleepTimer.timerRemaining > 0),
+                                  onHome: selectedTab == 0 || showNowPlaying)
     }
 
     /// Tracks the timer's active/idle state so the veil re-arms only on that transition, not on
@@ -80,10 +84,10 @@ struct ContentView: View {
     /// item re-reads the live state when it fires.
     private func scheduleDim(timerActiveNow: Bool? = nil) {
         windowActivity.pendingDim?.cancel()
-        guard mayDimNow(timerActive: timerActiveNow ?? (audio.sleepTimer.timerRemaining > 0)) else { return }
+        guard mayDim(timerActive: timerActiveNow) else { return }
         let work = DispatchWorkItem {
             let assistive = UIAccessibility.isVoiceOverRunning || UIAccessibility.isSwitchControlRunning
-            switch SessionGuards.veilTimeout(mayDim: self.mayDim, presenting: self.windowActivity.isPresenting,
+            switch SessionGuards.veilTimeout(mayDim: self.mayDim(), presenting: self.windowActivity.isPresenting,
                                              nowPlayingUp: self.showNowPlaying, assistiveTech: assistive) {
             case .closeNowPlaying:
                 self.showNowPlaying = false
@@ -107,8 +111,8 @@ struct ContentView: View {
     /// A tap on the veil: the glance first, then the wake (`SessionGuards.veilTap`).
     private func veilTapped() {
         let assistive = UIAccessibility.isVoiceOverRunning || UIAccessibility.isSwitchControlRunning
-        switch SessionGuards.veilTap(sinceGlance: veilGlanceAt.map { Date().timeIntervalSince($0) },
-                                     assistiveTech: assistive) {
+        let uptime = ProcessInfo.processInfo.systemUptime
+        switch SessionGuards.veilTap(sinceGlance: veilGlanceAt.map { uptime - $0 }, assistiveTech: assistive) {
         case .ignore: return
         case .glance: showGlance()
         case .wake:
@@ -125,7 +129,7 @@ struct ContentView: View {
     private func showGlance() {
         veilCaptionHide?.cancel()
         withAnimation(.easeInOut(duration: 0.4)) { veilCaptionShown = false }
-        veilGlanceAt = Date()
+        veilGlanceAt = ProcessInfo.processInfo.systemUptime
         // It answers the tap at once but arrives softly (dim text, a short ease-out), so a
         // dark-adapted eye isn't left wondering whether the tap landed.
         withAnimation(.easeOut(duration: 0.6)) { veilGlanceShown = true }
@@ -325,9 +329,10 @@ private struct VeilGlance: View {
                                    lengthMinutes: 0)
     }
 
-    /// Where Home lays out the night line under the ring: half the ring's frame, the VStack's
-    /// 20 pt spacing, and half the line's 44 pt minimum height.
-    private static let lineBelowRingCentre: CGFloat = NightRing.frameSize / 2 + 20 + 22
+    /// Where Home lays out the night line under the ring: half the ring's frame, the orb stack's
+    /// spacing, and half the line's minimum height.
+    private static let lineBelowRingCentre: CGFloat =
+        NightRing.frameSize / 2 + HomeView.heroSpacing + NightLine.minHeight / 2
 
     var body: some View {
         GeometryReader { geo in

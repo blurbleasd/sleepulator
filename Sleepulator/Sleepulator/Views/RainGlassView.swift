@@ -10,6 +10,9 @@ import SwiftUI
 struct RainGlassView: View {
     /// True only when the screen is occluded by the deep night-dim veil — freeze for battery.
     var paused: Bool = false
+    /// The screen itself is out of sight (not just "Moving scenes" off): the bokeh's fade stops
+    /// re-reading the night (see `SceneContext.occluded`).
+    var occluded: Bool = false
     /// The sleep timer, read *live* (not observed) inside the redraw so the rain eases off as
     /// the night progresses. Plain property on purpose — observing it here would re-render the
     /// whole scene every tick (the `rmsPower`/`@Published` storm CLAUDE.md warns about).
@@ -88,7 +91,7 @@ struct RainGlassView: View {
             // Blurred lights behind the glass — they dim out as the night settles, leaving a
             // dark fogged pane (isolated 1 Hz leaf; the animating drops dim separately, live).
             if let timer = sleepTimer {
-                NightFade(timer: timer, maxDim: 0.9, paused: paused) { bokehLights }
+                NightFade(timer: timer, maxDim: 0.9, occluded: occluded) { bokehLights }
             } else {
                 bokehLights
             }
@@ -146,7 +149,7 @@ struct RainGlassView: View {
     /// head and a fading tail, which read as meteors falling past a window.
     ///
     /// - Parameter night: `nightProgress` (0 at bedtime, →1 as the timer runs out or, with no
-    ///   timer, as the untimed night settles; 0 when idle). As it rises the rain eases off — each drop fades over a window, with
+    ///   timer, as the untimed night settles; 0 at bedtime). As it rises the rain eases off — each drop fades over a window, with
     ///   higher-`phase` drops retiring first, so the glass thins gradually to a still pane.
     ///   The fall *rate* is left untouched (scaling absolute `t` would jump the drop) — the
     ///   thinning alone reads as the rain letting up.

@@ -78,7 +78,8 @@ enum SessionGuards {
     /// and they never needed the light. `sinceGlance` is nil when no glance has shown this veil.
     static func veilTap(sinceGlance: TimeInterval?, assistiveTech: Bool) -> VeilTap {
         if assistiveTech { return .wake }
-        guard let t = sinceGlance, t < glanceHold + glanceFade else { return .glance }
+        // Negative only if the clock behind it stepped back: treat it as a stale glance.
+        guard let t = sinceGlance, t >= 0, t < glanceHold + glanceFade else { return .glance }
         return t < glanceSettle ? .ignore : .wake
     }
 

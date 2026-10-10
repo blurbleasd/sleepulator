@@ -113,8 +113,10 @@ final class SleepTimerService: ObservableObject {
     /// how far through the night it should be. 0 when no timer is running.
     @Published var timerTotal: TimeInterval = 0
 
-    /// 0 at the start of the night, →1 as it settles; 0 when idle. With a timer it runs across
-    /// the timer; on an untimed ("All night") Sleep night it runs on the clock (`UntimedNight`).
+    /// 0 at bedtime and in Focus, →1 as the night settles. With a timer it runs across the timer
+    /// (from wherever the night stood when it began); on an untimed ("All night") Sleep night it
+    /// runs on the clock (`UntimedNight`). It holds where the night stood through a pause or after
+    /// the timer's stop, and returns to 0 once the sound has been off for `resumeWindow`.
     /// Visual only: it darkens, stills and quiets the scenes and calms the orb. The audio fade
     /// has its own path (`updateFadeMultFn`), so an untimed night never fades the sound.
     var nightProgress: Double {
@@ -157,11 +159,27 @@ final class SleepTimerService: ObservableObject {
     }
 
     /// The night's timer reached its natural end: hold the scenes at their darkest, stillest state
-    /// through the silence that follows (a short pause, then resuming, keeps it; after
-    /// `UntimedNight.resumeWindow` the night is over). `stopAll` resets the timer's total, so
-    /// without this the scene fell back to the untimed clock and lifted just as the night ended.
+    /// through the silence that follows (resuming within `UntimedNight.resumeWindow` keeps it;
+    /// after that the night is over). `stopAll` resets the timer's total, so without this the
+    /// scene fell back to the untimed clock and lifted just as the night ended. Only over a Sleep
+    /// night (a timer set over silence has none), and it records the stop itself: a stop over
+    /// silence has no edge to record, and the settled night never expired.
     private func settleNight() {
+        guard untimedStart != nil else { return }
         untimedStart = now().addingTimeInterval(-UntimedNight.settle)
+        untimedStoppedAt = now()
+    }
+
+    /// The terminal stop, once per timer: hold the night settled, stop everything, clear the
+    /// timer. One place for the three paths (the duration fade, the episode's end, a deadline
+    /// passed while suspended), so a change to how the night ends can't miss one.
+    private func fireTerminalStop(_ reason: String) {
+        if timerRemaining != 0 { timerRemaining = 0 }
+        didFire = true
+        Log.timer.notice("terminal stop: \(reason, privacy: .public)")
+        settleNight()
+        stopAllFn?()
+        cancelTimer()
     }
 
     private var sleepTimer: DispatchSourceTimer?
@@ -209,8 +227,14 @@ final class SleepTimerService: ObservableObject {
         stopPodcastFn?()
         let end = Date().addingTimeInterval(tailDuration)
         sleepTimerEnd = end
-        timerTotal += tailDuration      // the moon keeps easing down, never snaps back up
+        let reached = nightProgress
+        timerTotal += tailDuration
         timerRemaining = tailDuration
+        // Re-base so the night carries straight on from where it stood and keeps easing down
+        // across the tail: growing the total alone dropped it back by tail / (total + tail) the
+        // moment the podcast stopped.
+        let f = 1 - timerRemaining / timerTotal
+        timedBase = f < 1 ? max(0, min(1, (reached - f) / (1 - f))) : reached
         backstop.schedule(after: tailDuration)
         updateLiveActivity()
         Log.timer.notice("ambient tail begin: podcast stopped, bed continues \(Int(self.tailDuration), privacy: .public)s")
@@ -291,12 +315,7 @@ final class SleepTimerService: ObservableObject {
             armTick()   // end-of-episode had no wall-clock timer; the tail needs one
             return
         }
-        if self.timerRemaining != 0 { self.timerRemaining = 0 }
-        didFire = true
-        Log.timer.notice("terminal stop: end-of-episode reached")
-        settleNight()
-        stopAllFn?()
-        cancelTimer(resetMoon: false)
+        fireTerminalStop("end-of-episode reached")
     }
 
     /// The podcast this timer follows has paused (AirPods out, a call, the lock screen) while the
@@ -319,12 +338,7 @@ final class SleepTimerService: ObservableObject {
     func reconcileIfExpired() {
         guard kind == .duration, !didFire, let end = sleepTimerEnd else { return }
         guard Date() >= end else { return }
-        if timerRemaining != 0 { timerRemaining = 0 }
-        didFire = true
-        Log.timer.notice("terminal stop: duration timer expired while suspended (reconcile on foreground)")
-        settleNight()
-        stopAllFn?()
-        cancelTimer(resetMoon: false)
+        fireTerminalStop("duration timer expired while suspended (reconcile on foreground)")
     }
 
     /// Drive the end-of-episode timer from the podcast clock. Runs on the main queue (its caller
@@ -371,11 +385,7 @@ final class SleepTimerService: ObservableObject {
                 // Publish the terminal value once, then fire exactly once.
                 if self.timerRemaining != 0 { self.timerRemaining = 0 }
                 guard !self.didFire else { return }
-                self.didFire = true
-                Log.timer.notice("terminal stop: duration timer fade complete")
-                self.settleNight()
-                self.stopAllFn?()
-                self.cancelTimer(resetMoon: false)
+                self.fireTerminalStop("duration timer fade complete")
                 return
             }
 
@@ -428,7 +438,10 @@ final class SleepTimerService: ObservableObject {
         }
     }
 
-    func cancelTimer(resetMoon: Bool = true) {
+    func cancelTimer() {
+        // A cancel mid-night (the ring to All night, a manual start in the tail) hands the night
+        // back to the untimed clock at the point it had reached, so the scene never brightens.
+        let reached = nightProgress
         sleepTimer?.cancel()
         sleepTimer = nil
         sleepTimerEnd = nil
@@ -440,10 +453,10 @@ final class SleepTimerService: ObservableObject {
         // Tear down the out-of-process net too: the in-process stop fired, or the user/mode
         // switch cancelled the timer. (Also fires on the terminal stop, which calls this.)
         backstop.cancel()
-        // An explicit cancel (mode switch / UI) resets the total here. A natural finish asks to
-        // keep it, but its `stopAllFn` has already cancelled with a reset by then; the night
-        // stays settled through `settleNight()` and the untimed clock instead.
-        if resetMoon { timerTotal = 0 }
+        timerTotal = 0
+        if let start = untimedStart {
+            untimedStart = min(start, now().addingTimeInterval(-reached * UntimedNight.settle))
+        }
         updateFadeMultFn?(1.0)
         
         endLiveActivity()

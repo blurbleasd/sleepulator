@@ -16,6 +16,10 @@ struct SceneContext {
     /// lighter controls-faded screensaver: scenes keep animating through that (it's the show).
     /// See `HomeView.scenesFrozen` / the `nightDimmed → audio.screenDimmed` hand-off.
     let paused: Bool
+    /// The screen itself is out of sight (the veil, backgrounded, low luminance), not just held
+    /// still by the "Moving scenes" setting. Static overlays stop their periodic re-reads only
+    /// then: with Moving scenes off the night still darkens.
+    var occluded: Bool = false
     /// The sleep timer, for time-reactive sleep scenes (e.g. the setting moon).
     let sleepTimer: SleepTimerService
     /// The Pomodoro, for time-reactive Focus scenes (work/break phase + progress).
@@ -75,7 +79,7 @@ struct NightSkyScene: AmbientScene {
                 // Darkening must observe the timer itself: nightProgress is computed (not
                 // @Published) and the timer is no longer forwarded through `audio`, so HomeView
                 // stops re-rendering each second — without this leaf the sky would freeze.
-                NightDarken(timer: ctx.sleepTimer, paused: ctx.paused)
+                NightDarken(timer: ctx.sleepTimer, occluded: ctx.occluded)
             }
             .ignoresSafeArea()
         )
@@ -84,14 +88,15 @@ struct NightSkyScene: AmbientScene {
 
 /// The sleep sky-darkening overlay, isolated so it re-renders on each timer tick (it observes the
 /// timer directly) rather than relying on its parent's per-second re-render. An untimed night
-/// settles on the clock with nothing published, so it also re-reads every 20 s, but only while
-/// the scene runs: under the veil (`paused`) the app makes no redraws at all (TESTING.md §3H.1).
+/// settles on the clock with nothing published, so it also re-reads every 20 s, except while the
+/// screen is out of sight (`occluded`). Under the veil it still follows a running timer's 1 Hz
+/// republish (TESTING.md §3H.1).
 private struct NightDarken: View {
     @ObservedObject var timer: SleepTimerService
-    var paused: Bool = false
+    var occluded: Bool = false
     var body: some View {
         Group {
-            if paused {
+            if occluded {
                 Color.black.opacity(timer.nightProgress * 0.35)
             } else {
                 TimelineView(.periodic(from: .now, by: 20)) { _ in
@@ -105,21 +110,21 @@ private struct NightDarken: View {
 }
 
 /// Fades arbitrary backdrop content toward dark as the sleep timer winds down — the
-/// general-purpose sibling of `NightDarken`, used for the warm static layers (the embers
-/// hearth glow, the rain-glass bokeh) that should dim with the night. Isolated so it
-/// re-renders only on the timer's ~1 Hz republish and, while unpaused, a 20 s re-read for an
-/// untimed night (which publishes nothing), never dragging its parent (or a sibling
-/// `TimelineView` animation loop) into a re-render. Animating Canvas layers don't use this —
+/// general-purpose sibling of `NightDarken`, used for warm static layers such as the rain-glass
+/// bokeh that should dim with the night. Isolated so it re-renders only on the timer's ~1 Hz
+/// republish and, unless the screen is out of sight, a 20 s re-read for an untimed night (which
+/// publishes nothing), never dragging its parent (or a sibling `TimelineView` animation loop)
+/// into a re-render. Animating Canvas layers don't use this —
 /// they read `nightProgress` live inside their own redraw instead.
 struct NightFade<Content: View>: View {
     @ObservedObject var timer: SleepTimerService
     /// Opacity removed at full night (`nightProgress == 1`). 0.8 → fades to a faint glow.
     var maxDim: Double = 0.8
-    /// The scene is frozen (veil, background): hold still, no periodic re-reads.
-    var paused: Bool = false
+    /// The screen is out of sight (veil, background): no periodic re-reads.
+    var occluded: Bool = false
     @ViewBuilder var content: Content
     var body: some View {
-        if paused {
+        if occluded {
             content.opacity(1 - maxDim * timer.nightProgress)
         } else {
             faded
@@ -180,7 +185,7 @@ struct RainOnGlassScene: AmbientScene {
     let mood = SceneMood.sleep
 
     func makeBackdrop(_ ctx: SceneContext) -> AnyView {
-        AnyView(RainGlassView(paused: ctx.paused, sleepTimer: ctx.sleepTimer))
+        AnyView(RainGlassView(paused: ctx.paused, occluded: ctx.occluded, sleepTimer: ctx.sleepTimer))
     }
 }
 
