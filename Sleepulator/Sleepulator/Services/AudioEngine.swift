@@ -260,6 +260,12 @@ final class AudioEngine: ObservableObject {
     @Published private(set) var loadedEpisode: Episode?
     /// The loaded episode wouldn't play. Cleared by the next load.
     @Published private(set) var podcastFailed = false
+    /// A load is in flight: set by `loadPodcast`, cleared by the player's first play/pause report
+    /// or a failure. The player views show a spinner only while this holds (NowPlayingState.phase),
+    /// so a pause before the first time report leaves Play, not a dead spinner.
+    @Published private(set) var episodeLoading = false
+    /// The loaded episode is a stand-in built by `loadPodcast` (not from the queue): title only.
+    private var standInEpisodeId: String?
     /// The Night Limiter couldn't attach to the loaded stream, so it plays unsoftened. Said quietly
     /// in the full player only: as a playback note it raised an amber ⚠ banner on Home and replaced
     /// "Playing" in the mini-player, all night, for a stream that was working. Cleared by the next load.
@@ -495,8 +501,18 @@ final class AudioEngine: ObservableObject {
         settings.onBeatRouting = { [weak self] in self?.syncBeatMode() }
 
         queueManager.loadPodcastFn = { [weak self] url, id, title, resume in
-            self?.podTitle = title
-            self?.loadPodcast(url, id: id, resume: resume)
+            guard let self else { return }
+            // `resume` marks a user's pick (an Up Next row, Next, Try again); auto-advance passes
+            // false. Picking an episode during the ambient tail means "I'm awake": cancel the timer
+            // so the tail's near-zero fade doesn't carry over and play it silently (`onResume` does
+            // the same for a resume). Never on an automatic load: there it would lift the night's
+            // fade and play the next episode at full volume with no timer left.
+            if resume, self.sleepTimer.inTail {
+                Log.timer.notice("episode picked during ambient tail — cancelling sleep timer so it's audible")
+                self.sleepTimer.cancelTimer()
+            }
+            self.podTitle = title
+            self.loadPodcast(url, id: id, resume: resume)
         }
         queueManager.pausePodcastFn = { [weak self] in
             guard let self else { return }
@@ -556,7 +572,16 @@ final class AudioEngine: ObservableObject {
         }
 
         podPlayer.onPlaybackStateChanged = { [weak self] isPlaying in
-            DispatchQueue.main.async { self?.isPodPlaying = isPlaying }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.episodeLoading = false
+                // Really playing again (a lock-screen resume, a rebuild): not failed any more.
+                if isPlaying { self.podcastFailed = false }
+                self.isPodPlaying = isPlaying
+                // A stop-with-episode timer only counts on the playback clock; paused, it moves to
+                // the wall clock so the night still ends (SleepTimerService.podcastPaused).
+                if !isPlaying { self.sleepTimer.podcastPaused() }
+            }
         }
         
         podPlayer.onTitleUpdate = { [weak self] title in
@@ -580,24 +605,18 @@ final class AudioEngine: ObservableObject {
             }
         }
         
-        podPlayer.onPlaybackFailed = { [weak self] _ in
-            DispatchQueue.main.async {
-                // The system's reason ("The operation could not be completed") is logged by the
-                // player; on screen it only alarmed. The player views offer Try again / Play next.
-                self?.playbackNote = "Couldn't play this episode"
-                self?.podcastFailed = true
-                self?.isPodPlaying = false
-            }
+        podPlayer.onPlaybackFailed = { [weak self] episodeId in
+            DispatchQueue.main.async { self?.handlePodcastFailure(episodeId: episodeId) }
         }
 
-        // Non-destructive note (e.g. limiter couldn't attach to a stream). Unlike
-        // onPlaybackFailed, this never changes isPodPlaying — the audio is fine.
+        // Non-destructive note (buffering, "stream lost", "No podcast audio?"). Unlike
+        // onPlaybackFailed, this never changes isPodPlaying. The limiter has its own signal below.
         podPlayer.onPlaybackNote = { [weak self] note in
             DispatchQueue.main.async { self?.playbackNote = note }
         }
 
         podPlayer.onLimiterUnavailable = { [weak self] in
-            DispatchQueue.main.async { self?.limiterOffForStream = true }
+            DispatchQueue.main.async { self?.handleLimiterUnavailable() }
         }
         
         podPlayer.onQueueAdvance = { [weak self] finishedEpId, didFinish in
@@ -612,7 +631,13 @@ final class AudioEngine: ObservableObject {
                 // rolling into the next one. (externalTick normally fires the stop just before the
                 // natural end; this covers the exact boundary if the last tick missed it.)
                 if self.sleepTimer.isEndOfEpisode {
-                    self.stopAll()
+                    self.sleepTimer.episodeEnded()   // the tail if one's set, else the stop
+                    return
+                }
+                // In the ambient tail the podcast is done for the night: tidy the queue, play nothing.
+                // (Auto-advancing here played the next episode under the tail, then cut it off.)
+                if self.sleepTimer.inTail {
+                    self.queueManager.advanceQueue(finishedEpId: finishedEpId, suppressAutoPlay: true)
                     return
                 }
                 // Sleep-aware hold: with a sleep timer running you're presumably asleep — burning
@@ -873,13 +898,41 @@ final class AudioEngine: ObservableObject {
     /// the skipped episode's download or marks it played, and plays the next one even with
     /// Auto-Play off (see `PodcastQueueManager.skipToNext`).
     func skipToNextEpisode() {
-        queueManager.skipToNext(currentId: loadedEpisode?.id ?? podPlayer.currentEpisodeId)
+        // Not mid-load: a second tap would drop the episode that's only just starting, unheard.
+        guard !episodeLoading else { return }
+        queueManager.skipToNext(currentId: loadedEpisode?.id)
+    }
+
+    /// The player gave up on an item. Ignored unless it's the episode the player is on now: the
+    /// callback hops through the main queue, and a failure from an item that's since been replaced
+    /// must not paint "Try again" over a working episode. (Internal: the tests drive it directly.)
+    func handlePodcastFailure(episodeId: String?) {
+        guard episodeId == nil || episodeId == loadedEpisode?.id else { return }
+        // The system's reason ("The operation could not be completed") is logged by the player;
+        // on screen it only alarmed. The player views offer Try again / Play next.
+        playbackNote = NowPlayingState.failedCopy
+        podcastFailed = true
+        episodeLoading = false
+        isPodPlaying = false
+    }
+
+    /// The limiter tap couldn't attach to this stream. Only worth a word when the Night Limiter is
+    /// actually on (it ships off by default, and the tap still carries volume and the fade).
+    func handleLimiterUnavailable() {
+        guard podPlayer.nightLimiterEnabled else { return }
+        limiterOffForStream = true
     }
 
     /// Try the loaded episode again after it failed. The failure already took it out of the queue
     /// (advance, not marked played), so this puts it back at the head and reloads it.
     func retryLoadedEpisode() {
         guard let ep = loadedEpisode else { return }
+        // A stand-in (Resume Last Night's episode, no longer queued) is retried as it was loaded:
+        // queueing it would write a title-only placeholder into queue.json for good.
+        if ep.id == standInEpisodeId {
+            loadPodcast(ep.audioUrl, id: ep.id, fallbackTitle: ep.title)
+            return
+        }
         queueManager.playEpisode(ep)
     }
 
@@ -1040,7 +1093,8 @@ final class AudioEngine: ObservableObject {
         if let urlStr = mix.podcastUrl {
             // Seek straight to the snapshot's stored position; fall back to the saved-position map
             // (resume: true) for older snapshots that predate podcastPosition.
-            loadPodcast(urlStr, id: mix.podcastId ?? urlStr, resume: true, startAt: mix.podcastPosition)
+            loadPodcast(urlStr, id: mix.podcastId ?? urlStr, resume: true, startAt: mix.podcastPosition,
+                        fallbackTitle: "Last night\u{2019}s episode")
         }
     }
     
@@ -1209,10 +1263,15 @@ final class AudioEngine: ObservableObject {
         return urlStr
     }
 
-    func loadPodcast(_ urlStr: String, id: String, resume: Bool = true, startAt: TimeInterval? = nil) {
+    /// `fallbackTitle`: what to call an episode that isn't in the queue (Resume Last Night after
+    /// the snapshot's episode left it). Without it the title fell back to `podTitle`, which at a
+    /// cold launch is the queue head's: the player showed another episode's name over this audio.
+    func loadPodcast(_ urlStr: String, id: String, resume: Bool = true, startAt: TimeInterval? = nil,
+                     fallbackTitle: String? = nil) {
         playbackNote = nil
         podcastFailed = false
         limiterOffForStream = false
+        episodeLoading = true
         // Resolve the title from the queue by id — the single point of truth for "what's loading."
         // Callers that pre-set podTitle (queueManager.loadPodcastFn) agree with this; callers that
         // didn't (resumeMix / the StartSleepulatorMix intent) used to pass a STALE podTitle into
@@ -1221,8 +1280,12 @@ final class AudioEngine: ObservableObject {
         if let ep = queueManager.queue.first(where: { $0.id == id }) {
             podTitle = ep.title
             loadedEpisode = ep
+            standInEpisodeId = nil
         } else if loadedEpisode?.id != id {
-            loadedEpisode = Episode(id: id, title: podTitle, audioUrl: urlStr)
+            let title = fallbackTitle ?? podTitle
+            podTitle = title
+            loadedEpisode = Episode(id: id, title: title, audioUrl: urlStr)
+            standInEpisodeId = id
         }
         // A fresh load invalidates the previous episode's progress NOW. The observer only ticks
         // during playback, so without this a snapshot taken between load and first tick (e.g.
@@ -1237,8 +1300,11 @@ final class AudioEngine: ObservableObject {
     /// Start a sleep timer that ends when the current episode finishes (fading the ambient bed
     /// down over the last stretch). No-op without a loaded episode of known, finite length, so we
     /// never start a timer that would instantly fire on an unknown-duration live stream.
+    /// Only while the podcast plays: this timer ticks off the playback clock, so started on a
+    /// paused episode it cancelled the night's timer and then never ran out (the sounds played on
+    /// all night).
     func startEndOfEpisodeTimer() {
-        guard podPlayer.hasPlayer, podcastDuration.isFinite, podcastDuration > 5 else { return }
+        guard podPlayer.hasPlayer, isPodPlaying, podcastDuration.isFinite, podcastDuration > 5 else { return }
         let speed = max(0.1, playbackSpeed)
         let remaining = max(1, (podcastDuration - podcastElapsed) / speed)
         sleepTimer.startEndOfEpisode(remaining: remaining)

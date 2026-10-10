@@ -116,7 +116,9 @@ final class PodcastPlayer: NSObject {
     var onQueueAdvance: ((_ finishedId: String?, _ didFinish: Bool) -> Void)?
     var onNearEnd: (() -> Void)?
     var onTitleUpdate: ((String) -> Void)?
-    var onPlaybackFailed: ((String) -> Void)?
+    /// The item for this episode id gave up (the reason is logged here). Tagged with the id so the
+    /// owner can ignore a failure from an item that's since been replaced.
+    var onPlaybackFailed: ((_ episodeId: String?) -> Void)?
     var onPlaybackNote: ((String?) -> Void)?
     /// The limiter tap couldn't attach to this stream (HLS / no audio track); it plays
     /// unprocessed. Its own signal rather than a note, so the views can say it quietly where it
@@ -374,7 +376,22 @@ final class PodcastPlayer: NSObject {
             playerItem = pre
             preloadedItem = nil
         } else {
-            guard let nsurl = URL(string: url) else { return }
+            guard let nsurl = URL(string: url) else {
+                // An enclosure URL that won't even parse. Say so rather than returning silently:
+                // the owner has already moved its "now playing" to this episode, so a quiet return
+                // left a spinner over the previous episode's audio. Stop that audio, then fail.
+                Log.audio.error("podcast load refused: malformed URL for \(id, privacy: .public)")
+                pause()
+                // Drop the previous item too, so a lock-screen Play can't resume it under this
+                // episode's name; then fail and advance exactly as a failed item does.
+                player?.replaceCurrentItem(with: nil)
+                currentUrl = url
+                currentId = id
+                currentTitle = title
+                onPlaybackFailed?(id)
+                onQueueAdvance?(id, false)
+                return
+            }
             playerItem = AVPlayerItem(url: nsurl)
         }
 
@@ -835,11 +852,13 @@ final class PodcastPlayer: NSObject {
 
     override func observeValue(forKeyPath keyPath: String?, of object: Any?, change: [NSKeyValueChangeKey : Any]?, context: UnsafeMutableRawPointer?) {
         if keyPath == "status", let item = object as? AVPlayerItem {
-            if item.status == .failed {
+            // Only the item the player is on: a late status from one already replaced (a retry, a
+            // rebuild) would otherwise be reported under the new episode's id.
+            if item.status == .failed, item === currentItem {
                 cancelStallWatchdog()
                 let errorMsg = item.error?.localizedDescription ?? "Unknown error"
                 Log.audio.error("AVPlayerItem failed: \(errorMsg, privacy: .public)")
-                onPlaybackFailed?(errorMsg)
+                onPlaybackFailed?(currentId)
                 onQueueAdvance?(currentId, false)   // failed — advance but do NOT mark it played
             }
         }

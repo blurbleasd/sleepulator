@@ -21,12 +21,8 @@ struct NowPlayingSheet: View {
     /// this, a sheet in use could be swept away when the veil drops (ContentView).
     var onInteraction: () -> Void = {}
 
-    @State private var isDraggingScrubber = false
-    @State private var scrubProgress: Double = 0.0
-    /// Where a scrub began, so a long jump can be taken back.
-    @State private var scrubFrom: Double = 0
     /// "Back to 3:20": offered for a few seconds after a scrub jumps more than two minutes.
-    @State private var seekUndo: Double?
+    @State private var seekUndo: SeekUndo?
     /// The last queue removal, offered back for a few seconds.
     @State private var removed: RemovedEpisode?
     /// Home's Sleep timer sheet, opened from the night line.
@@ -40,25 +36,24 @@ struct NowPlayingSheet: View {
         let index: Int
     }
 
-    /// One source for what's playing and what follows (see NowPlayingState).
-    private var state: NowPlayingState { NowPlayingState(loaded: audio.loadedEpisode, queue: queue.queue) }
-    private var phase: NowPlayingState.Phase {
-        NowPlayingState.phase(isLoaded: audio.loadedEpisode != nil, failed: audio.podcastFailed,
-                              isPlaying: audio.isPodPlaying,
-                              elapsed: progress.elapsed, duration: progress.duration)
+    /// Tied to the episode it was made for: on its own it outlived an auto-advance, and on the next
+    /// episode "Back to 58:00" seeked past the end, marking it played (and deleting its download
+    /// with delete-on-completion on).
+    private struct SeekUndo: Equatable {
+        let episodeId: String
+        let seconds: Double
     }
-    /// The scrubber and skips work only once the player knows where it is.
-    private var canSeek: Bool { [.playing, .paused, .finished].contains(phase) }
+
+    private var phase: NowPlayingState.Phase { audio.playerPhase(progress) }
+    /// The scrubber works only once the player knows where it is and how long the episode runs.
+    private var canSeek: Bool { NowPlayingState.canSeek(phase, duration: progress.duration) }
+    /// The relative skips need a position, not a length (live streams keep them).
+    private var canSkip: Bool { NowPlayingState.canSkip(phase) }
     /// Sleep's dusk palette, the dark-room case.
     private var night: Bool { pal.warm }
-    /// How tonight ends for this episode: Sleep only (Focus's timer is the Pomodoro), and only once
-    /// the player knows where it is.
-    private var showsNightLine: Bool {
-        night && state.isLoaded && [.playing, .paused, .finished, .live].contains(phase)
-    }
     /// Wall-clock seconds to the episode's end at the current speed; nil when the length isn't known.
     private var episodeRemaining: Double? {
-        guard canSeek, progress.duration > 0 else { return nil }
+        guard canSeek else { return nil }
         return max(0, progress.duration - progress.elapsed) / max(0.1, audio.playbackSpeed)
     }
 
@@ -71,7 +66,7 @@ struct NowPlayingSheet: View {
     @ViewBuilder
     private func queueRow(ep: Episode, isFirst: Bool, isLast: Bool) -> some View {
         // The title plays the episode now (it couldn't be reached from the queue before).
-        let title = Button(action: { queue.playEpisode(ep) }) {
+        let title = Button(action: { onInteraction(); queue.playEpisode(ep) }) {
             Text(ep.title)
                 .font(.system(.headline, design: .rounded))
                 .foregroundColor(pal.text)
@@ -97,10 +92,6 @@ struct NowPlayingSheet: View {
             rowButton("xmark.circle", label: "Remove \(ep.title) from queue", hidden: false) {
                 withMotion {
                     if let i = queue.remove(ep) { removed = RemovedEpisode(episode: ep, index: i) }
-                }
-                let token = ep.id
-                DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
-                    if removed?.episode.id == token { withMotion { removed = nil } }
                 }
             }
         }
@@ -129,7 +120,9 @@ struct NowPlayingSheet: View {
     /// keeps its slot.
     private func rowButton(_ symbol: String, label: String, hidden: Bool,
                            action: @escaping () -> Void) -> some View {
-        Button(action: action) {
+        // Each action counts as interaction itself: Voice Control and Full Keyboard Access never
+        // fire the sheet-wide tap gesture.
+        Button(action: { onInteraction(); action() }) {
             Image(systemName: symbol)
                 .font(.title3)
                 .foregroundColor(pal.dim)
@@ -149,155 +142,74 @@ struct NowPlayingSheet: View {
     /// limiter) no longer pushes the transport down under the thumb that just pressed it. A
     /// failure gets its way out right here, not a raw system error. Notes are information, not
     /// alarms: dim, not amber.
-    private var statusSlot: some View {
+    private func statusSlot(_ state: NowPlayingState) -> some View {
         // A clear 44 pt base holds the slot open when it's empty (a frame on an empty Group
         // collapses), so the chip, a note or nothing all leave the scrubber where it was.
         ZStack {
             Color.clear.frame(height: 44)
-            statusContent
+            statusContent(state)
         }
         .padding(.horizontal, UI.xxl)
     }
 
     @ViewBuilder
-    private var statusContent: some View {
-        Group {
-            if phase == .failed {
-                VStack(spacing: UI.sm) {
-                    Text("Couldn't play this episode")
-                        .font(.subheadline)
-                        .foregroundColor(pal.accent)
-                    HStack(spacing: UI.md) {
-                        Button("Try again") { audio.retryLoadedEpisode() }
-                        if !state.upNext.isEmpty {
-                            Button("Play next") { audio.skipToNextEpisode() }
-                        }
+    private func statusContent(_ state: NowPlayingState) -> some View {
+        if phase == .failed {
+            VStack(spacing: UI.sm) {
+                Text(NowPlayingState.failedCopy)
+                    .font(.subheadline)
+                    .foregroundColor(pal.accent)
+                HStack(spacing: UI.md) {
+                    Button("Try again") { onInteraction(); audio.retryLoadedEpisode() }
+                    if !state.upNext.isEmpty {
+                        Button("Play next") { onInteraction(); audio.skipToNextEpisode() }
                     }
+                }
+                .font(.subheadline.weight(.semibold))
+                .foregroundColor(pal.text)
+                .buttonStyle(.bordered)
+                .buttonBorderShape(.capsule)
+                .tint(pal.text)
+            }
+        } else if let undo = seekUndo, undo.episodeId == audio.loadedEpisode?.id, canSeek {
+            Button(action: {
+                onInteraction()
+                audio.seekPodcast(to: undo.seconds / progress.duration)
+                withMotion { seekUndo = nil }
+            }) {
+                Label("Back to \(PlayerClock.string(undo.seconds))", systemImage: "arrow.uturn.backward")
                     .font(.subheadline.weight(.semibold))
                     .foregroundColor(pal.text)
-                    .buttonStyle(.bordered)
-                    .buttonBorderShape(.capsule)
-                    .tint(pal.text)
-                }
-            } else if let back = seekUndo, canSeek {
-                Button(action: {
-                    audio.seekPodcast(to: progress.duration > 0 ? back / progress.duration : 0)
-                    withMotion { seekUndo = nil }
-                }) {
-                    Label("Back to \(PlayerClock.string(back))", systemImage: "arrow.uturn.backward")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundColor(pal.text)
-                        .padding(.horizontal, UI.lg)
-                        .frame(minHeight: 44)
-                        .background(Capsule().fill(pal.text.opacity(0.10)))
-                        .overlay(Capsule().stroke(pal.accent.opacity(0.28), lineWidth: 0.5))
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Back to \(PlayerClock.spoken(back))")
-            } else if phase == .loading {
-                Text("Loading…").font(.subheadline).foregroundColor(pal.dim)
-            } else if phase == .ready {
-                Text(readyLine).font(.subheadline).foregroundColor(pal.dim)
-            } else if let note = audio.playbackNote {
-                Text(note)
-                    .font(.subheadline)
-                    .foregroundColor(pal.dim)
-                    .multilineTextAlignment(.center)
-            } else if audio.limiterOffForStream {
-                // The one quiet word on the limiter: here, in dim, where the podcast is. It used
-                // to be an amber ⚠ banner on Home and replaced "Playing" in the mini-player.
-                Text("Night Limiter can't soften this stream")
-                    .font(.caption)
-                    .foregroundColor(pal.dim)
-                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, UI.lg)
+                    .frame(minHeight: 44)
+                    .background(Capsule().fill(pal.text.opacity(0.10)))
+                    .overlay(Capsule().stroke(pal.accent.opacity(0.28), lineWidth: 0.5))
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Back to \(PlayerClock.spoken(undo.seconds))")
+        } else if phase == .loading {
+            Text("Loading…").font(.subheadline).foregroundColor(pal.dim)
+        } else if phase == .ready {
+            Text(readyLine(state)).font(.subheadline).foregroundColor(pal.dim)
+        } else if let note = audio.playbackNote {
+            Text(note)
+                .font(.subheadline)
+                .foregroundColor(pal.dim)
+                .multilineTextAlignment(.center)
+        } else if audio.limiterOffForStream {
+            // The one quiet word on the limiter: here, in dim, where the podcast is. It used
+            // to be an amber ⚠ banner on Home and replaced "Playing" in the mini-player.
+            Text("Night Limiter can't soften this stream")
+                .font(.caption)
+                .foregroundColor(pal.dim)
+                .multilineTextAlignment(.center)
         }
     }
 
     /// "Up next · 1 hr 16 min" for an episode waiting at the head of the queue.
-    private var readyLine: String {
+    private func readyLine(_ state: NowPlayingState) -> String {
         guard let d = state.hero?.duration, d > 0 else { return "Up next" }
         return "Up next · \(PlayerClock.short(d))"
-    }
-
-    // MARK: Scrubber
-
-    /// The position fader: Home's VolumeBar, not the system Slider, whose iOS 26 thumb was a
-    /// pure-white capsule, the brightest object on the Sleep sheet. Relative drag, so a graze
-    /// can't throw you 50 minutes, with fine trim when the finger drifts off the track. In Sleep
-    /// the thumb is the dim tone, not cream.
-    @ViewBuilder
-    private var scrubber: some View {
-        if phase == .live {
-            Text("Live · \(PlayerClock.string(progress.elapsed))")
-                .font(.caption).foregroundColor(pal.dim).monospacedDigit()
-                .padding(.horizontal, UI.xxl)
-        } else {
-            // Before the player knows the length, show the episode's own (from its feed) rather
-            // than a placeholder "-0:01".
-            let duration = canSeek ? progress.duration : (state.hero?.duration ?? 0)
-            let elapsed = canSeek ? (isDraggingScrubber ? scrubProgress * duration : progress.elapsed) : 0
-            let skip = audio.skipInterval
-            VStack(spacing: UI.xs) {
-                VolumeBar(
-                    value: Binding(
-                        get: { canSeek ? (isDraggingScrubber ? scrubProgress : progress.progress) : 0 },
-                        set: { scrubProgress = $0 }
-                    ),
-                    accent: night ? pal.accent.opacity(0.75) : pal.accent,
-                    thumbColor: night ? pal.dim : pal.text,
-                    style: .channel,
-                    customAccessibility: true,
-                    onEditingChanged: { editing in
-                        onInteraction()
-                        if editing {
-                            scrubProgress = progress.progress
-                            scrubFrom = progress.elapsed
-                            isDraggingScrubber = true
-                        } else {
-                            isDraggingScrubber = false
-                            audio.seekPodcast(to: scrubProgress)
-                            offerSeekUndo(from: scrubFrom, to: scrubProgress * progress.duration)
-                        }
-                    }
-                )
-                .allowsHitTesting(canSeek)
-                .opacity(canSeek ? 1 : 0.4)
-                // VoiceOver steps by the skip interval, committing each step. (A stand-in Slider
-                // moved in ~10% jumps, about 8 minutes of a long episode.)
-                .accessibilityElement()
-                .accessibilityLabel("Playback position")
-                .accessibilityValue(duration > 0
-                                    ? "\(PlayerClock.spoken(elapsed)) of \(PlayerClock.spoken(duration))"
-                                    : "Not started")
-                .accessibilityAdjustableAction { direction in
-                    guard canSeek else { return }
-                    switch direction {
-                    case .increment: audio.seekPodcast(seconds: skip)
-                    case .decrement: audio.seekPodcast(seconds: -skip)
-                    @unknown default: break
-                    }
-                }
-
-                HStack {
-                    Text(duration > 0 ? PlayerClock.string(elapsed) : "--:--")
-                    Spacer()
-                    Text(duration > 0 ? "-" + PlayerClock.string(duration - elapsed) : "--:--")
-                }
-                .font(.caption2).foregroundColor(pal.dim).monospacedDigit().lineLimit(1)
-                .accessibilityHidden(true)
-            }
-            .padding(.horizontal, UI.xxl)
-        }
-    }
-
-    /// A scrub that lands more than two minutes away keeps the way back for eight seconds.
-    private func offerSeekUndo(from: Double, to: Double) {
-        guard abs(to - from) > 120 else { return }
-        withMotion { seekUndo = from }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 8) {
-            if seekUndo == from { withMotion { seekUndo = nil } }
-        }
     }
 
     // MARK: Transport
@@ -307,15 +219,19 @@ struct NowPlayingSheet: View {
         let d = min(playDisc, 92)
         switch phase {
         case .loading:
-            PlayerDiscButton(systemImage: nil, diameter: d, pal: pal) {}
-                .disabled(true)
-                .accessibilityLabel("Loading episode")
+            // A spinner, but still a pause while it plays (a stall before the first position
+            // report); only a load in flight disables it.
+            PlayerDiscButton(systemImage: nil, diameter: d, pal: pal) { onInteraction(); audio.togglePodcast() }
+                .disabled(audio.episodeLoading)
+                .accessibilityLabel(audio.episodeLoading ? "Loading episode" : "Pause podcast")
         case .failed:
-            PlayerDiscButton(systemImage: "arrow.clockwise", diameter: d, pal: pal) { audio.retryLoadedEpisode() }
-                .accessibilityLabel("Try again")
+            PlayerDiscButton(systemImage: "arrow.clockwise", diameter: d, pal: pal) {
+                onInteraction(); audio.retryLoadedEpisode()
+            }
+            .accessibilityLabel("Try again")
         default:
             PlayerDiscButton(systemImage: audio.isPodPlaying ? "pause.fill" : "play.fill", diameter: d, pal: pal) {
-                audio.togglePodcast()
+                onInteraction(); audio.togglePodcast()
             }
             // The same names as the mini-player's button (the orb's are "Pause all audio" / "Play").
             .accessibilityLabel(audio.isPodPlaying ? "Pause podcast" : "Play podcast")
@@ -323,21 +239,26 @@ struct NowPlayingSheet: View {
     }
 
     private func skipButton(forward: Bool) -> some View {
-        Button(action: { audio.seekPodcast(seconds: forward ? audio.skipInterval : -audio.skipInterval) }) {
+        Button(action: {
+            onInteraction()
+            audio.seekPodcast(seconds: forward ? audio.skipInterval : -audio.skipInterval)
+        }) {
             Image(systemName: forward ? audio.skipForwardSymbol : audio.skipBackSymbol)
                 .font(.title2)
-                .foregroundColor(pal.accent.opacity(canSeek ? 1 : 0.35))
+                .foregroundColor(pal.accent.opacity(canSkip ? 1 : 0.35))
                 .frame(minWidth: 56, minHeight: 56)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(!canSeek)
+        .disabled(!canSkip)
         .accessibilityLabel("Skip \(forward ? "forward" : "back") \(Int(audio.skipInterval)) seconds")
     }
 
     // MARK: Body
 
     var body: some View {
+        // Resolved once per render; every section below reads this one value.
+        let state = NowPlayingState(loaded: audio.loadedEpisode, queue: queue.queue)
         // At accessibility text sizes the cover gives way, so the transport stays on the first
         // screen.
         let artSize: CGFloat = (night ? 150 : 250) * (typeSize.isAccessibilitySize ? 0.6 : 1)
@@ -363,20 +284,35 @@ struct NowPlayingSheet: View {
                             .font(.subheadline)
                             .foregroundColor(pal.dim)
                     } else {
-                        statusSlot
+                        statusSlot(state)
                     }
                 }
 
                 if state.hero != nil {
                     VStack(spacing: UI.sm) {
-                        scrubber
-                        if showsNightLine {
+                        if phase == .live {
+                            Text("Live · \(PlayerClock.string(progress.elapsed))")
+                                .font(.caption).foregroundColor(pal.dim).monospacedDigit()
+                                .padding(.horizontal, UI.xxl)
+                        } else {
+                            PlayerScrubber(audio: audio, progress: progress, canSeek: canSeek,
+                                           fallbackDuration: state.hero?.duration ?? 0,
+                                           pal: pal, onInteraction: onInteraction) { from in
+                                guard let id = audio.loadedEpisode?.id else { return }
+                                withMotion { seekUndo = SeekUndo(episodeId: id, seconds: from) }
+                            }
+                        }
+                        // How tonight ends for this episode: Sleep only (Focus's timer is the
+                        // Pomodoro), once the player knows where it is.
+                        if night && state.isLoaded && [.playing, .paused, .finished, .live].contains(phase) {
                             PlayerNightLine(sleepTimer: audio.sleepTimer,
                                             episodeRemaining: episodeRemaining,
-                                            canStopAfter: canSeek && progress.duration > 5,
+                                            // Only while it plays: the end-of-episode timer ticks off
+                                            // the playback clock (AudioEngine.startEndOfEpisodeTimer).
+                                            canStopAfter: phase == .playing && progress.duration > 5,
                                             pal: pal,
-                                            openTimerOptions: { showTimerOptions = true },
-                                            stopAfterEpisode: { audio.startEndOfEpisodeTimer() })
+                                            openTimerOptions: { onInteraction(); showTimerOptions = true },
+                                            stopAfterEpisode: { onInteraction(); audio.startEndOfEpisodeTimer() })
                         }
                     }
 
@@ -396,7 +332,7 @@ struct NowPlayingSheet: View {
 
                     Menu {
                         Picker("Speed", selection: Binding(get: { audio.playbackSpeed },
-                                                           set: { audio.playbackSpeed = $0 })) {
+                                                           set: { onInteraction(); audio.playbackSpeed = $0 })) {
                             ForEach([0.8, 1.0, 1.2, 1.5, 2.0], id: \.self) { speed in
                                 Text(PlayerClock.speedLabel(speed)).tag(speed)
                             }
@@ -416,7 +352,7 @@ struct NowPlayingSheet: View {
 
                 // Up Next: everything after the hero, wherever the playing episode sits.
                 if !state.upNext.isEmpty {
-                    upNextSection
+                    upNextSection(state)
                 }
 
                 Spacer().frame(height: UI.xxl)
@@ -434,6 +370,19 @@ struct NowPlayingSheet: View {
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
+        // Offers expire on their own; SwiftUI cancels a pending expiry when the offer changes or
+        // the sheet goes away (closures queued with asyncAfter outlived the sheet).
+        .task(id: removed) {
+            guard removed != nil else { return }
+            try? await Task.sleep(for: .seconds(5))
+            if !Task.isCancelled { withMotion { removed = nil } }
+        }
+        .task(id: seekUndo) {
+            guard seekUndo != nil else { return }
+            try? await Task.sleep(for: .seconds(8))
+            if !Task.isCancelled { withMotion { seekUndo = nil } }
+        }
+        .onChange(of: audio.loadedEpisode?.id) { _, _ in seekUndo = nil }
         .sheet(isPresented: $showTimerOptions) {
             // Home's own timer sheet. From here something is loaded, so "Play & start timer" (shown
             // when paused) resumes the episode; the timer starts first, so the session-start rule
@@ -446,10 +395,12 @@ struct NowPlayingSheet: View {
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
                 .presentationBackground(pal.bg)
+                // Touches up here are interaction too: they don't reach the sheet underneath.
+                .simultaneousGesture(TapGesture().onEnded { onInteraction() })
         }
     }
 
-    private var upNextSection: some View {
+    private func upNextSection(_ state: NowPlayingState) -> some View {
         VStack(alignment: .leading, spacing: UI.md) {
             HStack(spacing: UI.xs) {
                 VStack(alignment: .leading, spacing: 1) {
@@ -465,11 +416,16 @@ struct NowPlayingSheet: View {
                         .foregroundColor(pal.dim)
                 }
                 Spacer()
-                headerButton("shuffle", label: "Shuffle up next") { withMotion { queue.shuffleRemainingQueue() } }
+                headerButton("shuffle", label: "Shuffle up next", enabled: true) {
+                    withMotion { queue.shuffleRemainingQueue(nowPlayingId: audio.loadedEpisode?.id) }
+                }
                 // Next lives with the queue it acts on. Beside skip-15, at the same weight, it was
-                // a 2am mis-tap away from dropping the episode.
+                // a 2am mis-tap away from dropping the episode. Off mid-load, so a second tap can't
+                // drop the episode that's only just starting.
                 if state.isLoaded {
-                    headerButton("forward.end", label: "Play next episode") { audio.skipToNextEpisode() }
+                    headerButton("forward.end", label: "Play next episode", enabled: phase != .loading) {
+                        audio.skipToNextEpisode()
+                    }
                 }
             }
             .padding(.horizontal, UI.xxl)
@@ -482,15 +438,17 @@ struct NowPlayingSheet: View {
         .padding(.top, UI.xl)
     }
 
-    private func headerButton(_ symbol: String, label: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
+    private func headerButton(_ symbol: String, label: String, enabled: Bool,
+                              action: @escaping () -> Void) -> some View {
+        Button(action: { onInteraction(); action() }) {
             Image(systemName: symbol)
                 .font(.body.weight(.semibold))
-                .foregroundColor(pal.accent)
+                .foregroundColor(pal.accent.opacity(enabled ? 1 : 0.35))
                 .frame(minWidth: 44, minHeight: 44)
                 .background(Capsule().fill(pal.text.opacity(0.08)))
         }
         .buttonStyle(.plain)
+        .disabled(!enabled)
         .accessibilityLabel(label)
     }
 
@@ -503,6 +461,7 @@ struct NowPlayingSheet: View {
                 .truncationMode(.middle)
             Spacer(minLength: UI.sm)
             Button("Undo") {
+                onInteraction()
                 withMotion {
                     queue.restore(r.episode, at: r.index)
                     removed = nil
@@ -518,6 +477,108 @@ struct NowPlayingSheet: View {
         .padding(.horizontal, UI.lg)
         .padding(.bottom, UI.lg)
         .accessibilityElement(children: .combine)
+    }
+}
+
+/// What the player views show for where playback stands: one reading of the engine for both the
+/// mini-player and the full player (they used to build it separately).
+extension AudioEngine {
+    func playerPhase(_ progress: PlaybackProgress) -> NowPlayingState.Phase {
+        NowPlayingState.phase(isLoaded: loadedEpisode != nil, failed: podcastFailed,
+                              loading: episodeLoading, isPlaying: isPodPlaying,
+                              elapsed: progress.elapsed, duration: progress.duration)
+    }
+}
+
+/// The position fader: Home's VolumeBar, not the system Slider, whose iOS 26 thumb was a
+/// pure-white capsule, the brightest object on the Sleep sheet. Relative drag, so a graze can't
+/// throw you 50 minutes, with fine trim when the finger drifts off the track. In Sleep the thumb
+/// is the dim tone, not cream.
+///
+/// Its own view, holding its own drag state: as the sheet's @State, every drag frame re-rendered
+/// the whole sheet (artwork, Up Next rows) at touch rate.
+struct PlayerScrubber: View {
+    @ObservedObject var audio: AudioEngine
+    @ObservedObject var progress: PlaybackProgress
+    let canSeek: Bool
+    /// The episode's length from its feed, shown before the player reports one (not "-0:01").
+    let fallbackDuration: Double
+    let pal: Palette
+    let onInteraction: () -> Void
+    /// A scrub that landed more than two minutes away, with where it started.
+    let onLongJump: (_ fromSeconds: Double) -> Void
+
+    @State private var dragging = false
+    @State private var scrubProgress: Double = 0
+    @State private var startProgress: Double = 0
+
+    var body: some View {
+        let duration = canSeek ? progress.duration : fallbackDuration
+        let elapsed = canSeek ? (dragging ? scrubProgress * duration : progress.elapsed) : 0
+        let skip = audio.skipInterval
+        VStack(spacing: UI.xs) {
+            VolumeBar(
+                value: Binding(
+                    get: { canSeek ? (dragging ? scrubProgress : progress.progress) : 0 },
+                    set: { scrubProgress = $0 }
+                ),
+                accent: pal.warm ? pal.accent.opacity(0.75) : pal.accent,
+                thumbColor: pal.warm ? pal.dim : pal.text,
+                style: .channel,
+                customAccessibility: true,
+                onEditingChanged: { editing in
+                    onInteraction()
+                    if editing {
+                        startProgress = progress.progress
+                        scrubProgress = progress.progress
+                        dragging = true
+                    } else {
+                        // A drag already called off (the bar stopped taking touches, the episode
+                        // changed) ends here: its start belongs to what was playing then.
+                        let wasDragging = dragging
+                        dragging = false
+                        guard wasDragging else { return }
+                        // A touch that didn't move the thumb is not a seek: seeking in place still
+                        // reset the player's resume state (its adaptive rewind and its finished flag).
+                        let moved = abs(scrubProgress - startProgress) * progress.duration
+                        guard moved >= 1 else { return }
+                        audio.seekPodcast(to: scrubProgress)
+                        if moved > 120 { onLongJump(startProgress * progress.duration) }
+                    }
+                }
+            )
+            .allowsHitTesting(canSeek)
+            .opacity(canSeek ? 1 : 0.4)
+            // VoiceOver steps by the skip interval, committing each step. (A stand-in Slider moved
+            // in ~10% jumps, about 8 minutes of a long episode.)
+            .accessibilityElement()
+            .accessibilityLabel("Playback position")
+            .accessibilityValue(duration > 0
+                                ? "\(PlayerClock.spoken(elapsed)) of \(PlayerClock.spoken(duration))"
+                                : "Not started")
+            .accessibilityAdjustableAction { direction in
+                guard canSeek else { return }
+                onInteraction()
+                switch direction {
+                case .increment: audio.seekPodcast(seconds: skip)
+                case .decrement: audio.seekPodcast(seconds: -skip)
+                @unknown default: break
+                }
+            }
+
+            HStack {
+                Text(duration > 0 ? PlayerClock.string(elapsed) : "--:--")
+                Spacer()
+                Text(duration > 0 ? "-" + PlayerClock.string(duration - elapsed) : "--:--")
+            }
+            .font(.caption2).foregroundColor(pal.dim).monospacedDigit().lineLimit(1)
+            .accessibilityHidden(true)
+        }
+        .padding(.horizontal, UI.xxl)
+        // A drag the system cancelled (the bar stopped taking touches, the episode changed) never
+        // reports its end; don't leave the labels frozen on its last frame.
+        .onChange(of: canSeek) { _, can in if !can { dragging = false } }
+        .onChange(of: audio.loadedEpisode?.id) { _, _ in dragging = false }
     }
 }
 
@@ -561,7 +622,7 @@ struct PlayerNightLine: View {
                 Color.clear.frame(height: 44)
                 if canStopAfter && !sleepTimer.isEndOfEpisode && !sleepTimer.inTail {
                     Button(action: stopAfterEpisode) {
-                        Label("Stop after this episode", systemImage: "text.append")
+                        Label(TimerCopy.stopAfterEpisode, systemImage: TimerCopy.stopAfterEpisodeSymbol)
                             .font(.subheadline.weight(.semibold))
                             .foregroundColor(pal.text)
                             .padding(.horizontal, UI.lg)

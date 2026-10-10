@@ -198,6 +198,40 @@ final class SleepTimerService: ObservableObject {
         startLiveActivity()
     }
 
+    /// The episode this timer follows is over: its last clock tick, or the player's end-of-item
+    /// report, whichever lands first (the 1 Hz tick only catches the final 0.4 s on some episodes,
+    /// so the end-of-item path used to hard-stop with no tail the night line had promised).
+    /// Ambient tail when one is set and there's a bed to carry: hand off to a duration timer for the
+    /// tail span so the bed eases you the rest of the way down instead of cutting with the episode
+    /// (beginTail() pauses the podcast before AVPlayer would auto-advance). Otherwise the terminal
+    /// stop. Idempotent: a second caller finds the timer already moved on.
+    func episodeEnded() {
+        guard kind == .endOfEpisode, !didFire else { return }
+        if !inTail, ambientTailFn() > 0, tailEligibleFn() {
+            kind = .duration
+            beginTail()
+            armTick()   // end-of-episode had no wall-clock timer; the tail needs one
+            return
+        }
+        if self.timerRemaining != 0 { self.timerRemaining = 0 }
+        didFire = true
+        Log.timer.notice("terminal stop: end-of-episode reached")
+        stopAllFn?()
+        cancelTimer(resetMoon: false)
+    }
+
+    /// The podcast this timer follows has paused (AirPods out, a call, the lock screen) while the
+    /// sounds may carry on. This timer only advances on the playback clock, so left alone it never
+    /// ran out and the bed played all night. Keep the same end, counted on the wall clock now.
+    func podcastPaused() {
+        guard kind == .endOfEpisode, !didFire, timerRemaining > 0 else { return }
+        kind = .duration
+        sleepTimerEnd = Date().addingTimeInterval(timerRemaining)
+        backstop.schedule(after: timerRemaining)
+        armTick()
+        Log.timer.notice("end-of-episode timer: podcast paused, \(Int(self.timerRemaining), privacy: .public)s left now counted on the wall clock")
+    }
+
     /// Called when the app returns to the foreground. If a fixed-duration timer's deadline already
     /// passed while the app was suspended (so neither the GCD tick nor the keep-alive could fire),
     /// run the terminal stop immediately. The end-of-episode timer needs no equivalent: its stop is
@@ -218,20 +252,7 @@ final class SleepTimerService: ObservableObject {
     func externalTick(remaining: TimeInterval) {
         guard kind == .endOfEpisode, !didFire else { return }
         if remaining <= 0.4 {
-            // Ambient tail: the episode is over — hand off to a duration timer for the tail
-            // span so the bed eases you the rest of the way down instead of cutting with the
-            // episode. beginTail() pauses the podcast before AVPlayer would auto-advance.
-            if !inTail, ambientTailFn() > 0, tailEligibleFn() {
-                kind = .duration
-                beginTail()
-                armTick()   // end-of-episode had no wall-clock timer; the tail needs one
-                return
-            }
-            if self.timerRemaining != 0 { self.timerRemaining = 0 }
-            didFire = true
-            Log.timer.notice("terminal stop: end-of-episode reached")
-            stopAllFn?()
-            cancelTimer(resetMoon: false)
+            episodeEnded()
             return
         }
         if Int(remaining) != Int(self.timerRemaining) { self.timerRemaining = remaining }

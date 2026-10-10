@@ -205,6 +205,10 @@ struct VolumeBar: View {
     var customAccessibility: Bool = false
     var onEditingChanged: ((Bool) -> Void)? = nil
     @State private var editing = false
+    /// True only while a finger is down. Unlike `editing` it resets by itself when the system
+    /// cancels the gesture (the bar stops taking touches mid-drag), which never calls `onEnded`
+    /// and used to leave `editing` stuck: the next drag then skipped its grab and jumped.
+    @GestureState private var touching = false
     /// Last drag translation, for incremental (relative) movement — see the gesture.
     @State private var lastX: CGFloat = 0
     /// Whether this gesture has moved past the tap threshold (gates tap-to-set on release).
@@ -249,6 +253,7 @@ struct VolumeBar: View {
             .animation(.spring(response: 0.3, dampingFraction: 0.72), value: editing)
             .gesture(
                 DragGesture(minimumDistance: 0)
+                    .updating($touching) { _, state, _ in state = true }
                     .onChanged { g in
                         if !editing {
                             editing = true
@@ -279,6 +284,13 @@ struct VolumeBar: View {
                         onEditingChanged?(false)
                     }
             )
+            .onChange(of: touching) { _, down in
+                // A cancelled drag: no onEnded came, so close the edit here.
+                if !down && editing {
+                    editing = false
+                    onEditingChanged?(false)
+                }
+            }
         }
         .frame(height: 28)
     }

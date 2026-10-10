@@ -41,7 +41,9 @@ struct ContentView: View {
     // else (Podcasts, Settings, Focus), and the mixer's Podcast row is unchanged.
     // Keyed on a loaded episode, not on playing: pausing from the orb must not fade the bar out
     // (and move Home's controls) under the user's thumb.
-    private var miniPlayerShownOnHome: Bool { audio.focusMode || audio.hasLoadedEpisode }
+    // `loadedEpisode` (published, and what the bar itself shows), not `hasLoadedEpisode` (whether
+    // the AVPlayer holds an item, false for a moment during a load or a pipeline rebuild).
+    private var miniPlayerShownOnHome: Bool { audio.focusMode || audio.loadedEpisode != nil }
     private var miniPlayerHidden: Bool {
         homeScreensaver || (selectedTab == 0 && !miniPlayerShownOnHome)
     }
@@ -203,7 +205,17 @@ struct ContentView: View {
             // The veil can't cover a presented sheet, so an open Now Playing stayed lit all
             // night above it. Touches in the sheet reset the countdown (onSheetInteraction), so
             // this only closes a player that's been left alone for the veil's minute.
-            if dimmed && showNowPlaying { showNowPlaying = false }
+            // VoiceOver and Switch Control reach the sheet without the touches that reset the
+            // countdown, so the sheet stays for them.
+            if dimmed && showNowPlaying
+                && !UIAccessibility.isVoiceOverRunning && !UIAccessibility.isSwitchControlRunning {
+                showNowPlaying = false
+            }
+        }
+        // Opening the player is interaction: restart the veil's minute, so a sheet opened at 0:55
+        // isn't closed five seconds later.
+        .onChange(of: showNowPlaying) { _, open in
+            if open && !nightDimmed { scheduleDim() }
         }
         .onChange(of: scenePhase) { _, phase in
             // Fail-safe: if iOS suspended us through a duration timer's deadline, the in-process

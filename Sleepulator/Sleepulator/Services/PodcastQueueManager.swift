@@ -194,11 +194,17 @@ final class PodcastQueueManager: ObservableObject {
         return true
     }
 
-    func shuffleRemainingQueue() {
-        guard queue.count > 1 else { return }
-        let current = queue[0]
-        let remaining = queue.dropFirst().shuffled()
-        queue = [current] + remaining
+    /// Shuffle Up Next. Like `moveInUpNext`, the episode that stays put is the one the player is
+    /// on, wherever it sits (or nowhere, after a failure or the sleep-aware hold); only with nothing
+    /// loaded is it the head. Pinning `queue[0]` regardless froze Up Next's first row, the very
+    /// episode Next and auto-advance play, whenever the loaded episode had left the queue.
+    func shuffleRemainingQueue(nowPlayingId: String? = nil) {
+        let pinned = nowPlayingId ?? queue.first?.id
+        let pinnedIndex = queue.firstIndex { $0.id == pinned }
+        var shuffled = queue.filter { $0.id != pinned }.shuffled()
+        guard shuffled.count > 1 || pinnedIndex == nil else { return }
+        if let i = pinnedIndex { shuffled.insert(queue[i], at: min(i, shuffled.count)) }
+        queue = shuffled
     }
 
     /// `suppressAutoPlay`: advance the queue data (drop the finished head, honor

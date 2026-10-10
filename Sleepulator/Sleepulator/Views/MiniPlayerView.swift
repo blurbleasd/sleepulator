@@ -68,18 +68,20 @@ struct MiniPlayerView: View {
 
     // MARK: Loaded — full transport
 
-    private var phase: NowPlayingState.Phase {
-        NowPlayingState.phase(isLoaded: audio.loadedEpisode != nil, failed: audio.podcastFailed,
-                              isPlaying: audio.isPodPlaying,
-                              elapsed: progress.elapsed, duration: progress.duration)
-    }
+    private var phase: NowPlayingState.Phase { audio.playerPhase(progress) }
+    /// Skips act only once the player has a position (they used to land on the previous item
+    /// while a new one loaded). A live stream keeps them.
+    private var canSkip: Bool { NowPlayingState.canSkip(phase) }
+    /// The play disc: tracks the text size, capped so the bar stays compact (40 pt inside its
+    /// 44 pt target).
+    private var discDiameter: CGFloat { min(playGlyph + 6, 40) }
 
     /// What the player is doing, always shown; a note (buffering, stream lost) joins it rather
     /// than replacing it.
     private var statusText: String {
         let state: String
         switch phase {
-        case .failed: return "Couldn't play this episode"
+        case .failed: return NowPlayingState.failedCopy
         case .loading: state = "Loading…"
         case .live: state = "Live"
         case .finished: state = queue.queue.isEmpty ? "Queue finished" : "Finished"
@@ -103,10 +105,11 @@ struct MiniPlayerView: View {
             Button(action: { audio.seekPodcast(seconds: -audio.skipInterval) }) {
                 Image(systemName: audio.skipBackSymbol)
                     .font(.title3)
-                    .foregroundColor(pal.accent)
+                    .foregroundColor(pal.accent.opacity(canSkip ? 1 : 0.35))
                     .frame(minWidth: 44, minHeight: 44)
                     .contentShape(Rectangle())
             }
+            .disabled(!canSkip)
             .accessibilityShowsLargeContentViewer()
             .accessibilityLabel("Skip back \(Int(audio.skipInterval)) seconds")
 
@@ -115,13 +118,15 @@ struct MiniPlayerView: View {
             // a failure it retries.
             // The orb's dark disc, small: a solid amber disc here outshone the orb on Sleep Home.
             if phase == .loading {
-                PlayerDiscButton(systemImage: nil, diameter: min(playGlyph + 6, 40), pal: pal) {}
-                    .disabled(true)
-                    .accessibilityLabel("Loading episode")
+                // Still a pause while it plays (a stall before the first position report); only a
+                // load in flight disables it.
+                PlayerDiscButton(systemImage: nil, diameter: discDiameter, pal: pal) { audio.togglePodcast() }
+                    .disabled(audio.episodeLoading)
+                    .accessibilityLabel(audio.episodeLoading ? "Loading episode" : "Pause podcast")
             } else {
                 let failed = phase == .failed
                 PlayerDiscButton(systemImage: failed ? "arrow.clockwise" : audio.isPodPlaying ? "pause.fill" : "play.fill",
-                                 diameter: min(playGlyph + 6, 40), pal: pal) {
+                                 diameter: discDiameter, pal: pal) {
                     failed ? audio.retryLoadedEpisode() : audio.togglePodcast()
                 }
                 .accessibilityShowsLargeContentViewer()
@@ -131,10 +136,11 @@ struct MiniPlayerView: View {
             Button(action: { audio.seekPodcast(seconds: audio.skipInterval) }) {
                 Image(systemName: audio.skipForwardSymbol)
                     .font(.title3)
-                    .foregroundColor(pal.accent)
+                    .foregroundColor(pal.accent.opacity(canSkip ? 1 : 0.35))
                     .frame(minWidth: 44, minHeight: 44)
                     .contentShape(Rectangle())
             }
+            .disabled(!canSkip)
             .accessibilityShowsLargeContentViewer()
             .accessibilityLabel("Skip forward \(Int(audio.skipInterval)) seconds")
 
@@ -170,7 +176,7 @@ struct MiniPlayerView: View {
     @ViewBuilder
     private func upNextBar(_ next: Episode) -> some View {
         HStack(spacing: 6) {
-            PlayerDiscButton(systemImage: "play.fill", diameter: min(playGlyph + 6, 40), pal: pal) {
+            PlayerDiscButton(systemImage: "play.fill", diameter: discDiameter, pal: pal) {
                 audio.playAll(queue.queue)
             }
             .accessibilityShowsLargeContentViewer()

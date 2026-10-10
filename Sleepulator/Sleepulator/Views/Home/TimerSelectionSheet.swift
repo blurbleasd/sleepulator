@@ -11,41 +11,11 @@ enum TimerCopy {
         }
         return minutes > 10 ? "Fades out over the last 10 min, then stops." : "Fades out gently, then stops."
     }
-}
 
-/// The Sleep player's one line on how tonight ends for this episode (NowPlayingSheet's night
-/// line): whether the timer cuts the story off, or the story ends first. Pure so the tests can pin
-/// every case.
-nonisolated enum NightLineCopy {
-    /// - `timerRemaining`: seconds left on the sleep timer; 0 when none runs.
-    /// - `endOfEpisode`: the timer follows this episode.
-    /// - `inTail`: the podcast has stopped and the sounds are fading out.
-    /// - `episodeRemaining`: wall-clock seconds to the episode's end (speed-scaled); nil when it
-    ///   isn't known (a live stream, or before the player reports a length).
-    /// - `tailMinutes`: the "keep sounds going" setting.
-    static func line(timerRemaining: Double, endOfEpisode: Bool, inTail: Bool,
-                     episodeRemaining: Double?, tailMinutes: Int) -> String {
-        if inTail { return "Sounds fading · \(span(timerRemaining)) left" }
-        guard timerRemaining > 0 else { return "Plays all night" }
-        if endOfEpisode {
-            let after = tailMinutes > 0 ? " · sounds go on \(tailMinutes) min" : ""
-            return "Stops with this episode · in \(span(timerRemaining))" + after
-        }
-        guard let episode = episodeRemaining else { return "Timer ends in \(span(timerRemaining))" }
-        let gap = episode - timerRemaining
-        // Within a minute either way, they end together as far as anyone in bed can tell.
-        if abs(gap) < 60 { return "Timer ends with this episode · in \(span(timerRemaining))" }
-        if gap > 0 { return "Timer ends in \(span(timerRemaining)) · \(span(gap)) before this episode does" }
-        return "This episode ends \(span(-gap)) before the timer"
-    }
-
-    /// "38 min", "1 hr 12 min", "2 hr". Rounded up: a countdown never claims less than is left.
-    static func span(_ seconds: Double) -> String {
-        let mins = max(1, Int((max(0, seconds) / 60).rounded(.up)))
-        let h = mins / 60, m = mins % 60
-        if h == 0 { return "\(m) min" }
-        return m == 0 ? "\(h) hr" : "\(h) hr \(m) min"
-    }
+    /// One name (and glyph) for the end-of-episode timer wherever it's offered: this sheet and the
+    /// Sleep player's chip.
+    static let stopAfterEpisode = "Stop after this episode"
+    static let stopAfterEpisodeSymbol = "text.append"
 }
 
 struct TimerSelectionSheet: View {
@@ -202,13 +172,15 @@ struct TimerSelectionSheet: View {
             // "End of episode" — only when a podcast with a known, finite length is loaded (so
             // the button can't silently no-op before the duration is known, or on a live stream).
             // A genuinely different timer kind, so it stays its own one-tap action.
-            if audio.hasLoadedEpisode, audio.podcastDuration.isFinite, audio.podcastDuration > 5 {
+            // Only while it plays: the end-of-episode timer ticks off the playback clock, so set
+            // on a paused episode it replaced the night's timer with one that never ran out.
+            if audio.hasLoadedEpisode, audio.isPodPlaying,
+               audio.podcastDuration.isFinite, audio.podcastDuration > 5 {
                 Button(action: {
                     audio.startEndOfEpisodeTimer()
                     isPresented = false
                 }) {
-                    // One name for this action wherever it appears (the player's chip says it too).
-                    Label("Stop after this episode", systemImage: "text.append")
+                    Label(TimerCopy.stopAfterEpisode, systemImage: TimerCopy.stopAfterEpisodeSymbol)
                         .font(.subheadline.weight(.semibold))
                         .foregroundColor(pal.accent)
                         .padding(.horizontal, UI.xl)
