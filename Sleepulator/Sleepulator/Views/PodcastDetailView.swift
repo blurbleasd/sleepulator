@@ -21,8 +21,8 @@ struct PodcastDetailView: View {
     @State private var isLoading = false
     @State private var errorMessage: String? = nil
     @State private var episodeSearch = ""
-    // Loaded once here instead of re-decoding positions.json in every EpisodeRowView.onAppear
-    // (which janked the main thread while scrolling a long episode list).
+    // Read once here (from the player's saved positions) instead of decoding positions.json in
+    // every EpisodeRowView.onAppear, which janked the main thread while scrolling a long list.
     @State private var episodePositions: [String: Double] = [:]
     // Which episodes are downloaded — computed once on appear / after a feed load, so the rows
     // don't each do a synchronous disk stat + MD5 hash in onAppear while scrolling.
@@ -47,12 +47,9 @@ struct PodcastDetailView: View {
             audio.resumeEpisode(target.episode, at: target.position)
         } else if let latest = TonightShelf.latestUnplayed(in: podcast, finished: audio.finishedEpisodes, excluding: nil)
                     ?? podcast.episodes.first {
-            // Saved a moment short of the end (an end-of-episode timer stop): start it over rather
-            // than play two seconds and auto-advance.
-            let saved = episodePositions[latest.id] ?? 0
-            let spent = saved >= TonightShelf.minimumResumePosition
-                && !TonightShelf.isResumable(position: saved, duration: latest.duration)
-            audio.resumeEpisode(latest, at: spent ? 0 : nil)
+            // From its saved spot. (Not restarted when the spot is near the feed's stated end: ad
+            // insertion often makes the real file longer, so that would lose someone's place.)
+            audio.resumeEpisode(latest, at: nil)
         }
     }
 
@@ -162,7 +159,7 @@ struct PodcastDetailView: View {
             Text("Your queue has \(PodcastText.episodeCount(audio.queueManager.queue.count)) in it.")
         }
         .onAppear {
-            episodePositions = StorageManager.shared.load(from: "positions.json") ?? [:]
+            episodePositions = audio.savedEpisodePositions
             refreshDownloaded()
             loadFeed()
         }
@@ -311,7 +308,11 @@ struct PodcastDetailView: View {
             do {
                 let feed = try await parser.parseFeed(url: url)
                 DispatchQueue.main.async {
-                    self.podcast.merge(title: feed.title, artworkUrl: feed.artworkUrl, episodes: feed.episodes)
+                    let hadEpisodes = !self.podcast.episodes.isEmpty
+                    if !self.podcast.merge(title: feed.title, artworkUrl: feed.artworkUrl, episodes: feed.episodes), hadEpisodes {
+                        // The feed came back empty: keep the saved episodes and say so.
+                        self.errorMessage = "Couldn't refresh. Showing saved episodes."
+                    }
                     // Update in library
                     if let idx = libraryPodcasts.firstIndex(where: { $0.id == podcast.id }) {
                         libraryPodcasts[idx] = self.podcast

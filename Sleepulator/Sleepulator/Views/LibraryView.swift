@@ -52,7 +52,7 @@ struct LibraryView: View {
     var pal: Palette { Palette(focusMode: focusMode) }
     /// The night ring's length (0 = All night), for the shelf's "runs past your night" note.
     @AppStorage("nightLengthMinutes") private var nightLength: Double = 0
-    /// Saved episode positions (positions.json), the shelf's fallback when the snapshot has none.
+    /// Saved episode positions (the player's in-memory map): what the shelf resumes from.
     @State private var positions: [String: Double] = [:]
 
     private var tonight: TonightPlan {
@@ -334,11 +334,12 @@ struct LibraryView: View {
 
     // MARK: - Feed Loading
 
-    /// Write a freshly parsed feed into the library row with that id: episodes, artwork when the
-    /// row had none, and the real title when the stored name was only a placeholder.
-    private func apply(_ feed: PodcastParser.ParsedFeed, toPodcastWithId id: String) {
-        guard let idx = podcasts.firstIndex(where: { $0.id == id }) else { return }
-        podcasts[idx].merge(title: feed.title, artworkUrl: feed.artworkUrl, episodes: feed.episodes)
+    /// Write a freshly parsed feed into the library row with that id (`Podcast.merge`). False when
+    /// the feed had no episodes, which keeps the stored ones.
+    @discardableResult
+    private func apply(_ feed: PodcastParser.ParsedFeed, toPodcastWithId id: String) -> Bool {
+        guard let idx = podcasts.firstIndex(where: { $0.id == id }) else { return true }
+        return podcasts[idx].merge(title: feed.title, artworkUrl: feed.artworkUrl, episodes: feed.episodes)
     }
 
     /// Pull-to-refresh: reload every feed, then say which ones failed instead of dropping them.
@@ -354,8 +355,8 @@ struct LibraryView: View {
                 group.addTask {
                     guard let url = URL(string: podcast.url),
                           let feed = try? await PodcastParser().parseFeed(url: url) else { return podcast.name }
-                    await MainActor.run { apply(feed, toPodcastWithId: podcast.id) }
-                    return nil
+                    let kept = await MainActor.run { apply(feed, toPodcastWithId: podcast.id) }
+                    return kept ? nil : podcast.name
                 }
             }
             for await name in group {
@@ -457,7 +458,7 @@ struct LibraryView: View {
         StorageManager.shared.save(podcasts, to: "library.json")
     }
     private func loadPositions() {
-        positions = StorageManager.shared.load(from: "positions.json") ?? [:]
+        positions = audio.savedEpisodePositions
     }
     private func loadPodcasts() {
         if let decoded: [Podcast] = StorageManager.shared.load(from: "library.json") {

@@ -10,6 +10,9 @@ nonisolated enum PodcastText {
     /// Stored show-notes are capped here: past this it's sponsor reads and link lists, and a
     /// 750-episode feed of raw HTML was writing a ~3 MB library.json on every visit.
     static let showNotesLimit = 3_000
+    /// Raw notes are cut to this before cleaning (markup is mostly tags, so it still covers the
+    /// stored limit with room to spare).
+    static let rawInputLimit = 60_000
 
     /// Feed show-notes arrive as HTML (`<p>`, `<a href>`, `<strong>`, entities). `Text` renders
     /// markup literally, which put a wall of raw tags in front of someone in bed. This flattens
@@ -18,7 +21,10 @@ nonisolated enum PodcastText {
     /// brackets (`<hello@show.example>`) that a second pass would strip as tags. Stored notes go
     /// through `displayShowNotes` instead.
     static func plainShowNotes(_ raw: String, limit: Int = showNotesLimit) -> String {
-        var text = decodeEntities(stripTags(raw))
+        // Only the first few thousand characters survive the cap; don't process 200 KB of
+        // sponsor reads to get there.
+        let input = raw.count > rawInputLimit ? String(raw.prefix(rawInputLimit)) : raw
+        var text = decodeEntities(stripTags(input))
         // Some feeds double-encode (`&lt;p&gt;`), so a decode can surface a second layer of tags.
         if looksLikeMarkup(text) { text = decodeEntities(stripTags(text)) }
         return truncate(normalizeWhitespace(text), limit: limit)
@@ -69,9 +75,13 @@ nonisolated enum PodcastText {
         out.reserveCapacity(s.utf8.count)
         var i = s.startIndex
         var skippingUntil: String? = nil   // inside <script>/<style>: drop everything to its close
+        // The next ">" at or after i, found once and reused: rescanning from every "<" made text
+        // full of stray "<" quadratic.
+        var nextClose = s.firstIndex(of: ">")
         while i < s.endIndex {
             let c = s[i]
-            guard c == "<", let close = s[i...].firstIndex(of: ">") else {
+            if c == "<", let found = nextClose, found < i { nextClose = s[i...].firstIndex(of: ">") }
+            guard c == "<", let close = nextClose else {
                 if skippingUntil == nil { out.append(c) }
                 i = s.index(after: i)
                 continue
@@ -113,9 +123,17 @@ nonisolated enum PodcastText {
         return name.lowercased()
     }
 
+    /// Real tags only: decoded text can quote angle brackets ("<pause>", "<podcast@show.example>")
+    /// that must survive.
+    private static let markupMarkers = [
+        "<p>", "<p ", "</p>", "<br>", "<br/>", "<br />", "<a ", "</a>", "<div", "</div>",
+        "<li>", "</li>", "<ul>", "<ol>", "<strong>", "</strong>", "<em>", "</em>", "<b>", "</b>",
+        "<i>", "</i>", "<span", "</span>", "<h1", "<h2", "<h3", "<blockquote",
+    ]
+
     private static func looksLikeMarkup(_ s: String) -> Bool {
         let lower = s.lowercased()
-        return lower.contains("</") || lower.contains("<p") || lower.contains("<br") || lower.contains("<a ")
+        return markupMarkers.contains { lower.contains($0) }
     }
 
     private static let namedEntities: [String: String] = [

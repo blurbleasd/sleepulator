@@ -110,7 +110,12 @@ final class PodcastQueueManager: ObservableObject {
         finishedEpisodes = Set(finishedOrder)   // triggers the persist in didSet
     }
 
+    /// Called when a person starts playback here (a row, a swipe, Play All), not on the
+    /// queue's own auto-advance. AudioEngine cancels the ambient tail on it.
+    var userStartedPlaybackFn: (() -> Void)?
+
     func playEpisode(_ episode: Episode) {
+        userStartedPlaybackFn?()
         moveToHead(episode)
         loadPodcastFn?(episode.audioUrl, episode.id, episode.title, true)
     }
@@ -127,6 +132,7 @@ final class PodcastQueueManager: ObservableObject {
 
     func playAll(_ episodes: [Episode]) {
         guard let first = episodes.first else { return }
+        userStartedPlaybackFn?()
         self.queue = episodes
         loadPodcastFn?(first.audioUrl, first.id, first.title, true)
     }

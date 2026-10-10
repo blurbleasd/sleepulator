@@ -841,6 +841,10 @@ final class ModelIdentityTests: XCTestCase {
         XCTAssertEqual(stub.name, "Real Show")
         XCTAssertEqual(stub.artworkUrl, "art")
         XCTAssertEqual(stub.episodes.map(\.id), ["1"])
+        // A feed that came back empty keeps the stored episodes and reports it.
+        var kept = Podcast(id: "k", name: "Show", url: "https://feeds.example.com/k", episodes: [e1])
+        XCTAssertFalse(kept.merge(title: "Show", artworkUrl: nil, episodes: []))
+        XCTAssertEqual(kept.episodes.map(\.id), ["1"], "an empty refresh must not wipe the show")
         var named = Podcast(id: "x", name: "My Name", url: "https://feeds.example.com/x", episodes: [], artworkUrl: "mine")
         named.merge(title: "Feed Title", artworkUrl: "theirs", episodes: [])
         XCTAssertEqual(named.name, "My Name", "a real name is kept")
@@ -2178,6 +2182,23 @@ final class ShowNotesEdgeTests: XCTestCase {
         let url = try XCTUnwrap(URL(string: "https://www.example.com/rss"))
         XCTAssertEqual(PodcastText.fallbackName(for: url), "example.com")
         XCTAssertTrue(PodcastText.isPlaceholderName(PodcastText.fallbackName(for: url), feedURL: url.absoluteString))
+    }
+
+    /// Decoded text that quotes angle brackets isn't markup, even when it starts like a tag name.
+    func testQuotedAnglesThatLookLikeTagNamesSurvive() {
+        let stored = PodcastText.plainShowNotes("<p>Say &lt;pause&gt; or write &lt;podcast@show.example&gt;</p>")
+        XCTAssertEqual(stored, "Say <pause> or write <podcast@show.example>")
+        XCTAssertEqual(PodcastText.displayShowNotes(stored), stored)
+    }
+
+    /// Stray "<" with no closing ">" used to rescan the rest of the text each time (quadratic).
+    func testStrayAngleBracketsAndHugeNotesStayCheap() {
+        let start = Date()
+        let strays = String(repeating: "< ", count: 50_000)
+        XCTAssertFalse(PodcastText.plainShowNotes(strays).isEmpty)
+        let huge = String(repeating: "<p>Sponsor read.</p>", count: 20_000)
+        XCTAssertLessThanOrEqual(PodcastText.plainShowNotes(huge).count, PodcastText.showNotesLimit + 1)
+        XCTAssertLessThan(Date().timeIntervalSince(start), 5, "linear, not quadratic")
     }
 
     func testOfflineErrors() {

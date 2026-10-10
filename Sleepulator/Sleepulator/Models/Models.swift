@@ -27,11 +27,15 @@ nonisolated struct Podcast: Identifiable, Codable, Hashable {
     func hash(into hasher: inout Hasher) { hasher.combine(id) }
 
     /// Fold a freshly parsed feed into the stored show: its episodes, artwork when the show had
-    /// none, and its title when the stored name was only a placeholder (`PodcastText`).
-    mutating func merge(title: String, artworkUrl: String?, episodes: [Episode]) {
-        self.episodes = episodes
+    /// none, and its title when the stored name was only a placeholder (`PodcastText`). A feed
+    /// that came back with no episodes (a moved feed, a captive-portal page) keeps the stored
+    /// ones rather than wiping the show; returns false then, so callers can report it.
+    @discardableResult
+    mutating func merge(title: String, artworkUrl: String?, episodes: [Episode]) -> Bool {
+        if !episodes.isEmpty { self.episodes = episodes }
         if self.artworkUrl == nil { self.artworkUrl = artworkUrl }
         if !title.isEmpty, PodcastText.isPlaceholderName(name, feedURL: url) { name = title }
+        return !episodes.isEmpty
     }
 }
 

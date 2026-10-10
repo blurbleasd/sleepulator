@@ -363,7 +363,9 @@ this section is where you do it. Do it in a dark room at your real bedtime brigh
    time left matches where you paused (not where you locked). With a timer in its ambient tail
    (podcast stopped, sounds fading), tap Resume. ✅ The timer cancels and the podcast is audible
    and keeps playing. Tap Resume / Back 5 min while that episode is already playing. ✅ No
-   dropout (it seeks in place); Back 5 min jumps 5 min from *now*.
+   dropout (it seeks in place); Back 5 min jumps 5 min from *now*. In the tail, tapping an episode
+   row or swiping Play also cancels the timer. After an end-of-episode timer stop, Resume on that
+   still-loaded episode starts it over instead of playing its last second and advancing.
 10. **Edges.** Paste a link already in your library → "already in your library". Paste a blog's
    RSS (no audio) → "That link has no episodes to play". Search offline / gibberish → the
    unreachable / "No shows found" notes. An OPML file with no shows → "No shows found". A show
