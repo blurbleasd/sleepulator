@@ -520,7 +520,8 @@ longest, so the window is widest). Export logs after each.
 driving frames on 120 Hz screens (device 2026-07-11, see `ShaderBackdrop`). They now swap to a
 static frame when paused, as the scenes do. The simulator animates either way, so only a
 ProMotion iPhone shows the difference. Before the fix the orb likely moved only when something
-else redrew Home, and the ring stepped once a second on the Pomodoro's tick.
+else redrew Home, and the ring stepped once a second on the Pomodoro's tick. The Focus hero now
+also pauses while its controls are faded to the screensaver, as the Sleep orb already did.
 
 1. **The orb breathes.** Sleep, nothing playing (so the controls stay up and nothing else
    redraws Home). Watch the orb for a minute without touching. ✅ The glow swells and settles

@@ -7,10 +7,10 @@ import SwiftUI
 // The arc depletes *continuously*, driven off the phase end-date via a `TimelineView` sampling
 // `pomodoro.progress(at:)`, instead of the old 1 Hz `.trim` + `.animation(.linear)` that stepped
 // once a second. A small lit cap rides the arc's leading edge — the one bright cue, appropriate to
-// Focus's calm-*alert* mood (not the 2am sleep surface). When `paused` (backgrounded, low-luminance,
-// or Settings ▸ Moving scenes off) the 30 Hz loop gives way to a static ring that steps with the
-// 1 Hz tick, so the redraw can't run unseen (the restraint the orb and scenes share) and the ring
-// never shows anything but the true time left.
+// Focus's calm-*alert* mood (not the 2am sleep surface). When `paused` (chrome faded to the
+// screensaver, backgrounded, low-luminance, or Settings ▸ Moving scenes off) the 30 Hz loop gives
+// way to a static ring that steps with the 1 Hz tick, so the redraw can't run unseen (the restraint
+// the orb and scenes share) and the ring never shows anything but the true time left.
 struct FocusHero: View {
     @ObservedObject var audio: AudioEngine
     // Observe the Pomodoro directly — a nested ObservableObject reached via `audio`
@@ -18,8 +18,9 @@ struct FocusHero: View {
     @ObservedObject var pomodoro: PomodoroService
     let pal: Palette
     let tap: () -> Void
-    /// True when the hero shouldn't animate (backgrounded, low-luminance, or Settings ▸ Moving
-    /// scenes off) — stop the ring's redraw loop and freeze the inner orb.
+    /// True when the hero shouldn't animate (chrome faded to the screensaver, backgrounded,
+    /// low-luminance, or Settings ▸ Moving scenes off) — stop the ring's redraw loop and freeze
+    /// the inner orb.
     var paused: Bool = false
 
     private static let ringSize: CGFloat = 214
