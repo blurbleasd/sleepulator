@@ -9,6 +9,11 @@ struct ContentView: View {
     @State private var nightDimmed = false
     @State private var veilCaptionShown = true
     @State private var veilCaptionHide: DispatchWorkItem?
+    /// The 3am glance: the first tap on the veil shows only the ember and the night's line, dim
+    /// on true black, for a few seconds; a second tap wakes the scene and the controls. One tap
+    /// used to bring the whole scene back (and still no number) just to check the time.
+    @State private var veilGlance = false
+    @State private var veilGlanceHide: DispatchWorkItem?
     /// The mini-player's full Now Playing sheet. Lifted here so HomeView can count it as a
     /// presentation (no screensaver fade behind it), alongside its own sheets.
     @State private var showNowPlaying = false
@@ -88,6 +93,34 @@ struct ContentView: View {
         scheduleDim()
     }
 
+    /// A tap on the veil: the glance first, then the wake. VoiceOver and Switch Control wake in
+    /// one step (the veil's label already says what it is, and they never needed the light).
+    private func veilTapped() {
+        let assistive = UIAccessibility.isVoiceOverRunning || UIAccessibility.isSwitchControlRunning
+        guard veilGlance || assistive else { showGlance(); return }
+        veilGlanceHide?.cancel()
+        veilGlance = false
+        wake()
+        // Straight to the controls: the glance already showed the night, so the second tap
+        // shouldn't land on a bare scene that needs a third.
+        if audio.ambientScreensaver {
+            withAnimation(.easeOut(duration: 1.0)) { audio.ambientScreensaver = false }
+        }
+    }
+
+    private func showGlance() {
+        veilCaptionHide?.cancel()
+        withAnimation(.easeInOut(duration: 0.4)) { veilCaptionShown = false }
+        // Eased in, so the light arrives slowly for dark-adapted eyes.
+        withAnimation(.easeIn(duration: 1.2)) { veilGlance = true }
+        let work = DispatchWorkItem {
+            withAnimation(.easeInOut(duration: 2)) { self.veilGlance = false }
+        }
+        veilGlanceHide?.cancel()
+        veilGlanceHide = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 6, execute: work)
+    }
+
     private func cancelDim() {
         windowActivity.pendingDim?.cancel()
         windowActivity.pendingDim = nil
@@ -163,7 +196,14 @@ struct ContentView: View {
                 Color.black
                     .ignoresSafeArea()
                     .contentShape(Rectangle())
-                    .onTapGesture { wake() }
+                    .onTapGesture { veilTapped() }
+                    .overlay {
+                        if veilGlance {
+                            VeilGlance(sleepTimer: audio.sleepTimer, center: orbCenter,
+                                       playing: audio.isAnythingPlaying, pal: pal)
+                                .transition(.opacity)
+                        }
+                    }
                     .overlay(
                         // The caption fades out after a few seconds: under the veil it was the
                         // only lit element on screen — a fixed, dim-white string held for eight
@@ -177,6 +217,8 @@ struct ContentView: View {
                     .transition(.opacity)
                     .accessibilityAddTraits(.isButton)
                     .accessibilityLabel("Screen dimmed for sleep. Tap to wake.")
+                    // Voice Control: "Tap Wake" (the first shows the glance, the second wakes).
+                    .accessibilityInputLabels(["Wake", "Tap to wake", "Show controls"])
                     .onAppear { flashVeilCaption() }
             }
         }
@@ -208,6 +250,7 @@ struct ContentView: View {
             // Freeze the backdrop scene only when the veil actually occludes the screen —
             // it keeps animating through the lighter controls-faded screensaver.
             audio.screenDimmed = dimmed
+            if !dimmed { veilGlanceHide?.cancel(); veilGlance = false }
         }
         .onChange(of: scenePhase) { _, phase in
             // Fail-safe: if iOS suspended us through a duration timer's deadline, the in-process
@@ -223,5 +266,42 @@ struct ContentView: View {
                 NotificationCenter.default.post(name: Notification.Name("StartSleepulatorMix"), object: nil)
             }
         }
+    }
+}
+
+/// What the first tap on the veil shows: the ember in the ring's place and the night said the way
+/// the line under the ring says it ("38m left", "All night"), dim on true black. Observes the
+/// timer, so the minutes stay live while it shows.
+private struct VeilGlance: View {
+    @ObservedObject var sleepTimer: SleepTimerService
+    /// The night ring's centre (global), measured by Home.
+    let center: CGPoint?
+    let playing: Bool
+    let pal: Palette
+
+    private var text: String {
+        guard playing else { return "Sounds off" }
+        return NightLine.timerText(remaining: sleepTimer.timerRemaining, inTail: sleepTimer.inTail,
+                                   endOfEpisode: sleepTimer.isEndOfEpisode, playing: true,
+                                   lengthMinutes: 0)
+    }
+
+    var body: some View {
+        GeometryReader { geo in
+            let origin = geo.frame(in: .global).origin
+            let c = center.map { CGPoint(x: $0.x - origin.x, y: $0.y - origin.y) }
+                ?? CGPoint(x: geo.size.width / 2, y: geo.size.height * 0.42)
+            NightEmber(sleepTimer: sleepTimer, pal: pal, screensaver: true, focusMode: false)
+                .position(c)
+            // Where the night line sits under the ring.
+            Text(text)
+                .font(.system(.callout, design: .rounded).weight(.medium))
+                .monospacedDigit()
+                .foregroundColor(pal.dim.opacity(0.55))
+                .position(x: c.x, y: c.y + NightRing.frameSize / 2 + 42)
+        }
+        .ignoresSafeArea()
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 }

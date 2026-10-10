@@ -712,6 +712,8 @@ struct HomeView: View {
         .onChange(of: miniPlayerTouches) { _, _ in
             if !audio.ambientScreensaver { scheduleIdleFade() }
         }
+        // The controls woken from outside (the veil's second tap): restart the countdown.
+        .onChange(of: audio.ambientScreensaver) { _, on in if !on { scheduleIdleFade() } }
         // VoiceOver / Switch Control turned on mid-screensaver: bring every control back now.
         .onChange(of: assistiveTechRunning) { _, _ in wakeChrome() }
         // A sheet opening cancels the countdown; closing one wakes the chrome and restarts it.

@@ -186,7 +186,9 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   ends, the veil waits another round (`SessionGuards.veilTimeout`). The veil is part of the root
   view, so it can't cover them. The status bar and home indicator hide under the veil and the
   Sleep screensaver (`SessionGuards.hidesSystemOverlays`); Focus keeps its clock. The pending
-  countdown lives on `WindowActivity`, not in `@State`: it changes on every touch.
+  countdown lives on `WindowActivity`, not in `@State`: it changes on every touch. The first tap
+  on the veil is a glance (`VeilGlance`: the ember and the night line, dim on black, for 6 s);
+  a second tap lifts the veil and wakes the controls. VoiceOver and Switch Control wake in one.
 - **One name per sound.** Name sounds through `SoundNames` (binaurals are "Deep", "Drift", …,
   never "Delta" / "Theta").
 - **Podcasts is split by depth.** The library and its Tonight shelf follow the 2am rules (artwork
