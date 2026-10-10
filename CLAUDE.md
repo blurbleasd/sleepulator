@@ -18,7 +18,8 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   - `Views/` — SwiftUI screens + components (HomeView, LibraryView, PodcastDetailView,
     NowPlayingSheet, MiniPlayerView, SettingsView, BreathingView, the `AmbientScene` backdrop
     library, Components, Theme, `MiniPlayerClearance`, `SoundNames`). `Views/Home/` holds Home's
-    pieces: the orb + `NightRing`, `ModeSwitcher`, `MixDrawer`, `TimerSelectionSheet`, and the
+    pieces: the orb + `NightRing`, `NightEmber` (the faint time-left arc left in the ring's place
+    under the Sleep screensaver), `ModeSwitcher`, `MixDrawer`, `TimerSelectionSheet`, and the
     pure, unit-tested rules `SessionGuards` and `HomeScreensaverPolicy`.
   - `Services/` — the engine + plumbing (below).
   - `Models/Models.swift` — `Podcast`, `Episode`, `SavedMix`, `NoiseType`.

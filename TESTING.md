@@ -345,6 +345,15 @@ this section is where you do it. Do it in a dark room at your real bedtime brigh
      drop under it. ✅ Close it; the veil drops a minute later.
    - Tap Focus mid-session. ✅ A centred alert shows both "Switch to Focus" and "Stay in Sleep",
      and nothing is red.
+16. **The ember: time left, no tap** (added 2026-10-10, simulator-checked only). On an OLED
+   iPhone in a dark room, at night brightness, start Sleep with a 45-minute night and let the
+   controls fade.
+   - ✅ A faint amber arc of the night left stays in the ring's place. A dark-adapted eye can
+     read it, and it never lights the room (it's ~8% amber).
+   - ✅ No arc for "All night", and none in Focus.
+   - ✅ Tap the veil once: the ember shows the time left with no controls, then the dark returns.
+   - Check the first session on a fresh install: the first-run card stays up about 15 s before
+     the fade. It comes back with the controls on a tap, and it's never held up all night.
 
 ---
 

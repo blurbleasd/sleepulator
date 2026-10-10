@@ -174,6 +174,12 @@ struct HomeView: View {
                                       presenting: presentingFromHome)
     }
 
+    /// A first-run or "the timer moved" card is up: the fade waits longer, so it can be read.
+    private var tipShowing: Bool {
+        CoachmarkContent.current(focusMode: audio.focusMode, hasCompletedFirstRun: hasCompletedFirstRun,
+                                 hasSeenNightRingTip: hasSeenNightRingTip) != nil
+    }
+
     private var chromeLift: EdgeInsets {
         HomeScreensaverPolicy.chromeLift(anchored: anchoredInsets, live: liveInsets)
     }
@@ -184,7 +190,7 @@ struct HomeView: View {
         // Both modes settle to the bare backdrop after a spell of no interaction (delays in
         // HomeScreensaverPolicy). Any change to a mayFade input cancels or reschedules this item,
         // so it can't fire on stale conditions.
-        let delay = HomeScreensaverPolicy.idleDelay(focusMode: audio.focusMode)
+        let delay = HomeScreensaverPolicy.idleDelay(focusMode: audio.focusMode, tipShowing: tipShowing)
         let work = DispatchWorkItem {
             guard self.homeVisible else { return }   // @State: reads the live value, not the copy's
             withAnimation(.easeInOut(duration: 0.9)) { self.audio.ambientScreensaver = true }
@@ -583,6 +589,17 @@ struct HomeView: View {
             .padding(.top, chromeLift.top)
             .padding(.bottom, chromeLift.bottom)
             .opacity(audio.ambientScreensaver ? 0 : 1)
+            // Outside the fade: what's left of the ring once the chrome goes, in the ring's place.
+            .overlayPreferenceValue(CoachmarkAnchorKey.self) { anchors in
+                if let orb = anchors[.orb] {
+                    GeometryReader { proxy in
+                        let r = proxy[orb]
+                        NightEmber(sleepTimer: audio.sleepTimer, pal: pal,
+                                   screensaver: audio.ambientScreensaver, focusMode: audio.focusMode)
+                            .position(x: r.midX, y: r.midY)
+                    }
+                }
+            }
             .allowsHitTesting(!audio.ambientScreensaver)
             .animation(.easeInOut(duration: 0.9), value: audio.ambientScreensaver)
             // Any touch on the live controls is interaction — push the idle countdown back
@@ -601,6 +618,10 @@ struct HomeView: View {
                     .ignoresSafeArea()
                     .onTapGesture { wakeChrome() }
                     .accessibilityLabel("Show controls")
+                    // Voice Control can't be detected (no public API), so the fade can't stand down
+                    // for it as it does for VoiceOver. This full-screen button is its way back:
+                    // "Tap Show controls", "Tap Wake" or "Tap Controls".
+                    .accessibilityInputLabels(["Show controls", "Wake", "Controls"])
                     .accessibilityAddTraits(.isButton)
             }
 
@@ -673,6 +694,8 @@ struct HomeView: View {
         .onChange(of: assistiveTechRunning) { _, _ in wakeChrome() }
         // A sheet opening cancels the countdown; closing one wakes the chrome and restarts it.
         .onChange(of: presentingFromHome) { _, _ in wakeChrome() }
+        // A tip dismissed (or shown) changes the delay: restart the countdown at the new length.
+        .onChange(of: tipShowing) { _, _ in if !audio.ambientScreensaver { scheduleIdleFade() } }
         // Using the ring counts as finding it: retire both tips.
         .onChange(of: nightLength) { _, _ in
             retireFirstRunTip()

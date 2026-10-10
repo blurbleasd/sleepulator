@@ -1337,8 +1337,17 @@ final class HomeScreensaverPolicyTests: XCTestCase {
     }
 
     func testSleepFadesFasterThanFocus() {
-        XCTAssertLessThan(HomeScreensaverPolicy.idleDelay(focusMode: false),
-                          HomeScreensaverPolicy.idleDelay(focusMode: true))
+        XCTAssertLessThan(HomeScreensaverPolicy.idleDelay(focusMode: false, tipShowing: false),
+                          HomeScreensaverPolicy.idleDelay(focusMode: true, tipShowing: false))
+    }
+
+    func testATipGetsTimeToBeReadBeforeTheFade() {
+        // At 3 s the first-run card faded mid-sentence. It gets longer, in either mode, but the
+        // fade still comes (Play doesn't dismiss it; a held fade would light an All-night session).
+        XCTAssertGreaterThan(HomeScreensaverPolicy.idleDelay(focusMode: false, tipShowing: true),
+                             HomeScreensaverPolicy.idleDelay(focusMode: true, tipShowing: false))
+        XCTAssertGreaterThanOrEqual(HomeScreensaverPolicy.idleDelay(focusMode: false, tipShowing: true), 12)
+        XCTAssertLessThanOrEqual(HomeScreensaverPolicy.idleDelay(focusMode: false, tipShowing: true), 20)
     }
 
     func testAnySourceCountsAsASession() {
@@ -1886,5 +1895,32 @@ final class CoachmarkContentTests: XCTestCase {
     func testNoTipsInFocus() {
         XCTAssertNil(CoachmarkContent.current(focusMode: true, hasCompletedFirstRun: false, hasSeenNightRingTip: false))
         XCTAssertNil(CoachmarkContent.current(focusMode: true, hasCompletedFirstRun: true, hasSeenNightRingTip: false))
+    }
+}
+
+final class NightEmberMathTests: XCTestCase {
+    func testTheEmberShowsOnlyOverASleepCountdownInTheScreensaver() {
+        XCTAssertTrue(NightEmberMath.visible(screensaver: true, focusMode: false, timerActive: true))
+        XCTAssertFalse(NightEmberMath.visible(screensaver: false, focusMode: false, timerActive: true),
+                       "with the chrome up, the ring itself shows the night")
+        XCTAssertFalse(NightEmberMath.visible(screensaver: true, focusMode: false, timerActive: false),
+                       "All night has no time left to show")
+        XCTAssertFalse(NightEmberMath.visible(screensaver: true, focusMode: true, timerActive: true))
+    }
+
+    func testTheEmberWandersWithinItsRadiusAndNeverJumps() {
+        // Burn-in: it must keep moving over the hours, but only ever imperceptibly.
+        var previous = NightEmberMath.drift(at: 0)
+        var farthest: CGFloat = 0
+        for second in stride(from: 1.0, through: 8 * 3600, by: 7) {
+            let d = NightEmberMath.drift(at: second)
+            XCTAssertLessThanOrEqual(abs(d.width), NightEmberMath.driftRadius + 0.0001)
+            XCTAssertLessThanOrEqual(abs(d.height), NightEmberMath.driftRadius + 0.0001)
+            XCTAssertLessThan(hypot(d.width - previous.width, d.height - previous.height), 1,
+                              "7 s of drift must stay under a point")
+            farthest = max(farthest, hypot(d.width, d.height))
+            previous = d
+        }
+        XCTAssertGreaterThan(farthest, NightEmberMath.driftRadius * 0.9, "it must actually move")
     }
 }
