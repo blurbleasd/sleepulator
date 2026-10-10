@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		24FEF89F7F3EE547E0DF1BBA /* NightVeilUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8773BE1F18CA068917F5C00 /* NightVeilUITests.swift */; };
 		2E448B63520859F2E217098F /* AudioMathTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5D5D733507738D0157791A3 /* AudioMathTests.swift */; };
 		43943F4DBCB07EF4DB67947C /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = AB899D16B0611E1DE7BE7027 /* Foundation.framework */; };
 		896817F92FE6F20900C5DF4D /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 896817F82FE6F20900C5DF4D /* WidgetKit.framework */; };
@@ -75,6 +76,7 @@
 		BB0200000000000000000003 /* GenerativeAudioEngineTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SleepulatorTests/GenerativeAudioEngineTests.swift; sourceTree = "<group>"; };
 		C5D5D733507738D0157791A3 /* AudioMathTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SleepulatorTests/AudioMathTests.swift; sourceTree = "<group>"; };
 		CC03CC03CC03CC03CC03CC03 /* PersistenceTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SleepulatorTests/PersistenceTests.swift; sourceTree = "<group>"; };
+		D8773BE1F18CA068917F5C00 /* NightVeilUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = NightVeilUITests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -208,6 +210,7 @@
 			isa = PBXGroup;
 			children = (
 				04989B6E7BC2DC8CBA44D2C0 /* HomeLayoutUITests.swift */,
+				D8773BE1F18CA068917F5C00 /* NightVeilUITests.swift */,
 			);
 			name = SleepulatorUITests;
 			path = SleepulatorUITests;
@@ -398,6 +401,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				BF4075B42E1B49487FA0DF0C /* HomeLayoutUITests.swift in Sources */,
+				24FEF89F7F3EE547E0DF1BBA /* NightVeilUITests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
