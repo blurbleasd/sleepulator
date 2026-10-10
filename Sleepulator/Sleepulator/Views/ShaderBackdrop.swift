@@ -142,8 +142,8 @@ struct ShaderBackdrop: View {
 /// `.colorEffect` scenes, here for lens scenes:
 ///   • `SceneClock` night-slowdown (`phase += Δt·rate`) — monotonic, no runs-backward, freeze holds pose,
 ///   • `sleepTimer.nightProgress` reactivity, sampled *live* each tick (never observed → no re-render storm),
-///   • the built-in `TimelineView(paused:)` freeze — one static pass at the frozen pose, and a stable
-///     view identity across the night-dim veil (an `if paused {} else { … }` swap resets state).
+///   • the freeze — one static pass at the frozen `SceneClock` pose (the clock is @State, so the
+///     `if paused {} else { TimelineView }` swap keeps the pose; see ShaderBackdrop's body).
 ///
 /// The far world is a caller-supplied view (gradient + bokeh + haze). This host flattens it once via
 /// `drawingGroup()` so the background blur is *baked*, not a per-frame Gaussian (§6.2 battery trap),

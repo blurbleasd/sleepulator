@@ -21,7 +21,7 @@ import SwiftUI
 /// it via `drawingGroup()`, so the background blur is **baked once**, not a Gaussian per pixel per
 /// frame (§6.2 battery trap). The only animated cost is the shader, driven by the host's `TimelineView`.
 ///
-/// Settle (§6.1): the host's `TimelineView(paused:)` stops the loop when `paused` and renders one
+/// Settle (§6.1): the host drops its `TimelineView` when `paused` and renders one
 /// static pass at the frozen `SceneClock` pose — no redraw loop on the occluded all-night screen, and
 /// no `t: 0` snap back to birth pose (the bug the depth-host was built to fix).
 ///

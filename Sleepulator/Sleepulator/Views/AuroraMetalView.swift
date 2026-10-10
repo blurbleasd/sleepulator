@@ -8,7 +8,7 @@ import SwiftUI
 /// A thin wrapper over `ShaderBackdrop`, which owns the redraw loop, the settle, and the
 /// `SceneClock` phase integration (`nightSlowdown: 0.5` → the curtains' flow eases to half
 /// speed by timer end, without the rewind bug of scaling absolute time):
-///   - `sleepTimer.nightProgress` winds the curtains down toward a dim violet wash,
+///   - `sleepTimer.nightProgress` winds the curtains down toward a dim rose wash,
 ///   - `audioLevel` lets them swell a touch with the generative bed,
 ///   - `tilt` parallaxes the field during the watching window.
 struct AuroraMetalView: View {

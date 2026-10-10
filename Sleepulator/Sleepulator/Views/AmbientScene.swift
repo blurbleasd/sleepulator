@@ -44,12 +44,15 @@ protocol AmbientScene {
     /// True if the scene reads `SceneContext.tilt` for gyro parallax — the owner uses this to
     /// gate CoreMotion so it runs *only* for a motion-using, on-screen, non-dimmed scene.
     var usesMotion: Bool { get }
+    /// A DEBUG A/B sibling: pickable from the Backdrop chips, but left out of Home's swipe loop.
+    var isExperiment: Bool { get }
     func makeBackdrop(_ ctx: SceneContext) -> AnyView
 }
 
 extension AmbientScene {
     /// Most scenes don't use motion; they opt in by overriding this.
     var usesMotion: Bool { false }
+    var isExperiment: Bool { false }
 }
 
 // MARK: - The built-in scenes (wrap today's backdrops verbatim)
@@ -113,13 +116,13 @@ struct NightFade<Content: View>: View {
 }
 
 // (EnergyScene retired 2026-07-06 — a rotating blurred glow with no depth/reactivity; a weak
-// concept Metal wouldn't save. Focus now defaults to "current". FocusBackdrop in Backdrops.swift
-// is now dead code, safe to delete in a cleanup pass.)
+// concept Metal wouldn't save. Focus now defaults to "current".)
 
 /// "Current" (Focus): cool streams that quicken/brighten through a work interval and ease on a
 /// break — momentum without flicker. A domain-warped FBM flow-field shader
 /// (`CurrentShader.metal` `currentField` via `CurrentMetalView`), driven by the shared
-/// `FocusDrivers` mapping. Reduce Motion feeds the flow clock rate 0 → static field.
+/// `FocusDrivers` mapping. System Reduce Motion doesn't still it (it gates parallax only, SCREENSAVER-LIBRARY-SPEC §5); the
+/// "Moving scenes" setting does, through `paused`.
 ///
 /// Promoted 2026-09-21: this WAS a DEBUG-only "(Metal)" A/B sibling sitting next to a Canvas
 /// `CurrentScene` that owned the "current" id — which is the id `sceneFocus` defaults to. So the
@@ -138,8 +141,9 @@ struct CurrentScene: AmbientScene {
 
 /// "Tide" (Focus): rising, pulsing bands whose energy builds across a work interval and eases on
 /// a break (`TideShader.metal` `tideField` via `TideMetalView`) — an FBM-modulated surge with a
-/// crisp crest and a counter-swell, instead of the flat Canvas fill it replaced. Reduce Motion
-/// stills the surface. Promoted 2026-09-21 out of its DEBUG A/B slot — see `CurrentScene`.
+/// crisp crest and a counter-swell, instead of the flat Canvas fill it replaced. Promoted
+/// 2026-09-21 out of its DEBUG A/B slot — see `CurrentScene`. System Reduce Motion doesn't still it (it gates parallax only, SCREENSAVER-LIBRARY-SPEC §5); the
+/// "Moving scenes" setting does, through `paused`.
 struct TideScene: AmbientScene {
     let id = "tide"
     let title = "Tide"
@@ -174,6 +178,7 @@ struct RainOnGlassDepthScene: AmbientScene {
     /// The drops' far world parallaxes with gyro (held-in-hand bonus); flat on a nightstand it
     /// still reads deep from focus + refraction. HomeView.reconcileMotion gates CoreMotion on this.
     var usesMotion: Bool { true }
+    var isExperiment: Bool { true }
 
     func makeBackdrop(_ ctx: SceneContext) -> AnyView {
         AnyView(RainGlassDepthView(paused: ctx.paused,
@@ -282,8 +287,9 @@ struct DeepSpaceScene: AmbientScene {
 
 /// "Sandfall" (Focus): per-column comet streaks falling through a descending FBM curtain, whose
 /// intensity builds across a work interval (`SandfallShader.metal` `sandField` via
-/// `SandfallMetalView`) — replacing the 14 stiff Canvas grains. Reduce Motion stills the fall.
-/// Promoted 2026-09-21 out of its DEBUG A/B slot — see `CurrentScene`.
+/// `SandfallMetalView`) — replacing the 14 stiff Canvas grains. Promoted 2026-09-21 out of its
+/// DEBUG A/B slot — see `CurrentScene`. System Reduce Motion doesn't still it (it gates parallax only, SCREENSAVER-LIBRARY-SPEC §5); the
+/// "Moving scenes" setting does, through `paused`.
 struct SandfallScene: AmbientScene {
     let id = "sandfall"
     let title = "Sandfall"
@@ -314,6 +320,11 @@ enum SceneRegistry {
 
     static func scenes(for mood: SceneMood) -> [any AmbientScene] {
         all.filter { $0.mood == mood }
+    }
+
+    /// What a swipe on Home cycles through: the mood's scenes without the A/B experiments.
+    static func swipeLoop(for mood: SceneMood) -> [any AmbientScene] {
+        scenes(for: mood).filter { !$0.isExperiment }
     }
 
     /// Resolve a selection id to a scene, falling back to the mood's first registered scene.

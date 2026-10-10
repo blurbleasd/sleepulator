@@ -45,9 +45,17 @@ struct BreathingBloomView: View {
     var body: some View {
         ZStack {
             Color(red: 0.03, green: 0.025, blue: 0.035).ignoresSafeArea()
-            TimelineView(.animation(minimumInterval: 1.0 / 20.0, paused: paused)) { tl in
-                bloom(Self.breath(ticked(tl.date)),
-                      nightDim: 1 - 0.8 * (sleepTimer?.nightProgress ?? 0))
+            // An if/else swap, not `TimelineView(.animation(paused:))`: the `paused:` schedule
+            // stops driving frames on ProMotion devices (device 2026-07-11, see ShaderBackdrop),
+            // so the scene moved only on outside re-renders. The clock is @State, so the frozen
+            // frame still holds the pose it froze at.
+            if paused {
+                bloom(Self.breath(clock.elapsed), nightDim: 1 - 0.8 * (sleepTimer?.nightProgress ?? 0))
+            } else {
+                TimelineView(.animation(minimumInterval: 1.0 / 20.0)) { tl in
+                    bloom(Self.breath(ticked(tl.date)),
+                          nightDim: 1 - 0.8 * (sleepTimer?.nightProgress ?? 0))
+                }
             }
         }
         .ignoresSafeArea()

@@ -133,7 +133,7 @@ struct HomeView: View {
 
     private func cycleScene(_ dir: Int) {
         let mood: SceneMood = audio.focusMode ? .focus : .sleep
-        let list = SceneRegistry.scenes(for: mood)
+        let list = SceneRegistry.swipeLoop(for: mood)
         guard list.count > 1 else { return }
         let curId = audio.focusMode ? focusSceneId : sleepSceneId
         let idx = list.firstIndex { $0.id == curId } ?? 0

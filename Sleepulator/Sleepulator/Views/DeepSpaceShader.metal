@@ -75,8 +75,8 @@ inline float fbm(float2 p) {
 // a cosine palette meant as violet→blue→magenta→cyan; over the density range actually used it
 // rendered a muddy olive-khaki.)
 inline float3 palette(float d) {
-    float3 c = mix(float3(0.20, 0.06, 0.11), float3(0.44, 0.15, 0.08), smoothstep(0.35, 0.65, d));
-    return mix(c, float3(0.52, 0.30, 0.12), smoothstep(0.65, 0.95, d));
+    float3 c = mix(float3(0.34, 0.10, 0.18), float3(0.70, 0.25, 0.13), smoothstep(0.35, 0.65, d));
+    return mix(c, float3(0.80, 0.48, 0.20), smoothstep(0.65, 0.95, d));
 }
 
 // One parallax star tier: a scrolling, gyro-shifted grid where rare cells hold a twinkling star.

@@ -123,16 +123,17 @@ struct FocusSessionReadout: View {
                         .frame(minHeight: 44)
                 }
                 .buttonStyle(.plain)
-            } else {
+            } else if layers.isEmpty {
+                // At rest: what Play would resume ("Resume · Pink", "Tap to begin").
                 Text(idleStatus)
                     .font(.system(.callout, design: .rounded).weight(.medium))
                     .foregroundColor(pal.dim)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 30)
-
-                if !layers.isEmpty {
-                    LayerPills(layers: layers, pal: pal)
-                }
+            } else {
+                // Playing: the pills name the sounds, as under the Sleep orb. The status line
+                // said the same names again ("Pink" over a "Pink" pill).
+                LayerPills(layers: layers, pal: pal)
             }
         }
     }

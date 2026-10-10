@@ -2,13 +2,13 @@ import SwiftUI
 
 /// "Tide" (Focus) — the Metal edition. A GPU fragment shader (`TideShader.metal`, `tideField`)
 /// renders a cool water level whose height tracks the Pomodoro, with an FBM-warped waterline,
-/// depth shading, a crisp surface line and specular shimmer — instead of the flat Canvas fill.
-/// A/B sibling of the CPU `TideView`.
+/// depth shading, a crisp surface line and specular shimmer — instead of the flat Canvas fill it
+/// replaced.
 ///
-/// The level + tint come from the SAME mapping the Canvas `TideView` uses, so the two differ only
-/// in rendering. Values are read live each tick (never observed). Ambient surface motion runs off
-/// its own `SceneClock` at a constant rate (the tide's motion isn't Pomodoro-paced); Reduce Motion
-/// feeds rate 0 → a still surface, and `paused` (occlusion) freezes to one static frame.
+/// The level + tint come from the shared `FocusDrivers` mapping. Values are read live each tick
+/// (never observed). Ambient surface motion runs off its own `SceneClock` at a constant rate (the
+/// tide's motion isn't Pomodoro-paced); `paused` (occlusion, or "Moving scenes" off) freezes it to
+/// one static frame. System Reduce Motion doesn't (SCREENSAVER-LIBRARY-SPEC §5).
 struct TideMetalView: View {
     var paused: Bool = false
     let pomodoro: PomodoroService

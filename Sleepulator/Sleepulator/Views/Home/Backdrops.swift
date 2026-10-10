@@ -67,11 +67,17 @@ struct StarfieldView: View {
     var body: some View {
         ZStack {
             hazeBand
-            // `paused:` on the schedule (not an if/else branch swap) keeps the Canvas identity
-            // stable across the freeze.
-            TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: paused)) { tl in
-                let t = ticked(tl.date)
-                Canvas { ctx, size in Self.draw(ctx, size, t: t) }
+            // An if/else swap, not `TimelineView(.animation(paused:))`: the `paused:` schedule
+            // stops driving frames on ProMotion devices (device 2026-07-11, see ShaderBackdrop),
+            // so the scene moved only on outside re-renders. The clock is @State, so the frozen
+            // frame still holds the pose it froze at.
+            if paused {
+                Canvas { ctx, size in Self.draw(ctx, size, t: clock.elapsed) }
+            } else {
+                TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { tl in
+                    let t = ticked(tl.date)
+                    Canvas { ctx, size in Self.draw(ctx, size, t: t) }
+                }
             }
         }
         .allowsHitTesting(false)
@@ -233,58 +239,6 @@ struct ShootingStarView: View {
     private func frac(_ n: Int) -> CGFloat {
         let v = sin(Double(n) * 12.9898) * 43758.5453
         return CGFloat(v - v.rounded(.down))
-    }
-}
-
-// Focus backdrop — a slow-rotating cool "energy" sweep over the deep-indigo gradient.
-// Runs regardless of Reduce Motion — a slow blurred glow drift is ambient, not the
-// vestibular kind of motion, and Focus should feel alive even with Reduce Motion on.
-//
-// TimelineView-driven (was a `repeatForever` CA animation, which kept compositing the
-// blurred rotation at native refresh even while "frozen" — the default Focus scene was
-// the only backdrop that never honored `paused`). The clock freezes the sweep in place.
-struct FocusBackdrop: View {
-    let accent: Color
-    let reduceMotion: Bool
-    /// True when the screen is occluded (veil, backgrounded, low luminance) — freeze the sweep.
-    var paused: Bool = false
-
-    /// One full revolution of the sweep, seconds (matches the old CA animation).
-    private static let revolutionSec: Double = 36
-
-    @State private var clock = SceneClock()
-
-    var body: some View {
-        // GeometryReader's footprint is always the proposed (screen) size — it never grows
-        // to fit the oversized/blurred glow, so the ZStack can't be widened (which was
-        // shoving the centered content off both edges). The glow is positioned at center.
-        GeometryReader { geo in
-            // 1/10s is plenty: one revolution takes 36s, so each step is ~0.36° through a
-            // 90pt blur — imperceptible, and a third of the body evaluations of 1/30.
-            TimelineView(.animation(minimumInterval: 1.0 / 10.0, paused: paused)) { tl in
-                AngularGradient(
-                    gradient: Gradient(colors: [
-                        accent.opacity(0.0), accent.opacity(0.30), accent.opacity(0.05),
-                        accent.opacity(0.22), accent.opacity(0.0)
-                    ]),
-                    center: .center
-                )
-                .frame(width: 640, height: 640)
-                .blur(radius: 90)
-                .rotationEffect(.degrees(sweepAngle(tl.date)))
-                .opacity(0.75)
-                .position(x: geo.size.width / 2, y: geo.size.height / 2 - 30)
-            }
-        }
-        .ignoresSafeArea()
-        .clipped()
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
-    }
-
-    private func sweepAngle(_ now: Date) -> Double {
-        if !paused { clock.tick(now: now.timeIntervalSinceReferenceDate, rate: 1) }
-        return (clock.elapsed / Self.revolutionSec) * 360
     }
 }
 
