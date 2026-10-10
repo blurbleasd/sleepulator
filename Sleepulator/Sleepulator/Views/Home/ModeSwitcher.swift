@@ -20,6 +20,9 @@ struct ModeSwitcher: View {
             }
         }
         .padding(4)
+        // Capped like the mini-player: past accessibility size 2 the labels ran out of room
+        // ("Sle…", "Foc…" on an iPhone SE). Each segment adopts the Large Content Viewer.
+        .dynamicTypeSize(...DynamicTypeSize.accessibility2)
         .background(Capsule().fill(pal.text.opacity(quiet ? 0.04 : 0.08)))
         .frame(maxWidth: .infinity)
         .animation(.easeInOut(duration: 0.6), value: quiet)
@@ -61,6 +64,7 @@ struct ModeSwitcher: View {
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
+        .accessibilityShowsLargeContentViewer()
         .accessibilityLabel("\(title) mode")
         .accessibilityAddTraits(isActive ? [.isButton, .isSelected] : .isButton)
     }

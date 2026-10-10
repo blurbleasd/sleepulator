@@ -18,7 +18,8 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   - `Views/` — SwiftUI screens + components (HomeView, LibraryView, PodcastDetailView,
     NowPlayingSheet, MiniPlayerView, SettingsView, BreathingView, the `AmbientScene` backdrop
     library, Components, Theme, `MiniPlayerClearance`, `SoundNames`). `Views/Home/` holds Home's
-    pieces: the orb + `NightRing`, `ModeSwitcher`, `MixDrawer`, `TimerSelectionSheet`, and the
+    pieces: the orb + `NightRing`, `NightEmber` (the faint time-left arc left in the ring's place
+    under the Sleep screensaver), `ModeSwitcher`, `MixDrawer`, `TimerSelectionSheet`, and the
     pure, unit-tested rules `SessionGuards` and `HomeScreensaverPolicy`. `Views/TonightShelfView.swift`
     is the Podcasts tab's "Tonight" (Focus: "Continue") shelf. `Views/NowPlayingState.swift` holds
     the player views' pure, unit-tested rules: `NowPlayingState` (hero, Up Next, phase),
@@ -31,6 +32,11 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
     pure, unit-tested podcast rules.
   - `PrivacyInfo.xcprivacy`, `Info.plist`.
 - **Widget** — `SleepulatorWidget/` (sleep-timer Live Activity).
+- **UI tests** — `SleepulatorUITests/` (XCUITest, in the shared scheme so CI runs it).
+  `HomeLayoutUITests` checks Focus's Build mix / Focus session row clears the mini-player and
+  that a tap starts the Pomodoro. The target is made by `Sleepulator/setup_ui_tests.rb`
+  (idempotent; re-run it after adding a file there). It runs in the same app the unit tests are
+  hosted in, so a UI test must leave persisted state (mode, night length) as it found it.
 - **Tests** — `SleepulatorTests/` (XCTest). Six files, many suites: `AudioMathTests.swift`;
   `AudioStateTests.swift` (also holds `PodcastParserTests`, `OPMLParserTests`,
   `StorageManagerTests`, `NetRetryTests`, `CacheEvictionTests`, the sleep-timer suites, Home's
@@ -105,8 +111,11 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   must not be iCloud-backed). `isExcludedFromBackup`, ~2GB LRU cap (`AudioDownloader`).
 - **Persistence is per-key JSON** via `StorageManager`; one oversized write must not abort the
   rest. `PersistenceMigrator` owns the fragile launch-time legacy reads.
-- **Sound palettes are mode-scoped** — Sleep and Focus deliberately share no sounds
-  (`AudioEngine.reconcileSoundsToMode`).
+- **Sound palettes are mode-scoped.** Sleep and Focus share no sounds except Pink noise
+  (`AudioEngine.reconcileSoundsToMode`). Each mode remembers its own last noise and binaural pick
+  (`lastPick.*` keys), and a mode switch restores that pick. Without it, Sleep's Brown came back
+  from Focus as Pink: Focus snapped it to Pink, which Sleep also has. Launch and restore don't
+  apply the memory; there, the current sound is already that mode's latest pick.
 - **The sleep timer starts from the Home orb's night ring.** `NightRing` sets
   `nightLengthMinutes` (0 = All night, the default, so an update never starts timing anyone out).
   Any Sleep session starting from rest starts the timer at that length: `AudioEngine.noteSessionStart`
@@ -142,23 +151,34 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   `Palette(bedtime:)` is legacy and only ever yields Sleep amber.
 - **Mini-player clearance is measured, not guessed.** ContentView measures the floating bar's top
   edge and hands each tab `\.miniPlayerTop` (nil on Sleep Home unless a podcast plays). A screen
-  that ends at the bottom edge (a tab root, a pushed show page) applies `.miniPlayerClearance()`;
-  Home passes `frozen:` under the screensaver. No fixed bottom spacers: the old 112 / 80 / 60 pt
-  guesses broke as soon as the bar grew with text size. Home measures the screen bottom on its
-  root as frame edge + inset (`MiniPlayerClearanceMath.screenBottom`), not off the backdrop: a
-  frame after `.ignoresSafeArea()` still ends at the safe-area edge, so the tab bar was counted
-  twice and Build mix sat behind a loaded bar.
-- **The night veil closes an idle Now Playing sheet.** The veil can't cover a sheet, so when it
-  drops `ContentView` dismisses an open player. Opening the sheet and every tap or control in it
-  restart the veil's minute (`onSheetInteraction` → `scheduleDim`), so a sheet in use stays;
-  under VoiceOver or Switch Control the veil never closes it.
+  that ends at the bottom edge (a tab root, a pushed show page) applies `.miniPlayerClearance()`.
+  Home computes its own (`HomeView.homeClearance`) from the screen's bottom edge minus the insets
+  anchored while the tab bar shows, so it holds still under the screensaver. No fixed bottom
+  spacers: the old 112 / 80 / 60 pt guesses broke as soon as the bar grew with text size.
+  To measure a full-bleed view, put `.onGeometryChange` *before* its `.ignoresSafeArea()`.
+  Placed after it, you get the un-expanded frame (the tab bar's top edge, not the screen's). That
+  bug once hid Focus's whole bottom row under the bar; `HomeLayoutUITests` now guards it.
+- **The night veil closes an idle Now Playing sheet.** Any touch anywhere restarts the veil's
+  minute (`WindowActivity`), and a presented sheet or dialog makes it wait rather than drop over it
+  (`SessionGuards.veilTimeout`). The Now Playing sheet is the exception (`.closeNowPlaying`): left
+  untouched for the minute, it's the brightest surface on the night screen, so ContentView closes
+  it and the veil drops. Never under VoiceOver or Switch Control, which reach it without touches.
 - **Dark-only.** `Info.plist` sets `UIUserInterfaceStyle = Dark` and a `UILaunchScreen` filled
   with the `LaunchBackground` color; the generated launch screen is off
   (`INFOPLIST_KEY_UILaunchScreen_Generation = NO`; it followed the system appearance and flashed
   white on every cold launch). ContentView also forces `.dark`.
-- **Home's confirms can't present over a sheet.** A `confirmationDialog` raised while the
-  Build-mix sheet is up silently does nothing, and the stuck request holds the screensaver off.
-  Close the sheet, then ask (`HomeView.requestMode`).
+- **Home's confirms can't present over a sheet.** A confirm (the mode switch's `.alert`) raised
+  while the Build-mix sheet is up silently does nothing, and the stuck request holds the
+  screensaver off. Close the sheet, then ask (`HomeView.requestMode`). Night-time confirms are
+  `.alert`s with no `.destructive` role. iOS 26 draws a `confirmationDialog` as a popover with no
+  cancel button, which left a lone red button on a dark screen.
+- **The night veil runs from the last touch.** ContentView drops it 60 s after the last touch
+  anywhere in the window (`WindowActivity`: a recognizer that observes every touch, sheets
+  included, and claims none). If a sheet, dialog or full-screen cover is up when the countdown
+  ends, the veil waits another round (`SessionGuards.veilTimeout`). The veil is part of the root
+  view, so it can't cover them. The status bar and home indicator hide under the veil and the
+  Sleep screensaver (`SessionGuards.hidesSystemOverlays`); Focus keeps its clock. The pending
+  countdown lives on `WindowActivity`, not in `@State`: it changes on every touch.
 - **One name per sound.** Name sounds through `SoundNames` (binaurals are "Deep", "Drift", …,
   never "Delta" / "Theta").
 - **Podcasts is split by depth.** The library and its Tonight shelf follow the 2am rules (artwork
