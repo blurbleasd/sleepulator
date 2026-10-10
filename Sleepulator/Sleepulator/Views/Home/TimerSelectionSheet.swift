@@ -35,44 +35,48 @@ struct TimerSelectionSheet: View {
     private var playing: Bool { audio.isAnythingPlaying }
 
     var body: some View {
-        VStack(spacing: UI.xl) {
-            Text("Sleep timer")
-                .font(.title2.bold())
-                .foregroundColor(pal.text)
-
-            // One confident value — the slider and the presets both drive this number. Replaces a
-            // "Fade out smoothly over…" caption *and* a separate "N minutes" line saying it twice.
-            HStack(alignment: .firstTextBaseline, spacing: UI.xs) {
-                Text("\(Int(timerMinutes))")
-                    .font(.system(size: heroSize, weight: .semibold, design: .rounded))
-                    .monospacedDigit()
+        // Scrolls, top-aligned. At the .medium detent the sheet is often taller than the detent (a
+        // podcast's tail row and episode button, a running timer's "Play all night", large text),
+        // and the old centred VStack pushed the title up under the drag indicator. Dragging up
+        // still grows the sheet to .large before the content scrolls.
+        ScrollView {
+            VStack(spacing: UI.xl) {
+                Text("Sleep timer")
+                    .font(.title2.bold())
                     .foregroundColor(pal.text)
-                    .contentTransition(.numericText())
-                Text("min")
-                    .font(.system(.title3, design: .rounded))
+
+                // One confident value — the slider and the presets both drive this number. Replaces a
+                // "Fade out smoothly over…" caption *and* a separate "N minutes" line saying it twice.
+                HStack(alignment: .firstTextBaseline, spacing: UI.xs) {
+                    Text("\(Int(timerMinutes))")
+                        .font(.system(size: heroSize, weight: .semibold, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundColor(pal.text)
+                        .contentTransition(.numericText())
+                    Text("min")
+                        .font(.system(.title3, design: .rounded))
+                        .foregroundColor(pal.dim)
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("\(Int(timerMinutes)) minutes")
+
+                // What actually happens at the end, said once. The Live Activity already promised
+                // "Audio fades out, then stops"; the sheet where you commit said nothing.
+                // A tail only runs with a podcast loaded AND a sound bed on (SleepTimerService's
+                // tailEligibleFn); say so only when it will.
+                Text(TimerCopy.consequence(minutes: Int(timerMinutes),
+                                           tailMinutes: audio.hasLoadedEpisode && (audio.noiseOn || audio.binauralOn)
+                                               ? ambientTailMinutes : 0))
+                    .font(.footnote)
                     .foregroundColor(pal.dim)
-            }
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel("\(Int(timerMinutes)) minutes")
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, UI.xxl)
+                    .padding(.top, -UI.md)
 
-            // What actually happens at the end, said once. The Live Activity already promised
-            // "Audio fades out, then stops"; the sheet where you commit said nothing.
-            // A tail only runs with a podcast loaded AND a sound bed on (SleepTimerService's
-            // tailEligibleFn); say so only when it will.
-            Text(TimerCopy.consequence(minutes: Int(timerMinutes),
-                                       tailMinutes: audio.hasLoadedEpisode && (audio.noiseOn || audio.binauralOn)
-                                           ? ambientTailMinutes : 0))
-                .font(.footnote)
-                .foregroundColor(pal.dim)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.horizontal, UI.xxl)
-                .padding(.top, -UI.md)
-
-            // Presets *select* a duration (they no longer fire-and-dismiss); nudging the slider
-            // after is one coherent flow ending in a single Start button.
-            HStack(spacing: UI.md) {
-                ForEach([15, 30, 45, 60], id: \.self) { mins in
+                // Presets *select* a duration (they no longer fire-and-dismiss); nudging the slider
+                // after is one coherent flow ending in a single Start button.
+                FoldingChipRow(values: [15, 30, 45, 60], spacing: UI.md) { mins in
                     let selected = Int(timerMinutes) == mins
                     Button(action: {
                         withAnimation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.85)) { timerMinutes = Double(mins) }
@@ -101,21 +105,26 @@ struct TimerSelectionSheet: View {
                     .accessibilityLabel("\(mins) minutes")
                     .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
                 }
-            }
 
-            Slider(value: $timerMinutes, in: 5...120, step: 5)
-                .tint(pal.accent)
-                .padding(.horizontal, 40)
+                // The app's own fader, not the system slider: iOS 26's pure-white thumb was the
+                // brightest object on the 2am screen. Tap-to-set suits a settings-style length,
+                // and the 5-minute detents tick under the finger.
+                VolumeBar(value: $timerMinutes, accent: pal.accent, range: 5...120, thumbColor: pal.text,
+                          tapToSet: true, step: 5)
+                    .padding(.horizontal, 40)
+                    .accessibilityLabel("Timer length")
+                    .accessibilityValue("\(Int(timerMinutes)) minutes")
 
-            // Ambient tail — only meaningful when a podcast is in the mix: at expiry (or the
-            // episode's end) the podcast stops and the noise bed keeps fading for this span.
-            if audio.hasLoadedEpisode {
-                VStack(spacing: 8) {
-                    Text("Keep sounds going after the podcast stops")
-                        .font(.caption)
-                        .foregroundColor(pal.dim)
-                    HStack(spacing: UI.sm) {
-                        ForEach([0, 15, 30, 60], id: \.self) { mins in
+                // Ambient tail — only meaningful when a podcast is in the mix: at expiry (or the
+                // episode's end) the podcast stops and the noise bed keeps fading for this span.
+                if audio.hasLoadedEpisode {
+                    VStack(spacing: 8) {
+                        Text("Keep sounds going after the podcast stops")
+                            .font(.caption)
+                            .foregroundColor(pal.dim)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, UI.xxl)
+                        FoldingChipRow(values: [0, 15, 30, 60], spacing: UI.sm) { mins in
                             let selected = ambientTailMinutes == mins
                             Button(action: {
                                 withAnimation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.85)) { ambientTailMinutes = mins }
@@ -143,73 +152,100 @@ struct TimerSelectionSheet: View {
                         }
                     }
                 }
-            }
 
-            // Single commit for the duration timer. With nothing playing it starts the mix too: a
-            // countdown over silence did nothing but arm the night veil over a quiet room.
-            Button(action: {
-                let minutes = Int(timerMinutes)
-                nightLength = Double(minutes)
-                if playing { audio.sleepTimer.startSleepTimer(minutes: minutes) } else { playAndStart(minutes) }
-                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                isPresented = false
-            }) {
-                Text(SessionGuards.timerCommitTitle(playing: playing, timerActive: timerActive))
-                    .font(.headline.bold())
-                    .foregroundColor(pal.bg)
-                    .frame(maxWidth: .infinity, minHeight: 44)
-                    .padding()
-                    .background(Capsule().fill(pal.accent))
-            }
-            .accessibilityHint(playing ? "" : "Starts your mix, then the timer")
-            .padding(.horizontal, 40)
-
-            // "End of episode" — only when a podcast with a known, finite length is loaded (so
-            // the button can't silently no-op before the duration is known, or on a live stream).
-            // A genuinely different timer kind, so it stays its own one-tap action.
-            if audio.hasLoadedEpisode, audio.podcastDuration.isFinite, audio.podcastDuration > 5 {
+                // Single commit for the duration timer. With nothing playing it starts the mix too: a
+                // countdown over silence did nothing but arm the night veil over a quiet room.
                 Button(action: {
-                    audio.startEndOfEpisodeTimer()
+                    let minutes = Int(timerMinutes)
+                    nightLength = Double(minutes)
+                    if playing { audio.sleepTimer.startSleepTimer(minutes: minutes) } else { playAndStart(minutes) }
+                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                     isPresented = false
                 }) {
-                    Label("Stop at end of episode", systemImage: "text.append")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundColor(pal.accent)
-                        .padding(.horizontal, UI.xl)
-                        .padding(.vertical, UI.md)
-                        .frame(minHeight: 44)
-                        .overlay(Capsule().strokeBorder(pal.accent.opacity(0.5), lineWidth: 1))
+                    Text(SessionGuards.timerCommitTitle(playing: playing, timerActive: timerActive))
+                        .font(.headline.bold())
+                        .multilineTextAlignment(.center)
+                        // Ember, like BumpTimerButton, not a solid amber slab (the brightest
+                        // surface on the 2am screen). A step stronger than a selected chip's
+                        // tint, and the only full-width fill here, so it still reads as the one
+                        // commit.
+                        .foregroundColor(pal.text)
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .padding()
+                        .background(Capsule().fill(pal.accent.opacity(0.22)))
+                        .overlay(Capsule().strokeBorder(
+                            LinearGradient(colors: [pal.accent.opacity(0.75), pal.accent.opacity(0.2)],
+                                           startPoint: .top, endPoint: .bottom),
+                            lineWidth: 1))
+                }
+                .accessibilityHint(playing ? "" : "Starts your mix, then the timer")
+                .padding(.horizontal, 40)
+
+                // "End of episode" — only when a podcast with a known, finite length is loaded (so
+                // the button can't silently no-op before the duration is known, or on a live stream).
+                // A genuinely different timer kind, so it stays its own one-tap action.
+                if audio.hasLoadedEpisode, audio.podcastDuration.isFinite, audio.podcastDuration > 5 {
+                    Button(action: {
+                        audio.startEndOfEpisodeTimer()
+                        isPresented = false
+                    }) {
+                        Label("Stop at end of episode", systemImage: "text.append")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundColor(pal.accent)
+                            .padding(.horizontal, UI.xl)
+                            .padding(.vertical, UI.md)
+                            .frame(minHeight: 44)
+                            .overlay(Capsule().strokeBorder(pal.accent.opacity(0.5), lineWidth: 1))
+                    }
+                }
+
+                // Cancel an already-running timer — previously there was no way out except starting a
+                // new one. Only shown when a timer is actually counting down.
+                if timerActive {
+                    Button(action: {
+                        nightLength = 0
+                        audio.sleepTimer.cancelTimer()
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        isPresented = false
+                    }) {
+                        // Says what it does: it stops tonight's countdown AND sets the ring to All night,
+                        // which Play then honours on later nights too (the ring is the setting).
+                        Label("Play all night", systemImage: "moon.zzz")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundColor(pal.dim)
+                            .frame(minHeight: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .accessibilityLabel("Turn off the timer and play all night")
+                    .accessibilityHint("The ring stays on All night until you set a length again")
                 }
             }
-
-            // Cancel an already-running timer — previously there was no way out except starting a
-            // new one. Only shown when a timer is actually counting down.
-            if timerActive {
-                Button(action: {
-                    nightLength = 0
-                    audio.sleepTimer.cancelTimer()
-                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                    isPresented = false
-                }) {
-                    // Says what it does: it stops tonight's countdown AND sets the ring to All night,
-                    // which Play then honours on later nights too (the ring is the setting).
-                    Label("Play all night", systemImage: "moon.zzz")
-                        .font(.subheadline.weight(.medium))
-                        .foregroundColor(pal.dim)
-                        .frame(minHeight: 44)
-                        .contentShape(Rectangle())
-                }
-                .accessibilityLabel("Turn off the timer and play all night")
-                .accessibilityHint("The ring stays on All night until you set a length again")
-            }
-
-            Spacer()
+            .padding(.top, UI.xxl)
+            .padding(.bottom, UI.lg)
+            .frame(maxWidth: .infinity)
         }
-        .padding(.top, UI.xxl)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .scrollBounceBehavior(.basedOnSize)
         // Open on the length the ring shows, when it has one.
         .onAppear { if nightLength >= 5 { timerMinutes = nightLength } }
         // Translucent sheet backdrop (see the presentationBackground at the call site) — the scene
         // drifts behind rather than a flat fill.
+    }
+}
+
+/// Four chips across, folding into two rows of two when they won't fit (large text truncated the
+/// single row to "1…", "3…"). ViewThatFits keeps the one-row layout wherever it fits.
+private struct FoldingChipRow<Chip: View>: View {
+    let values: [Int]
+    let spacing: CGFloat
+    @ViewBuilder let chip: (Int) -> Chip
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: spacing) { ForEach(values, id: \.self, content: chip) }
+            VStack(spacing: spacing) {
+                HStack(spacing: spacing) { ForEach(values.prefix(2), id: \.self, content: chip) }
+                HStack(spacing: spacing) { ForEach(values.dropFirst(2), id: \.self, content: chip) }
+            }
+        }
     }
 }
