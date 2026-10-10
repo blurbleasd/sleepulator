@@ -367,13 +367,37 @@ final class AudioEngine: ObservableObject {
     // reconcileSoundsToMode (and aliased to alpha in AudioMath.getCarrierAndBeat as a backstop).
     static let focusBinaurals = ["alpha", "beta", "gamma"]
 
+    /// Where each mode's last pick is kept ("lastPick.noise.sleep", …).
+    nonisolated static func pickKey(_ kind: String, focus: Bool) -> String {
+        "lastPick.\(kind).\(focus ? "focus" : "sleep")"
+    }
+
+    /// The sound a palette lands on: the mode's remembered pick if it belongs, else the current
+    /// sound if it belongs, else the palette's first. Palettes are static and non-empty today,
+    /// but the all-night path never crashes over it: `fallback` covers an emptied palette.
+    nonisolated static func landing(current: String, remembered: String?, palette: [String],
+                                    fallback: String) -> String {
+        if let remembered, palette.contains(remembered) { return remembered }
+        if palette.contains(current) { return current }
+        return palette.first ?? fallback
+    }
+
     @Published var focusMode: Bool {
         didSet {
             UserDefaults.standard.set(focusMode, forKey: "focusMode")
             // The two timers are mutually exclusive: leaving one mode stops its timer.
             if focusMode { sleepTimer.cancelTimer() } else { pomodoro.stop() }
+            // Each mode keeps its own pick: remember the one being left, so coming back restores
+            // it. Without this, Sleep's Brown came back from Focus as Pink (Focus snapped it to
+            // Pink, which Sleep also has, so it stuck).
+            let switched = focusMode != oldValue
+            if switched {
+                let d = UserDefaults.standard
+                d.set(noiseType, forKey: Self.pickKey("noise", focus: oldValue))
+                d.set(binauralPreset, forKey: Self.pickKey("binaural", focus: oldValue))
+            }
             // Snap the active sounds into the new mode's palette so nothing cross-mode lingers.
-            reconcileSoundsToMode()
+            reconcileSoundsToMode(restoringPicks: switched)
             // If the limiter follows the mode, update it (Sleep = on, Focus = off).
             applyLimiterForMode()
             // Apple Music is Focus-only: leaving Focus stops it and reverts the session to
@@ -385,13 +409,20 @@ final class AudioEngine: ObservableObject {
     /// Force the active noise + binaural selections into the current mode's palette.
     /// Called on every mode switch and once at launch, so a persisted cross-mode sound
     /// (e.g. brown noise while entering Focus) can't leak across.
-    func reconcileSoundsToMode() {
+    /// On a mode switch (`restoringPicks`), the entered mode's own last pick wins. At launch or
+    /// after a restore the current sound stays if it belongs: it *is* that mode's latest pick.
+    func reconcileSoundsToMode(restoringPicks: Bool = false) {
         let noises = focusMode ? Self.focusNoises : Self.sleepNoises
         let binaurals = focusMode ? Self.focusBinaurals : Self.sleepBinaurals
-        // Palettes are static and non-empty today, but never crash the all-night path over it:
-        // fall back to known-good defaults if a palette is ever accidentally emptied.
-        if !noises.contains(noiseType) { noiseType = noises.first ?? "brown" }
-        if !binaurals.contains(binauralPreset) { binauralPreset = binaurals.first ?? "delta" }
+        let d = UserDefaults.standard
+        let noise = Self.landing(current: noiseType,
+                                 remembered: restoringPicks ? d.string(forKey: Self.pickKey("noise", focus: focusMode)) : nil,
+                                 palette: noises, fallback: "brown")
+        let binaural = Self.landing(current: binauralPreset,
+                                    remembered: restoringPicks ? d.string(forKey: Self.pickKey("binaural", focus: focusMode)) : nil,
+                                    palette: binaurals, fallback: "delta")
+        if noise != noiseType { noiseType = noise }
+        if binaural != binauralPreset { binauralPreset = binaural }
         // Drop any extra layer whose sound isn't in the new mode's palette, so a cross-mode layer
         // can't leak across (same rule the primary noise follows above).
         let filtered = extraLayers.filter { noises.contains($0.type) }

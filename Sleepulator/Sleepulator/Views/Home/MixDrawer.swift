@@ -20,6 +20,10 @@ struct MixDrawer: View {
     @State private var draftName = ""
     @State private var showOverwriteConfirm = false
     @State private var pendingPresetName = ""
+    /// Layering is taught here, where it happens: one line under the title, the first time the
+    /// mixer opens. Retired on that first open, but held for the whole visit.
+    @AppStorage("hasSeenMixHint") private var hasSeenMixHint = false
+    @State private var showsMixHint = false
 
     private var currentMode: String { audio.focusMode ? "focus" : "sleep" }
     private var modePresets: [SoundPreset] { mixStore.savedPresets.filter { $0.mode == currentMode } }
@@ -28,11 +32,24 @@ struct MixDrawer: View {
     var body: some View {
         ScrollView {
             VStack(spacing: UI.lg) {
-                Text("Your mix")
-                    .font(.system(.headline, design: .rounded).bold())
-                    .foregroundColor(pal.text)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, UI.xl)
+                VStack(alignment: .leading, spacing: UI.xs) {
+                    Text("Your mix")
+                        .font(.system(.headline, design: .rounded).bold())
+                        .foregroundColor(pal.text)
+                    if showsMixHint {
+                        // The last slider (HomeBottomBar's master) carries no label of its own.
+                        Text("Turn on as many sounds as you like. Each slider sets one sound; the last sets the whole mix.")
+                            .font(.footnote)
+                            .foregroundColor(pal.dim)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, UI.xl)
+                .onAppear {
+                    showsMixHint = !hasSeenMixHint
+                    hasSeenMixHint = true
+                }
 
                 MixPanel(audio: audio, pal: pal, onPickEpisode: onPickEpisode)
 

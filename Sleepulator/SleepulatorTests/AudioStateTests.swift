@@ -490,6 +490,36 @@ final class AudioEngineBehaviorTests: XCTestCase {
         XCTAssertEqual(engine.noiseType, "green")    // green is a real sound now (NoiseType.migrate)
     }
 
+    func testEachModeKeepsItsOwnPickAcrossARoundTrip() {
+        // Brown used to come back from Focus as Pink: Focus snapped it to Pink, which Sleep also has.
+        let engine = AudioEngine()
+        engine.focusMode = false
+        engine.noiseType = "brown"
+        engine.binauralPreset = "theta"
+        engine.focusMode = true
+        XCTAssertTrue(AudioEngine.focusNoises.contains(engine.noiseType))
+        engine.noiseType = "white"
+        engine.focusMode = false
+        XCTAssertEqual(engine.noiseType, "brown")
+        XCTAssertEqual(engine.binauralPreset, "theta")
+        engine.focusMode = true
+        XCTAssertEqual(engine.noiseType, "white", "Focus keeps its own pick too")
+        engine.focusMode = false
+        for kind in ["noise", "binaural"] {
+            for focus in [false, true] { UserDefaults.standard.removeObject(forKey: AudioEngine.pickKey(kind, focus: focus)) }
+        }
+    }
+
+    func testLandingPrefersTheModesOwnPickThenTheCurrentSound() {
+        let focus = AudioEngine.focusNoises
+        XCTAssertEqual(AudioEngine.landing(current: "pink", remembered: "white", palette: focus, fallback: "brown"), "white")
+        XCTAssertEqual(AudioEngine.landing(current: "pink", remembered: nil, palette: focus, fallback: "brown"), "pink")
+        XCTAssertEqual(AudioEngine.landing(current: "brown", remembered: "rain", palette: focus, fallback: "brown"), focus.first,
+                       "neither belongs: the palette's first")
+        XCTAssertEqual(AudioEngine.landing(current: "x", remembered: nil, palette: [], fallback: "brown"), "brown",
+                       "an emptied palette never crashes the all-night path")
+    }
+
     func testModeSwitchReconcilesSoundsIntoPalette() {
         let engine = AudioEngine()
         engine.focusMode = false
@@ -1425,8 +1455,17 @@ final class HomeScreensaverPolicyTests: XCTestCase {
     }
 
     func testSleepFadesFasterThanFocus() {
-        XCTAssertLessThan(HomeScreensaverPolicy.idleDelay(focusMode: false),
-                          HomeScreensaverPolicy.idleDelay(focusMode: true))
+        XCTAssertLessThan(HomeScreensaverPolicy.idleDelay(focusMode: false, tipShowing: false),
+                          HomeScreensaverPolicy.idleDelay(focusMode: true, tipShowing: false))
+    }
+
+    func testATipGetsTimeToBeReadBeforeTheFade() {
+        // At 3 s the first-run card faded mid-sentence. It gets longer, in either mode, but the
+        // fade still comes (Play doesn't dismiss it; a held fade would light an All-night session).
+        XCTAssertGreaterThan(HomeScreensaverPolicy.idleDelay(focusMode: false, tipShowing: true),
+                             HomeScreensaverPolicy.idleDelay(focusMode: true, tipShowing: false))
+        XCTAssertGreaterThanOrEqual(HomeScreensaverPolicy.idleDelay(focusMode: false, tipShowing: true), 12)
+        XCTAssertLessThanOrEqual(HomeScreensaverPolicy.idleDelay(focusMode: false, tipShowing: true), 20)
     }
 
     func testAnySourceCountsAsASession() {
@@ -1530,6 +1569,31 @@ final class SessionGuardsTests: XCTestCase {
         XCTAssertFalse(SessionGuards.mayNightDim(autoNightDim: true, focusMode: true, timerActive: true, playing: true))
         XCTAssertFalse(SessionGuards.mayNightDim(autoNightDim: false, focusMode: false, timerActive: true, playing: true))
         XCTAssertFalse(SessionGuards.mayNightDim(autoNightDim: true, focusMode: false, timerActive: false, playing: true))
+    }
+
+    func testTheFirstSessionIsTheLayeredBedHoweverTheTipWasDismissed() {
+        // The first bed has its own flag: touching the ring (which retires the first-run tip)
+        // used to make the first play a bare Brown.
+        XCTAssertTrue(SessionGuards.begin(hasResumableMix: false, firstSessionStarted: false) == .firstBed)
+        XCTAssertTrue(SessionGuards.begin(hasResumableMix: false, firstSessionStarted: true) == .transport)
+        XCTAssertTrue(SessionGuards.begin(hasResumableMix: true, firstSessionStarted: false) == .resume)
+        XCTAssertTrue(SessionGuards.begin(hasResumableMix: true, firstSessionStarted: true) == .resume)
+    }
+
+    func testVeilWaitsOutAPresentationInsteadOfDroppingUnderIt() {
+        // The veil can't cover a sheet or dialog: dropping it then left a lit dialog on black.
+        XCTAssertTrue(SessionGuards.veilTimeout(mayDim: true, presenting: false) == .drop)
+        XCTAssertTrue(SessionGuards.veilTimeout(mayDim: true, presenting: true) == .wait)
+        XCTAssertTrue(SessionGuards.veilTimeout(mayDim: false, presenting: false) == .stand)
+        XCTAssertTrue(SessionGuards.veilTimeout(mayDim: false, presenting: true) == .stand)
+    }
+
+    func testSystemOverlaysHideOnlyInTheDark() {
+        // The veil hides them in any mode it can show in; the screensaver only in Sleep.
+        XCTAssertTrue(SessionGuards.hidesSystemOverlays(nightDimmed: true, screensaver: false, focusMode: false))
+        XCTAssertTrue(SessionGuards.hidesSystemOverlays(nightDimmed: false, screensaver: true, focusMode: false))
+        XCTAssertFalse(SessionGuards.hidesSystemOverlays(nightDimmed: false, screensaver: true, focusMode: true))
+        XCTAssertFalse(SessionGuards.hidesSystemOverlays(nightDimmed: false, screensaver: false, focusMode: false))
     }
 
     func testTimerCommitStartsTheMixWhenNothingPlays() {
@@ -1743,20 +1807,6 @@ final class MiniPlayerClearanceTests: XCTestCase {
 
     func testBarBelowTheEdgeNeedsNothingExtra() {
         XCTAssertEqual(MiniPlayerClearanceMath.clearance(safeBottom: 600, miniTop: 700), 0)
-    }
-
-    // The arithmetic behind the Build-mix fix, with the values measured on an iPhone 17 Pro. Home
-    // read the screen bottom off a frame that stops at the safe-area edge (791, the tab bar's top)
-    // and subtracted the tab bar again: 791 − 83 − 694 + 12 = 26, leaving the row behind the bar.
-    // This pins the formula only; WHICH view HomeView measures (its root, not the backdrop) is a
-    // view-layout fact XCTest can't reach, so that half was checked on the simulator.
-    func testHomeClearsTheLoadedBarOnAnIPhone17Pro() {
-        let anchored: CGFloat = 83, miniTop: CGFloat = 694
-        let shown = MiniPlayerClearanceMath.screenBottom(frameMaxY: 791, safeAreaBottom: 83)
-        let screensaver = MiniPlayerClearanceMath.screenBottom(frameMaxY: 840, safeAreaBottom: 34)
-        XCTAssertEqual(shown, 874)
-        XCTAssertEqual(screensaver, shown, "stable while the tab bar hides")
-        XCTAssertEqual(MiniPlayerClearanceMath.clearance(safeBottom: shown - anchored, miniTop: miniTop), 109)
     }
 }
 
@@ -2011,6 +2061,16 @@ final class CoachmarkContentTests: XCTestCase {
     func testUpgradersSeeTheNightRingNoteOnce() {
         XCTAssertEqual(CoachmarkContent.current(focusMode: false, hasCompletedFirstRun: true, hasSeenNightRingTip: false), .nightRing)
         XCTAssertFalse(CoachmarkContent.nightRing.pointsDown)       // it's about the ring above, not Build mix
+    }
+
+    func testTheFirstRunCardSaysOneThingAtEitherSize() {
+        // The brief card (most phones) shows the title over `briefMessage`: both are about the
+        // orb and its ring. Layering is the mixer's own first-open hint now.
+        let card = CoachmarkContent.firstRun
+        XCTAssertTrue(card.title.contains("orb"))
+        XCTAssertTrue(card.briefMessage.contains("ring"))
+        XCTAssertFalse(card.title.localizedCaseInsensitiveContains("layer"))
+        XCTAssertTrue(card.message.contains("Build mix"), "the full card still points at Build mix")
     }
 
     func testNoTipsInFocus() {
@@ -2441,6 +2501,48 @@ final class PlayerQueueActionTests: XCTestCase {
         XCTAssertFalse(engine.sleepTimer.isEndOfEpisode)
         XCTAssertGreaterThan(engine.sleepTimer.timerRemaining, 0, "the night's timer stands")
         engine.sleepTimer.cancelTimer()
+    }
+}
+
+/// The veil's timeout over a presented sheet: wait (mid-task), except an idle Now Playing sheet,
+/// the brightest surface at night, which closes so the veil can drop.
+final class VeilTimeoutNowPlayingTests: XCTestCase {
+    func testAnIdleNowPlayingSheetClosesSoTheVeilCanDrop() {
+        XCTAssertEqual(SessionGuards.veilTimeout(mayDim: true, presenting: true, nowPlayingUp: true), .closeNowPlaying)
+        XCTAssertEqual(SessionGuards.veilTimeout(mayDim: true, presenting: true, nowPlayingUp: false), .wait,
+                       "any other sheet or dialog keeps the veil waiting")
+        XCTAssertEqual(SessionGuards.veilTimeout(mayDim: true, presenting: true, nowPlayingUp: true,
+                                                 assistiveTech: true), .wait,
+                       "VoiceOver / Switch Control reach the sheet without touches")
+        XCTAssertEqual(SessionGuards.veilTimeout(mayDim: false, presenting: true, nowPlayingUp: true), .stand)
+        XCTAssertEqual(SessionGuards.veilTimeout(mayDim: true, presenting: false, nowPlayingUp: false), .drop)
+    }
+}
+
+final class NightEmberMathTests: XCTestCase {
+    func testTheEmberShowsOnlyOverASleepCountdownInTheScreensaver() {
+        XCTAssertTrue(NightEmberMath.visible(screensaver: true, focusMode: false, timerActive: true))
+        XCTAssertFalse(NightEmberMath.visible(screensaver: false, focusMode: false, timerActive: true),
+                       "with the chrome up, the ring itself shows the night")
+        XCTAssertFalse(NightEmberMath.visible(screensaver: true, focusMode: false, timerActive: false),
+                       "All night has no time left to show")
+        XCTAssertFalse(NightEmberMath.visible(screensaver: true, focusMode: true, timerActive: true))
+    }
+
+    func testTheEmberWandersWithinItsRadiusAndNeverJumps() {
+        // Burn-in: it must keep moving over the hours, but only ever imperceptibly.
+        var previous = NightEmberMath.drift(at: 0)
+        var farthest: CGFloat = 0
+        for second in stride(from: 1.0, through: 8 * 3600, by: 7) {
+            let d = NightEmberMath.drift(at: second)
+            XCTAssertLessThanOrEqual(abs(d.width), NightEmberMath.driftRadius + 0.0001)
+            XCTAssertLessThanOrEqual(abs(d.height), NightEmberMath.driftRadius + 0.0001)
+            XCTAssertLessThan(hypot(d.width - previous.width, d.height - previous.height), 1,
+                              "7 s of drift must stay under a point")
+            farthest = max(farthest, hypot(d.width, d.height))
+            previous = d
+        }
+        XCTAssertGreaterThan(farthest, NightEmberMath.driftRadius * 0.9, "it must actually move")
     }
 }
 

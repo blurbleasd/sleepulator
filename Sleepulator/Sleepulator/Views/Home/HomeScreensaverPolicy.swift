@@ -7,7 +7,13 @@ enum HomeScreensaverPolicy {
     /// Seconds without a touch before the chrome fades. Sleep fades fast (you want the room dark
     /// quickly); Focus lingers longer — the session readout is useful mid-work, and a good Focus
     /// scene encodes the Pomodoro progress anyway, so losing the numbers to the scene is no loss.
-    static func idleDelay(focusMode: Bool) -> TimeInterval { focusMode ? 10 : 3 }
+    /// A first-run or "the timer moved" card gets time to be read: at 3 s it faded mid-sentence in
+    /// the first session. Not held for good, though: Play doesn't dismiss it, and a held fade
+    /// would light a first "All night" (no veil) until auto-lock. It returns on the next tap.
+    static func idleDelay(focusMode: Bool, tipShowing: Bool) -> TimeInterval {
+        if tipShowing { return 15 }
+        return focusMode ? 10 : 3
+    }
 
     /// The screensaver is for a session in progress, never an idle app — with nothing playing it
     /// blanked a first launch (coachmark, tab bar and all) three seconds in. It also never engages:

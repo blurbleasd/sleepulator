@@ -67,356 +67,210 @@ struct SettingsView: View {
         )
     }
 
+    // Pomodoro lengths: shown from the persisted keys, written through the service (its didSet
+    // persists them, and it reads them at the start of each phase).
+    @AppStorage("pomoWork") private var pomoWork = 25
+    @AppStorage("pomoRest") private var pomoRest = 5
+    @AppStorage("pomoLongRest") private var pomoLongRest = 15
+    @AppStorage("pomoCycles") private var pomoCycles = 4
+
+    private func pomodoroBinding(_ value: Int, _ write: @escaping (Int) -> Void) -> Binding<Int> {
+        Binding(get: { value }, set: { write($0) })
+    }
+
+    /// One settings row: the label in the text tone (dim labels read as disabled), the value or
+    /// control trailing.
+    private func label(_ title: String) -> some View {
+        Text(title)
+            .foregroundStyle(pal.text)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func header(_ title: String) -> some View {
+        Text(title).foregroundStyle(pal.dim)
+    }
+
+    private func footer(_ text: String) -> some View {
+        Text(text).foregroundStyle(pal.dim)
+    }
+
+    private func minutesStepper(_ title: String, value: Int, range: ClosedRange<Int>, step: Int,
+                                write: @escaping (Int) -> Void) -> some View {
+        Stepper(value: pomodoroBinding(value, write), in: range, step: step) {
+            HStack {
+                label(title)
+                Spacer()
+                Text("\(value) min").foregroundStyle(pal.dim).monospacedDigit()
+            }
+        }
+        .accessibilityValue("\(value) minutes")
+    }
+
+    // Order is the app's: Sleep first (the bedside case), then Focus, then what both share, then
+    // podcasts, then the rarely touched. It used to open on the podcast queue and storage, with
+    // the sleep controls below the fold.
     var body: some View {
         NavigationStack {
-            ZStack {
-                pal.bg.ignoresSafeArea()
-                
-                ScrollView {
-                    VStack(spacing: 24) {
-                        
-                        // Podcast Playback & Queue
-                        VStack(alignment: .leading, spacing: 16) {
-                            Text("Podcast Queue")
-                                .font(.title3.bold())
-                                .foregroundColor(pal.text)
-                            
-                            Toggle("Auto-Play Next Episode", isOn: $queue.autoPlay)
-                                .toggleStyle(SwitchToggleStyle(tint: pal.accent))
-                                .foregroundColor(pal.dim)
+            List {
+                Group {
+                    Section {
+                        Toggle(isOn: $autoNightDim) { label("Darken the screen at night") }
+                        Toggle(isOn: $breathingOnRamp) { label("Start with a minute of breathing") }
+                    } header: {
+                        header("Sleep")
+                    } footer: {
+                        footer("With a sleep timer running, the screen goes black a minute after your last touch; tap to wake. Breathing leads into your mix, then it starts on its own.")
+                    }
 
-                            // Sleep-aware hold: don't burn through (and mark finished) episodes
-                            // you sleep through — see AudioEngine.onQueueAdvance.
-                            Toggle("Pause Queue During Sleep Timer", isOn: holdQueueBinding)
-                                .toggleStyle(SwitchToggleStyle(tint: pal.accent))
-                                .foregroundColor(pal.dim)
-                            Text("With a sleep timer running, finish the current episode and keep only the ambient sounds going.")
-                                .font(.caption2)
-                                .foregroundColor(pal.dim)
-
-                            Toggle("Shuffle Queue", isOn: $queue.shuffleQueue)
-                                .toggleStyle(SwitchToggleStyle(tint: pal.accent))
-                                .foregroundColor(pal.dim)
-
-                            HStack {
-                                Text("Skip Interval")
-                                    .foregroundColor(pal.dim)
-                                Spacer()
-                                Menu {
-                                    ForEach([10, 15, 30, 45], id: \.self) { secs in
-                                        Button("\(secs) seconds") { settings.skipInterval = Double(secs) }
-                                    }
-                                } label: {
-                                    Text("\(Int(settings.skipInterval))s")
-                                        .font(.headline)
-                                        .foregroundColor(pal.accent)
-                                        .padding(.horizontal, 14)
-                                        .padding(.vertical, 8)
-                                        .frame(minHeight: 44)
-                                        .background(pal.text.opacity(0.1))
-                                        .clipShape(Capsule())
+                    Section {
+                        Toggle(isOn: $settings.nightLimiter) {
+                            label(settings.limiterByMode ? "Soften loud moments (follows the mode)" : "Soften loud moments")
+                        }
+                        .disabled(settings.limiterByMode)
+                        Toggle(isOn: $settings.limiterByMode) { label("On while sleeping, off while focusing") }
+                        Toggle(isOn: $settings.sleepEQ) { label("Soften harsh highs and boomy lows") }
+                        if settings.sleepEQ {
+                            VStack(alignment: .leading, spacing: 8) {
+                                HStack {
+                                    label("How much")
+                                    Spacer()
+                                    Text(eqAmountLabel).foregroundStyle(pal.dim)
                                 }
-                                .accessibilityLabel("Skip interval")
-                                .accessibilityValue("\(Int(settings.skipInterval)) seconds")
+                                VolumeBar(value: $settings.sleepEQIntensity, accent: pal.accent, range: 0...2, style: .parameter, tapToSet: true)
+                                    .accessibilityLabel("Softening amount")
+                                    .accessibilityValue(eqAmountLabel)
+                            }
+                            .padding(.vertical, 4)
+                        }
+                    } header: {
+                        header("Podcasts at night")
+                    } footer: {
+                        footer("Keeps a sudden loud moment in a podcast from waking you, and gentles voices at low volume. Podcasts only; your sounds are already steady.")
+                    }
+
+                    Section {
+                        minutesStepper("Focus", value: pomoWork, range: 5...90, step: 5) { audio.pomodoro.workMinutes = $0 }
+                        minutesStepper("Short break", value: pomoRest, range: 1...30, step: 1) { audio.pomodoro.restMinutes = $0 }
+                        minutesStepper("Long break", value: pomoLongRest, range: 5...60, step: 5) { audio.pomodoro.longRestMinutes = $0 }
+                        Stepper(value: pomodoroBinding(pomoCycles) { audio.pomodoro.cyclesBeforeLongBreak = $0 }, in: 2...8) {
+                            HStack {
+                                label("Rounds before a long break")
+                                Spacer()
+                                Text("\(pomoCycles)").foregroundStyle(pal.dim).monospacedDigit()
                             }
                         }
-                        .glassPanel()
-                        .padding(.horizontal)
-                        
-                        // Library & Storage Settings
-                        VStack(alignment: .leading, spacing: 16) {
-                            Text("Library & Storage")
-                                .font(.title3.bold())
-                                .foregroundColor(pal.text)
-                                .padding(.bottom, 4)
-                            
-                            Toggle("Delete Played Episodes", isOn: $queue.deleteOnCompletion)
-                                .toggleStyle(SwitchToggleStyle(tint: pal.accent))
-                                .foregroundColor(pal.dim)
-                            Text("Automatically delete the downloaded file when an episode finishes playing.")
-                                .font(.caption)
-                                .foregroundColor(pal.dim)
-                                .padding(.bottom, 8)
-                            
-                            Toggle("Hide Finished Episodes", isOn: $queue.hideFinishedEpisodes)
-                                .toggleStyle(SwitchToggleStyle(tint: pal.accent))
-                                .foregroundColor(pal.dim)
-                        }
-                        .glassPanel()
-                        .padding(.horizontal)
-                        
-                        // Sound
-                        VStack(alignment: .leading, spacing: 12) {
+                        .accessibilityValue("\(pomoCycles) rounds")
+                    } header: {
+                        header("Focus")
+                    } footer: {
+                        footer("Changes apply from the next round.")
+                    }
+
+                    Section {
+                        VStack(alignment: .leading, spacing: 8) {
                             HStack {
-                                Text("Stereo Width")
-                                    .font(.title3.bold())
-                                    .foregroundColor(pal.text)
-                                    .lineLimit(1)
-                                    .minimumScaleFactor(0.7)
+                                label("Stereo width")
                                 Spacer()
                                 Text(settings.stereoWidth < 0.05 ? "Mono" : "\(Int((settings.stereoWidth / 1.5) * 100))%")
-                                    .font(.caption.monospacedDigit())
-                                    .foregroundColor(pal.dim)
-                                    .fixedSize()
+                                    .foregroundStyle(pal.dim).monospacedDigit()
                             }
                             VolumeBar(value: $settings.stereoWidth, accent: pal.accent, range: 0...1.5, style: .parameter, tapToSet: true)
                                 .accessibilityLabel("Stereo width")
                                 .accessibilityValue(settings.stereoWidth < 0.05 ? "Mono" : "\(Int((settings.stereoWidth / 1.5) * 100)) percent")
-                            Text("Lower keeps the bass centered on phone and laptop speakers; higher opens the noise up in headphones.")
-                                .font(.caption)
-                                .foregroundColor(pal.dim)
                         }
-                        .glassPanel()
-                        .padding(.horizontal)
-
-                        // Sleep Safe Settings
-                        VStack(alignment: .leading, spacing: 16) {
-                            Text("Playback Safety")
-                                .font(.title3.bold())
-                                .foregroundColor(pal.text)
-                                
-                            // Trailing-closure label so the long text wraps at large Dynamic Type
-                            // sizes instead of truncating against the fixed-width switch.
-                            Toggle(isOn: $settings.nightLimiter) {
-                                Text(settings.limiterByMode ? "Night Limiter — following mode" : "Night Limiter — soften loud spikes")
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                            .toggleStyle(SwitchToggleStyle(tint: pal.accent))
-                            .foregroundColor(pal.dim)
-                            .disabled(settings.limiterByMode)
-                            .opacity(settings.limiterByMode ? 0.45 : 1)
-
-                            Toggle(isOn: $settings.limiterByMode) {
-                                Text("Limiter follows mode — on while sleeping, off while focusing")
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                            .toggleStyle(SwitchToggleStyle(tint: pal.accent))
-                            .foregroundColor(pal.dim)
-
-                            Toggle(isOn: $settings.sleepEQ) {
-                                Text("Sleep EQ — soften harsh highs & boomy lows")
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                            .toggleStyle(SwitchToggleStyle(tint: pal.accent))
-                            .foregroundColor(pal.dim)
-
-                            if settings.sleepEQ {
-                                VStack(alignment: .leading, spacing: 8) {
-                                    HStack {
-                                        Text("Softening amount")
-                                            .font(.subheadline)
-                                            .foregroundColor(pal.text)
-                                            .lineLimit(1)
-                                            .minimumScaleFactor(0.7)
-                                        Spacer()
-                                        Text(eqAmountLabel)
-                                            .font(.caption.monospacedDigit())
-                                            .foregroundColor(pal.dim)
-                                            .fixedSize()
-                                    }
-                                    VolumeBar(value: $settings.sleepEQIntensity, accent: pal.accent, range: 0...2, style: .parameter, tapToSet: true)
-                                        .accessibilityLabel("Sleep EQ softening amount")
-                                        .accessibilityValue(eqAmountLabel)
-                                }
-                                .padding(.top, 4)
-                            }
-                            Text("Gentle tone shaping for voice clarity at low volume. Podcasts only.")
-                                .font(.caption)
-                                .foregroundColor(pal.dim)
-
-                            Divider().background(pal.dim.opacity(0.2))
-
-                            // How the entrainment beats render. A true binaural beat needs per-ear
-                            // isolation (headphones); on a speaker the two tones sum in the air and
-                            // the beat vanishes — so render an isochronic (pulsed mono) tone there.
-                            // Auto follows the current output route.
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text("Beats output")
-                                    .font(.subheadline).foregroundColor(pal.text)
-                                Picker("Beats output", selection: $settings.beatRouting) {
-                                    Text("Auto").tag("auto")
-                                    Text("Headphones").tag("headphones")
-                                    Text("Speaker").tag("speaker")
-                                }
-                                .pickerStyle(.segmented)
-                                Text(settings.beatRouting == "headphones" ? "Always true binaural (assumes headphones)."
-                                   : settings.beatRouting == "speaker" ? "Always isochronic — a speaker-safe pulsed tone."
-                                   : "Binaural with headphones, isochronic on the speaker.")
-                                    .font(.caption).foregroundColor(pal.dim)
-                            }
-                            .padding(.top, 4)
+                        .padding(.vertical, 4)
+                        // A true binaural beat needs one tone per ear; on a speaker the two sum in the
+                        // air and the beat vanishes, so a speaker gets a pulsed (isochronic) tone.
+                        Picker(selection: $settings.beatRouting) {
+                            Text("Auto").tag("auto")
+                            Text("Headphones").tag("headphones")
+                            Text("Speaker").tag("speaker")
+                        } label: {
+                            label("Beats for")
                         }
-                        .glassPanel()
-                        .padding(.horizontal)
-                        
-                        // Wind-down
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text("Wind-down")
-                                .font(.title3.bold())
-                                .foregroundColor(pal.text)
-
-                            Toggle(isOn: $breathingOnRamp) {
-                                Text("Start with a minute of breathing")
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                            .toggleStyle(SwitchToggleStyle(tint: pal.accent))
-                            .foregroundColor(pal.dim)
-
-                            Text("When you begin a Sleep session, a calm breathing glow leads for about a minute, then your mix starts automatically. Tap “Start now” to skip ahead.")
-                                .font(.caption)
-                                .foregroundColor(pal.dim)
-                        }
-                        .glassPanel()
-                        .padding(.horizontal)
-
-                        // Display
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text("Display")
-                                .font(.title3.bold())
-                                .foregroundColor(pal.text)
-
-                            Toggle(isOn: $autoNightDim) {
-                                Text("Auto-dim at night")
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                            .toggleStyle(SwitchToggleStyle(tint: pal.accent))
-                            .foregroundColor(pal.dim)
-
-                            Text("Once a sleep timer is running, the screen fades to black after a minute so it doesn't light the room. Tap to wake.")
-                                .font(.caption)
-                                .foregroundColor(pal.dim)
-
-                            Divider().background(pal.dim.opacity(0.2))
-
-                            Toggle(isOn: $ambientMotion) {
-                                Text("Ambient motion")
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                            .toggleStyle(SwitchToggleStyle(tint: pal.accent))
-                            .foregroundColor(pal.dim)
-
-                            Text("Let the backdrop scenes drift, ripple, and parallax. Turn off to hold them on a single still frame — calmer, and a touch easier on the battery. (System Reduce Motion already stops the tilt parallax; this stills the scene itself.)")
-                                .font(.caption)
-                                .foregroundColor(pal.dim)
-                        }
-                        .glassPanel()
-                        .padding(.horizontal)
-
-                        // Advanced
-                        DisclosureGroup("Advanced") {
-                            VStack(spacing: 24) {
-                                // Data Backup
-                                VStack(alignment: .leading, spacing: 16) {
-                                    Text("Backup & Restore")
-                                        .font(.headline)
-                                        .foregroundColor(pal.text)
-                                        
-                                    Text("Export your custom mixes, playlists, and settings to a JSON file.")
-                                        .font(.caption)
-                                        .foregroundColor(pal.dim)
-                                        
-                                    HStack {
-                                        Button("Export Data") {
-                                            exportData()
-                                        }
-                                        .padding()
-                                        .background(pal.text.opacity(0.1))
-                                        .foregroundColor(pal.accent)
-                                        .cornerRadius(8)
-                                        .frame(minWidth: 44, minHeight: 44)
-                                        
-                                        Button("Import Data") {
-                                            isImporting = true
-                                        }
-                                        .padding()
-                                        .background(pal.text.opacity(0.1))
-                                        .foregroundColor(pal.accent)
-                                        .cornerRadius(8)
-                                        .frame(minWidth: 44, minHeight: 44)
-                                    }
-                                }
-
-                                // Diagnostics (MetricKit) — battery / hang / crash payloads
-                                // collected by iOS, stored locally, shareable for analysis.
-                                VStack(alignment: .leading, spacing: 16) {
-                                    Text("Diagnostics")
-                                        .font(.headline)
-                                        .foregroundColor(pal.text)
-
-                                    Text("iOS delivers battery, hang, and crash reports about once a day while the app is in use. Stored on this device only.")
-                                        .font(.caption)
-                                        .foregroundColor(pal.dim)
-
-                                    NavigationLink {
-                                        DiagnosticsListView(pal: pal)
-                                    } label: {
-                                        HStack {
-                                            Text("View reports")
-                                                .foregroundColor(pal.accent)
-                                            Spacer()
-                                            Image(systemName: "chevron.right")
-                                                .font(.footnote.weight(.semibold))
-                                                .foregroundColor(pal.dim)
-                                        }
-                                        .frame(minHeight: 44)
-                                        .contentShape(Rectangle())
-                                    }
-                                    .buttonStyle(.plain)
-
-                                    // Export the overnight log trail (timer, interruption, route,
-                                    // limiter breadcrumbs) — the bedside way to see why the bed
-                                    // behaved as it did without tethering to Console.app.
-                                    Button {
-                                        Task {
-                                            let text = await LogExport.collect()
-                                            logDocument = TextDocument(text: text)
-                                            isExportingLog = true
-                                        }
-                                    } label: {
-                                        HStack {
-                                            Text("Export last night's log")
-                                                .foregroundColor(pal.accent)
-                                            Spacer()
-                                            Image(systemName: "square.and.arrow.up")
-                                                .font(.footnote.weight(.semibold))
-                                                .foregroundColor(pal.dim)
-                                        }
-                                        .frame(minHeight: 44)
-                                        .contentShape(Rectangle())
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                            }
-                            .padding(.top, 16)
-                        }
-                        .accentColor(pal.accent)
-                        .glassPanel()
-                        .padding(.horizontal)
-
-                        // Build identity footer — glance here to confirm which build the device is
-                        // running. Version/build are static across manual builds, so the build time
-                        // (executable mod date) is the line that actually distinguishes them.
-                        VStack(spacing: 3) {
-                            Text("Sleepulator \(AppInfo.versionBuild)")
-                                .font(.footnote.weight(.medium))
-                                .foregroundColor(pal.dim)
-                            if let built = AppInfo.builtAtLabel {
-                                Text("Built \(built)")
-                                    .font(.caption2)
-                                    .foregroundColor(pal.dim)
-                            }
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.top, 4)
-                        .accessibilityElement(children: .combine)
-                        .accessibilityLabel(AppInfo.accessibilitySummary)
+                    } header: {
+                        header("Sound")
+                    } footer: {
+                        footer(settings.beatRouting == "headphones" ? "Beats made for headphones, one tone in each ear. Lower width keeps the bass centred on a phone speaker."
+                               : settings.beatRouting == "speaker" ? "A gentle pulse that works on a speaker. Lower width keeps the bass centred on a phone speaker."
+                               : "Headphone beats with headphones in, a speaker-friendly pulse without. Lower width keeps the bass centred on a phone speaker.")
                     }
-                    .padding(.top, 20)
-                    .padding(.bottom, UI.lg)
+
+                    Section {
+                        Toggle(isOn: $ambientMotion) { label("Moving scenes") }
+                    } header: {
+                        header("Display")
+                    } footer: {
+                        footer("Off holds the backdrop on one still frame: calmer, and easier on the battery. The system's Reduce Motion already stops the tilt.")
+                    }
+
+                    Section {
+                        Toggle(isOn: $queue.autoPlay) { label("Play the next episode automatically") }
+                        Toggle(isOn: holdQueueBinding) { label("During a sleep timer, stop after this episode") }
+                        Toggle(isOn: $queue.shuffleQueue) { label("Shuffle the queue") }
+                        Picker(selection: Binding(get: { Int(settings.skipInterval) }, set: { settings.skipInterval = Double($0) })) {
+                            ForEach([10, 15, 30, 45], id: \.self) { Text("\($0) seconds").tag($0) }
+                        } label: {
+                            label("Skip back and forward")
+                        }
+                        Toggle(isOn: $queue.deleteOnCompletion) { label("Delete downloads once played") }
+                        Toggle(isOn: $queue.hideFinishedEpisodes) { label("Hide played episodes") }
+                    } header: {
+                        header("Podcasts")
+                    } footer: {
+                        footer("With a sleep timer running, the current episode finishes and only your sounds carry on, so you don't sleep through the next one.")
+                    }
+
+                    Section {
+                        Button { exportData() } label: {
+                            Label("Export a backup", systemImage: "square.and.arrow.up")
+                        }
+                        Button { isImporting = true } label: {
+                            Label("Restore from a backup", systemImage: "square.and.arrow.down")
+                        }
+                    } header: {
+                        header("Backup")
+                    } footer: {
+                        footer("Your mixes, podcasts, queue and settings, as one file.")
+                    }
+
+                    Section {
+                        NavigationLink { DiagnosticsListView(pal: pal) } label: { label("Reports from iOS") }
+                        Button {
+                            Task {
+                                let text = await LogExport.collect()
+                                logDocument = TextDocument(text: text)
+                                isExportingLog = true
+                            }
+                        } label: {
+                            Label("Export last night's log", systemImage: "doc.text")
+                        }
+                    } header: {
+                        header("Diagnostics")
+                    } footer: {
+                        // Build identity: the build time is the line that tells manual builds apart.
+                        VStack(alignment: .leading, spacing: 6) {
+                            footer("Battery, hang and crash reports iOS delivers about once a day. Stored on this device only.")
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Sleepulator \(AppInfo.versionBuild)")
+                                if let built = AppInfo.builtAtLabel { Text("Built \(built)") }
+                            }
+                            .foregroundStyle(pal.dim)
+                            .padding(.top, 10)
+                            .accessibilityElement(children: .combine)
+                            .accessibilityLabel(AppInfo.accessibilitySummary)
+                        }
+                    }
                 }
-                // Room for the floating mini-player, measured (was a fixed 80 pt spacer).
-                .miniPlayerClearance()
+                // The same faint row tint as the Podcasts list.
+                .listRowBackground(pal.text.opacity(0.05))
             }
+            .listStyle(.insetGrouped)
+            .scrollContentBackground(.hidden)
+            .background(pal.bg.ignoresSafeArea())
+            .tint(pal.accent)
+            // Room for the floating mini-player, measured.
+            .miniPlayerClearance()
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.large)
         }

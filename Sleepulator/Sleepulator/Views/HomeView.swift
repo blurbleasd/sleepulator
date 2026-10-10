@@ -23,6 +23,8 @@ struct HomeView: View {
     @AppStorage("hasCompletedFirstRun") private var hasCompletedFirstRun = false
     /// The one-time "the sleep timer moved" note for people who used the app before the night ring.
     @AppStorage("hasSeenNightRingTip") private var hasSeenNightRingTip = false
+    /// Set by the first session the orb starts; until then, the orb starts the layered first bed.
+    @AppStorage("hasStartedFirstSession") private var hasStartedFirstSession = false
     @State private var showTimerActionSheet = false
     @State private var isPlayPressed = false
     @State private var showBreathing = false
@@ -174,6 +176,12 @@ struct HomeView: View {
                                       presenting: presentingFromHome)
     }
 
+    /// A first-run or "the timer moved" card is up: the fade waits longer, so it can be read.
+    private var tipShowing: Bool {
+        CoachmarkContent.current(focusMode: audio.focusMode, hasCompletedFirstRun: hasCompletedFirstRun,
+                                 hasSeenNightRingTip: hasSeenNightRingTip) != nil
+    }
+
     private var chromeLift: EdgeInsets {
         HomeScreensaverPolicy.chromeLift(anchored: anchoredInsets, live: liveInsets)
     }
@@ -184,7 +192,7 @@ struct HomeView: View {
         // Both modes settle to the bare backdrop after a spell of no interaction (delays in
         // HomeScreensaverPolicy). Any change to a mayFade input cancels or reschedules this item,
         // so it can't fire on stale conditions.
-        let delay = HomeScreensaverPolicy.idleDelay(focusMode: audio.focusMode)
+        let delay = HomeScreensaverPolicy.idleDelay(focusMode: audio.focusMode, tipShowing: tipShowing)
         let work = DispatchWorkItem {
             guard self.homeVisible else { return }   // @State: reads the live value, not the copy's
             withAnimation(.easeInOut(duration: 0.9)) { self.audio.ambientScreensaver = true }
@@ -256,17 +264,19 @@ struct HomeView: View {
     }
 
     /// How beginning playback from rest would go: resume the last mix, the first-run layered bed,
-    /// or the transport's own resume (which always lands on at least the noise bed).
+    /// or the transport's own resume (which always lands on at least the noise bed). Decided now,
+    /// run later (the breathing on-ramp holds it), and only then counted as the first session.
     private func resolveBegin() -> () -> Void {
-        if let mix = mixStore.lastMix,
-           (mix.noiseOn || mix.binauralOn || mix.podcastUrl != nil) {
-            return { audio.resumeMix(mix) }
-        } else if !hasCompletedFirstRun {
-            // First-ever play with nothing to resume: start a layered bed (noise + binaural)
-            // instead of a single bare noise, so the first tap shows what the app actually does.
-            return { audio.startDefaultMix() }
+        let mix = mixStore.lastMix.flatMap { $0.noiseOn || $0.binauralOn || $0.podcastUrl != nil ? $0 : nil }
+        let begin = SessionGuards.begin(hasResumableMix: mix != nil, firstSessionStarted: hasStartedFirstSession)
+        return {
+            hasStartedFirstSession = true
+            switch begin {
+            case .resume: if let mix { audio.resumeMix(mix) }
+            case .firstBed: audio.startDefaultMix()
+            case .transport: audio.toggleMasterTransport()
+            }
         }
-        return { audio.toggleMasterTransport() }
     }
 
     private func heroTap() {
@@ -383,6 +393,7 @@ struct HomeView: View {
             .overlay(Capsule().stroke(pal.accent.opacity(0.28), lineWidth: 0.5))
         }
         .frame(minHeight: 44)
+        .accessibilityShowsLargeContentViewer()
     }
 
     private var focusSessionButton: some View {
@@ -397,6 +408,11 @@ struct HomeView: View {
                 startRadius: 5,
                 endRadius: 620
             )
+            // Measured INSIDE `.ignoresSafeArea()`, where the gradient is laid out full-bleed.
+            // Measured after it, the reading is the un-expanded frame: the tab bar's top edge
+            // (791 pt on an iPhone 17 Pro), so `homeClearance` took the tab bar off twice and
+            // left Focus's Build mix / Focus session row under the mini-player.
+            .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY } action: { screenMaxY = $0 }
             .ignoresSafeArea()
 
             // Backdrop is the selected AmbientScene for the current mode (Phase 1 of
@@ -428,14 +444,15 @@ struct HomeView: View {
                 ModeSwitcher(focusMode: audio.focusMode, pal: pal,
                              quiet: !audio.focusMode && (sessionActive || audio.sleepTimer.timerRemaining > 0),
                              onSelect: requestMode)
-                    // Attached here, not on the root, so iOS 26's popover-style dialog points at
-                    // the switch that raised it.
-                    .confirmationDialog(modeSwitchTitle,
-                                        isPresented: Binding(get: { modeSwitchRequest != nil },
-                                                             set: { if !$0 { modeSwitchRequest = nil } }),
-                                        titleVisibility: .visible,
-                                        presenting: modeSwitchRequest) { request in
-                        Button(request.warning.confirm, role: .destructive) { applyMode(request.toFocus) }
+                    // An alert, not a confirmation dialog: iOS 26 draws that as a popover and drops
+                    // its cancel button, which left one red "Switch to Focus" on a dark screen. An
+                    // alert always shows the way back ("Stay in Sleep"), and nothing here is red:
+                    // the switch is reversible, and red is the loudest light in the room at 2am.
+                    .alert(modeSwitchTitle,
+                           isPresented: Binding(get: { modeSwitchRequest != nil },
+                                                set: { if !$0 { modeSwitchRequest = nil } }),
+                           presenting: modeSwitchRequest) { request in
+                        Button(request.warning.confirm) { applyMode(request.toFocus) }
                         Button(request.warning.cancel, role: .cancel) {}
                     } message: { request in
                         Text(request.warning.message)
@@ -503,6 +520,10 @@ struct HomeView: View {
                                   pal: pal,
                                   openOptions: openTimerOptions)
                             .anchorPreference(key: CoachmarkAnchorKey.self, value: .bounds) { [.nightLine: $0] }
+                            // Mid-drag the orb shows the length being set, large; the line under it
+                            // still showed the old one. Step it out of the way until the drag ends.
+                            .opacity(ringDragging ? 0 : 1)
+                            .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: ringDragging)
 
                         if !activeLayers.isEmpty {
                             LayerPills(layers: activeLayers, pal: pal)
@@ -531,6 +552,10 @@ struct HomeView: View {
                         buildMixButton
                     }
                 }
+                // Capped like the mini-player it sits above: past accessibility size 2 the stacked
+                // pair outgrew a small phone (iPhone SE) and pushed the orb's line into "Build mix".
+                // The buttons adopt the Large Content Viewer, so a long press still shows them large.
+                .dynamicTypeSize(...DynamicTypeSize.accessibility2)
                 .frame(maxWidth: .infinity)
                 .anchorPreference(key: CoachmarkAnchorKey.self, value: .bounds) { [.mixRow: $0] }
                 // Clear of the floating mini-player by its measured height, when it shows on Home
@@ -572,6 +597,17 @@ struct HomeView: View {
             .padding(.top, chromeLift.top)
             .padding(.bottom, chromeLift.bottom)
             .opacity(audio.ambientScreensaver ? 0 : 1)
+            // Outside the fade: what's left of the ring once the chrome goes, in the ring's place.
+            .overlayPreferenceValue(CoachmarkAnchorKey.self) { anchors in
+                if let orb = anchors[.orb] {
+                    GeometryReader { proxy in
+                        let r = proxy[orb]
+                        NightEmber(sleepTimer: audio.sleepTimer, pal: pal,
+                                   screensaver: audio.ambientScreensaver, focusMode: audio.focusMode)
+                            .position(x: r.midX, y: r.midY)
+                    }
+                }
+            }
             .allowsHitTesting(!audio.ambientScreensaver)
             .animation(.easeInOut(duration: 0.9), value: audio.ambientScreensaver)
             // Any touch on the live controls is interaction — push the idle countdown back
@@ -590,6 +626,10 @@ struct HomeView: View {
                     .ignoresSafeArea()
                     .onTapGesture { wakeChrome() }
                     .accessibilityLabel("Show controls")
+                    // Voice Control can't be detected (no public API), so the fade can't stand down
+                    // for it as it does for VoiceOver. This full-screen button is its way back:
+                    // "Tap Show controls", "Tap Wake" or "Tap Controls".
+                    .accessibilityInputLabels(["Show controls", "Wake", "Controls"])
                     .accessibilityAddTraits(.isButton)
             }
 
@@ -610,15 +650,6 @@ struct HomeView: View {
                 .transition(.opacity)
             }
         }
-        // The screen's bottom edge, from the root: its frame ends at the safe-area edge and its
-        // inset is what lies beyond (MiniPlayerClearanceMath.screenBottom). This used to be read
-        // off the backdrop gradient, on the theory that `.ignoresSafeArea()` stretched it to the
-        // screen edge. Its geometry stays at the safe-area edge, so the tab bar was subtracted
-        // twice and Build mix sat behind the mini-player whenever an episode was loaded.
-        .onGeometryChange(for: CGFloat.self) { proxy in
-            MiniPlayerClearanceMath.screenBottom(frameMaxY: proxy.frame(in: .global).maxY,
-                                                 safeAreaBottom: proxy.safeAreaInsets.bottom)
-        } action: { screenMaxY = $0 }
         .onGeometryChange(for: EdgeInsets.self) { $0.safeAreaInsets } action: { insets in
             liveInsets = insets
             // Anchor only while the tab bar shows, so the lift is exactly what hiding it took away.
@@ -671,6 +702,8 @@ struct HomeView: View {
         .onChange(of: assistiveTechRunning) { _, _ in wakeChrome() }
         // A sheet opening cancels the countdown; closing one wakes the chrome and restarts it.
         .onChange(of: presentingFromHome) { _, _ in wakeChrome() }
+        // A tip dismissed (or shown) changes the delay: restart the countdown at the new length.
+        .onChange(of: tipShowing) { _, _ in if !audio.ambientScreensaver { scheduleIdleFade() } }
         // Using the ring counts as finding it: retire both tips.
         .onChange(of: nightLength) { _, _ in
             retireFirstRunTip()

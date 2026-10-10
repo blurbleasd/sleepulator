@@ -38,6 +38,16 @@
                ReferencedContainer = "container:Sleepulator.xcodeproj">
             </BuildableReference>
          </TestableReference>
+         <TestableReference
+            skipped = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "ADFEF623A278E51CCF35479A"
+               BuildableName = "SleepulatorUITests.xctest"
+               BlueprintName = "SleepulatorUITests"
+               ReferencedContainer = "container:Sleepulator.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
       </Testables>
    </TestAction>
    <LaunchAction

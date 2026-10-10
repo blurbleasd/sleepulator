@@ -16,6 +16,7 @@ struct NowPlayingSheet: View {
     @ObservedObject var queue: PodcastQueueManager
     /// High-frequency playback position, observed directly (see PlaybackProgress).
     @ObservedObject var progress: PlaybackProgress
+    @Binding var isPresented: Bool
     let pal: Palette
     /// Any touch in the sheet. The night veil counts its 60 s from the last interaction; without
     /// this, a sheet in use could be swept away when the veil drops (ContentView).
@@ -264,6 +265,17 @@ struct NowPlayingSheet: View {
         let artSize: CGFloat = (night ? 150 : 250) * (typeSize.isAccessibilitySize ? 0.6 : 1)
         ScrollView {
             VStack(spacing: UI.xxl) {
+                // The system's drag indicator (MiniPlayerView) replaces a hand-drawn one; Done is
+                // the way out for anyone who doesn't swipe.
+                HStack {
+                    Spacer()
+                    Button("Done") { onInteraction(); isPresented = false }
+                        .font(.body.weight(.semibold))
+                        .foregroundColor(pal.accent)
+                        .frame(minWidth: 44, minHeight: 44)
+                }
+                .padding(.horizontal, UI.xl)
+
                 // Sleep: a smaller, desaturated cover under a dark scrim, so the show's (often
                 // near-white) art no longer outshines everything else at 2am. Focus keeps it full.
                 EpisodeArtwork(url: state.hero?.artworkUrl, pal: pal, size: artSize,
@@ -358,7 +370,7 @@ struct NowPlayingSheet: View {
                 Spacer().frame(height: UI.xxl)
             }
             // Clear of the system grabber.
-            .padding(.top, UI.xxl)
+            .padding(.top, UI.md)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(pal.bg.ignoresSafeArea())
