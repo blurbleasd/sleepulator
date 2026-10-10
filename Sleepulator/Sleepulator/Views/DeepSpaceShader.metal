@@ -12,9 +12,8 @@ using namespace metal;
 //
 // -- ATTRIBUTION / LICENSE ---------------------------------------------------
 // Original implementation. Standard hash + value-noise + FBM (public domain) and
-// the cosine-palette *technique* (a + b·cos(2π(c·t+d)) — a well-known shaping
-// trick, reimplemented here, no code copied). Clean to ship with credit to the
-// techniques.
+// a plain mix/smoothstep colour ramp. No code copied. Clean to ship with credit
+// to the techniques.
 //
 // Driven from SwiftUI `.colorEffect`. Swift owns phase, time, size,
 // nightProgress, audioLevel, gyro; everything else is a `constant` below

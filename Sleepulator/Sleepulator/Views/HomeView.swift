@@ -289,7 +289,7 @@ struct HomeView: View {
             return
         }
 
-        // The night ring's timer starts with the session itself (AudioEngine.noteSessionStart).
+        // The night ring's timer starts with the session itself (AudioEngine.noteSessionEdge).
         let begin = resolveBegin()
         // Optional breathing wind-down before Sleep playback (never in Focus — Pomodoro starts now).
         if breathingOnRamp && !audio.focusMode {

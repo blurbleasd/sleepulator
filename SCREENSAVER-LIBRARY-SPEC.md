@@ -49,7 +49,7 @@ Tags: **⚙︎** generative (cheap, recommended) · **✦** time-reactive · **�
 - **Rain on glass** ⚙︎🔊 — droplets running down a window, soft blurred lights behind. Pairs
   with the rain sound; the definitive sleep aesthetic. _(Highest-value next scene.)_
 - **Embers / fireplace** ⚙︎🔊 — slow flickering coals and rising sparks; warm and very dark.
-- **Aurora** ⚙︎ — slow ribbons of green/violet over a dark horizon (Metal shader). The "wow."
+- **Aurora** ⚙︎ — slow ribbons of red / rose (oxygen) aurora over a dark horizon (Metal shader). The "wow."
 - **Moonlit ocean** ⚙︎✦ — gentle swells with a moon-glint path; the moon can set with the timer.
 - **Drifting clouds** ⚙︎✦ — clouds crossing the moon; thickens (darkens) as the night ends.
 - **Snowfall** ⚙︎🔊 — gentle snow over a faint treeline silhouette.

@@ -82,8 +82,8 @@ struct FocusHero: View {
 }
 
 // Focus session readout — replaces the generic status line in Focus mode. While a
-// session runs it shows the phase, the live countdown, and progress through the set;
-// idle, it falls back to the same "what's playing" line as Sleep.
+// session runs it shows the phase, the live countdown, and progress through the set; with
+// sound playing and no session, the sound pills; at rest, what Play would resume.
 struct FocusSessionReadout: View {
     @ObservedObject var pomodoro: PomodoroService
     let pal: Palette

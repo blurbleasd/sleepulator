@@ -10,7 +10,7 @@ import SwiftUI
 /// the old `repeatForever` loop: (1) it *freezes* when the orb isn't visible (chrome faded to the
 /// screensaver, or the screen occluded/backgrounded) instead of compositing a blurred 200pt layer
 /// all night; (2) its motion depth rides `NightDamping`, so the orb progressively stills as the
-/// sleep timer winds down. Only *scale* is modulated — opacity stays clamped at the original
+/// night settles (the timer's, or an untimed night's). Only *scale* is modulated — opacity stays clamped at the original
 /// values, never brighter (the 2am rule). Runs under Reduce Motion by design (see `NightDamping`).
 struct OrbButton: View {
     @ObservedObject var audio: AudioEngine

@@ -1,5 +1,4 @@
 import SwiftUI
-import Combine
 
 struct ContentView: View {
     @StateObject private var audio = AudioEngine()
@@ -11,8 +10,10 @@ struct ContentView: View {
     @State private var veilCaptionHide: DispatchWorkItem?
     /// The 3am glance: the first tap on the veil shows only the ember and the night's line, dim
     /// on true black, for a few seconds; a second tap wakes the scene and the controls. One tap
-    /// used to bring the whole scene back (and still no number) just to check the time.
-    @State private var veilGlance = false
+    /// used to bring the whole scene back (and still no number) just to check the time. Timing
+    /// rules live in `SessionGuards.veilTap`.
+    @State private var veilGlanceShown = false
+    @State private var veilGlanceAt: Date?
     @State private var veilGlanceHide: DispatchWorkItem?
     /// The mini-player's full Now Playing sheet. Lifted here so HomeView can count it as a
     /// presentation (no screensaver fade behind it), alongside its own sheets.
@@ -55,21 +56,31 @@ struct ContentView: View {
                                           focusMode: audio.focusMode)
     }
 
-    // App-wide night-dim: ~60s after the last touch in a Sleep session, timed or All night, drop
-    // a black veil over the whole app (tabs + mini-player) so a bedside screen goes dark. Tap to
-    // wake. Any touch anywhere (Home, the mixer, any sheet) re-arms it (`WindowActivity`), as do
-    // tab changes. When the sound stops we only cancel the pending dim, never force the screen
-    // bright mid-night. Only over a session that's actually playing (SessionGuards.mayNightDim):
-    // a timer counting down over paused audio used to blank the screen on a silent room.
-    private var mayDim: Bool {
+    // App-wide night-dim: ~60s after the last touch in a Sleep session (anywhere while a timer
+    // runs, on Home for All night), drop a black veil over the whole app (tabs + mini-player) so a
+    // bedside screen goes dark. Tap to wake. Any touch anywhere (Home, the mixer, any sheet)
+    // re-arms it (`WindowActivity`), as do tab changes. When the sound stops we only cancel the
+    // pending dim, never force the screen bright mid-night. Only over a session that's actually
+    // playing (SessionGuards.mayNightDim): a timer counting down over paused audio used to blank
+    // the screen on a silent room.
+    private var mayDim: Bool { mayDimNow(timerActive: audio.sleepTimer.timerRemaining > 0) }
+
+    private func mayDimNow(timerActive: Bool) -> Bool {
         SessionGuards.mayNightDim(autoNightDim: autoNightDim, focusMode: audio.focusMode,
-                                  playing: audio.isAnythingPlaying)
+                                  playing: audio.isAnythingPlaying, timerActive: timerActive,
+                                  onHome: selectedTab == 0)
     }
 
-    /// Restarts the veil's minute. The work item re-reads the live state when it fires.
-    private func scheduleDim() {
+    /// Tracks the timer's active/idle state so the veil re-arms only on that transition, not on
+    /// every per-second `timerRemaining` publish (which would reschedule the 60 s work item forever).
+    @State private var timerWasActive = false
+
+    /// Restarts the veil's minute. `timerActiveNow` is the value just published: `$timerRemaining`
+    /// emits in willSet, so the property still reads the old value inside `onReceive`. The work
+    /// item re-reads the live state when it fires.
+    private func scheduleDim(timerActiveNow: Bool? = nil) {
         windowActivity.pendingDim?.cancel()
-        guard mayDim else { return }
+        guard mayDimNow(timerActive: timerActiveNow ?? (audio.sleepTimer.timerRemaining > 0)) else { return }
         let work = DispatchWorkItem {
             let assistive = UIAccessibility.isVoiceOverRunning || UIAccessibility.isSwitchControlRunning
             switch SessionGuards.veilTimeout(mayDim: self.mayDim, presenting: self.windowActivity.isPresenting,
@@ -93,32 +104,44 @@ struct ContentView: View {
         scheduleDim()
     }
 
-    /// A tap on the veil: the glance first, then the wake. VoiceOver and Switch Control wake in
-    /// one step (the veil's label already says what it is, and they never needed the light).
+    /// A tap on the veil: the glance first, then the wake (`SessionGuards.veilTap`).
     private func veilTapped() {
         let assistive = UIAccessibility.isVoiceOverRunning || UIAccessibility.isSwitchControlRunning
-        guard veilGlance || assistive else { showGlance(); return }
-        veilGlanceHide?.cancel()
-        veilGlance = false
-        wake()
-        // Straight to the controls: the glance already showed the night, so the second tap
-        // shouldn't land on a bare scene that needs a third.
-        if audio.ambientScreensaver {
-            withAnimation(.easeOut(duration: 1.0)) { audio.ambientScreensaver = false }
+        switch SessionGuards.veilTap(sinceGlance: veilGlanceAt.map { Date().timeIntervalSince($0) },
+                                     assistiveTech: assistive) {
+        case .ignore: return
+        case .glance: showGlance()
+        case .wake:
+            endGlance()
+            wake()
+            // Straight to the controls: the glance already showed the night, so the second tap
+            // shouldn't land on a bare scene that needs a third.
+            if audio.ambientScreensaver {
+                withAnimation(.easeOut(duration: 1.0)) { audio.ambientScreensaver = false }
+            }
         }
     }
 
     private func showGlance() {
         veilCaptionHide?.cancel()
         withAnimation(.easeInOut(duration: 0.4)) { veilCaptionShown = false }
-        // Eased in, so the light arrives slowly for dark-adapted eyes.
-        withAnimation(.easeIn(duration: 1.2)) { veilGlance = true }
+        veilGlanceAt = Date()
+        // It answers the tap at once but arrives softly (dim text, a short ease-out), so a
+        // dark-adapted eye isn't left wondering whether the tap landed.
+        withAnimation(.easeOut(duration: 0.6)) { veilGlanceShown = true }
         let work = DispatchWorkItem {
-            withAnimation(.easeInOut(duration: 2)) { self.veilGlance = false }
+            withAnimation(.easeInOut(duration: SessionGuards.glanceFade)) { self.veilGlanceShown = false }
         }
         veilGlanceHide?.cancel()
         veilGlanceHide = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 6, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + SessionGuards.glanceHold, execute: work)
+    }
+
+    private func endGlance() {
+        veilGlanceHide?.cancel()
+        veilGlanceHide = nil
+        veilGlanceAt = nil
+        veilGlanceShown = false
     }
 
     private func cancelDim() {
@@ -175,6 +198,9 @@ struct ContentView: View {
                     .tag(2)
             }
             .accentColor(pal.accent)
+            // Under the veil only the veil answers VoiceOver and Voice Control: Home's screensaver
+            // catcher also answers "Wake", and woke the hidden chrome under the black.
+            .accessibilityHidden(nightDimmed)
 
             // Mini-player floats above the tab bar (a ZStack overlay, not a TabView safe-area
             // inset — that docks it ON the UIKit tab bar). Tabs reserve room for it themselves from
@@ -188,7 +214,7 @@ struct ContentView: View {
                 }
                 .opacity(miniPlayerHidden ? 0 : 1)
                 .allowsHitTesting(!miniPlayerHidden)
-                .accessibilityHidden(miniPlayerHidden)
+                .accessibilityHidden(miniPlayerHidden || nightDimmed)
                 .animation(.easeInOut(duration: 0.9), value: miniPlayerHidden)
 
             // Full-screen night veil — over the tabs and mini-player both.
@@ -198,9 +224,12 @@ struct ContentView: View {
                     .contentShape(Rectangle())
                     .onTapGesture { veilTapped() }
                     .overlay {
-                        if veilGlance {
+                        if veilGlanceShown {
+                            // "Playing" includes an episode that's loading between episodes: a
+                            // podcast night isn't "Sounds off" for the second before the next starts.
                             VeilGlance(sleepTimer: audio.sleepTimer, center: orbCenter,
-                                       playing: audio.isAnythingPlaying, pal: pal)
+                                       playing: audio.isAnythingPlaying || audio.podcastIsPlayingOrStarting,
+                                       pal: pal)
                                 .transition(.opacity)
                         }
                     }
@@ -213,6 +242,7 @@ struct ContentView: View {
                             .font(.caption)
                             .foregroundColor(.white.opacity(0.16))
                             .opacity(veilCaptionShown ? 1 : 0)
+                            .allowsHitTesting(false)   // a tap on the words is a tap on the veil
                     )
                     .transition(.opacity)
                     .accessibilityAddTraits(.isButton)
@@ -237,8 +267,17 @@ struct ContentView: View {
         .onChange(of: audio.isAnythingPlaying) { _, playing in
             if playing { if !nightDimmed { scheduleDim() } } else { cancelDim() }
         }
+        // A timer starting or ending changes where the veil may drop (everywhere vs Home only).
+        .onReceive(audio.sleepTimer.$timerRemaining) { remaining in
+            let active = remaining > 0
+            guard active != timerWasActive else { return }
+            timerWasActive = active
+            if !nightDimmed { scheduleDim(timerActiveNow: active) }
+        }
         .onChange(of: audio.focusMode) { _, focus in
             if focus { cancelDim(); withAnimation(.easeInOut(duration: 0.4)) { nightDimmed = false } }
+            // Into Sleep with the sound still going: that's a night starting, so arm the veil.
+            else if !nightDimmed { scheduleDim() }
         }
         .onChange(of: selectedTab) { _, _ in
             // Navigating is interaction — reset the dim countdown and drop the screensaver
@@ -250,7 +289,7 @@ struct ContentView: View {
             // Freeze the backdrop scene only when the veil actually occludes the screen —
             // it keeps animating through the lighter controls-faded screensaver.
             audio.screenDimmed = dimmed
-            if !dimmed { veilGlanceHide?.cancel(); veilGlance = false }
+            if !dimmed { endGlance() }
         }
         .onChange(of: scenePhase) { _, phase in
             // Fail-safe: if iOS suspended us through a duration timer's deadline, the in-process
@@ -286,19 +325,27 @@ private struct VeilGlance: View {
                                    lengthMinutes: 0)
     }
 
+    /// Where Home lays out the night line under the ring: half the ring's frame, the VStack's
+    /// 20 pt spacing, and half the line's 44 pt minimum height.
+    private static let lineBelowRingCentre: CGFloat = NightRing.frameSize / 2 + 20 + 22
+
     var body: some View {
         GeometryReader { geo in
             let origin = geo.frame(in: .global).origin
-            let c = center.map { CGPoint(x: $0.x - origin.x, y: $0.y - origin.y) }
-                ?? CGPoint(x: geo.size.width / 2, y: geo.size.height * 0.42)
+            let measured = center.map { CGPoint(x: $0.x - origin.x, y: $0.y - origin.y) }
+            // Home's measurement can be stale (rotated or resized while another tab showed):
+            // only trust it when the line would land on screen.
+            let c = measured.flatMap { p in
+                p.x >= 0 && p.x <= geo.size.width && p.y >= 0
+                    && p.y + Self.lineBelowRingCentre <= geo.size.height ? p : nil
+            } ?? CGPoint(x: geo.size.width / 2, y: geo.size.height * 0.42)
             NightEmber(sleepTimer: sleepTimer, pal: pal, screensaver: true, focusMode: false)
                 .position(c)
-            // Where the night line sits under the ring.
             Text(text)
                 .font(.system(.callout, design: .rounded).weight(.medium))
                 .monospacedDigit()
                 .foregroundColor(pal.dim.opacity(0.55))
-                .position(x: c.x, y: c.y + NightRing.frameSize / 2 + 42)
+                .position(x: c.x, y: c.y + Self.lineBelowRingCentre)
         }
         .ignoresSafeArea()
         .allowsHitTesting(false)

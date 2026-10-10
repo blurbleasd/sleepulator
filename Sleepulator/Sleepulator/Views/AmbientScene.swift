@@ -75,7 +75,7 @@ struct NightSkyScene: AmbientScene {
                 // Darkening must observe the timer itself: nightProgress is computed (not
                 // @Published) and the timer is no longer forwarded through `audio`, so HomeView
                 // stops re-rendering each second — without this leaf the sky would freeze.
-                NightDarken(timer: ctx.sleepTimer)
+                NightDarken(timer: ctx.sleepTimer, paused: ctx.paused)
             }
             .ignoresSafeArea()
         )
@@ -84,12 +84,20 @@ struct NightSkyScene: AmbientScene {
 
 /// The sleep sky-darkening overlay, isolated so it re-renders on each timer tick (it observes the
 /// timer directly) rather than relying on its parent's per-second re-render. An untimed night
-/// settles on the clock with nothing published, so it also re-reads every 20 s.
+/// settles on the clock with nothing published, so it also re-reads every 20 s, but only while
+/// the scene runs: under the veil (`paused`) the app makes no redraws at all (TESTING.md §3H.1).
 private struct NightDarken: View {
     @ObservedObject var timer: SleepTimerService
+    var paused: Bool = false
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 20)) { _ in
-            Color.black.opacity(timer.nightProgress * 0.35)
+        Group {
+            if paused {
+                Color.black.opacity(timer.nightProgress * 0.35)
+            } else {
+                TimelineView(.periodic(from: .now, by: 20)) { _ in
+                    Color.black.opacity(timer.nightProgress * 0.35)
+                }
+            }
         }
         .ignoresSafeArea()
         .allowsHitTesting(false)
@@ -99,16 +107,26 @@ private struct NightDarken: View {
 /// Fades arbitrary backdrop content toward dark as the sleep timer winds down — the
 /// general-purpose sibling of `NightDarken`, used for the warm static layers (the embers
 /// hearth glow, the rain-glass bokeh) that should dim with the night. Isolated so it
-/// re-renders only on the timer's ~1 Hz republish, never dragging its parent (or a sibling
+/// re-renders only on the timer's ~1 Hz republish and, while unpaused, a 20 s re-read for an
+/// untimed night (which publishes nothing), never dragging its parent (or a sibling
 /// `TimelineView` animation loop) into a re-render. Animating Canvas layers don't use this —
 /// they read `nightProgress` live inside their own redraw instead.
 struct NightFade<Content: View>: View {
     @ObservedObject var timer: SleepTimerService
     /// Opacity removed at full night (`nightProgress == 1`). 0.8 → fades to a faint glow.
     var maxDim: Double = 0.8
+    /// The scene is frozen (veil, background): hold still, no periodic re-reads.
+    var paused: Bool = false
     @ViewBuilder var content: Content
     var body: some View {
-        // Re-read every 20 s too: an untimed night settles on the clock with nothing published.
+        if paused {
+            content.opacity(1 - maxDim * timer.nightProgress)
+        } else {
+            faded
+        }
+    }
+
+    private var faded: some View {
         TimelineView(.periodic(from: .now, by: 20)) { _ in
             content.opacity(1 - maxDim * timer.nightProgress)
         }
@@ -121,8 +139,8 @@ struct NightFade<Content: View>: View {
 /// "Current" (Focus): cool streams that quicken/brighten through a work interval and ease on a
 /// break — momentum without flicker. A domain-warped FBM flow-field shader
 /// (`CurrentShader.metal` `currentField` via `CurrentMetalView`), driven by the shared
-/// `FocusDrivers` mapping. System Reduce Motion doesn't still it (it gates parallax only, SCREENSAVER-LIBRARY-SPEC §5); the
-/// "Moving scenes" setting does, through `paused`.
+/// `FocusDrivers` mapping. System Reduce Motion doesn't still it (it gates parallax only,
+/// SCREENSAVER-LIBRARY-SPEC §5); the "Moving scenes" setting does, through `paused`.
 ///
 /// Promoted 2026-09-21: this WAS a DEBUG-only "(Metal)" A/B sibling sitting next to a Canvas
 /// `CurrentScene` that owned the "current" id — which is the id `sceneFocus` defaults to. So the
@@ -139,11 +157,11 @@ struct CurrentScene: AmbientScene {
     }
 }
 
-/// "Tide" (Focus): rising, pulsing bands whose energy builds across a work interval and eases on
-/// a break (`TideShader.metal` `tideField` via `TideMetalView`) — an FBM-modulated surge with a
-/// crisp crest and a counter-swell, instead of the flat Canvas fill it replaced. Promoted
-/// 2026-09-21 out of its DEBUG A/B slot — see `CurrentScene`. System Reduce Motion doesn't still it (it gates parallax only, SCREENSAVER-LIBRARY-SPEC §5); the
-/// "Moving scenes" setting does, through `paused`.
+/// "Tide" (Focus): one waterline whose height IS the interval, rising across a work interval and
+/// running back on a break, with a crisp crest (`TideShader.metal` `tideField` via
+/// `TideMetalView`). At rest the tide is out, a low line at the bottom edge. Promoted 2026-09-21
+/// out of its DEBUG A/B slot — see `CurrentScene`. System Reduce Motion doesn't still it (it gates
+/// parallax only, SCREENSAVER-LIBRARY-SPEC §5); the "Moving scenes" setting does, via `paused`.
 struct TideScene: AmbientScene {
     let id = "tide"
     let title = "Tide"
@@ -285,11 +303,11 @@ struct DeepSpaceScene: AmbientScene {
     }
 }
 
-/// "Sandfall" (Focus): per-column comet streaks falling through a descending FBM curtain, whose
-/// intensity builds across a work interval (`SandfallShader.metal` `sandField` via
-/// `SandfallMetalView`) — replacing the 14 stiff Canvas grains. Promoted 2026-09-21 out of its
-/// DEBUG A/B slot — see `CurrentScene`. System Reduce Motion doesn't still it (it gates parallax only, SCREENSAVER-LIBRARY-SPEC §5); the
-/// "Moving scenes" setting does, through `paused`.
+/// "Sandfall" (Focus): an hourglass whose bottom bulb's fill IS the interval, draining across a
+/// work interval and running back on a break (`SandfallShader.metal` `sandField` via
+/// `SandfallMetalView`). At rest its sand lies settled in the bottom bulb. Promoted 2026-09-21
+/// out of its DEBUG A/B slot — see `CurrentScene`. System Reduce Motion doesn't still it (it gates
+/// parallax only, SCREENSAVER-LIBRARY-SPEC §5); the "Moving scenes" setting does, via `paused`.
 struct SandfallScene: AmbientScene {
     let id = "sandfall"
     let title = "Sandfall"

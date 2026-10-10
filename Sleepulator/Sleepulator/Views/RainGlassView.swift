@@ -25,8 +25,7 @@ struct RainGlassView: View {
         let phase: Double      // 0…1 start offset
         let r: Double          // head radius, pt
         let len: Double        // trail length, pt
-        let wobAmp: Double     // sideways meander, pt
-        let wobFreq: Double
+        let wobAmp: Double     // sideways meander, pt (follows the drop's height)
         let opacity: Double
     }
     private struct Speck { let x, y, r, opacity: Double }
@@ -50,14 +49,12 @@ struct RainGlassView: View {
     private static let drops: [Drop] = {
         let n = rng(0x2A11DEADBEEF0042)
         return (0..<16).map { _ in
-            Drop(x: n(),
-                 speed: 0.035 + pow(n(), 2.0) * 0.16,   // ~6–28s to fall
-                 phase: n(),
-                 r: 1.5 + n() * 2.5,
-                 len: 24 + n() * 84,
-                 wobAmp: 1.5 + n() * 5.0,
-                 wobFreq: 0.15 + n() * 0.4,
-                 opacity: 0.12 + n() * 0.22)
+            let x = n(), speed = 0.035 + pow(n(), 2.0) * 0.16   // ~6–28s to fall
+            let phase = n(), r = 1.5 + n() * 2.5, len = 24 + n() * 84
+            let wobAmp = 1.5 + n() * 5.0
+            _ = n()   // a retired wobble-rate draw, kept so the seeded layout stays the same
+            return Drop(x: x, speed: speed, phase: phase, r: r, len: len, wobAmp: wobAmp,
+                        opacity: 0.12 + n() * 0.22)
         }
     }()
 
@@ -91,7 +88,7 @@ struct RainGlassView: View {
             // Blurred lights behind the glass — they dim out as the night settles, leaving a
             // dark fogged pane (isolated 1 Hz leaf; the animating drops dim separately, live).
             if let timer = sleepTimer {
-                NightFade(timer: timer, maxDim: 0.9) { bokehLights }
+                NightFade(timer: timer, maxDim: 0.9, paused: paused) { bokehLights }
             } else {
                 bokehLights
             }
@@ -126,7 +123,7 @@ struct RainGlassView: View {
         .animation(.easeInOut(duration: 1.2), value: active)
     }
 
-    /// Out-of-focus warm/cool lights behind the pane. Extracted so the night-fade leaf can dim
+    /// Out-of-focus warm (amber / ember) lights behind the pane. Extracted so the night-fade leaf can dim
     /// them without observing the timer from the parent.
     private var bokehLights: some View {
         GeometryReader { geo in
@@ -148,8 +145,8 @@ struct RainGlassView: View {
     /// path with a few beads left on the pane. The old drop slid continuously with a bright
     /// head and a fading tail, which read as meteors falling past a window.
     ///
-    /// - Parameter night: `nightProgress` (0 at the start of a sleep timer, →1 as it expires;
-    ///   0 when idle). As it rises the rain eases off — each drop fades over a window, with
+    /// - Parameter night: `nightProgress` (0 at bedtime, →1 as the timer runs out or, with no
+    ///   timer, as the untimed night settles; 0 when idle). As it rises the rain eases off — each drop fades over a window, with
     ///   higher-`phase` drops retiring first, so the glass thins gradually to a still pane.
     ///   The fall *rate* is left untouched (scaling absolute `t` would jump the drop) — the
     ///   thinning alone reads as the rain letting up.

@@ -187,12 +187,16 @@ half4 stillWaterField(float2 pos, half4 color,
         float2 sg  = floor(sp);
         float2 sf  = fract(sp) - 0.5;
         float  sh  = hashCell(sg, 0u);
-        float2 soff = (float2(hashCell(sg, 1u), hashCell(sg, 2u)) - 0.5) * 0.7;
-        float  sd  = length(sf - soff);
-        float star = step(0.986, sh) * exp(-(sd * sd) / 0.04) * smoothstep(0.0, 0.5, (HORIZON - uv.y) / HORIZON);
-        float tw   = 0.55 + 0.45 * sin(time * 1.7 + sh * 100.0);
-        float nearMoon = smoothstep(0.0, 0.25, md);   // screen widths
-        col += float3(1.0, 0.88, 0.74) * star * tw * 0.45 * (1.0 - 0.6 * p) * nearMoon;
+        // Only ~1.4% of cells hold a star: the rest skip the jitter, falloff and twinkle. Cells
+        // are 12 px, so a SIMD group spans a cell or two and the branch stays coherent.
+        if (sh >= 0.986) {
+            float2 soff = (float2(hashCell(sg, 1u), hashCell(sg, 2u)) - 0.5) * 0.7;
+            float  sd  = length(sf - soff);
+            float star = exp(-(sd * sd) / 0.04) * smoothstep(0.0, 0.5, (HORIZON - uv.y) / HORIZON);
+            float tw   = 0.55 + 0.45 * sin(time * 1.7 + sh * 100.0);
+            float nearMoon = smoothstep(0.0, 0.25, md);   // screen widths
+            col += float3(1.0, 0.88, 0.74) * star * tw * 0.45 * (1.0 - 0.6 * p) * nearMoon;
+        }
     }
 
     // Soft vignette to settle the eye toward the center.

@@ -118,7 +118,7 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   apply the memory; there, the current sound is already that mode's latest pick.
 - **The sleep timer starts from the Home orb's night ring.** `NightRing` sets
   `nightLengthMinutes` (0 = All night, the default, so an update never starts timing anyone out).
-  Any Sleep session starting from rest starts the timer at that length: `AudioEngine.noteSessionStart`
+  Any Sleep session starting from rest starts the timer at that length: `AudioEngine.noteSessionEdge`
   on the idle→playing edge of `noiseOn`/`binauralOn`/`isPodPlaying`, so the orb, mixer switches,
   podcasts, lock screen/AirPods, Siri and the widget all honour it. Nothing in Focus, for All night,
   or while a countdown runs (resume, interruption, stall keep the night). The timer sheet syncs the
@@ -132,8 +132,12 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   the night, a longer one ends it). AudioEngine reports the session's edges
   (`noteSessionEdge`) and a switch to Focus ends it. It's visual only (scenes darken and still,
   comets and meteors retire past 0.4, the orb calms); the audio fade never reads it. Views that
-  observe the timer for darkening (`NightDarken`, `NightFade`) also re-read it every 20 s, since
-  an untimed night publishes nothing. Before this, All night (the default) never darkened at all.
+  observe the timer for darkening (`NightDarken`, `NightFade`) also re-read it every 20 s while
+  unpaused, since an untimed night publishes nothing. The night never brightens at a timer
+  boundary: a timer started mid-night settles on from where the night already is
+  (`SleepTimerService.timedBase`), and a natural end leaves it settled (`settleNight`; `stopAll`
+  resets the timer's total). Switching Focus → Sleep with the sound playing starts the night like
+  Play (`AudioEngine.beginSleepNight`). Before this, All night (the default) never darkened.
 - **The stop-with-episode timer runs on the playback clock.** "Stop after this episode" (the timer
   sheet and the Sleep player's chip, `startEndOfEpisodeTimer`) is offered and starts only while the
   episode plays. A pause hands it to the wall clock with the same end
@@ -181,14 +185,17 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   cancel button, which left a lone red button on a dark screen.
 - **The night veil runs from the last touch.** ContentView drops it 60 s after the last touch
   anywhere in the window (`WindowActivity`: a recognizer that observes every touch, sheets
-  included, and claims none), over any playing Sleep session, timed or All night
-  (`SessionGuards.mayNightDim`). If a sheet, dialog or full-screen cover is up when the countdown
+  included, and claims none), over a playing Sleep session: everywhere while a timer runs, on
+  Home for All night (`SessionGuards.mayNightDim`; on other tabs it would black out daytime
+  listening), and never under VoiceOver or Switch Control (`veilTimeout`). If a sheet, dialog or full-screen cover is up when the countdown
   ends, the veil waits another round (`SessionGuards.veilTimeout`). The veil is part of the root
   view, so it can't cover them. The status bar and home indicator hide under the veil and the
   Sleep screensaver (`SessionGuards.hidesSystemOverlays`); Focus keeps its clock. The pending
   countdown lives on `WindowActivity`, not in `@State`: it changes on every touch. The first tap
   on the veil is a glance (`VeilGlance`: the ember and the night line, dim on black, for 6 s);
-  a second tap lifts the veil and wakes the controls. VoiceOver and Switch Control wake in one.
+  a second tap lifts the veil and wakes the controls (`SessionGuards.veilTap`: a tap within
+  0.8 s is ignored, and one counts as the wake until the glance has faded). VoiceOver and Switch
+  Control wake in one. Under the veil the tabs are hidden from accessibility, so only it answers.
 - **One name per sound.** Name sounds through `SoundNames` (binaurals are "Deep", "Drift", …,
   never "Delta" / "Theta").
 - **Podcasts is split by depth.** The library and its Tonight shelf follow the 2am rules (artwork

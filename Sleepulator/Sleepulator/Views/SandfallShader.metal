@@ -15,7 +15,7 @@ using namespace metal;
 // reference you cannot read 60% from 80% — so the scene never actually said
 // anything about the session ("they don't speak to focus"). Progress now rides
 // the one absolute channel the eye reads instantly: POSITION. Two sand surfaces,
-// travelling ~40% of the field each, in opposite directions.
+// travelling ~33% of the field each (TOP_Y→NECK_Y), in opposite directions.
 //
 //   fill (0…1) — drained fraction, computed Swift-side (FocusDrivers.fill):
 //                a work interval runs 0→1, a break runs it back 1→0.
@@ -37,7 +37,8 @@ constant float BULB_HW  = 0.34;    // half-width at the extremes
 // The glass sits clear of the mode switcher up top and the mini-player below (it ran from 0.10
 // to 0.90, the top bulb lit behind "Sleep / Focus").
 constant float TOP_Y    = 0.17;    // top of the upper bulb
-constant float BOT_Y    = 0.83;    // bottom of the lower bulb
+constant float BOT_Y    = 0.83;    // bottom of the lower bulb (keep BOT_Y = 1 − TOP_Y: `silhouette`
+                                   // normalises both bulbs by NECK_Y − TOP_Y)
 
 inline float hash21(float2 p) {
     p = fract(p * float2(123.34, 345.45));
@@ -107,7 +108,7 @@ half4 sandField(float2 pos, half4 color,
     // ---- the two sand surfaces — THE reading -----------------------------------------
     // Upper bulb drains: its surface descends from TOP_Y to the neck as f: 0 → 1.
     // Lower bulb mounds: its surface rises from BOT_Y to the neck over the same span.
-    // Each travels ~40% of the field, so the pair is legible at a glance from across a desk.
+    // Each travels ~33% of the field, so the pair is legible at a glance from across a desk.
     float topSurf = mix(TOP_Y, NECK_Y, f);
     float botSurf = mix(BOT_Y, NECK_Y, f);
 

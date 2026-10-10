@@ -310,8 +310,16 @@ final class AudioEngine: ObservableObject {
     private func noteSessionEdge(wasPlaying: Bool) {
         if wasPlaying, !isAnythingPlaying { sleepTimer.noteSleepSessionStopped(); return }
         guard !wasPlaying, isAnythingPlaying else { return }
-        if !focusMode { sleepTimer.noteSleepSessionStarted() }
-        if let m = SessionGuards.timerOnPlay(focusMode: focusMode, lengthMinutes: nightLengthProvider(),
+        beginSleepNight()
+    }
+
+    /// A Sleep night begins: from rest, or by switching from Focus with the sound still playing
+    /// (that path has no idle→playing edge, so the night never settled and the ring's timer never
+    /// started until the next pause and play).
+    private func beginSleepNight() {
+        guard !focusMode else { return }
+        sleepTimer.noteSleepSessionStarted()
+        if let m = SessionGuards.timerOnPlay(focusMode: false, lengthMinutes: nightLengthProvider(),
                                              timerActive: sleepTimer.timerRemaining > 0) {
             sleepTimer.startSleepTimer(minutes: m)
         }
@@ -411,6 +419,8 @@ final class AudioEngine: ObservableObject {
             // Apple Music is Focus-only: leaving Focus stops it and reverts the session to
             // exclusive playback so Sleep's all-night behavior (and the limiter) is unaffected.
             if !focusMode { stopAppleMusic() }
+            // Into Sleep with the sound still going: the same night start as pressing Play.
+            if switched, !focusMode, isAnythingPlaying { beginSleepNight() }
         }
     }
 
@@ -514,7 +524,7 @@ final class AudioEngine: ObservableObject {
         // reactive consumers observe the child directly instead:
         //   - sleepTimer / pomodoro (~1/sec): SessionButton, NightRing, NightLine, BumpTimerButton in
         //     HomeView; FocusHero / FocusSessionReadout / CycleDots; NightDarken in AmbientScene.
-        //     ContentView drives its night-dim off `sleepTimer.$timerRemaining` via onReceive.
+        //     ContentView arms its night-dim off `isAnythingPlaying` and touches, not the timer.
         //   - playbackProgress (~1/sec): MiniPlayerView + NowPlayingSheet (Phase 1).
         //   - queueManager (user-action): NowPlayingSheet (queue list) + SettingsView (the
         //     Auto-Play / Shuffle toggles) observe it directly.

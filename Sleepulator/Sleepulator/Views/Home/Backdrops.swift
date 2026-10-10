@@ -16,9 +16,12 @@ struct StarfieldView: View {
         let twAmp, twSpeed, twPhase: Double
     }
 
-    private static let coolWhite = Color(red: 0.93, green: 0.95, blue: 1.0)
+    // Sleep's palette: pale and warm whites, with a rare faint cool star for realism. Two-thirds
+    // of the field used to be a cool blue-white and an eighth plainly blue, the coolest light left
+    // in the warm mode.
+    private static let paleStar  = Color(red: 0.98, green: 0.95, blue: 0.90)
     private static let warmStar  = Color(red: 1.0,  green: 0.86, blue: 0.66)
-    private static let blueStar  = Color(red: 0.74, green: 0.84, blue: 1.0)
+    private static let coolStar  = Color(red: 0.86, green: 0.89, blue: 0.97)
 
     // Tuning knobs — all slow on purpose (a sleep aid, not a screensaver demo).
     private static let driftPeriod: Double = 300    // seconds to drift one screen-height down
@@ -30,7 +33,7 @@ struct StarfieldView: View {
     private static func build() -> [Star] {
         var rng: UInt64 = 0x5EED5160_0DECAF01
         func n() -> Double { rng ^= rng << 13; rng ^= rng >> 7; rng ^= rng << 17; return Double(rng % 1_000_000) / 1_000_000 }
-        func tint() -> Color { let t = n(); return t < 0.66 ? coolWhite : (t < 0.88 ? warmStar : blueStar) }
+        func tint() -> Color { let t = n(); return t < 0.66 ? paleStar : (t < 0.96 ? warmStar : coolStar) }
         var out: [Star] = []
         // Scattered field — cube the brightness so most stars are dim and only a few brighter.
         for _ in 0..<90 {
@@ -50,7 +53,7 @@ struct StarfieldView: View {
                             y: 0.06 + u * 0.5 + (n() - 0.5) * 0.16,
                             r: 0.4 + mag * 0.9,
                             baseOpacity: 0.12 + mag * 0.34,
-                            tint: coolWhite,
+                            tint: paleStar,
                             bright: false,
                             twAmp: 0.2 + n() * 0.3, twSpeed: 0.4 + n() * 0.8, twPhase: n() * 6.283))
         }

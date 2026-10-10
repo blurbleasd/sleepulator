@@ -2,7 +2,7 @@ import SwiftUI
 
 /// "Deep space" (Sleep) — a GPU fragment shader (`DeepSpaceShader.metal`, `nebulaField`) renders a
 /// slow nebula of domain-warped FBM cloud over a three-tier parallax star field, with a comet
-/// sweeping every ~40s. A new generative showpiece (no CPU predecessor), so there's no A/B sibling.
+/// sweeping every two minutes. A new generative showpiece (no CPU predecessor), so there's no A/B sibling.
 ///
 /// A thin wrapper over `ShaderBackdrop`, which owns the redraw loop, the settle, and the
 /// `SceneClock` phase integration (`nightSlowdown: 0.4` → the nebula's drift eases as the night

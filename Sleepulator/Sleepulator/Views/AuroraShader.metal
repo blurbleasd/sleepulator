@@ -184,14 +184,18 @@ half4 auroraField(float2 pos, half4 color,
     float2 sg  = floor(sp);
     float2 sf  = fract(sp) - 0.5;
     float  sh  = hashCell(sg, 0u);
-    float2 soff = (float2(hashCell(sg, 1u), hashCell(sg, 2u)) - 0.5) * 0.7;
-    float  sd  = length(sf - soff);
-    float star = step(0.986, sh) * exp(-(sd * sd) / 0.04) * smoothstep(0.05, 0.65, vY);
-    float ph     = hashCell(sg, 3u) * 6.28318530718;     // full 0..2π phase spread
-    float fr     = 0.5 + 1.6 * hashCell(sg, 4u);         // per-star rate, 0.5..2.1 rad/s
-    float steady = step(hashCell(sg, 5u), 0.35);         // ~35% don't twinkle at all
-    float tw     = mix(0.55 + 0.45 * sin(time * fr + ph), 0.9, steady);
-    col += float3(1.0, 0.88, 0.74) * star * tw * 0.5 * (1.0 - clamp(lum * 3.0, 0.0, 1.0));
+    // Only ~1.4% of cells hold a star: the rest skip the other five hashes, the falloff and the
+    // twinkle. Cells are 12 px, so a SIMD group spans a cell or two and the branch stays coherent.
+    if (sh >= 0.986) {
+        float2 soff = (float2(hashCell(sg, 1u), hashCell(sg, 2u)) - 0.5) * 0.7;
+        float  sd  = length(sf - soff);
+        float star = exp(-(sd * sd) / 0.04) * smoothstep(0.05, 0.65, vY);
+        float ph     = hashCell(sg, 3u) * 6.28318530718;     // full 0..2π phase spread
+        float fr     = 0.5 + 1.6 * hashCell(sg, 4u);         // per-star rate, 0.5..2.1 rad/s
+        float steady = step(hashCell(sg, 5u), 0.35);         // ~35% don't twinkle at all
+        float tw     = mix(0.55 + 0.45 * sin(time * fr + ph), 0.9, steady);
+        col += float3(1.0, 0.88, 0.74) * star * tw * 0.5 * (1.0 - clamp(lum * 3.0, 0.0, 1.0));
+    }
 
     // Gentle Reinhard-ish roll-off keeps highlights from clipping harshly (filmic, OLED-kind).
     col = col / (col + 0.85);
