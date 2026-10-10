@@ -27,8 +27,10 @@ namespace ember {
 
 // ---- tunables --------------------------------------------------------------------
 constant int   OCTAVES   = 4;      // FBM detail — the battery knob.
-constant float DRIFT      = 0.080; // texture drift speed (slow churn)
-constant float SWIRL       = 0.050; // differential swirl speed
+// Both slowed ~40% (were 0.080 / 0.050): the churn changed nearly half the screen's pixels every
+// few seconds, the most motion of any Sleep scene. Coals should smoulder, not boil.
+constant float DRIFT      = 0.048; // texture drift speed (slow churn)
+constant float SWIRL       = 0.030; // differential swirl speed
 constant float BREATH_SEC  = 12.0;  // slow brightness breath
 
 inline float hash21(float2 p) {

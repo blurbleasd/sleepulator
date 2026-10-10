@@ -88,7 +88,7 @@ struct StarfieldView: View {
     private var hazeBand: some View {
         GeometryReader { geo in
             Ellipse()
-                .fill(Color.white.opacity(0.03))
+                .fill(Color(red: 1.0, green: 0.90, blue: 0.78).opacity(0.03))
                 .frame(width: geo.size.width * 1.5, height: geo.size.height * 0.26)
                 .rotationEffect(.degrees(-22))
                 .position(x: geo.size.width * 0.5, y: geo.size.height * 0.28)
@@ -134,6 +134,8 @@ struct ShootingStarView: View {
     var paused: Bool = false
     /// Read live at each meteor's fire time (never observed) for the night dimming/gating.
     var sleepTimer: SleepTimerService? = nil
+
+    private static let meteor = Color(red: 1.0, green: 0.88, blue: 0.72)
 
     @State private var progress: CGFloat = 0
     @State private var active = false
@@ -190,7 +192,9 @@ struct ShootingStarView: View {
         let y = startY + progress * len * 0.42
         return Capsule()
             .fill(LinearGradient(
-                gradient: Gradient(colors: [Color.white.opacity(0), Color.white.opacity(0.9)]),
+                // A warm streak at two-thirds strength: a pure-white 0.9 meteor was the brightest
+                // thing the night sky ever drew.
+                gradient: Gradient(colors: [Self.meteor.opacity(0), Self.meteor.opacity(0.6)]),
                 startPoint: .leading, endPoint: .trailing))
             .frame(width: 66, height: 2)
             .rotationEffect(.degrees(22.8))

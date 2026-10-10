@@ -42,10 +42,12 @@ constant float TRAVEL     = 0.011; // lateral sky drift, uv/s — real aurora ma
 constant float BREATH_SEC = 11.0;  // per-layer brightness breath period (phase-offset per layer)
 constant int   LAYERS     = 3;     // depth layers of curtains accumulated additively
 
-// Curtain palette (linear-ish): green/teal base rising to violet tips.
-constant float3 C_GREEN  = float3(0.18, 0.85, 0.55);
-constant float3 C_TEAL   = float3(0.16, 0.55, 0.62);
-constant float3 C_VIOLET = float3(0.55, 0.42, 0.95);
+// Curtain palette (linear-ish): a RED aurora, the high-altitude oxygen glow, so the scene keeps
+// Sleep's warm dusk. Amber-crimson base, deepening to crimson toward night, dusky rose tips. (It
+// was green/teal rising to violet: the only cool light in a mode that promises amber.)
+constant float3 C_BASE   = float3(0.78, 0.30, 0.13);
+constant float3 C_DEEP   = float3(0.55, 0.15, 0.09);
+constant float3 C_TIP    = float3(0.46, 0.18, 0.28);
 
 // -- hash + value-noise + FBM (standard technique) ---------------------------------
 inline float hash21(float2 p) {
@@ -132,12 +134,11 @@ half4 auroraField(float2 pos, half4 color,
                      * (0.5 - 0.5 * cos(time * 6.28318530718 / BREATH_SEC + fl * 2.4));
         float intensity = pow(dens * ray * band * bright, 1.3) * breath;
 
-        // Colour by height within the curtain: green/teal base → violet tips. The warm
-        // base fades faster than the violet as night deepens, so the end state is a dim
-        // violet wash.
+        // Colour by height within the curtain: amber-crimson base → dusky rose tips. The base
+        // fades faster than the tips as night deepens, so the end state is a dim rose wash.
         float h = clamp(up / 0.5, 0.0, 1.0);
-        float3 base = mix(C_GREEN, C_TEAL, 0.3 + 0.5 * p);   // less green, more teal at night
-        float3 cc   = mix(base * (1.0 - 0.35 * p), C_VIOLET, h);
+        float3 base = mix(C_BASE, C_DEEP, 0.3 + 0.5 * p);    // less amber, more crimson at night
+        float3 cc   = mix(base * (1.0 - 0.35 * p), C_TIP, h);
         col += cc * intensity;
     }
 
@@ -148,10 +149,10 @@ half4 auroraField(float2 pos, half4 color,
 
     // Faint low horizon glow the curtains seem to rise from.
     float horizon = smoothstep(0.30, 0.0, vY) * 0.12;
-    col += float3(0.10, 0.45, 0.35) * horizon * (1.0 - 0.6 * p);
+    col += float3(0.40, 0.13, 0.05) * horizon * (1.0 - 0.6 * p);
 
-    // Deep blue-black base sky.
-    col += mix(float3(0.012, 0.015, 0.030), float3(0.004, 0.005, 0.013), vY);
+    // Warm near-black base sky (Sleep's dusk, not a blue-black).
+    col += mix(float3(0.018, 0.011, 0.008), float3(0.007, 0.005, 0.005), vY);
 
     // Faint stars, weighted toward the upper sky and dimmed wherever a curtain is bright.
     // Twinkle phase/rate come from hashes INDEPENDENT of the existence gate: `sh` survives
@@ -177,7 +178,7 @@ half4 auroraField(float2 pos, half4 color,
     float fr     = 0.5 + 1.6 * hash21(sg + 47.3);        // per-star rate, 0.5..2.1 rad/s
     float steady = step(hash21(sg + 71.1), 0.35);        // ~35% don't twinkle at all
     float tw     = mix(0.55 + 0.45 * sin(time * fr + ph), 0.9, steady);
-    col += float3(0.85, 0.90, 1.0) * star * tw * 0.6 * (1.0 - clamp(lum * 3.0, 0.0, 1.0));
+    col += float3(1.0, 0.88, 0.74) * star * tw * 0.5 * (1.0 - clamp(lum * 3.0, 0.0, 1.0));
 
     // Gentle Reinhard-ish roll-off keeps highlights from clipping harshly (filmic, OLED-kind).
     col = col / (col + 0.85);

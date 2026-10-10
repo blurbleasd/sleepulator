@@ -32,8 +32,11 @@ struct RainGlassView: View {
     private struct Speck { let x, y, r, opacity: Double }
     private struct Bokeh { let x, y, r: Double; let color: Color }
 
+    // Every light here is warm, Sleep's dusk: amber and a deeper ember behind the glass, cream water
+    // on it. (Half the bokeh were a cool blue and the drops pure white, the coolest light in Sleep.)
     private static let warm = Color(red: 1.0, green: 0.82, blue: 0.55)
-    private static let cool = Color(red: 0.6, green: 0.78, blue: 1.0)
+    private static let ember = Color(red: 0.95, green: 0.55, blue: 0.36)
+    private static let water = Color(red: 1.0, green: 0.88, blue: 0.72)
 
     private static func rng(_ seed: UInt64) -> () -> Double {
         var s = seed
@@ -54,7 +57,7 @@ struct RainGlassView: View {
                  len: 24 + n() * 84,
                  wobAmp: 1.5 + n() * 5.0,
                  wobFreq: 0.15 + n() * 0.4,
-                 opacity: 0.16 + n() * 0.30)
+                 opacity: 0.12 + n() * 0.22)
         }
     }()
 
@@ -73,16 +76,16 @@ struct RainGlassView: View {
             Bokeh(x: 0.12 + n() * 0.76,
                   y: 0.42 + n() * 0.46,
                   r: 56 + n() * 120,
-                  color: n() < 0.5 ? warm : cool)
+                  color: n() < 0.5 ? warm : ember)
         }
     }()
 
     var body: some View {
         ZStack {
-            // Cold near-black glass.
+            // Warm near-black glass (Sleep's dusk, not a cold blue pane).
             LinearGradient(
-                colors: [Color(red: 0.02, green: 0.03, blue: 0.05),
-                         Color(red: 0.04, green: 0.05, blue: 0.09)],
+                colors: [Color(red: 0.035, green: 0.026, blue: 0.022),
+                         Color(red: 0.055, green: 0.040, blue: 0.030)],
                 startPoint: .top, endPoint: .bottom)
 
             // Blurred lights behind the glass — they dim out as the night settles, leaving a
@@ -98,7 +101,7 @@ struct RainGlassView: View {
                 for s in Self.specks {
                     let rect = CGRect(x: s.x * size.width - s.r, y: s.y * size.height - s.r,
                                       width: s.r * 2, height: s.r * 2)
-                    ctx.fill(Path(ellipseIn: rect), with: .color(.white.opacity(s.opacity)))
+                    ctx.fill(Path(ellipseIn: rect), with: .color(Self.water.opacity(s.opacity)))
                 }
             }
 
@@ -133,7 +136,7 @@ struct RainGlassView: View {
                     .fill(b.color)
                     .frame(width: b.r, height: b.r)
                     .blur(radius: b.r * 0.5)
-                    .opacity(0.20)
+                    .opacity(0.17)
                     .position(x: b.x * geo.size.width, y: b.y * geo.size.height)
             }
         }
@@ -160,14 +163,14 @@ struct RainGlassView: View {
         let trail = Path(roundedRect: CGRect(x: x - d.r * 0.5, y: y - d.len, width: d.r, height: d.len),
                          cornerRadius: d.r * 0.5)
         ctx.fill(trail, with: .linearGradient(
-            Gradient(colors: [.white.opacity(0), .white.opacity(op * 0.5)]),
+            Gradient(colors: [water.opacity(0), water.opacity(op * 0.5)]),
             startPoint: CGPoint(x: x, y: y - d.len), endPoint: CGPoint(x: x, y: y)))
 
         // Head + a small catch-light.
         ctx.fill(Path(ellipseIn: CGRect(x: x - d.r, y: y - d.r, width: d.r * 2, height: d.r * 2)),
-                 with: .color(.white.opacity(op)))
+                 with: .color(water.opacity(op)))
         ctx.fill(Path(ellipseIn: CGRect(x: x - d.r * 0.4, y: y - d.r * 0.7,
                                         width: d.r * 0.6, height: d.r * 0.6)),
-                 with: .color(.white.opacity(op * 0.7)))
+                 with: .color(water.opacity(op * 0.7)))
     }
 }

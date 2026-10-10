@@ -68,13 +68,16 @@ struct BreathingBloomView: View {
                     .frame(width: d * 1.3, height: d * 1.3)
                     .blur(radius: 50)
                 Circle()
-                    .fill(RadialGradient(colors: [tint.opacity(0.5), .clear],
+                    .fill(RadialGradient(colors: [tint.opacity(0.38), .clear],
                                          center: .center, startRadius: 0, endRadius: d * 0.3))
                     .frame(width: d * 0.7, height: d * 0.7)
                     .blur(radius: 22)
             }
+            // The breath lives mostly in the swell, not the light: brightness moves 0.45…0.75 (was
+            // 0.4…0.9, a 2.25× pulse every 10 s in a partner's peripheral vision). Size still
+            // carries a full, followable breath.
             .scaleEffect(0.75 + 0.25 * b)
-            .opacity((0.4 + 0.5 * b) * nightDim)
+            .opacity((0.45 + 0.30 * b) * nightDim)
             .position(x: geo.size.width / 2, y: geo.size.height / 2)
         }
     }

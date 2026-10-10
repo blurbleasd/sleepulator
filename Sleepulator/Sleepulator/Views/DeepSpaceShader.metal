@@ -57,13 +57,12 @@ inline float fbm(float2 p) {
     return v;
 }
 
-// Cosine palette (iq-style technique): smooth violet→blue→magenta→cyan ramp.
+// Nebula ramp: dusky plum → rust → amber dust, so the showpiece keeps Sleep's warm dusk. (It was
+// a cosine palette meant as violet→blue→magenta→cyan; over the density range actually used it
+// rendered a muddy olive-khaki.)
 inline float3 palette(float d) {
-    float3 a = float3(0.16, 0.10, 0.22);
-    float3 b = float3(0.32, 0.22, 0.42);
-    float3 c = float3(1.0, 1.0, 1.0);
-    float3 e = float3(0.20, 0.45, 0.78);
-    return a + b * cos(6.28318530718 * (c * d + e));
+    float3 c = mix(float3(0.20, 0.06, 0.11), float3(0.44, 0.15, 0.08), smoothstep(0.35, 0.65, d));
+    return mix(c, float3(0.52, 0.30, 0.12), smoothstep(0.65, 0.95, d));
 }
 
 // One parallax star tier: a scrolling, gyro-shifted grid where rare cells hold a twinkling star.
@@ -82,7 +81,7 @@ inline float3 starTier(float2 uv, float drift, float twinkle, float depth, float
     float d = length(st);
     float core = smoothstep(0.18, 0.0, d);
     float tw = 0.5 + 0.5 * sin(twinkle * (1.0 + h * 2.0) + h * 100.0);
-    float3 tint = mix(float3(0.75, 0.82, 1.0), float3(1.0, 0.9, 0.8), fract(h * 7.0));
+    float3 tint = mix(float3(0.96, 0.90, 0.84), float3(1.0, 0.82, 0.62), fract(h * 7.0));   // warm whites
     return tint * core * tw * (0.4 + depth * 0.8);
 }
 
@@ -103,7 +102,7 @@ half4 nebulaField(float2 pos, half4 color,
     float dim = (1.0 - 0.45 * p);
     float t = phase * DRIFT;                     // drift rate slowdown lives in phase
 
-    float3 col = float3(0.004, 0.005, 0.012);     // deep space black, faint blue lift
+    float3 col = float3(0.008, 0.005, 0.004);     // deep space black, a faint warm lift
 
     // --- nebula: two domain-warped FBM layers at different scales/colours for depth ---
     for (int L = 0; L < 2; L++) {
@@ -145,7 +144,7 @@ half4 nebulaField(float2 pos, half4 color,
         float perp  = abs(dot(rel, float2(-dir.y, dir.x)));
         float tail = smoothstep(0.22, 0.0, along) * step(0.0, along) * smoothstep(0.010, 0.0, perp);
         float core = smoothstep(0.012, 0.0, length(rel));
-        col += float3(0.85, 0.92, 1.0) * (tail * 0.6 + core) * win * dim;
+        col += float3(1.0, 0.84, 0.62) * (tail * 0.5 + core * 0.7) * win * dim;
     }
 
     // Filmic roll-off + hash dither (kills OLED banding). Wrap `time` small before the hash: hours

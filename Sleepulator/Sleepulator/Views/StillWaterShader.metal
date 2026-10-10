@@ -3,7 +3,7 @@
 using namespace metal;
 
 // ============================================================================
-// Still Water — a low moon over a dark pond, its light a shimmering reflected
+// Still Water — a low amber moon over a dark pond, its light a shimmering reflected
 // path on the surface, with faint concentric ripples spreading from a few points.
 // ----------------------------------------------------------------------------
 // The Metal replacement for the CPU `StillWaterView` (which stroked ellipse
@@ -31,10 +31,12 @@ namespace sw {
 
 // ---- tunables --------------------------------------------------------------------
 constant int   OCTAVES   = 4;      // FBM detail — the battery knob.
-constant float FLOW       = 0.50;  // surface drift speed (× phase — never re-scale by night here)
+constant float FLOW       = 0.32;  // surface drift speed (× phase — never re-scale by night here; was 0.50, the least still Sleep scene)
 constant float HORIZON    = 0.42;  // sky / water split (0 top → 1 bottom)
 constant float2 MOON      = float2(0.5, 0.16);   // moon position in the sky
-constant float3 MOONLIGHT = float3(0.66, 0.78, 0.98);  // cool moonlit blue-white
+// A low moon reads amber through the haze near the horizon, and keeps Sleep's warm dusk (it was a
+// cool blue-white, the bluest light in Sleep mode).
+constant float3 MOONLIGHT = float3(0.95, 0.72, 0.46);
 
 // Ripple sources (in uv space, in the water) and their phase offsets.
 constant float2 SRC[3] = { float2(0.30, 0.62), float2(0.70, 0.74), float2(0.50, 0.88) };
@@ -84,16 +86,16 @@ half4 stillWaterField(float2 pos, half4 color,
     float3 col;
     if (uv.y < HORIZON) {
         float s = uv.y / HORIZON;                         // 0 top → 1 horizon
-        col = mix(float3(0.05, 0.08, 0.15), float3(0.03, 0.05, 0.10), s);
+        col = mix(float3(0.026, 0.018, 0.020), float3(0.048, 0.030, 0.022), s);   // warmer toward the horizon
     } else {
         float d = (uv.y - HORIZON) / (1.0 - HORIZON);     // 0 horizon → 1 foreground
-        col = mix(float3(0.015, 0.02, 0.045), float3(0.008, 0.01, 0.025), d);
+        col = mix(float3(0.014, 0.010, 0.009), float3(0.006, 0.0045, 0.004), d);
     }
 
     // --- moon disc + halo ---
     float md = distance(uv, MOON);
-    col += MOONLIGHT * smoothstep(0.045, 0.0, md) * 0.9 * moonDim;   // disc
-    col += float3(0.40, 0.55, 0.85) * smoothstep(0.28, 0.0, md) * 0.18 * moonDim;  // halo
+    col += MOONLIGHT * smoothstep(0.045, 0.0, md) * 0.6 * moonDim;   // disc
+    col += float3(0.55, 0.36, 0.20) * smoothstep(0.28, 0.0, md) * 0.14 * moonDim;  // halo
 
     // --- water surface ---
     if (uv.y >= HORIZON) {
@@ -123,14 +125,14 @@ half4 stillWaterField(float2 pos, half4 color,
         if (reactive < 0.5) {
             // Shipping path — audio is a gentle GLOBAL brightness swell on the moonpath. Same
             // source as before the reactive uniform existed; Reduce Motion routes here too.
-            waves += ripple * 0.5 * motion;
+            waves += ripple * 0.35 * motion;
             swell = 1.0 + 0.30 * a;          // ripples reach a little brighter on a swell
         } else {
             // Structural — audio disturbs the SURFACE (the wave field), not the brightness, so the
             // reflection shimmers/breaks up where the light lives instead of the whole pond lifting.
             // Constants are first guesses; tune DOWN on device (subtle or it wakes you).
             float agitate = 1.0 + 0.6 * a;               // ripples spread harder on a swell
-            waves += ripple * 0.5 * motion * agitate;
+            waves += ripple * 0.35 * motion * agitate;
             if (a > 0.02) {                              // skip the extra fbm on silent passages
                 waves += (fbm(wuv * 1.7 + float2(0.0, t)) - 0.5) * 0.08 * a * motion;   // fine chop
             }
@@ -144,16 +146,16 @@ half4 stillWaterField(float2 pos, half4 color,
         // wave ridges catch the light. Wider + brighter toward the foreground.
         float column = smoothstep(0.34, 0.0, abs(x - MOON.x));
         float glint  = pow(clamp(waves, 0.0, 1.0), 5.0);
-        float path   = column * glint * (0.35 + 0.65 * depth);
+        float path   = column * glint * (0.35 + 0.65 * depth) * 0.75;
 
         col += MOONLIGHT * path * still * swell * moonDim;
 
         // A faint overall sheen so the dark water isn't dead flat.
-        col += float3(0.20, 0.30, 0.45) * pow(clamp(waves, 0.0, 1.0), 2.0) * 0.04 * still;
+        col += float3(0.40, 0.27, 0.17) * pow(clamp(waves, 0.0, 1.0), 2.0) * 0.04 * still;
     }
 
     // Faint band where sky meets water.
-    col += float3(0.30, 0.40, 0.60) * smoothstep(0.06, 0.0, abs(uv.y - HORIZON)) * 0.05;
+    col += float3(0.50, 0.32, 0.20) * smoothstep(0.06, 0.0, abs(uv.y - HORIZON)) * 0.05;
 
     // Stars in the sky, dimmed near the moon and as the night deepens.
     if (uv.y < HORIZON) {
@@ -170,7 +172,7 @@ half4 stillWaterField(float2 pos, half4 color,
         float star = step(0.986, sh) * exp(-(sd * sd) / 0.04) * smoothstep(0.0, 0.5, (HORIZON - uv.y) / HORIZON);
         float tw   = 0.55 + 0.45 * sin(time * 1.7 + sh * 100.0);
         float nearMoon = smoothstep(0.0, 0.25, md);
-        col += float3(0.85, 0.90, 1.0) * star * tw * 0.5 * (1.0 - 0.6 * p) * nearMoon;
+        col += float3(1.0, 0.88, 0.74) * star * tw * 0.45 * (1.0 - 0.6 * p) * nearMoon;
     }
 
     // Soft vignette to settle the eye toward the center.
