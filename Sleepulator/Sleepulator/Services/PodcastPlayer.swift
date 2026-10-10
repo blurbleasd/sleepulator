@@ -149,6 +149,15 @@ final class PodcastPlayer: NSObject {
     /// in (the "next podcast doesn't start at the beginning" race). The sleep-timer keep-alive
     /// (backgroundTick) is intentionally NOT gated by this — it must keep firing across a swap.
     private(set) var isLoadingItem = false
+    /// Whether the load in flight starts playing once its item is in. `play()` sets it; `pause()`
+    /// and `stop()` clear it. The load awaits the tap attach (up to 1.5 s) and the resume-seek
+    /// before it plays, and it used to play regardless: a lock-screen or AirPods pause, a call, or
+    /// the sleep timer's terminal stop in that window was undone, and the next episode started
+    /// after everything had stopped.
+    private var playWhenLoaded = false
+    /// A load is in flight and will start playing when it lands. The owner counts it as playing
+    /// when deciding whether to pause (a call, headphones out): `isPodPlaying` is still false then.
+    var isStartingPlayback: Bool { isLoadingItem && playWhenLoaded }
     /// Read-only outside so tests can drive the item-level failure notifications.
     private(set) var currentItem: AVPlayerItem?
     private var currentTitle: String = "No episode loaded"
@@ -406,6 +415,7 @@ final class PodcastPlayer: NSObject {
         cancelStallWatchdog()            // a fresh item — any pending stall belongs to the old one
         onPlaybackNote?(nil)             // clear a stale "stream lost"/"buffering" note on load
         isLoadingItem = true             // block position writes until the swap + resume-seek finish
+        playWhenLoaded = true            // a load is a request to play, until a pause says otherwise
 
         currentItem?.removeObserver(self, forKeyPath: "status")
         self.currentItem = playerItem
@@ -510,6 +520,15 @@ final class PodcastPlayer: NSObject {
             // Swap + seek are done; let the observer record positions for the new item again.
             self.isLoadingItem = false
 
+            // Paused or stopped while this loaded: the new item is in, at its start position, and
+            // stays paused. `pause()` already reported it; `pausedAt` stays set so a media-services
+            // reset reads it as paused.
+            guard playWhenLoaded else {
+                Log.audio.notice("podcast load landed after a pause — holding it paused (id=\(id, privacy: .public))")
+                onTitleUpdate?(title)
+                updateNowPlaying(isPlaying: false)
+                return
+            }
             pausedAt = nil                   // a fresh load isn't a "resume after pause"
             beginFadeIn()                    // ease in from silence, driven by the render thread
             player?.play()
@@ -521,6 +540,12 @@ final class PodcastPlayer: NSObject {
     }
     
     func toggle() -> Bool {
+        // Mid-load the AVPlayer's state describes the previous item (an auto-advance's finished
+        // one reads paused), so go by what the load will do: an AirPods tap there means pause.
+        if isLoadingItem {
+            if playWhenLoaded { pause(); return false }
+            return resume()
+        }
         guard let player = player else { return false }
         if player.timeControlStatus == .playing {
             player.pause()
@@ -534,6 +559,14 @@ final class PodcastPlayer: NSObject {
     
     @discardableResult
     func resume() -> Bool {
+        // Mid-load the AVPlayer still holds the previous item (or doesn't exist yet), so playing it
+        // would replay the old episode under the new title. Re-arm the load: it plays on landing.
+        if isLoadingItem {
+            playWhenLoaded = true
+            Log.activateAudioSession("podcast resume mid-load")
+            onResume?()
+            return true
+        }
         guard let player = player else { return false }
         // Give the owner first refusal: if the loaded item is a finished episode the queue has
         // already advanced past (sleep-aware hold), the owner loads the real head instead of us
@@ -586,6 +619,7 @@ final class PodcastPlayer: NSObject {
     }
 
     func pause() {
+        playWhenLoaded = false           // a load in flight lands paused (see `playWhenLoaded`)
         cancelStallWatchdog()            // a paused stream must not be auto-skipped by the watchdog
         pausedAt = Date()
         player?.pause()
@@ -595,6 +629,7 @@ final class PodcastPlayer: NSObject {
     }
 
     func stop() {
+        playWhenLoaded = false           // the timer's terminal stop must not be undone by a load
         cancelStallWatchdog()
         pausedAt = Date()
         player?.pause()
@@ -876,7 +911,8 @@ final class PodcastPlayer: NSObject {
             self?.resume() == true ? .success : .commandFailed
         }
         center.pauseCommand.addTarget { [weak self] _ in
-            guard let self = self, self.player != nil else { return .commandFailed }
+            // Mid-load there may be no AVPlayer yet (a first load), but there's a load to hold.
+            guard let self = self, self.player != nil || self.isLoadingItem else { return .commandFailed }
             self.pause()
             return .success
         }

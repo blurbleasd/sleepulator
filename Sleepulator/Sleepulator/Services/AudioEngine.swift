@@ -314,6 +314,11 @@ final class AudioEngine: ObservableObject {
         }
     }
     var isAnythingPlaying: Bool { isPodPlaying || noiseOn || binauralOn }
+    /// Playing, or loading an episode that will start the moment it lands. The "pause the podcast
+    /// if it's playing" calls that aren't a tap on a control showing `isPodPlaying` read this: a
+    /// call, headphones out, Pause All, Apple Music. Mid-load `isPodPlaying` is false (or still true
+    /// from the episode that just ended), and a pause skipped there was undone by the load.
+    var podcastIsPlayingOrStarting: Bool { isPodPlaying || podPlayer.isStartingPlayback }
 
     // MARK: Apple Music (Focus-only parallel source)
     // Low-frequency toggles, safe to @Published (a track change fires at most once per song, not
@@ -873,7 +878,9 @@ final class AudioEngine: ObservableObject {
     }
 
     func resumePodcast() {
-        if podPlayer.hasPlayer {
+        // A first load has no AVPlayer until it lands; play then re-arms it (it may have been
+        // paused mid-load) rather than starting the queue head over it.
+        if podPlayer.hasPlayer || podPlayer.isLoadingItem {
             podPlayer.resume()
         } else if let first = queueManager.queue.first {
             podTitle = first.title
@@ -946,7 +953,7 @@ final class AudioEngine: ObservableObject {
     func startAppleMusic<Item: PlayableMusicItem>(_ item: Item) {
         Task { @MainActor in
             guard await appleMusic.ensureAuthorized() else { return }
-            if isPodPlaying { podPlayer.pause() }
+            if podcastIsPlayingOrStarting { podPlayer.pause() }
             setAppleMusicMixing(true)
             await appleMusic.play(item)
         }
@@ -959,7 +966,7 @@ final class AudioEngine: ObservableObject {
                 appleMusic.pause()
             } else {
                 guard appleMusic.hasSelection else { return }
-                if isPodPlaying { podPlayer.pause() }
+                if podcastIsPlayingOrStarting { podPlayer.pause() }
                 setAppleMusicMixing(true)
                 await appleMusic.resume()
             }
@@ -1018,7 +1025,7 @@ final class AudioEngine: ObservableObject {
         podWasPlayingBeforeInterruption = false
         noiseOn = false
         binauralOn = false
-        if isPodPlaying { podPlayer.pause() }
+        if podcastIsPlayingOrStarting { podPlayer.pause() }
         if appleMusic.isPlaying { appleMusic.pause() }
         isMasterPauseTransition = false
     }
@@ -1394,15 +1401,19 @@ final class AudioEngine: ObservableObject {
     /// Main-queue only (AudioSessionController hops every forward to main).
     private var podWasPlayingBeforeInterruption = false
 
-    private func handleInterruption(note: Notification) {
+    /// Internal so the tests can deliver an interruption without the audio session.
+    func handleInterruption(note: Notification) {
         guard let typeValue = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
               let type = AVAudioSession.InterruptionType(rawValue: typeValue) else { return }
 
         if type == .began {
-            Log.timer.notice("interruption began (podWasPlaying=\(self.isPodPlaying, privacy: .public))")
-            podWasPlayingBeforeInterruption = podWasPlayingBeforeInterruption || isPodPlaying
+            // A load in flight counts as playing: it would start the episode as soon as it landed,
+            // straight through the call, and the call's end should bring it back.
+            let podActive = podcastIsPlayingOrStarting
+            Log.timer.notice("interruption began (podWasPlaying=\(podActive, privacy: .public))")
+            podWasPlayingBeforeInterruption = podWasPlayingBeforeInterruption || podActive
             genEngine.handleInterruption(shouldResume: false)
-            if isPodPlaying { podPlayer.pause() }
+            if podActive { podPlayer.pause() }
         } else if type == .ended {
             // A missing options key must not abort recovery: the old early-return here skipped
             // the suspend-cancel, the session reactivation, AND the engine restart — a silent
@@ -1445,7 +1456,7 @@ final class AudioEngine: ObservableObject {
         // syncBeatMode() below switches them to isochronic, which (unlike a true binaural beat)
         // actually works on a speaker.
         if reason == .oldDeviceUnavailable {
-            if isPodPlaying { podPlayer.pause() }
+            if podcastIsPlayingOrStarting { podPlayer.pause() }
             // Headphones went away — also void a pending post-interruption resume, or a call
             // during which the AirPods died would resume the spoken podcast on the SPEAKER
             // (the exact wake-the-room case this pause exists to prevent).

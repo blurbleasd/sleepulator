@@ -1386,7 +1386,7 @@ final class PodcastPlayerRebuildTests: XCTestCase {
     }
 
     /// 16-bit mono PCM WAV, a very quiet 220 Hz tone (real samples, not digital zero).
-    private static func quietWav(seconds: Int, sampleRate: Int = 44_100) -> Data {
+    static func quietWav(seconds: Int, sampleRate: Int = 44_100) -> Data {
         let count = seconds * sampleRate
         var pcm = Data(capacity: count * 2)
         for i in 0..<count {
@@ -2775,5 +2775,181 @@ final class QueueMoveToHeadTests: XCTestCase {
         qm.moveToHead(ep("d"))
         XCTAssertEqual(qm.queue.map(\.id), ["d", "c", "a", "b"])
         sub.cancel()
+    }
+}
+
+/// A pause, a stop or a call while an episode is still loading must stick. The load awaits the
+/// limiter tap (up to 1.5 s) and the resume-seek, then used to play regardless, undoing the pause.
+/// Real AVPlayer (simulator), like `PodcastPlayerRebuildTests`.
+@MainActor
+final class PodcastLoadHoldTests: XCTestCase {
+    private var fileURL: URL!
+
+    override func setUpWithError() throws {
+        fileURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("hold-\(UUID().uuidString).wav")
+        try PodcastPlayerRebuildTests.quietWav(seconds: 20).write(to: fileURL)
+    }
+
+    override func tearDownWithError() throws {
+        try? FileManager.default.removeItem(at: fileURL)
+    }
+
+    private func waitUntil(_ timeout: TimeInterval = 8, _ condition: () -> Bool) async -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if condition() { return true }
+            try? await Task.sleep(nanoseconds: 20_000_000)
+        }
+        return condition()
+    }
+
+    private func settle(_ seconds: Double = 1.5) async {
+        try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+    }
+
+    func testAPauseDuringALoadHoldsTheEpisodePaused() async {
+        let p = PodcastPlayer()
+        defer { p.stop() }
+        var reports: [Bool] = []
+        p.onPlaybackStateChanged = { reports.append($0) }
+        let id = "hold-\(UUID().uuidString)"
+        p.play(url: fileURL.absoluteString, id: id, title: "Held", resume: false)
+        XCTAssertTrue(p.isStartingPlayback)
+        p.pause()                                     // the lock screen, inside the load window
+        XCTAssertFalse(p.isStartingPlayback)
+
+        let landed = await waitUntil { p.hasPlayer && !p.isLoadingItem }
+        XCTAssertTrue(landed, "the load still lands")
+        await settle()
+        XCTAssertEqual(reports, [false], "it must not report playing after the pause")
+        XCTAssertLessThan(p.currentPositionSeconds ?? 0, 0.3, "the clock must not run")
+        XCTAssertEqual(p.currentEpisodeId, id, "the new episode is loaded, paused")
+
+        p.resume()                                    // and a later play starts it
+        let playing = await waitUntil { (p.currentPositionSeconds ?? 0) > 0.5 }
+        XCTAssertTrue(playing)
+        XCTAssertEqual(reports.last, true)
+    }
+
+    func testTheTimersStopDuringAnAutoAdvanceIsNotUndone() async {
+        let p = PodcastPlayer()
+        defer { p.stop() }
+        p.play(url: fileURL.absoluteString, id: "a-\(UUID().uuidString)", title: "A", resume: false)
+        let first = await waitUntil { (p.currentPositionSeconds ?? 0) > 0.3 }
+        XCTAssertTrue(first, "the first episode never played")
+
+        var reports: [Bool] = []
+        p.onPlaybackStateChanged = { reports.append($0) }
+        let next = "b-\(UUID().uuidString)"
+        p.play(url: fileURL.absoluteString, id: next, title: "B", resume: false)   // the queue moves on
+        p.stop()                                      // ...and the sleep timer's terminal stop lands
+        let landed = await waitUntil { !p.isLoadingItem }
+        XCTAssertTrue(landed)
+        await settle()
+        XCTAssertEqual(reports, [false], "the next episode must not start after everything stopped")
+        XCTAssertEqual(p.currentEpisodeId, next)
+        XCTAssertLessThan(p.currentPositionSeconds ?? 0, 0.3)
+    }
+
+    func testAPlayDuringALoadAfterAPauseStillStartsIt() async {
+        // Guard against over-correcting: pause then play inside the window plays the NEW episode.
+        let p = PodcastPlayer()
+        defer { p.stop() }
+        var reports: [Bool] = []
+        p.onPlaybackStateChanged = { reports.append($0) }
+        p.play(url: fileURL.absoluteString, id: "r-\(UUID().uuidString)", title: "R", resume: false)
+        p.pause()
+        XCTAssertTrue(p.resume(), "a play mid-load is handled, not refused")
+        XCTAssertTrue(p.isStartingPlayback)
+        let playing = await waitUntil { (p.currentPositionSeconds ?? 0) > 0.5 }
+        XCTAssertTrue(playing)
+        XCTAssertEqual(reports.last, true)
+    }
+
+    func testAnAirPodsToggleDuringALoadPauses() async {
+        // Mid-load there's no playing AVPlayer to read, so a toggle used to do nothing (or resume).
+        let p = PodcastPlayer()
+        defer { p.stop() }
+        var reports: [Bool] = []
+        p.onPlaybackStateChanged = { reports.append($0) }
+        p.play(url: fileURL.absoluteString, id: "t-\(UUID().uuidString)", title: "T", resume: false)
+        XCTAssertFalse(p.toggle(), "a toggle over a starting load means pause")
+        _ = await waitUntil { p.hasPlayer && !p.isLoadingItem }
+        await settle()
+        XCTAssertEqual(reports, [false])
+        XCTAssertLessThan(p.currentPositionSeconds ?? 0, 0.3)
+    }
+
+    // MARK: Through the engine
+
+    private final class NoopBackstop: SleepTimerBackstopScheduling {
+        func schedule(after seconds: TimeInterval) {}
+        func cancel() {}
+    }
+
+    private func sleepEngine(nightMinutes: Double) -> AudioEngine {
+        let e = AudioEngine()
+        e.sleepTimer.backstop = NoopBackstop()
+        e.nightLengthProvider = { nightMinutes }
+        e.focusMode = false
+        return e
+    }
+
+    private func interruption(_ type: AVAudioSession.InterruptionType, shouldResume: Bool = false) -> Notification {
+        var info: [AnyHashable: Any] = [AVAudioSessionInterruptionTypeKey: type.rawValue]
+        if type == .ended {
+            info[AVAudioSessionInterruptionOptionKey] =
+                (shouldResume ? AVAudioSession.InterruptionOptions.shouldResume : []).rawValue
+        }
+        return Notification(name: AVAudioSession.interruptionNotification, object: nil, userInfo: info)
+    }
+
+    func testPlayOnAFirstLoadPausedMidwayResumesThatLoad() {
+        // No AVPlayer exists until a first load lands, so Play used to start the queue's head
+        // instead (Resume Last Night's episode swapped for another one).
+        let e = sleepEngine(nightMinutes: 0)
+        defer { e.stopAll() }
+        e.queueManager.queue = [Episode(id: "head-\(UUID().uuidString)", title: "Head",
+                                        audioUrl: fileURL.absoluteString, duration: 20)]
+        let id = "last-night-\(UUID().uuidString)"
+        e.loadPodcast(fileURL.absoluteString, id: id, fallbackTitle: "Last night")
+        e.pauseAll()
+        XCTAssertFalse(e.podcastIsPlayingOrStarting)
+        e.togglePodcast()                              // the Play the paused load shows
+        XCTAssertTrue(e.podcastIsPlayingOrStarting)
+        XCTAssertEqual(e.loadedEpisode?.id, id, "the same episode, not the queue head")
+    }
+
+    func testTheTerminalStopDuringALoadArmsNoFreshNight() async {
+        // The reported symptom: the next episode started after "everything stopped", and that
+        // idle → playing edge armed a brand-new night timer over it.
+        let e = sleepEngine(nightMinutes: 45)
+        defer { e.stopAll(); e.sleepTimer.cancelTimer() }
+        e.loadPodcast(fileURL.absoluteString, id: "stop-\(UUID().uuidString)", resume: false)
+        XCTAssertTrue(e.podcastIsPlayingOrStarting)
+        e.stopAll()
+        XCTAssertFalse(e.podcastIsPlayingOrStarting)
+        let landed = await waitUntil { e.hasLoadedEpisode }
+        XCTAssertTrue(landed)
+        await settle()
+        XCTAssertFalse(e.isPodPlaying, "stopped means stopped")
+        XCTAssertEqual(e.sleepTimer.timerRemaining, 0, "no night timer armed over a stopped app")
+    }
+
+    func testACallDuringALoadHoldsItAndItsEndBringsItBack() async {
+        let e = sleepEngine(nightMinutes: 0)
+        defer { e.stopAll() }
+        e.loadPodcast(fileURL.absoluteString, id: "call-\(UUID().uuidString)", resume: false)
+        XCTAssertFalse(e.isPodPlaying, "mid-load: not reported playing yet")
+        e.handleInterruption(note: interruption(.began))
+        XCTAssertFalse(e.podcastIsPlayingOrStarting, "the call pauses the load in flight")
+        _ = await waitUntil { e.hasLoadedEpisode }
+        await settle()
+        XCTAssertFalse(e.isPodPlaying, "the episode must not start under the call")
+
+        e.handleInterruption(note: interruption(.ended, shouldResume: true))
+        let resumed = await waitUntil { e.isPodPlaying }
+        XCTAssertTrue(resumed, "the call's end brings back what was starting")
     }
 }
