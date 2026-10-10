@@ -515,7 +515,7 @@ longest, so the window is widest). Export logs after each.
    log shows `ignoring the end of a podcast item that's since been replaced`, and nothing else
    moved.
 
-### R. Orb breath + Focus ring on ProMotion (added 2026-10-10, simulator-checked only)
+### R. Orb breath + Focus ring on ProMotion (added 2026-10-10, passed on device 2026-10-10)
 `OrbButton` and `FocusHero`'s ring moved off `TimelineView(.animation(paused:))`, which stops
 driving frames on 120 Hz screens (device 2026-07-11, see `ShaderBackdrop`). They now swap to a
 static frame when paused, as the scenes do. The simulator animates either way, so only a
@@ -560,4 +560,4 @@ also pauses while its controls are faded to the screensaver, as the Sleep orb al
 
 | Date | Device / iOS | Sections run | Result / notes |
 |------|--------------|--------------|----------------|
-| —    | —            | —            | No native device pass recorded yet. |
+| 2026-10-10 | iPhone 16 Pro (ProMotion) / iOS 27.0.1 | §3R | ✅ Pass. The orb breathes and the Focus ring depletes smoothly. Debug build of `main` + #29 (`efbdbaa`) + the screensaver branch (`95ee8f0`). |
