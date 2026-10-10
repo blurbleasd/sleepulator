@@ -362,6 +362,21 @@ this section is where you do it. Do it in a dark room at your real bedtime brigh
      (e.g. Brown + Deep), not a bare noise.
    - ✅ The first Build mix shows one line under "Your mix" about turning on several sounds. It
      doesn't show on the next open.
+18. **Podcasts and Settings** (added 2026-10-10, simulator-checked only).
+   - **Podcasts (no shows yet):**
+     - ✅ No search field or "Import OPML" in the toolbar.
+     - ✅ The empty state is centred, with "Find a sleep podcast".
+     - ✅ At the largest text size it scrolls instead of clipping.
+   - **Add sheet:**
+     - ✅ "Find a sleep podcast" opens on live "Sleep stories" results, each with an add icon.
+     - ✅ "+" opens on four starter chips.
+     - ✅ It has a Cancel button.
+     - ✅ "Import from another podcast app (OPML)" opens the file picker after the sheet closes.
+   - **Settings:**
+     - ✅ It opens on Sleep, then Podcasts at night, Focus, Sound, Display, Podcasts, Backup and
+       Diagnostics, in sentence case.
+     - ✅ The Focus steppers change the next Pomodoro phase.
+     - ✅ Backup export, restore and "Export last night's log" still work.
 
 ---
 
