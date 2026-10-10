@@ -34,7 +34,8 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
 - **Widget** — `SleepulatorWidget/` (sleep-timer Live Activity).
 - **UI tests** — `SleepulatorUITests/` (XCUITest, in the shared scheme so CI runs it).
   `HomeLayoutUITests` checks Focus's Build mix / Focus session row clears the mini-player and
-  that a tap starts the Pomodoro. The target is made by `Sleepulator/setup_ui_tests.rb`
+  that a tap starts the Pomodoro, and that Sleep Home at rest has no mini-player in the
+  accessibility tree and hittable controls. The target is made by `Sleepulator/setup_ui_tests.rb`
   (idempotent; re-run it after adding a file there). It runs in the same app the unit tests are
   hosted in, so a UI test must leave persisted state (mode, night length) as it found it.
 - **Tests** — `SleepulatorTests/` (XCTest). Six files, many suites: `AudioMathTests.swift`;
@@ -158,6 +159,17 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   To measure a full-bleed view, put `.onGeometryChange` *before* its `.ignoresSafeArea()`.
   Placed after it, you get the un-expanded frame (the tab bar's top edge, not the screen's). That
   bug once hid Focus's whole bottom row under the bar; `HomeLayoutUITests` now guards it.
+- **Hidden means not rendered.** On iOS 26 a rendered SwiftUI view stays in the accessibility tree
+  XCUITest reads through `opacity(0)`, `.allowsHitTesting(false)` and even
+  `.accessibilityHidden(true)`. So ContentView takes the hidden mini-player out of the hierarchy
+  (`if !miniPlayerHidden`, an opacity transition), and presents its Now Playing sheet itself so the
+  sheet never depends on the bar. To prove a hidden view is gone, assert `!exists` in a UI test.
+- **A `.contentShape(.accessibility, …)` can become its container's frame.** NightRing's band shape
+  made Home's root accessibility container a 250 pt square around the orb, which clipped every
+  other Sleep Home control out of the accessibility hit test. XCUITest called them unhittable,
+  while real taps still worked. HomeView's root sets `.contentShape(.accessibility, Rectangle())`
+  to keep its own. If a screen's controls turn unhittable in XCUITest, compare each container's
+  frame in `app.debugDescription` with the screen.
 - **The night veil closes an idle Now Playing sheet.** Any touch anywhere restarts the veil's
   minute (`WindowActivity`), and a presented sheet or dialog makes it wait rather than drop over it
   (`SessionGuards.veilTimeout`). The Now Playing sheet is the exception (`.closeNowPlaying`): left

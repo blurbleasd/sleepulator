@@ -319,6 +319,10 @@ this section is where you do it. Do it in a dark room at your real bedtime brigh
 6. **Dark launch.** Cold-launch at night. ✅ No white flash before Home (warm near-black launch).
 7. **VoiceOver.** The ring is "Night length, 45 minutes", swipe up/down adjusts in 5s; the on-ramp
    close button says "Close without starting your mix" (and doesn't start it).
+   *Touch exploration (added 2026-10-10).* On Sleep Home at rest, slide a finger around the
+   screen. ✅ The mode switcher, the night line and Build mix are each found by touch, not only by
+   swipe. The orb's centre reads "Play", the band around it "Night length", and nothing reads from
+   the hidden mini-player's spot above Build mix.
 8. **Ring drag keeps the controls awake.** Mid-night (sounds playing): tap to wake, then drag the
    ring slowly for 5+ s. ✅ The controls don't fade under the finger; ~3 s after release they do.
    Inside the last 10 minutes the ring is locked (handle dims); a drag that ends where it began

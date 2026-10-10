@@ -51,6 +51,36 @@ final class HomeLayoutUITests: XCTestCase {
         app.buttons["Sleep mode"].tap()
     }
 
+    /// Sleep Home at rest (nothing loaded) hides the mini-player, and hidden must mean gone from
+    /// the accessibility tree: faded to opacity 0 it stayed there on iOS 26, over Build mix.
+    /// And Home's controls must all take a tap: the night ring's accessibility shape once became
+    /// Home's whole frame, and XCUITest called everything outside the ring unhittable.
+    @MainActor
+    func testSleepHomeAtRestHasNoMiniPlayer() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launch()
+
+        // Sleep from either start state. A fresh launch has no episode loaded.
+        let sleepMode = app.buttons["Sleep mode"]
+        XCTAssertTrue(sleepMode.waitForExistence(timeout: 15), "No mode switcher on Home")
+        sleepMode.tap()
+
+        let buildMix = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Build mix")).firstMatch
+        let miniPlayer = app.descendants(matching: .any)["miniPlayer"]
+        XCTAssertTrue(buildMix.waitForExistence(timeout: 5), "No Build mix button")
+        // Coming from Focus, the bar fades out over ~1 s.
+        XCTAssertTrue(waitUntil(timeout: 5) { !miniPlayer.exists },
+                      "The hidden mini-player is still in the accessibility tree on Sleep Home")
+        XCTAssertTrue(buildMix.isHittable, "Build mix is covered")
+        XCTAssertTrue(sleepMode.isHittable, "The mode switcher is clipped out of Home's hit test")
+
+        // Off Home it comes back: Podcasts always shows it.
+        app.tabBars.buttons["Podcasts"].tap()
+        XCTAssertTrue(miniPlayer.waitForExistence(timeout: 5), "No mini-player on Podcasts")
+        app.tabBars.buttons["Sleep"].tap()
+    }
+
     /// Polls `condition` on the main run loop until it holds or `timeout` passes.
     @MainActor
     private func waitUntil(timeout: TimeInterval, _ condition: () -> Bool) -> Bool {

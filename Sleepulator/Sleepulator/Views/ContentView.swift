@@ -154,17 +154,22 @@ struct ContentView: View {
             // Mini-player floats above the tab bar (a ZStack overlay, not a TabView safe-area
             // inset — that docks it ON the UIKit tab bar). Tabs reserve room for it themselves from
             // its measured top edge (`miniPlayerTop`, MiniPlayerClearance).
-            MiniPlayerView(audio: audio, progress: audio.playbackProgress, queue: audio.queueManager,
-                           selectedTab: $selectedTab, showNowPlaying: $showNowPlaying,
-                           onSheetInteraction: { if !nightDimmed { scheduleDim() } })
-                .simultaneousGesture(TapGesture().onEnded { miniPlayerTouches &+= 1 })
-                .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).minY } action: { top in
-                    miniPlayerTop = top
+            // Hidden means not rendered. On iOS 26 a rendered view stays in the accessibility tree
+            // XCUITest reads through opacity 0, .allowsHitTesting(false) and
+            // .accessibilityHidden(true) alike: the invisible bar sat in it over Sleep Home's Build
+            // mix. While it's out, `miniPlayerTop` keeps its last measurement.
+            ZStack {
+                if !miniPlayerHidden {
+                    MiniPlayerView(audio: audio, progress: audio.playbackProgress, queue: audio.queueManager,
+                                   selectedTab: $selectedTab, showNowPlaying: $showNowPlaying)
+                        .simultaneousGesture(TapGesture().onEnded { miniPlayerTouches &+= 1 })
+                        .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).minY } action: { top in
+                            miniPlayerTop = top
+                        }
+                        .transition(.opacity)
                 }
-                .opacity(miniPlayerHidden ? 0 : 1)
-                .allowsHitTesting(!miniPlayerHidden)
-                .accessibilityHidden(miniPlayerHidden)
-                .animation(.easeInOut(duration: 0.9), value: miniPlayerHidden)
+            }
+            .animation(.easeInOut(duration: 0.9), value: miniPlayerHidden)
 
             // Full-screen night veil — over the tabs and mini-player both.
             if nightDimmed {
@@ -187,6 +192,16 @@ struct ContentView: View {
                     .accessibilityLabel("Screen dimmed for sleep. Tap to wake.")
                     .onAppear { flashVeilCaption() }
             }
+        }
+        // The mini-player's full player. Presented here, not from the bar, so it never depends on
+        // the bar being rendered.
+        .sheet(isPresented: $showNowPlaying) {
+            NowPlayingSheet(audio: audio, queue: audio.queueManager, progress: audio.playbackProgress,
+                            isPresented: $showNowPlaying, pal: pal,
+                            onInteraction: { if !nightDimmed { scheduleDim() } })
+                // The system grabber (the hand-drawn one scrolled away with the content).
+                .presentationDragIndicator(.visible)
+                .presentationBackground(pal.bg)
         }
         // Force dark mode for bedtime aesthetic
         .preferredColorScheme(.dark)
