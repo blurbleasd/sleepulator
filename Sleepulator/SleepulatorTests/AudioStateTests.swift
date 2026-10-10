@@ -2029,6 +2029,28 @@ final class PlayerQueueActionTests: XCTestCase {
         XCTAssertEqual(qm.queue.map(\.id), ["A", "C", "B"])
     }
 
+    func testRemoveThenUndoPutsItBackInPlace() {
+        let qm = PodcastQueueManager()
+        qm.queue = [ep("A"), ep("B"), ep("C")]
+        let at = qm.remove(ep("B"))
+        XCTAssertEqual(at, 1)
+        XCTAssertEqual(qm.queue.map(\.id), ["A", "C"])
+        qm.restore(ep("B"), at: at!)
+        XCTAssertEqual(qm.queue.map(\.id), ["A", "B", "C"])
+        qm.restore(ep("B"), at: 0)                     // already back: no duplicate
+        XCTAssertEqual(qm.queue.map(\.id), ["A", "B", "C"])
+    }
+
+    func testUndoAfterTheQueueShrankClampsTheIndex() {
+        let qm = PodcastQueueManager()
+        qm.queue = [ep("A"), ep("B"), ep("C")]
+        let at = qm.remove(ep("C"))!                  // was at 2
+        qm.remove(ep("B"))
+        qm.restore(ep("C"), at: at)
+        XCTAssertEqual(qm.queue.map(\.id), ["A", "C"])
+        XCTAssertNil(qm.remove(ep("Z")), "not queued")
+    }
+
     func testRetryPutsTheFailedEpisodeBackAndReloadsIt() {
         let engine = AudioEngine()
         engine.queueManager.autoPlay = false

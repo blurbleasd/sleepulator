@@ -6,6 +6,10 @@ import MediaPlayer
 /// ChipRow): depth from darkness, accents as hairlines and glyphs, no solid fills, nothing
 /// cold-white. In Sleep the artwork sits back a long way and the title is held to two lines;
 /// Focus, a daytime mode, keeps the artwork full.
+///
+/// Built for a drowsy thumb: back · play · forward, symmetric, with play dead centre; nothing
+/// moves under the finger (the status line has a fixed slot); big scrubs can be taken back; a
+/// queue removal can be undone; and Next lives with the queue it acts on, not beside skip-15.
 struct NowPlayingSheet: View {
     @ObservedObject var audio: AudioEngine
     /// Observed directly so the Up Next queue list refreshes after Phase 3 dropped the
@@ -21,8 +25,20 @@ struct NowPlayingSheet: View {
 
     @State private var isDraggingScrubber = false
     @State private var scrubProgress: Double = 0.0
+    /// Where a scrub began, so a long jump can be taken back.
+    @State private var scrubFrom: Double = 0
+    /// "Back to 3:20": offered for a few seconds after a scrub jumps more than two minutes.
+    @State private var seekUndo: Double?
+    /// The last queue removal, offered back for a few seconds.
+    @State private var removed: RemovedEpisode?
     @ScaledMetric(relativeTo: .largeTitle) private var playDisc: CGFloat = 76
     @Environment(\.dynamicTypeSize) private var typeSize
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private struct RemovedEpisode: Equatable {
+        let episode: Episode
+        let index: Int
+    }
 
     /// One source for what's playing and what follows (see NowPlayingState).
     private var state: NowPlayingState { NowPlayingState(loaded: audio.loadedEpisode, queue: queue.queue) }
@@ -36,95 +52,152 @@ struct NowPlayingSheet: View {
     /// Sleep's dusk palette, the dark-room case.
     private var night: Bool { pal.warm }
 
+    private func withMotion(_ change: () -> Void) {
+        if reduceMotion { change() } else { withAnimation(.easeOut(duration: 0.25)) { change() } }
+    }
+
+    // MARK: Up Next rows
+
     @ViewBuilder
     private func queueRow(ep: Episode, isFirst: Bool, isLast: Bool) -> some View {
-        let title = Text(ep.title)
-            .font(.system(.headline, design: .rounded))
-            .foregroundColor(pal.text)
-            .lineLimit(2)
-            .minimumScaleFactor(0.7)
-            .layoutPriority(1)
+        // The title plays the episode now (it couldn't be reached from the queue before).
+        let title = Button(action: { queue.playEpisode(ep) }) {
+            Text(ep.title)
+                .font(.system(.headline, design: .rounded))
+                .foregroundColor(pal.text)
+                .lineLimit(2)
+                .multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint("Plays now")
+        .layoutPriority(1)
 
         let nowPlayingId = audio.loadedEpisode?.id
-        let controls = HStack(spacing: 8) {
-            if !isFirst {
-                Button(action: { queue.moveInUpNext(ep, by: -1, nowPlayingId: nowPlayingId) }) {
-                    Image(systemName: "chevron.up.circle.fill").foregroundColor(pal.dim).font(.title3)
+        // Fixed slots: up, down and remove keep their places on every row (a missing "up" on the
+        // first row used to slide the others over, so the same spot did different things).
+        let controls = HStack(spacing: UI.xs) {
+            rowButton("chevron.up.circle", label: "Move \(ep.title) up", hidden: isFirst) {
+                withMotion { queue.moveInUpNext(ep, by: -1, nowPlayingId: nowPlayingId) }
+            }
+            rowButton("chevron.down.circle", label: "Move \(ep.title) down", hidden: isLast) {
+                withMotion { queue.moveInUpNext(ep, by: 1, nowPlayingId: nowPlayingId) }
+            }
+            rowButton("xmark.circle", label: "Remove \(ep.title) from queue", hidden: false) {
+                withMotion {
+                    if let i = queue.remove(ep) { removed = RemovedEpisode(episode: ep, index: i) }
                 }
-                .frame(minWidth: 44, minHeight: 44)
-                .accessibilityLabel("Move \(ep.title) up")
-            }
-            if !isLast {
-                Button(action: { queue.moveInUpNext(ep, by: 1, nowPlayingId: nowPlayingId) }) {
-                    Image(systemName: "chevron.down.circle.fill").foregroundColor(pal.dim).font(.title3)
+                let token = ep.id
+                DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
+                    if removed?.episode.id == token { withMotion { removed = nil } }
                 }
-                .frame(minWidth: 44, minHeight: 44)
-                .accessibilityLabel("Move \(ep.title) down")
             }
-            // Dim like its neighbours: an accent disc made "remove" the loudest thing in each row.
-            Button(action: { queue.remove(ep) }) {
-                Image(systemName: "xmark.circle.fill").foregroundColor(pal.dim).font(.title3)
-            }
-            .frame(minWidth: 44, minHeight: 44)
-            .accessibilityLabel("Remove \(ep.title) from queue")
         }
 
         // At accessibility sizes the title can't share a row with three buttons — stack them.
         Group {
             if typeSize.isAccessibilitySize {
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: UI.sm) {
                     title
                     HStack { Spacer(); controls }
                 }
             } else {
-                HStack(spacing: 12) {
+                HStack(spacing: UI.md) {
                     title
-                    Spacer()
                     controls
                 }
             }
         }
-        .padding(.vertical, 12)
-        .padding(.horizontal, 16)
-        .background(pal.text.opacity(0.05))
-        .cornerRadius(12)
-        .padding(.horizontal, 30)
+        .padding(.vertical, UI.xs)
+        .padding(.horizontal, UI.lg)
+        .background(RoundedRectangle(cornerRadius: UI.cardRadius).fill(pal.text.opacity(0.05)))
+        .padding(.horizontal, UI.xxl)
     }
 
-    /// Under the title: what the player is doing when that needs saying. A failure gets its way
-    /// out right here, not a raw system error. Notes are information, not alarms: dim, not amber.
+    /// An outlined row glyph in the dim tone (the filled discs read as lit buttons). A hidden one
+    /// keeps its slot.
+    private func rowButton(_ symbol: String, label: String, hidden: Bool,
+                           action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.title3)
+                .foregroundColor(pal.dim)
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .opacity(hidden ? 0 : 1)
+        .disabled(hidden)
+        .accessibilityHidden(hidden)
+        .accessibilityLabel(label)
+    }
+
+    // MARK: Status
+
+    /// Under the title, in a slot of fixed height, so a note arriving after Play (buffering, the
+    /// limiter) no longer pushes the transport down under the thumb that just pressed it. A
+    /// failure gets its way out right here, not a raw system error. Notes are information, not
+    /// alarms: dim, not amber.
+    private var statusSlot: some View {
+        // A clear 44 pt base holds the slot open when it's empty (a frame on an empty Group
+        // collapses), so the chip, a note or nothing all leave the scrubber where it was.
+        ZStack {
+            Color.clear.frame(height: 44)
+            statusContent
+        }
+        .padding(.horizontal, UI.xxl)
+    }
+
     @ViewBuilder
-    private var statusLine: some View {
-        switch phase {
-        case .failed:
-            VStack(spacing: UI.sm) {
-                Text("Couldn't play this episode")
-                    .font(.subheadline)
-                    .foregroundColor(pal.accent)
-                HStack(spacing: UI.md) {
-                    Button("Try again") { audio.retryLoadedEpisode() }
-                    if !state.upNext.isEmpty {
-                        Button("Play next") { audio.skipToNextEpisode() }
+    private var statusContent: some View {
+        Group {
+            if phase == .failed {
+                VStack(spacing: UI.sm) {
+                    Text("Couldn't play this episode")
+                        .font(.subheadline)
+                        .foregroundColor(pal.accent)
+                    HStack(spacing: UI.md) {
+                        Button("Try again") { audio.retryLoadedEpisode() }
+                        if !state.upNext.isEmpty {
+                            Button("Play next") { audio.skipToNextEpisode() }
+                        }
                     }
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundColor(pal.text)
+                    .buttonStyle(.bordered)
+                    .buttonBorderShape(.capsule)
+                    .tint(pal.text)
                 }
-                .font(.subheadline.weight(.semibold))
-                .foregroundColor(pal.text)
-                .buttonStyle(.bordered)
-                .buttonBorderShape(.capsule)
-                .tint(pal.text)
-            }
-        case .ready:
-            Text(readyLine)
-                .font(.subheadline)
-                .foregroundColor(pal.dim)
-        case .loading:
-            Text("Loading…")
-                .font(.subheadline)
-                .foregroundColor(pal.dim)
-        default:
-            if let note = audio.playbackNote {
+            } else if let back = seekUndo, canSeek {
+                Button(action: {
+                    audio.seekPodcast(to: progress.duration > 0 ? back / progress.duration : 0)
+                    withMotion { seekUndo = nil }
+                }) {
+                    Label("Back to \(PlayerClock.string(back))", systemImage: "arrow.uturn.backward")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundColor(pal.text)
+                        .padding(.horizontal, UI.lg)
+                        .frame(minHeight: 44)
+                        .background(Capsule().fill(pal.text.opacity(0.10)))
+                        .overlay(Capsule().stroke(pal.accent.opacity(0.28), lineWidth: 0.5))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Back to \(PlayerClock.spoken(back))")
+            } else if phase == .loading {
+                Text("Loading…").font(.subheadline).foregroundColor(pal.dim)
+            } else if phase == .ready {
+                Text(readyLine).font(.subheadline).foregroundColor(pal.dim)
+            } else if let note = audio.playbackNote {
                 Text(note)
                     .font(.subheadline)
+                    .foregroundColor(pal.dim)
+                    .multilineTextAlignment(.center)
+            } else if audio.limiterOffForStream {
+                // The one quiet word on the limiter: here, in dim, where the podcast is. It used
+                // to be an amber ⚠ banner on Home and replaced "Playing" in the mini-player.
+                Text("Night Limiter can't soften this stream")
+                    .font(.caption)
                     .foregroundColor(pal.dim)
                     .multilineTextAlignment(.center)
             }
@@ -137,6 +210,8 @@ struct NowPlayingSheet: View {
         return "Up next · \(PlayerClock.spoken(d))"
     }
 
+    // MARK: Scrubber
+
     /// The position fader: Home's VolumeBar, not the system Slider, whose iOS 26 thumb was a
     /// pure-white capsule, the brightest object on the Sleep sheet. Relative drag, so a graze
     /// can't throw you 50 minutes, with fine trim when the finger drifts off the track. In Sleep
@@ -146,14 +221,14 @@ struct NowPlayingSheet: View {
         if phase == .live {
             Text("Live · \(PlayerClock.string(progress.elapsed))")
                 .font(.caption).foregroundColor(pal.dim).monospacedDigit()
-                .padding(.horizontal, 30)
+                .padding(.horizontal, UI.xxl)
         } else {
             // Before the player knows the length, show the episode's own (from its feed) rather
             // than a placeholder "-0:01".
             let duration = canSeek ? progress.duration : (state.hero?.duration ?? 0)
             let elapsed = canSeek ? (isDraggingScrubber ? scrubProgress * duration : progress.elapsed) : 0
             let skip = audio.skipInterval
-            VStack(spacing: 4) {
+            VStack(spacing: UI.xs) {
                 VolumeBar(
                     value: Binding(
                         get: { canSeek ? (isDraggingScrubber ? scrubProgress : progress.progress) : 0 },
@@ -167,10 +242,12 @@ struct NowPlayingSheet: View {
                         onInteraction()
                         if editing {
                             scrubProgress = progress.progress
+                            scrubFrom = progress.elapsed
                             isDraggingScrubber = true
                         } else {
                             isDraggingScrubber = false
                             audio.seekPodcast(to: scrubProgress)
+                            offerSeekUndo(from: scrubFrom, to: scrubProgress * progress.duration)
                         }
                     }
                 )
@@ -194,26 +271,26 @@ struct NowPlayingSheet: View {
 
                 HStack {
                     Text(duration > 0 ? PlayerClock.string(elapsed) : "--:--")
-                        .font(.caption2).foregroundColor(pal.dim).monospacedDigit().lineLimit(1).minimumScaleFactor(0.7)
                     Spacer()
                     Text(duration > 0 ? "-" + PlayerClock.string(duration - elapsed) : "--:--")
-                        .font(.caption2).foregroundColor(pal.dim).monospacedDigit().lineLimit(1).minimumScaleFactor(0.7)
                 }
+                .font(.caption2).foregroundColor(pal.dim).monospacedDigit().lineLimit(1)
                 .accessibilityHidden(true)
             }
-            .padding(.horizontal, 30)
-
-            // The one quiet word on the limiter: here, in dim, where the podcast is. It used to
-            // be an amber ⚠ banner on Home and replaced "Playing" in the mini-player all night.
-            if audio.limiterOffForStream {
-                Text("Night Limiter can't soften this stream")
-                    .font(.caption)
-                    .foregroundColor(pal.dim)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 30)
-            }
+            .padding(.horizontal, UI.xxl)
         }
     }
+
+    /// A scrub that lands more than two minutes away keeps the way back for eight seconds.
+    private func offerSeekUndo(from: Double, to: Double) {
+        guard abs(to - from) > 120 else { return }
+        withMotion { seekUndo = from }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 8) {
+            if seekUndo == from { withMotion { seekUndo = nil } }
+        }
+    }
+
+    // MARK: Transport
 
     @ViewBuilder
     private var playButton: some View {
@@ -234,9 +311,27 @@ struct NowPlayingSheet: View {
         }
     }
 
+    private func skipButton(forward: Bool) -> some View {
+        Button(action: { audio.seekPodcast(seconds: forward ? audio.skipInterval : -audio.skipInterval) }) {
+            Image(systemName: forward ? audio.skipForwardSymbol : audio.skipBackSymbol)
+                .font(.title2)
+                .foregroundColor(pal.accent.opacity(canSeek ? 1 : 0.35))
+                .frame(minWidth: 56, minHeight: 56)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!canSeek)
+        .accessibilityLabel("Skip \(forward ? "forward" : "back") \(Int(audio.skipInterval)) seconds")
+    }
+
+    // MARK: Body
+
     var body: some View {
+        // At accessibility text sizes the cover gives way, so the transport stays on the first
+        // screen.
+        let artSize: CGFloat = (night ? 150 : 250) * (typeSize.isAccessibilitySize ? 0.6 : 1)
         ScrollView {
-            VStack(spacing: 30) {
+            VStack(spacing: UI.xxl) {
                 // Drag indicator
                 Capsule()
                     .fill(pal.dim)
@@ -245,65 +340,36 @@ struct NowPlayingSheet: View {
 
                 // Sleep: a smaller, desaturated cover under a dark scrim, so the show's (often
                 // near-white) art no longer outshines everything else at 2am. Focus keeps it full.
-                EpisodeArtwork(url: state.hero?.artworkUrl, pal: pal, size: night ? 150 : 250,
+                EpisodeArtwork(url: state.hero?.artworkUrl, pal: pal, size: artSize,
                                dim: night ? 0.5 : 0)
                     .shadow(color: .black.opacity(0.3), radius: 20, x: 0, y: 10)
 
-                // Title & status
-                VStack(spacing: 8) {
+                VStack(spacing: UI.sm) {
                     Text(state.hero?.title ?? "Nothing queued")
                         .font(night ? .headline : .title3.weight(.semibold))
                         .foregroundColor(pal.text)
                         .multilineTextAlignment(.center)
                         .lineLimit(night ? 2 : 3)
                         .truncationMode(.tail)
-                        .padding(.horizontal)
+                        .padding(.horizontal, UI.xxl)
 
                     if state.hero == nil {
                         Text("Add episodes from a show's page.")
                             .font(.subheadline)
                             .foregroundColor(pal.dim)
                     } else {
-                        statusLine
+                        statusSlot
                     }
                 }
 
                 if state.hero != nil {
                     scrubber
 
-                    // Transports
-                    HStack(spacing: 20) {
-                        Button(action: { audio.seekPodcast(seconds: -audio.skipInterval) }) {
-                            Image(systemName: audio.skipBackSymbol)
-                                .font(.title2)
-                                .foregroundColor(pal.accent)
-                        }
-                        .frame(minWidth: 44, minHeight: 44)
-                        .disabled(!canSeek)
-                        .accessibilityLabel("Skip back \(Int(audio.skipInterval)) seconds")
-
+                    // Back · play · forward: symmetric, play centred under the thumb.
+                    HStack(spacing: UI.xxl) {
+                        skipButton(forward: false)
                         playButton
-
-                        Button(action: { audio.seekPodcast(seconds: audio.skipInterval) }) {
-                            Image(systemName: audio.skipForwardSymbol)
-                                .font(.title2)
-                                .foregroundColor(pal.accent)
-                        }
-                        .frame(minWidth: 44, minHeight: 44)
-                        .disabled(!canSeek)
-                        .accessibilityLabel("Skip forward \(Int(audio.skipInterval)) seconds")
-
-                        // Safe Next: plays the next episode, never deletes the skipped one's
-                        // download. Off when nothing is loaded (play starts the head) or nothing
-                        // follows.
-                        Button(action: { audio.skipToNextEpisode() }) {
-                            Image(systemName: "forward.end.fill")
-                                .font(.title2)
-                                .foregroundColor(pal.accent)
-                        }
-                        .frame(minWidth: 44, minHeight: 44)
-                        .disabled(!state.isLoaded || state.upNext.isEmpty)
-                        .accessibilityLabel("Play next episode")
+                        skipButton(forward: true)
                     }
                 }
 
@@ -335,42 +401,7 @@ struct NowPlayingSheet: View {
 
                 // Up Next: everything after the hero, wherever the playing episode sits.
                 if !state.upNext.isEmpty {
-                    VStack(alignment: .leading, spacing: 16) {
-                        HStack {
-                            Image(systemName: "list.dash")
-                                .foregroundColor(pal.accent)
-                                .accessibilityHidden(true)
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text("Up Next")
-                                    .font(.system(.title3, design: .rounded).bold())
-                                    .foregroundColor(pal.text)
-                                // Total remaining time — handy when picking a sleep-timer length.
-                                // Durations of 0 (unknown/live) are simply not counted.
-                                let secs = state.upNext.reduce(0.0) { $0 + max(0, $1.duration ?? 0) }
-                                let count = state.upNext.count
-                                Text("\(count) episode\(count == 1 ? "" : "s")" + (secs > 60 ? " · \(Int(secs) / 3600 > 0 ? "\(Int(secs) / 3600)h " : "")\((Int(secs) % 3600) / 60)m" : ""))
-                                    .font(.caption)
-                                    .foregroundColor(pal.dim)
-                            }
-                            Spacer()
-                            Button(action: { queue.shuffleRemainingQueue() }) {
-                                Image(systemName: "shuffle")
-                                    .foregroundColor(pal.accent)
-                                    .padding(8)
-                                    .background(pal.text.opacity(0.1))
-                                    .cornerRadius(8)
-                            }
-                            .frame(minWidth: 44, minHeight: 44)
-                            .accessibilityLabel("Shuffle up next")
-                        }
-                        .padding(.horizontal, 30)
-
-                        let upNext = state.upNext
-                        ForEach(Array(upNext.enumerated()), id: \.element.id) { i, ep in
-                            queueRow(ep: ep, isFirst: i == 0, isLast: i == upNext.count - 1)
-                        }
-                    }
-                    .padding(.top, 20)
+                    upNextSection
                 }
 
                 Spacer().frame(height: 40)
@@ -380,6 +411,83 @@ struct NowPlayingSheet: View {
         .background(pal.bg.ignoresSafeArea())
         // Taps anywhere count as interaction for the night veil (simultaneous: never steals one).
         .simultaneousGesture(TapGesture().onEnded { onInteraction() })
+        .overlay(alignment: .bottom) {
+            if let removed {
+                undoToast(removed)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+    }
+
+    private var upNextSection: some View {
+        VStack(alignment: .leading, spacing: UI.md) {
+            HStack(spacing: UI.xs) {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Up Next")
+                        .font(.system(.title3, design: .rounded).bold())
+                        .foregroundColor(pal.text)
+                    // Total remaining time — handy when picking a sleep-timer length.
+                    // Durations of 0 (unknown/live) are simply not counted.
+                    let secs = state.upNext.reduce(0.0) { $0 + max(0, $1.duration ?? 0) }
+                    let count = state.upNext.count
+                    Text("\(count) episode\(count == 1 ? "" : "s")" + (secs > 60 ? " · \(Int(secs) / 3600 > 0 ? "\(Int(secs) / 3600)h " : "")\((Int(secs) % 3600) / 60)m" : ""))
+                        .font(.caption)
+                        .foregroundColor(pal.dim)
+                }
+                Spacer()
+                headerButton("shuffle", label: "Shuffle up next") { withMotion { queue.shuffleRemainingQueue() } }
+                // Next lives with the queue it acts on. Beside skip-15, at the same weight, it was
+                // a 2am mis-tap away from dropping the episode.
+                if state.isLoaded {
+                    headerButton("forward.end", label: "Play next episode") { audio.skipToNextEpisode() }
+                }
+            }
+            .padding(.horizontal, UI.xxl)
+
+            let upNext = state.upNext
+            ForEach(Array(upNext.enumerated()), id: \.element.id) { i, ep in
+                queueRow(ep: ep, isFirst: i == 0, isLast: i == upNext.count - 1)
+            }
+        }
+        .padding(.top, UI.xl)
+    }
+
+    private func headerButton(_ symbol: String, label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.body.weight(.semibold))
+                .foregroundColor(pal.accent)
+                .frame(minWidth: 44, minHeight: 44)
+                .background(Capsule().fill(pal.text.opacity(0.08)))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
+    }
+
+    private func undoToast(_ r: RemovedEpisode) -> some View {
+        HStack(spacing: UI.md) {
+            Text("Removed \u{201C}\(r.episode.title)\u{201D}")
+                .font(.subheadline)
+                .foregroundColor(pal.text)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Spacer(minLength: UI.sm)
+            Button("Undo") {
+                withMotion {
+                    queue.restore(r.episode, at: r.index)
+                    removed = nil
+                }
+            }
+            .font(.subheadline.weight(.semibold))
+            .foregroundColor(pal.accent)
+            .frame(minHeight: 44)
+        }
+        .padding(.horizontal, UI.lg)
+        .background(Capsule().fill(.ultraThinMaterial).overlay(Capsule().fill(pal.bg.opacity(0.7))))
+        .overlay(Capsule().stroke(pal.text.opacity(0.1), lineWidth: 1))
+        .padding(.horizontal, UI.lg)
+        .padding(.bottom, UI.lg)
+        .accessibilityElement(children: .combine)
     }
 }
 

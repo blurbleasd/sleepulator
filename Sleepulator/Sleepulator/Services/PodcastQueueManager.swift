@@ -162,9 +162,20 @@ final class PodcastQueueManager: ObservableObject {
         queue.swapAt(a, b)
     }
 
-    /// Take an episode out of the queue. Never touches its download.
-    func remove(_ episode: Episode) {
-        queue.removeAll { $0.id == episode.id }
+    /// Take an episode out of the queue. Never touches its download. Returns where it was, so the
+    /// player can offer Undo (`restore`); nil if it wasn't queued.
+    @discardableResult
+    func remove(_ episode: Episode) -> Int? {
+        guard let i = queue.firstIndex(where: { $0.id == episode.id }) else { return nil }
+        queue.remove(at: i)
+        return i
+    }
+
+    /// Undo a `remove`: put the episode back where it was (clamped, in case the queue has since
+    /// shrunk). A no-op if it's already queued again.
+    func restore(_ episode: Episode, at index: Int) {
+        guard !queue.contains(where: { $0.id == episode.id }) else { return }
+        queue.insert(episode, at: min(max(0, index), queue.count))
     }
 
     /// The player's Next: drop the episode being skipped and play the one after it. A skip is not
