@@ -11,10 +11,32 @@ nonisolated struct Podcast: Identifiable, Codable, Hashable {
     var episodes: [Episode]
     var artworkUrl: String? = nil
 
-    // Identity is the id. Without these, synthesized Hashable would compare/hash the whole episode
-    // array — expensive, and the hash churns on every feed refresh.
-    static func == (lhs: Podcast, rhs: Podcast) -> Bool { lhs.id == rhs.id }
+    // Hashing is the id alone: synthesized Hashable would hash the whole episode array, which is
+    // expensive and churns on every feed refresh. Equality also compares what the library row
+    // shows (name, artwork, and the episode list's size and newest id), still O(1). SwiftUI skips
+    // a state update whose new value == the old one, so with id-only == a show page that loaded
+    // 750 episodes left its library row reading "40 unplayed · 40" until relaunch.
+    static func == (lhs: Podcast, rhs: Podcast) -> Bool {
+        lhs.id == rhs.id
+            && lhs.name == rhs.name
+            && lhs.url == rhs.url
+            && lhs.artworkUrl == rhs.artworkUrl
+            && lhs.episodes.count == rhs.episodes.count
+            && lhs.episodes.first?.id == rhs.episodes.first?.id
+    }
     func hash(into hasher: inout Hasher) { hasher.combine(id) }
+
+    /// Fold a freshly parsed feed into the stored show: its episodes, artwork when the show had
+    /// none, and its title when the stored name was only a placeholder (`PodcastText`). A feed
+    /// that came back with no episodes (a moved feed, a captive-portal page) keeps the stored
+    /// ones rather than wiping the show; returns false then, so callers can report it.
+    @discardableResult
+    mutating func merge(title: String, artworkUrl: String?, episodes: [Episode]) -> Bool {
+        if !episodes.isEmpty { self.episodes = episodes }
+        if self.artworkUrl == nil { self.artworkUrl = artworkUrl }
+        if !title.isEmpty, PodcastText.isPlaceholderName(name, feedURL: url) { name = title }
+        return !episodes.isEmpty
+    }
 }
 
 /// `nonisolated` for the same reason as `Podcast` — a plain data model that must decode and be
