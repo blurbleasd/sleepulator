@@ -3216,6 +3216,22 @@ final class PodcastLoadHoldTests: XCTestCase {
         let resumed = await waitUntil { e.isPodPlaying }
         XCTAssertTrue(resumed, "the call's end brings back what was starting")
     }
+
+    // Value: protects=headphones out during a load holds it; fails_when=the route handler checks isPodPlaying only; why_new=only the call path was tested; seam=none
+    func testHeadphonesOutDuringALoadKeepsItOffTheSpeaker() async {
+        // AirPods out right after tapping an episode: it must not start on the speaker and wake the room.
+        let e = sleepEngine(nightMinutes: 0)
+        defer { e.stopAll() }
+        e.loadPodcast(fileURL.absoluteString, id: "route-\(UUID().uuidString)", resume: false)
+        XCTAssertTrue(e.podcastIsPlayingOrStarting)
+        // Through the real observer (AudioSessionController hops it to main).
+        NotificationCenter.default.post(name: AVAudioSession.routeChangeNotification, object: nil, userInfo: [
+            AVAudioSessionRouteChangeReasonKey: AVAudioSession.RouteChangeReason.oldDeviceUnavailable.rawValue])
+        _ = await waitUntil { e.hasLoadedEpisode }
+        await settle()
+        XCTAssertFalse(e.isPodPlaying, "the episode must not start on the speaker")
+        XCTAssertFalse(e.podcastIsPlayingOrStarting)
+    }
 }
 
 /// An episode's end is filed under the episode its ITEM was loaded for. `.AVPlayerItemDidPlayToEndTime`
