@@ -70,6 +70,10 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   Focus Pomodoro. `AudioMath` holds the fade curve.
 - `PodcastQueueManager`, `MixStore`, `PersistenceMigrator`, `StorageManager` (JSON file store),
   `AudioDownloader` (offline cache), `PodcastParser` / `OPMLParser` / `ITunesSearchManager`.
+- `Backup`: the backup file's export and restore. A restore reads and validates first, the person
+  confirms in plain counts ("4 mixes, 12 shows"), and a snapshot of what was here is kept for a
+  week so Undo can put it back exactly. Its key lists are the restore allowlist: keep new persisted
+  settings in sync there.
 
 ## Audio + state invariants (the hard-won stuff — change with care)
 - **Never block the render thread.** It reads params lock-free; hand-offs are atomic. No locks,
