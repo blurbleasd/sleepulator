@@ -163,7 +163,9 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   XCUITest reads through `opacity(0)`, `.allowsHitTesting(false)` and even
   `.accessibilityHidden(true)`. So ContentView takes the hidden mini-player out of the hierarchy
   (`if !miniPlayerHidden`, an opacity transition), and presents its Now Playing sheet itself so the
-  sheet never depends on the bar. To prove a hidden view is gone, assert `!exists` in a UI test.
+  sheet never depends on the bar. To prove a hidden view is gone, assert
+  `waitForNonExistence(timeout:)` in a UI test: a removal transition keeps it in the tree until it
+  finishes.
 - **A `.contentShape(.accessibility, …)` can become its container's frame.** NightRing's band shape
   made Home's root accessibility container a 250 pt square around the orb, which clipped every
   other Sleep Home control out of the accessibility hit test. XCUITest called them unhittable,

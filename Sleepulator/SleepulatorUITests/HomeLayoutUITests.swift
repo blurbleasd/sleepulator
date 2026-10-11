@@ -49,9 +49,10 @@ final class HomeLayoutUITests: XCTestCase {
         // Leave the app in Sleep: the unit tests run hosted in this same app and read its
         // persisted mode, so a run after this one must not start out in Focus.
         XCTAssertTrue(session.waitForExistence(timeout: 5))
-        XCTAssertTrue(miniPlayer.waitForExistence(timeout: 5), "No mini-player in Focus after the session")
-        let barTop = miniPlayer.frame.minY
+        // Read before the switch, checked after it, so a failure here still leaves the app in Sleep.
+        let barTop = miniPlayer.waitForExistence(timeout: 5) ? miniPlayer.frame.minY : nil
         app.buttons["Sleep mode"].tap()
+        guard let barTop else { return XCTFail("No mini-player in Focus after the session") }
 
         // Sleep Home at rest: the bar fades out and leaves the tree, and Build mix drops into the spot
         // it held. ContentView keeps the bar's last measurement while it's out; Home must not use it.
