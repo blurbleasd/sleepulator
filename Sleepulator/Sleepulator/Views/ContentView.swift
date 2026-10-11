@@ -169,6 +169,10 @@ struct ContentView: View {
                         .transition(.opacity)
                 }
             }
+            // Off the moment it hides, as before: a bar in its 0.9 s removal fade may still take
+            // taps or assistive focus, and on Sleep Home it fades out over Build mix.
+            .allowsHitTesting(!miniPlayerHidden)
+            .accessibilityHidden(miniPlayerHidden)
             .animation(.easeInOut(duration: 0.9), value: miniPlayerHidden)
 
             // Full-screen night veil — over the tabs and mini-player both.
