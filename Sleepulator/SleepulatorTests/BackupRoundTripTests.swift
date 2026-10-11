@@ -228,6 +228,8 @@ final class BackupRoundTripTests: XCTestCase {
         XCTAssertTrue(Backup.undoAvailable(takenAt: now.addingTimeInterval(-6 * 86_400), now: now))
         XCTAssertFalse(Backup.undoAvailable(takenAt: now.addingTimeInterval(-8 * 86_400), now: now))
         XCTAssertFalse(Backup.undoAvailable(takenAt: now.addingTimeInterval(60), now: now), "a clock set back")
+        XCTAssertTrue(Backup.undoAvailable(takenAt: now.addingTimeInterval(1e-6), now: now),
+                      "the stored time can round a hair past now")
     }
 
     func testExportFilenameIsDated() throws {

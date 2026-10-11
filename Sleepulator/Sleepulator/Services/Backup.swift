@@ -222,7 +222,10 @@ enum Backup {
     nonisolated static func undoAvailable(takenAt: Date?, now: Date) -> Bool {
         guard let takenAt else { return false }
         let age = now.timeIntervalSince(takenAt)
-        return age >= 0 && age < undoWindow
+        // A second of slack: the time goes through UserDefaults as seconds since 1970, and the
+        // round trip can land a hair after `now`. Without it Undo was refused (and its snapshot
+        // thrown away) right after the restore that made it.
+        return age > -1 && age < undoWindow
     }
 
     /// "sleepulator-backup-2026-10-11": dated, so a second export doesn't overwrite the first.
