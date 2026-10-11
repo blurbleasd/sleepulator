@@ -359,7 +359,8 @@ final class BackupRoundTripTests: XCTestCase {
         d.set(0.6, forKey: "masterVolume")
         let at = Date(timeIntervalSince1970: 1_000_000)
         let exported = try await Backup.exportData(at: at, storage: storage, defaults: d)
-        let read = await Backup.read(try file("export.json", exported))
+        XCTAssertEqual(exported.leftOut, [])
+        let read = await Backup.read(try file("export.json", exported.data))
         guard case .success(let pending) = read else { return XCTFail("an export must read back as a backup") }
         XCTAssertEqual(pending.contents.shows, 1)
         XCTAssertNil(pending.contents.mixes, "absent, so a restore leaves the mixes alone")
@@ -422,21 +423,22 @@ final class BackupRoundTripTests: XCTestCase {
         }
     }
 
-    // MARK: export refuses what JSON can't hold
+    // MARK: export skips what a restore wouldn't take back
 
-    // Value: protects=export (and the restore's snapshot) throws on a non-JSON setting instead of raising an uncatchable ObjC exception; fails_when=exportData's isValidJSONObject guard is removed; why_new=no test drove exportData's failure path; seam=none; no_claim=the alert shown, or the restore-without-snapshot policy
+    // Value: protects=a stored value JSON can't hold, or of the wrong shape, is left out of the export instead of failing it (and every restore's Undo copy); fails_when=userDefaults(from:) stops filtering by kinds; why_new=one NaN made every export throw; seam=none; no_claim=which values the app can store
     @MainActor
-    func testExportRefusesASettingJSONCantHold() async {
+    func testExportSkipsASettingARestoreWouldntTakeBack() async throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("BackupExport-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: dir) }
         let storage = StorageManager(directory: dir)
         d.set(Double.nan, forKey: "masterVolume")      // JSON has no NaN
-        do {
-            _ = try await Backup.exportData(storage: storage, defaults: d)
-            XCTFail("a NaN setting must refuse the export, not write a file")
-        } catch {
-            // Refused, and the test process is still alive to see it.
-        }
+        d.set("loud", forKey: "podVolume")             // the wrong type
+        d.set(0.4, forKey: "binVolume")
+        let export = try await Backup.exportData(storage: storage, defaults: d)
+        let dict = try XCTUnwrap(JSONSerialization.jsonObject(with: export.data) as? [String: Any])
+        XCTAssertNil(dict["masterVolume"])
+        XCTAssertNil(dict["podVolume"])
+        XCTAssertEqual(dict["binVolume"] as? Double, 0.4)
     }
 
     // MARK: a setting must have the shape its reader expects
@@ -491,30 +493,7 @@ final class BackupRoundTripTests: XCTestCase {
         XCTAssertEqual(d.string(forKey: "lastPick.noise.focus"), "white")
     }
 
-    // MARK: no snapshot, no restore; a lost snapshot stops being offered
-
-    // Value: protects=a restore that can't save its Undo copy replaces nothing and leaves the previous Undo as it was; fails_when=restore goes ahead without a snapshot, or the earlier snapshot or its date is dropped; why_new=only the export refusal itself was tested; seam=none; no_claim=the alert copy
-    @MainActor
-    func testARestoreThatCantSaveItsUndoCopyReplacesNothing() async throws {
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("BackupNoSnap-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at: dir) }
-        let storage = StorageManager(directory: dir)
-        let now = Date(timeIntervalSince1970: 2_000_000_000)
-        storage.writeRaw(Data("{}".utf8), to: Backup.undoFile)                // an earlier restore's snapshot
-        d.set(now.addingTimeInterval(-3600).timeIntervalSince1970, forKey: Backup.undoTakenAtKey)
-        d.set(0.3, forKey: "masterVolume")
-        d.set(Double.nan, forKey: "stereoWidth")                            // JSON can't hold it: no snapshot
-        let backup: [String: Any] = ["masterVolume": 0.9, Backup.markerKey: 1]
-        let outcome = await Backup.restore(Backup.Pending(data: try JSONSerialization.data(withJSONObject: backup),
-                                                          contents: Backup.contents(of: backup)),
-                                           now: now, storage: storage, defaults: d)
-        XCTAssertNil(outcome, "the confirm promised Undo, so nothing is replaced without one")
-        XCTAssertEqual(d.double(forKey: "masterVolume"), 0.3, accuracy: 1e-9)
-        XCTAssertEqual(Backup.undoDate(now: now, storage: storage, defaults: d)?.timeIntervalSince1970 ?? 0,
-                       now.addingTimeInterval(-3600).timeIntervalSince1970, accuracy: 1e-3,
-                       "nothing changed, so the earlier Undo still describes a real state and stays")
-        XCTAssertEqual(storage.rawData(for: Backup.undoFile), Data("{}".utf8), "and its copy is still there")
-    }
+    // MARK: a lost snapshot stops being offered
 
     // Value: protects=an Undo whose snapshot is gone or unreadable reports failure and stops being offered; fails_when=undo keeps the key when the file is missing, or says "undone" after putting nothing back; why_new=only the expired case was tested; seam=none; no_claim=why the snapshot went missing
     @MainActor
@@ -614,7 +593,7 @@ final class BackupRoundTripTests: XCTestCase {
         XCTAssertEqual(failure, .tooLarge)
     }
 
-    // Value: protects=a restore whose Undo copy can't be written replaces nothing and offers no Undo; fails_when=the snapshot write's failure is ignored or the Undo date is set first; why_new=the other no-snapshot test fails at the export, never at the write; seam=none; no_claim=why the write failed
+    // Value: protects=a restore whose Undo copy can't be written replaces nothing and leaves the previous Undo (copy and date) as it was; fails_when=the snapshot write's failure is ignored, the Undo date is set first, or the earlier copy is dropped; why_new=an export that fails can't be staged any more (it skips what JSON can't hold), so the write is where it fails; seam=none; no_claim=why the write failed
     @MainActor
     func testARestoreWhoseUndoCopyDoesntLandReplacesNothing() async throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("BackupRO-\(UUID().uuidString)")
@@ -623,15 +602,22 @@ final class BackupRoundTripTests: XCTestCase {
             try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: dir.path)
             try? FileManager.default.removeItem(at: dir)
         }
+        let now = Date(timeIntervalSince1970: 2_000_000_000)
+        let earlier = now.addingTimeInterval(-3_600)
+        try storage.writeRawNow(Data("{}".utf8), to: Backup.undoFile)        // an earlier restore's copy
+        d.set(earlier.timeIntervalSince1970, forKey: Backup.undoTakenAtKey)
         d.set(0.3, forKey: "masterVolume")
         try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: dir.path)
         let backup: [String: Any] = ["masterVolume": 0.9, Backup.markerKey: 1]
         let outcome = await Backup.restore(Backup.Pending(data: try JSONSerialization.data(withJSONObject: backup),
                                                           contents: Backup.contents(of: backup)),
-                                           storage: storage, defaults: d)
-        XCTAssertNil(outcome)
+                                           now: now, storage: storage, defaults: d)
+        XCTAssertNil(outcome, "the confirm promised Undo, so nothing is replaced without one")
         XCTAssertEqual(d.double(forKey: "masterVolume"), 0.3, accuracy: 1e-9)
-        XCTAssertNil(d.object(forKey: Backup.undoTakenAtKey))
+        XCTAssertEqual(Backup.undoDate(now: now, storage: storage, defaults: d)?.timeIntervalSince1970 ?? 0,
+                       earlier.timeIntervalSince1970, accuracy: 1e-3,
+                       "nothing changed, so the earlier Undo still describes a real state and stays")
+        XCTAssertEqual(storage.rawData(for: Backup.undoFile), Data("{}".utf8), "and its copy is still there")
     }
 
     // MARK: pass 3: the shipping restore in Focus; a second restore within the week
@@ -688,6 +674,84 @@ final class BackupRoundTripTests: XCTestCase {
         XCTAssertNil(exportedAt(now.timeIntervalSince1970 + 2 * 86_400))
         XCTAssertEqual(Backup.confirmTitle(Backup.contents(of: ["autoPlay": true, Backup.exportedAtKey: 1e300], now: now)),
                        "Replace with this backup?")
+    }
+
+    // MARK: pass 4: an unreadable file, and the export's size
+
+    /// A temp store holding one show in library.json (both copies).
+    @MainActor
+    private func storeWithAShow(_ name: String) throws -> (StorageManager, URL) {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("\(name)-\(UUID().uuidString)")
+        let storage = StorageManager(directory: dir)
+        let ep = Episode(id: "e", title: "E", audioUrl: "u", duration: nil, pubDate: nil, description: nil)
+        try storage.writeRawNow(JSONEncoder().encode([Podcast(id: "a", name: "A", url: "fa", episodes: [ep])]),
+                                to: "library.json")
+        return (storage, dir)
+    }
+
+    // Value: protects=an unparseable primary falls back to its .bak, so export and Undo keep the shows; fails_when=rawData returns the primary's bytes whether or not they parse; why_new=the export dropped the section silently and Undo wrote [] over the good .bak; seam=none; no_claim=how the primary got corrupted
+    @MainActor
+    func testAnUnreadablePrimaryFallsBackToItsBackupCopy() async throws {
+        let (storage, dir) = try storeWithAShow("BackupBak")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try Data("{ truncated".utf8).write(to: dir.appendingPathComponent("library.json"))
+
+        let export = try await Backup.exportData(storage: storage, defaults: d)
+        XCTAssertEqual(export.leftOut, [], "the .bak is read instead")
+        let dict = try XCTUnwrap(JSONSerialization.jsonObject(with: export.data) as? [String: Any])
+        XCTAssertEqual((dict["savedPodcasts"] as? [Any])?.count, 1)
+
+        // A restore that brings in no shows, then Undo: the shows come back from the copy.
+        let backup: [String: Any] = ["savedPodcasts": [Any](), Backup.markerKey: 1]
+        let now = Date()
+        let restored = await Backup.restore(Backup.Pending(data: try JSONSerialization.data(withJSONObject: backup),
+                                                           contents: Backup.contents(of: backup)),
+                                            now: now, storage: storage, defaults: d)
+        XCTAssertNotNil(restored)
+        let undone = await Backup.undo(now: now, storage: storage, defaults: d)
+        XCTAssertTrue(undone)
+        let shows = try JSONDecoder().decode([Podcast].self, from: try XCTUnwrap(storage.rawData(for: "library.json")))
+        XCTAssertEqual(shows.map(\.id), ["a"], "Undo put back the shows, not []")
+    }
+
+    // Value: protects=a section neither copy of which parses is named in the export's result; fails_when=currentFiles stops reporting files that exist but can't be read; why_new=the export left the section out without a word; seam=none; no_claim=the alert's presentation
+    @MainActor
+    func testAnExportSaysWhichSectionItLeftOut() async throws {
+        let (storage, dir) = try storeWithAShow("BackupGap")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        for name in ["library.json", "library.json.bak"] {
+            try Data("{ truncated".utf8).write(to: dir.appendingPathComponent(name))
+        }
+        let export = try await Backup.exportData(storage: storage, defaults: d)
+        XCTAssertEqual(export.leftOut, ["savedPodcasts"])
+        XCTAssertNil((try JSONSerialization.jsonObject(with: export.data) as? [String: Any])?["savedPodcasts"])
+        XCTAssertEqual(Backup.leftOutMessage(export.leftOut),
+                       "It was saved without your podcasts, which couldn't be read. Everything else is in it.")
+        XCTAssertEqual(Backup.leftOutMessage(["upNextQueue", "savedPlaylists"]),
+                       "It was saved without your mixes and Up Next, which couldn't be read. Everything else is in it.")
+        XCTAssertNil(Backup.leftOutMessage([]))
+    }
+
+    // Value: protects=a saved backup always fits under the size a restore reads; fails_when=exportData ignores maxBytes or stops falling back to compact JSON; why_new=export never checked the import cap, so a big library saved a file restore refused; seam=maxBytes (the real cap is 50 MB); no_claim=the alert copy
+    @MainActor
+    func testASavedBackupFitsTheRestoreCapOrIsRefused() async throws {
+        let (storage, dir) = try storeWithAShow("BackupCap")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let at = Date(timeIntervalSince1970: 1_000_000)                   // one length for every call
+        let pretty = try await Backup.exportData(at: at, storage: storage, defaults: d).data
+        let compact = try await Backup.exportData(at: at, storage: storage, defaults: d, pretty: false).data
+        XCTAssertLessThan(compact.count, pretty.count)
+
+        let fits = try await Backup.exportData(at: at, storage: storage, defaults: d, maxBytes: pretty.count)
+        XCTAssertEqual(fits.data, pretty, "pretty-printed when that fits")
+        let squeezed = try await Backup.exportData(at: at, storage: storage, defaults: d, maxBytes: compact.count)
+        XCTAssertEqual(squeezed.data.count, compact.count, "compact when only that fits")
+        do {
+            _ = try await Backup.exportData(at: at, storage: storage, defaults: d, maxBytes: compact.count - 1)
+            XCTFail("a backup a restore would refuse isn't made")
+        } catch {
+            XCTAssertEqual(error as? Backup.ExportFailure, .tooLarge)
+        }
     }
 
     // MARK: pass 4: what a restore stores is what decoded

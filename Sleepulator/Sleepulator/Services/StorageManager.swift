@@ -10,7 +10,7 @@ final class StorageManager {
     /// write lands the same bytes in both `<name>` and `<name>.bak`, so a primary truncated by a
     /// crash mid-replace (or corrupted at rest) can be recovered from the backup on the next load
     /// instead of silently decoding to `nil` and wiping the user's library/presets.
-    private static let backupSuffix = ".bak"
+    nonisolated private static let backupSuffix = ".bak"
 
     /// How `loadResult` resolved — lets callers/tests tell a benign first-run miss from a
     /// corruption that was (or wasn't) recovered from the backup.
@@ -41,11 +41,11 @@ final class StorageManager {
     // runtimes (CLAUDE.md, "Isolated deinits"). Only releases stored properties.
     nonisolated deinit {}
 
-    private func fileURL(for filename: String) -> URL {
+    nonisolated private func fileURL(for filename: String) -> URL {
         return appSupportURL.appendingPathComponent(filename)
     }
 
-    private func backupURL(for filename: String) -> URL {
+    nonisolated private func backupURL(for filename: String) -> URL {
         return appSupportURL.appendingPathComponent(filename + Self.backupSuffix)
     }
 
@@ -102,13 +102,27 @@ final class StorageManager {
         return (nil, .failed)
     }
 
-    /// Raw JSON bytes for a file, or nil if it doesn't exist. Lets Backup/Restore
-    /// round-trip the file-backed collections (mixes/library/queue/positions)
-    /// without coupling to their Codable types.
-    func rawData(for filename: String) -> Data? {
-        if let data = try? Data(contentsOf: fileURL(for: filename)) { return data }
-        // Fall back to the backup so an export still captures recoverable data.
-        return try? Data(contentsOf: backupURL(for: filename))
+    /// Raw JSON bytes for a file: the primary if it parses as JSON, else the `.bak` if that does,
+    /// else nil. Lets Backup/Restore round-trip the file-backed collections (mixes/library/queue/
+    /// positions) without coupling to their Codable types. An unparseable primary used to be
+    /// returned as it was: the export then left that section out without a word, and Undo,
+    /// finding it missing from its copy, wrote [] over both files, the good `.bak` included.
+    /// Parses the file, so a big one is read off the main thread (Backup does). Nonisolated:
+    /// it touches only the immutable directory URL and the file system.
+    nonisolated func rawData(for filename: String) -> Data? {
+        for url in [fileURL(for: filename), backupURL(for: filename)] {
+            if let data = try? Data(contentsOf: url),
+               (try? JSONSerialization.jsonObject(with: data, options: .fragmentsAllowed)) != nil {
+                return data
+            }
+        }
+        return nil
+    }
+
+    /// Whether the file or its `.bak` is on disk, readable or not. Cheap: no read, no parse.
+    nonisolated func exists(_ filename: String) -> Bool {
+        let fm = FileManager.default
+        return fm.fileExists(atPath: fileURL(for: filename).path) || fm.fileExists(atPath: backupURL(for: filename).path)
     }
 
     /// `writeRaw`, but synchronous and throwing: the write is atomic (a temp file renamed over

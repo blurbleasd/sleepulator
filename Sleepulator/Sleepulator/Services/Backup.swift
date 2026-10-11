@@ -123,6 +123,16 @@ enum Backup {
 
     enum ReadFailure: Error, Equatable, Sendable { case noAccess, unreadable, tooLarge, notBackup }
 
+    /// A backup made for saving, and the sections it couldn't include: backup keys whose file is
+    /// there but neither copy parses (`StorageManager.rawData`).
+    struct Export: Sendable {
+        let data: Data
+        let leftOut: [String]
+    }
+
+    /// The backup would be over `maxFileBytes` even written compactly, so a restore would refuse it.
+    enum ExportFailure: Error, Equatable, Sendable { case tooLarge }
+
     /// No backup is this big (a library with show notes can run to tens of MB). JSON expands
     /// many times over as it's parsed, so a crafted file near this size could get the app killed
     /// for memory before anything was checked; 50 MB halves that worst case.
@@ -309,9 +319,22 @@ enum Backup {
         switch failure {
         case .noAccess:   return "Couldn't open that file. Pick it again from Files; if it's in iCloud, let it download first."
         case .unreadable: return "Couldn't read that file. Pick it again from Files; if it's in iCloud, let it download first."
-        case .tooLarge:   return "That file is too big to be a Sleepulator backup."
+        case .tooLarge:   return "That file is too big to restore. A backup can be up to 50 MB."
         case .notBackup:  return "That isn't a Sleepulator backup. Make one with Export a backup."
         }
+    }
+
+    /// Export couldn't fit under the size a restore reads (`ExportFailure.tooLarge`). Show notes
+    /// are what makes a library big.
+    nonisolated static let tooLargeToExportMessage =
+        "Your podcast library is too big for one backup file (over 50 MB). Remove shows you no longer listen to, then try again."
+
+    /// The sections an export left out (`Export.leftOut`), named for a person; nil when none were.
+    nonisolated static func leftOutMessage(_ keys: [String]) -> String? {
+        let names = [("savedPlaylists", "mixes"), ("savedPodcasts", "podcasts"), ("upNextQueue", "Up Next"),
+                     ("episodePositions", "places in episodes")].filter { keys.contains($0.0) }.map(\.1)
+        guard !names.isEmpty else { return nil }
+        return "It was saved without your \(joined(names)), which couldn't be read. Everything else is in it."
     }
 
     /// Whether Undo is still offered for a snapshot taken at `takenAt`. A snapshot from the
@@ -340,8 +363,10 @@ enum Backup {
     /// path.
     nonisolated static func userDefaults(from defaults: UserDefaults) -> [String: Any] {
         var out: [String: Any] = [:]
+        // Only what a restore would take back (`kinds`). One stored NaN or wrong-typed value made
+        // JSONSerialization refuse the whole export, and with it every restore's Undo copy.
         for key in scalarKeys {
-            if let v = defaults.object(forKey: key) { out[key] = v }
+            if let v = defaults.object(forKey: key), scalarValid(key: key, value: v) { out[key] = v }
         }
         for key in exportOnlyKeys { out[key] = defaults.bool(forKey: key) }
         for key in encodedKeys {
@@ -426,26 +451,43 @@ enum Backup {
     // The I/O below takes the store and defaults as parameters (the shared ones by default) so
     // the restore → undo round trip is tested against a temp store, never the app's own data.
 
-    /// The file-backed collections as they are on disk, after any queued writes land.
-    private static func currentFiles(_ storage: StorageManager) -> [String: Data] {
-        storage.flush()
+    /// The file-backed collections as they are on disk (a parseable copy of each, `rawData`), and
+    /// the backup keys of those that are there but couldn't be read. Call after `storage.flush()`.
+    nonisolated private static func currentFiles(_ storage: StorageManager) -> (files: [String: Data], leftOut: [String]) {
         var files: [String: Data] = [:]
-        for file in fileBacked.values {
-            if let data = storage.rawData(for: file) { files[file] = data }
+        var leftOut: [String] = []
+        for (key, file) in fileBacked {
+            if let data = storage.rawData(for: file) {
+                files[file] = data
+            } else if storage.exists(file) {
+                leftOut.append(key)
+            }
         }
-        return files
+        return (files, leftOut.sorted())
     }
 
-    /// A backup of everything here now, serialized off the main thread (a large library would
-    /// otherwise stall the UI).
+    /// A backup of everything here now, read and serialized off the main thread (a large library
+    /// would otherwise stall the UI), after any queued writes land.
+    ///
+    /// `maxBytes`, for a backup someone saves: the most a restore will read (`maxFileBytes`).
+    /// Pretty-printed when that fits, compact when only that does, refused (`ExportFailure`)
+    /// when neither does: a file a restore refuses is no backup. The restore's own Undo copy
+    /// passes none; it's never read through `read`.
     static func exportData(at date: Date = Date(), storage: StorageManager = .shared,
-                           defaults: UserDefaults = .standard, pretty: Bool = true) async throws -> Data {
-        let files = currentFiles(storage)
+                           defaults: UserDefaults = .standard, pretty: Bool = true,
+                           maxBytes: Int? = nil) async throws -> Export {
+        storage.flush()
         return try await Task.detached(priority: .userInitiated) {
-            let dict = exportDictionary(defaults: defaults, files: files, at: date)
+            let current = currentFiles(storage)
+            let dict = exportDictionary(defaults: defaults, files: current.files, at: date)
             // Refuse rather than raise: a non-JSON value would throw an uncatchable exception.
             guard JSONSerialization.isValidJSONObject(dict) else { throw CocoaError(.coderInvalidValue) }
-            return try JSONSerialization.data(withJSONObject: dict, options: pretty ? .prettyPrinted : [])
+            var data = try JSONSerialization.data(withJSONObject: dict, options: pretty ? .prettyPrinted : [])
+            if let maxBytes, data.count > maxBytes {
+                if pretty { data = try JSONSerialization.data(withJSONObject: dict, options: []) }
+                guard data.count <= maxBytes else { throw ExportFailure.tooLarge }
+            }
+            return Export(data: data, leftOut: current.leftOut)
         }.value
     }
 
@@ -484,7 +526,7 @@ enum Backup {
         // restore replaces nothing and the previous Undo stays as it was (file and date): nothing
         // changed, so it still describes a real earlier state.
         guard let snapshot = try? await exportData(at: now, storage: storage, defaults: defaults, pretty: false),
-              (try? storage.writeRawNow(snapshot, to: undoFile)) != nil else {
+              (try? storage.writeRawNow(snapshot.data, to: undoFile)) != nil else {
             return nil
         }
         defaults.set(now.timeIntervalSince1970, forKey: undoTakenAtKey)
@@ -509,7 +551,8 @@ enum Backup {
                      defaults: UserDefaults = .standard) async -> Bool {
         storage.flush()
         guard undoDate(now: now, storage: storage, defaults: defaults) != nil else { return false }
-        guard let data = storage.rawData(for: undoFile) else {
+        // Read (and parsed, to fall back to the `.bak`) off the main thread: it's library-sized.
+        guard let data = await Task.detached(priority: .userInitiated, operation: { storage.rawData(for: undoFile) }).value else {
             discardUndo(storage, defaults)
             return false
         }

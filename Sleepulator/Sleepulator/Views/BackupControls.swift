@@ -11,6 +11,9 @@ final class BackupController: ObservableObject {
         case confirm(Backup.Pending)
         case restored(Backup.Outcome)
         case failed(title: String, message: String)
+        /// Something to know about what just happened, with only an OK (a backup saved with a
+        /// section left out).
+        case notice(title: String, message: String)
         case confirmUndo(Date)
         case undone
     }
@@ -19,6 +22,8 @@ final class BackupController: ObservableObject {
     @Published var isExporting = false
     @Published private(set) var exportDocument: JSONDocument?
     @Published private(set) var exportName = "sleepulator-backup"
+    /// The sections the backup being saved couldn't include, said once the save lands.
+    private var exportLeftOut: [String] = []
     @Published private(set) var prompt: Prompt?
     /// A read, write or undo is running: the rows disable so a second tap can't start another.
     @Published private(set) var busy = false
@@ -57,12 +62,15 @@ final class BackupController: ObservableObject {
             defer { busy = false }
             do {
                 let now = Date()
-                let data = try await Backup.exportData(at: now)
+                let export = try await Backup.exportData(at: now, maxBytes: Backup.maxFileBytes)
                 // Closed while it was being made: no save sheet popping up later, out of context.
                 guard pageVisible else { return }
-                exportDocument = JSONDocument(data: data)
+                exportDocument = JSONDocument(data: export.data)
+                exportLeftOut = export.leftOut
                 exportName = Backup.filename(for: now)
                 isExporting = true
+            } catch Backup.ExportFailure.tooLarge {
+                await present(.failed(title: "Couldn't make a backup", message: Backup.tooLargeToExportMessage))
             } catch {
                 await present(.failed(title: "Couldn't make a backup", message: "Try again in a moment."))
             }
@@ -75,6 +83,9 @@ final class BackupController: ObservableObject {
         switch result {
         case .success(let url):
             Log.storage.info("Exported backup to \(url.lastPathComponent, privacy: .public)")
+            if let message = Backup.leftOutMessage(exportLeftOut) {
+                Task { await present(.notice(title: "Part of the backup is missing", message: message)) }
+            }
         case .failure(let error):
             Log.storage.error("Backup export failed: \(error.localizedDescription, privacy: .public)")
             Task { await present(.failed(title: "Couldn't save the backup", message: "Try again, or pick another place to save it.")) }
@@ -148,7 +159,7 @@ final class BackupController: ObservableObject {
         switch prompt {
         case .confirm(let p):         return Backup.confirmTitle(p.contents)
         case .restored:               return "Backup restored"
-        case .failed(let title, _):   return title
+        case .failed(let title, _), .notice(let title, _): return title
         case .confirmUndo:            return "Undo the restore?"
         case .undone:                 return "Restore undone"
         case nil:                     return ""
@@ -159,7 +170,7 @@ final class BackupController: ObservableObject {
         switch prompt {
         case .confirm(let p):         return Backup.confirmMessage(p.contents)
         case .restored(let o):        return Backup.restoredMessage(o)
-        case .failed(_, let message): return message
+        case .failed(_, let message), .notice(_, let message): return message
         case .confirmUndo(let date):
             return "This puts back the mixes, podcasts, queue and settings you had before restoring on "
                 + "\(date.formatted(.dateTime.weekday(.wide).hour().minute())). Anything you've changed since will be lost."
