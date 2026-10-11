@@ -324,9 +324,11 @@ this section is where you do it. Do it in a dark room at your real bedtime brigh
    swipe. The orb's centre reads "Play", the band around it "Night length", and nothing reads from
    the hidden mini-player's spot above Build mix.
    *The bar's fade-out (added 2026-10-10).* With something queued but nothing loaded, go from
-   Podcasts to Sleep, or from Focus to Sleep, and tap Build mix at once, inside the bar's ~1 s
-   fade. ✅ The mixer opens; never Now Playing, Podcasts or a playing queue. With VoiceOver on,
-   focus never lands on the fading bar.
+   Podcasts to Sleep (Build mix is already in place there) and tap Build mix where the "Up next"
+   bar is still visibly fading; if the bar had already gone, try again. ✅ The mixer opens; never
+   Now Playing, Podcasts or a playing queue. With VoiceOver on, focus never lands on the fading
+   bar. To widen the window, run it in the Simulator with Debug ▸ Slow Animations (the ~1 s fade
+   takes about 9 s): a tap on Build mix through the half-faded bar must still open the mixer.
 8. **Ring drag keeps the controls awake.** Mid-night (sounds playing): tap to wake, then drag the
    ring slowly for 5+ s. ✅ The controls don't fade under the finger; ~3 s after release they do.
    Inside the last 10 minutes the ring is locked (handle dims); a drag that ends where it began

@@ -169,8 +169,9 @@ struct ContentView: View {
                         .transition(.opacity)
                 }
             }
-            // Off the moment it hides, as before: a bar in its 0.9 s removal fade may still take
-            // taps or assistive focus, and on Sleep Home it fades out over Build mix.
+            // The removal fade still renders the bar, for 0.9 s, over Sleep Home's Build mix. These
+            // gates stop real taps and VoiceOver on it the moment it hides; XCUITest's tree still
+            // lists it until the fade ends. Keep them.
             .allowsHitTesting(!miniPlayerHidden)
             .accessibilityHidden(miniPlayerHidden)
             .animation(.easeInOut(duration: 0.9), value: miniPlayerHidden)

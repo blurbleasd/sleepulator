@@ -34,8 +34,9 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
 - **Widget** — `SleepulatorWidget/` (sleep-timer Live Activity).
 - **UI tests** — `SleepulatorUITests/` (XCUITest, in the shared scheme so CI runs it).
   `HomeLayoutUITests` checks Focus's Build mix / Focus session row clears the mini-player and
-  that a tap starts the Pomodoro, and that Sleep Home at rest has no mini-player in the
-  accessibility tree and hittable controls. The target is made by `Sleepulator/setup_ui_tests.rb`
+  that a tap starts the Pomodoro; that a tap on the shown bar reaches it, and on Podcasts it sits
+  above the tab bar; and that on Sleep Home at rest the bar is gone from the accessibility tree and
+  Home's controls stay hittable. The target is made by `Sleepulator/setup_ui_tests.rb`
   (idempotent; re-run it after adding a file there). It runs in the same app the unit tests are
   hosted in, so a UI test must leave persisted state (mode, night length) as it found it.
 - **Tests** — `SleepulatorTests/` (XCTest). Six files, many suites: `AudioMathTests.swift`;
@@ -151,7 +152,7 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   `@AppStorage("focusMode")` (AudioEngine writes it) instead of observing `audio`.
   `Palette(bedtime:)` is legacy and only ever yields Sleep amber.
 - **Mini-player clearance is measured, not guessed.** ContentView measures the floating bar's top
-  edge and hands each tab `\.miniPlayerTop` (nil on Sleep Home unless a podcast plays). A screen
+  edge and hands each tab `\.miniPlayerTop` (nil on Sleep Home unless an episode is loaded). A screen
   that ends at the bottom edge (a tab root, a pushed show page) applies `.miniPlayerClearance()`.
   Home computes its own (`HomeView.homeClearance`) from the screen's bottom edge minus the insets
   anchored while the tab bar shows, so it holds still under the screensaver. No fixed bottom
@@ -163,7 +164,10 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   XCUITest reads through `opacity(0)`, `.allowsHitTesting(false)` and even
   `.accessibilityHidden(true)`. So ContentView takes the hidden mini-player out of the hierarchy
   (`if !miniPlayerHidden`, an opacity transition), and presents its Now Playing sheet itself so the
-  sheet never depends on the bar. To prove a hidden view is gone, assert
+  sheet never depends on the bar. The removal fade still renders the bar for 0.9 s, so the
+  always-present wrapper also gates `.allowsHitTesting` and `.accessibilityHidden` on
+  `miniPlayerHidden`: those stop real taps and VoiceOver at once, though XCUITest's tree ignores
+  them. Keep them (only TESTING.md §M7 checks the fade). To prove a hidden view is gone, assert
   `waitForNonExistence(timeout:)` in a UI test: a removal transition keeps it in the tree until it
   finishes.
 - **A `.contentShape(.accessibility, …)` can become its container's frame.** NightRing's band shape

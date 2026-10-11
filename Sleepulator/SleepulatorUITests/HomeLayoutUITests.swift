@@ -46,8 +46,6 @@ final class HomeLayoutUITests: XCTestCase {
         if wake.exists { wake.tap() }
         stop.tap()
 
-        // Leave the app in Sleep: the unit tests run hosted in this same app and read its
-        // persisted mode, so a run after this one must not start out in Focus.
         XCTAssertTrue(session.waitForExistence(timeout: 5))
 
         // A tap on the shown bar reaches it. ContentView's wrapper switches the bar's hit testing
@@ -74,11 +72,13 @@ final class HomeLayoutUITests: XCTestCase {
             _ = session.waitForExistence(timeout: 5)
         }
 
-        // Read before the switch, checked after it, so a failure here still leaves the app in Sleep.
+        // Leave the app in Sleep before any check below can stop the test: the unit tests run hosted
+        // in this same app and read its persisted mode, so a run after this one must not start out
+        // in Focus. So the bar's top is read before the switch and checked after it.
         let barTop = miniPlayer.waitForExistence(timeout: 5) ? miniPlayer.frame.minY : nil
         app.buttons["Sleep mode"].tap()
-        XCTAssertTrue(barTapActed, "A tap on the mini-player in Focus did nothing: it didn't reach the bar")
         guard let barTop else { return XCTFail("No mini-player in Focus after the session") }
+        XCTAssertTrue(barTapActed, "A tap on the mini-player in Focus did nothing: it didn't reach the bar")
 
         // Sleep Home at rest: the bar fades out and leaves the tree, and Build mix drops into the spot
         // it held. ContentView keeps the bar's last measurement while it's out; Home must not use it.
