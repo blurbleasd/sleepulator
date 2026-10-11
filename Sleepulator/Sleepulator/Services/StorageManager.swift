@@ -136,8 +136,9 @@ final class StorageManager {
         try ioQueue.sync { try writeBoth(data, filename: filename) }
     }
 
-    /// Atomically write raw JSON bytes to a file (Backup/Restore import path), keeping the
-    /// `.bak` sibling in sync.
+    /// Atomically write raw JSON bytes to a file, keeping the `.bak` sibling in sync, without
+    /// waiting (the self-heal in `loadResult`; tests). A restore and its Undo use `writeRawNow`,
+    /// so they know when a file didn't land.
     func writeRaw(_ data: Data, to filename: String) {
         ioQueue.async { [weak self] in
             guard let self = self else { return }
@@ -161,8 +162,8 @@ final class StorageManager {
         }
     }
 
-    /// Block until all queued writes have flushed to disk. Used by the in-process Restore so a
-    /// reload can't read a file before its just-written bytes have landed (the writes are async).
+    /// Block until all queued writes have flushed to disk: before a backup reads the store, and
+    /// after a restore, so the reload can't read a file another queued write is still landing on.
     func flush() {
         ioQueue.sync { }
     }

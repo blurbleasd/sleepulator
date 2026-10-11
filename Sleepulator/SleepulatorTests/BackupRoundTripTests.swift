@@ -517,6 +517,15 @@ final class BackupRoundTripTests: XCTestCase {
         let unreadable = await Backup.undo(now: now, storage: storage, defaults: d)
         XCTAssertEqual(unreadable, .gone, "nothing was put back, so it must not report Restore undone")
         XCTAssertNil(Backup.undoDate(now: now, storage: storage, defaults: d))
+
+        // JSON, but not a backup: it gets past the read and stops at the parse.
+        d.set(0.3, forKey: "masterVolume")
+        storage.writeRaw(Data("[]".utf8), to: Backup.undoFile)
+        d.set(now.timeIntervalSince1970, forKey: Backup.undoTakenAtKey)
+        let notABackup = await Backup.undo(now: now, storage: storage, defaults: d)
+        XCTAssertEqual(notABackup, .gone)
+        XCTAssertNil(Backup.undoDate(now: now, storage: storage, defaults: d))
+        XCTAssertEqual(d.double(forKey: "masterVolume"), 0.3, accuracy: 1e-9, "nothing was touched")
     }
 
     // MARK: the confirm names an old backup's year
@@ -574,7 +583,7 @@ final class BackupRoundTripTests: XCTestCase {
     // Value: protects=whole-number settings and text lengths match what their readers take; fails_when=a fraction or an over-long string is written; why_new=the shapes test had neither; seam=none; no_claim=the UI's exact ranges
     func testFractionsWhereWholeNumbersAreReadAndOverlongTextAreSkipped() {
         let dict: [String: Any] = ["pomoWork": 25.5, "ambientTailMinutes": 10, "sceneSleep": String(repeating: "x", count: 300),
-                                   "finishedEpisodes": ["ok", String(repeating: "y", count: 3_000)]]
+                                   "finishedEpisodes": ["ok", String(repeating: "y", count: 17_000)]]
         let (restored, skipped) = Backup.restoreUserDefaults(from: dict, into: d)
         XCTAssertEqual(restored, 1)
         XCTAssertEqual(skipped, 3)
@@ -893,6 +902,14 @@ final class BackupRoundTripTests: XCTestCase {
         XCTAssertEqual(mixes.count, 1)
         XCTAssertFalse(String(decoding: mixes.data, as: UTF8.self).contains("junk"))
         XCTAssertEqual(try JSONDecoder().decode([SavedMix].self, from: mixes.data).first?.name, "Old mix")
+
+        // Value: protects=an older backup's mix padded past the settings' text limit is dropped like a current preset; fails_when=sanitizedLegacyPreset stops checking its texts or the legacy branch maps instead of compactMaps; why_new=the legacy block held only an in-bounds mix; seam=none; no_claim=MixStore's conversion
+        var paddedLegacy = legacyMix
+        paddedLegacy["id"] = "p"
+        paddedLegacy["noiseType"] = String(repeating: "n", count: 300)
+        let bounded = try XCTUnwrap(Backup.validatedFileSection(key: "savedPlaylists", value: [legacyMix, paddedLegacy]))
+        XCTAssertEqual(bounded.count, 1)
+        XCTAssertEqual(try JSONDecoder().decode([SavedMix].self, from: bounded.data).map(\.id), ["m"], "the padded mix is dropped")
     }
 
     // MARK: pass 5: Undo puts back exactly what was there
@@ -911,7 +928,7 @@ final class BackupRoundTripTests: XCTestCase {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("BackupLongId-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: dir) }
         let storage = StorageManager(directory: dir)
-        let longId = String(repeating: "g", count: 3_000)                  // PodcastParser keeps guids up to 4,000 characters
+        let longId = String(repeating: "g", count: 20_000)                 // an audio-address id: the parser has no cap there
         d.set(["short", longId], forKey: "finishedEpisodes")
         // A backup with its own played list, and one from before the list was backed up.
         for backup: [String: Any] in [["finishedEpisodes": ["other"], Backup.markerKey: 1], ["masterVolume": 0.5, Backup.markerKey: 1]] {
@@ -966,15 +983,19 @@ final class BackupRoundTripTests: XCTestCase {
         let now = Date()
         _ = try await restored(["episodePositions": ["ep9": 5.0], Backup.markerKey: 1], into: storage, now: now)
         try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: dir.path)
-        let first = await Backup.undo(now: now, storage: storage, defaults: d)
+        let fiveDaysOn = now.addingTimeInterval(5 * 86_400)
+        let first = await Backup.undo(now: fiveDaysOn, storage: storage, defaults: d)
         guard case .incomplete(let unwritten) = first else { return XCTFail("got \(first)") }
         XCTAssertTrue(unwritten.contains("episodePositions"))
-        XCTAssertNotNil(Backup.undoDate(now: now, storage: storage, defaults: d), "Undo is still offered")
-        XCTAssertNotNil(storage.rawData(for: Backup.undoFile), "and its copy is kept")
+        XCTAssertNotNil(storage.rawData(for: Backup.undoFile), "its copy is kept")
         XCTAssertTrue(Backup.undoIncompleteMessage(unwritten).contains("places in episodes"))
+        // The copy now holds what couldn't be saved, so its week starts again: past the restore's.
+        let tenDaysOn = now.addingTimeInterval(10 * 86_400)
+        XCTAssertEqual(Backup.undoDate(now: tenDaysOn, storage: storage, defaults: d)?.timeIntervalSince1970 ?? 0,
+                       now.timeIntervalSince1970, accuracy: 1e-3, "still offered, named for the restore")
 
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: dir.path)
-        let second = await Backup.undo(now: now, storage: storage, defaults: d)
+        let second = await Backup.undo(now: tenDaysOn, storage: storage, defaults: d)
         XCTAssertEqual(second, .undone)
         XCTAssertEqual(try JSONDecoder().decode([String: Double].self, from: try XCTUnwrap(storage.rawData(for: "positions.json"))),
                        ["ep1": 30.0])
@@ -997,6 +1018,45 @@ final class BackupRoundTripTests: XCTestCase {
         XCTAssertEqual(d.double(forKey: "masterVolume"), 0.4, accuracy: 1e-9, "the rest still restored")
     }
 
+    // Value: protects=Restore then Undo puts stored layers back as Data and leaves a value its copy couldn't hold (a NaN, a bad lastMix) alone, and a NaN doesn't refuse it; fails_when=undoUserDefaults copies a non-JSON value (restore refused) or drops one unlisted, restorePlan removes a left-out key, or trusted stores the object; why_new=no Restore-then-Undo test held a blob or a value its copy couldn't hold; seam=none; no_claim=how such a value gets stored
+    @MainActor
+    func testUndoLeavesWhatItsCopyCouldNotHoldAndPutsBackTheBlobs() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("BackupUnholdable-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let storage = StorageManager(directory: dir)
+        let layers = [ExtraNoiseLayer(id: "a", type: "rain", volume: 0.6, muted: nil)]
+        d.set(try JSONEncoder().encode(layers), forKey: "extraLayers")
+        d.set(Double.nan, forKey: "masterVolume")
+        d.set(Data("not json".utf8), forKey: "lastMix")
+        let now = Date()
+        // `restored` unwraps the outcome: a stored NaN mustn't refuse the restore.
+        _ = try await restored(["extraLayers": [["id": "b", "type": "fan", "volume": 0.2]], Backup.markerKey: 1],
+                               into: storage, now: now)
+        let undone = await Backup.undo(now: now, storage: storage, defaults: d)
+        XCTAssertEqual(undone, .undone)
+        let raw = try XCTUnwrap(d.data(forKey: "extraLayers"), "put back as a Data blob")
+        XCTAssertEqual(try JSONDecoder().decode([ExtraNoiseLayer].self, from: raw), layers)
+        XCTAssertTrue(d.double(forKey: "masterVolume").isNaN, "left alone, not removed")
+        XCTAssertEqual(d.data(forKey: "lastMix"), Data("not json".utf8), "left alone, not removed")
+    }
+
+    // Value: protects=a restore whose only section couldn't be saved says Nothing could be restored and names it, and a places-only restore still says so; fails_when=write's unwritten switch stops clearing contents.positions, or restoredMessage loses a branch; why_new=only the shows arm and a non-empty message were tested; seam=none; no_claim=the mixes/Up Next arms
+    @MainActor
+    func testARestoreThatSavedNothingSaysSo() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("BackupNothing-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let storage = StorageManager(directory: dir)
+        // A directory where the saved places go: no file can be saved over it.
+        try FileManager.default.createDirectory(at: dir.appendingPathComponent("positions.json"), withIntermediateDirectories: true)
+        let outcome = try await restored(["episodePositions": ["ep9": 5.0], Backup.markerKey: 1], into: storage, now: Date())
+        XCTAssertEqual(outcome.unwritten, ["episodePositions"])
+        XCTAssertFalse(outcome.contents.positions, "not counted as restored")
+        XCTAssertEqual(Backup.restoredMessage(outcome),
+                       "Nothing could be restored. Your places in episodes couldn't be saved on this iPhone and weren't changed.")
+        XCTAssertEqual(Backup.restoredMessage(Backup.Outcome(contents: Backup.Contents(positions: true), skipped: 0)),
+                       "Restored where you'd got to in each episode.")
+    }
+
     // Value: protects=restored presets are held to the settings' text limit, volumes and layer count; fails_when=validatedFileSection stops sanitizing presets; why_new=a padded preset reached the preferences plist when tapped; seam=none; no_claim=applyPreset itself
     func testRestoredPresetsAreBoundedLikeTheSettings() throws {
         let layers = (0..<5).map { ExtraNoiseLayer(id: "l\($0)", type: "fan", volume: 2, muted: nil) }
@@ -1008,6 +1068,7 @@ final class BackupRoundTripTests: XCTestCase {
         let value = try JSONSerialization.jsonObject(with: JSONEncoder().encode([rain, padded]))
         let section = try XCTUnwrap(Backup.validatedFileSection(key: "savedPlaylists", value: value))
         XCTAssertEqual(section.count, 1)
+        XCTAssertEqual(Backup.contents(of: ["savedPlaylists": value]).mixes, 1, "the confirm counts what the restore keeps")
         let kept = try JSONDecoder().decode([SoundPreset].self, from: section.data)
         XCTAssertEqual(kept.map(\.name), ["Rain"], "the padded preset is dropped")
         XCTAssertEqual(kept.first?.noiseVolume, 1)
@@ -1038,6 +1099,46 @@ final class BackupRoundTripTests: XCTestCase {
         for key in Backup.fileBacked.keys {
             XCTAssertNotNil(Backup.leftOutMessage([key]), "\(key) would be left out without a word")
         }
+    }
+
+    // MARK: pass 6: episodes, the played list, the reload after Undo
+
+    // Value: protects=a restored episode or show with a text over the feed limit is dropped, and the count says so; fails_when=validatedFileSection stops bounding episode/show texts; why_new=a crafted address reached the plist once played (Last Night, the played list); seam=none; no_claim=the parser's own caps
+    func testRestoredEpisodesAndShowsAreBoundedLikeAFeed() throws {
+        let fine = Episode(id: "a", title: "A", audioUrl: "https://x/a.mp3", duration: nil, pubDate: nil, description: nil)
+        let padded = Episode(id: "b", title: "B", audioUrl: "https://x/" + String(repeating: "u", count: 20_000), duration: nil,
+                             pubDate: nil, description: nil)
+        let queue = try JSONSerialization.jsonObject(with: JSONEncoder().encode([fine, padded]))
+        let upNext = try XCTUnwrap(Backup.validatedFileSection(key: "upNextQueue", value: queue))
+        XCTAssertEqual(upNext.count, 1)
+        XCTAssertEqual(try JSONDecoder().decode([Episode].self, from: upNext.data).map(\.id), ["a"])
+        XCTAssertEqual(Backup.contents(of: ["upNextQueue": queue]).upNext, 1, "the confirm counts what's kept")
+
+        let shows = try JSONSerialization.jsonObject(with: JSONEncoder().encode([
+            Podcast(id: "p", name: "P", url: "f", episodes: [fine, padded]),
+            Podcast(id: "q", name: String(repeating: "n", count: 20_000), url: "g", episodes: []),
+        ]))
+        let library = try XCTUnwrap(Backup.validatedFileSection(key: "savedPodcasts", value: shows))
+        XCTAssertEqual(library.count, 1)
+        let kept = try JSONDecoder().decode([Podcast].self, from: library.data)
+        XCTAssertEqual(kept.map(\.id), ["p"])
+        XCTAssertEqual(kept.first?.episodes.map(\.id), ["a"])
+    }
+
+    // Value: protects=the export keeps the played list minus what a restore can't take (an over-long id; the oldest past the size); fails_when=userDefaults(from:) goes back to leaving the whole list out; why_new=one long id dropped the person's whole played history from a backup; seam=none; no_claim=the list's own recency order
+    func testTheExportKeepsThePlayedListItCanCarry() throws {
+        d.set(["old", String(repeating: "g", count: 20_000), "new"], forKey: "finishedEpisodes")
+        var file = try throughBackupFile(Backup.userDefaults(from: d))
+        XCTAssertEqual(file["finishedEpisodes"] as? [String], ["old", "new"], "only the over-long id is left out")
+
+        // 600 ids of 2,000 bytes: 1.2 MB, over the list's 1 MB. The newest that fit are kept.
+        let many = (0..<600).map { String(format: "%04d", $0) + String(repeating: "y", count: 1_996) }
+        d.set(many, forKey: "finishedEpisodes")
+        file = try throughBackupFile(Backup.userDefaults(from: d))
+        let exported = try XCTUnwrap(file["finishedEpisodes"] as? [String])
+        XCTAssertEqual(exported.last, many.last, "the newest are kept")
+        XCTAssertLessThanOrEqual(exported.reduce(0) { $0 + $1.utf8.count }, 1_000_000)
+        XCTAssertEqual(Backup.restoreUserDefaults(from: file, into: d).skipped, 0, "and a restore takes it")
     }
 }
 
@@ -1071,9 +1172,11 @@ final class BackupControllerTests: XCTestCase {
         return Fixture(controller: controller, storage: storage, dir: dir, defaults: defaults, suite: suite)
     }
 
-    private func waitUntil(_ condition: () -> Bool) async throws {
+    /// Waits up to 5 s, and fails the test if the condition never held.
+    private func waitUntil(_ condition: () -> Bool, file: StaticString = #filePath, line: UInt = #line) async throws {
         let deadline = Date().addingTimeInterval(5)
         while !condition(), Date() < deadline { try await Task.sleep(for: .milliseconds(10)) }
+        if !condition() { XCTFail("timed out waiting", file: file, line: line) }
     }
 
     // Value: protects=a failure that lands while Backup & support is closed is shown when it opens again, and a result with a one-tap Undo is still dropped; fails_when=present drops failures again, or keeps every result; why_new="Couldn't save a copy …, so nothing was replaced" was lost when the page had closed; seam=alertDelay 0, a temp store; no_claim=SwiftUI's alert presentation
@@ -1144,6 +1247,7 @@ final class BackupControllerTests: XCTestCase {
         try await waitUntil { reloads == 2 && !backup.busy && backup.prompt != nil }
         guard case .failed(let title, _)? = backup.prompt else { return XCTFail("got \(String(describing: backup.prompt))") }
         XCTAssertEqual(title, "Couldn't put everything back")
+        XCTAssertEqual(reloads, 2, "an incomplete Undo still reloads what it put back")
         XCTAssertNotNil(backup.undoDate, "Undo is still offered")
     }
 

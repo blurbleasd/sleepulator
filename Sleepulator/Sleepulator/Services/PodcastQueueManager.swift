@@ -6,6 +6,7 @@ import os
 final class PodcastQueueManager: ObservableObject {
     @Published var queue: [Episode] = [] {
         didSet {
+            guard persistsQueue else { return }
             let q = queue
             storageQueue.async {
                 StorageManager.shared.save(q, to: "queue.json")
@@ -37,6 +38,9 @@ final class PodcastQueueManager: ObservableObject {
     }
     
     private let storageQueue = DispatchQueue(label: "app.sleepulator.queueStorage", qos: .utility)
+    /// Off only while a reload shows an empty queue for a queue.json it can't decode (see
+    /// `reloadFromDisk`).
+    private var persistsQueue = true
 
     /// Wait for the queue and played-list writes already queued (`AudioEngine.flushPendingWrites`).
     func flushPendingWrites() {
@@ -95,7 +99,15 @@ final class PodcastQueueManager: ObservableObject {
             finishedEpisodes = []
         }
 
-        queue = StorageManager.shared.load(from: "queue.json") ?? []
+        // As at launch: a queue.json today's types can't decode (an update's schema change, or the
+        // one an Undo just put back as it was) is left on disk. Assigning [] saved [] over it.
+        if let saved: [Episode] = StorageManager.shared.load(from: "queue.json") {
+            queue = saved
+        } else {
+            persistsQueue = false
+            queue = []
+            persistsQueue = true
+        }
     }
 
     /// Mark an episode finished, keeping the set bounded by recency. Replaces a raw

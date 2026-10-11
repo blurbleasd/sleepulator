@@ -3706,6 +3706,25 @@ final class RestoreReloadTests: XCTestCase {
         XCTAssertTrue(presets.contains { $0.name == name }, "the deferred write landed before flushPendingWrites returned")
     }
 
+    // Value: protects=a queue.json today's types can't decode survives the reload after a restore or Undo, as at launch; fails_when=reloadFromDisk assigns [] through the persisting didSet; why_new=the reload saved [] over the queue an Undo had just put back; seam=none; no_claim=LibraryView's matching reload (view state)
+    func testAQueueReloadLeavesAnUndecodableQueueOnDisk() throws {
+        let storage = StorageManager.shared
+        storage.flush()
+        let before = storage.rawData(for: "queue.json")
+        defer {
+            if let before { try? storage.writeRawNow(before, to: "queue.json") } else { storage.delete(filename: "queue.json") }
+            storage.flush()
+        }
+        let drift = Data(#"[{"fromAnOlderBuild":true}]"#.utf8)
+        try storage.writeRawNow(drift, to: "queue.json")
+        let manager = PodcastQueueManager()
+        manager.reloadFromDisk()
+        manager.flushPendingWrites()
+        storage.flush()
+        XCTAssertEqual(manager.queue, [])
+        XCTAssertEqual(storage.rawData(for: "queue.json"), drift, "left on disk, not saved over with []")
+    }
+
     // Value: protects=flushPositionsNow writes the player's in-memory saved places to positions.json before it returns; fails_when=flushPositionsNow skips the in-memory map (e.g. reduced to a queue barrier) or returns before the store writes it; why_new=this suite covered only mixes.json, and places held in memory reach disk only every ~30 s or on a pause; seam=none; no_claim=that AudioEngine.flushPendingWrites calls it (podPlayer is private to AudioEngine)
     func testFlushPositionsNowWritesThePlacesHeldInMemory() throws {
         let storage = StorageManager.shared
