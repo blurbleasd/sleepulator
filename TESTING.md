@@ -613,7 +613,8 @@ also pauses while its controls are faded to the screensaver, as the Sleep orb al
 
 ### S. Settings: restore with a confirm and Undo, the night section, mode order (added 2026-10-11, simulator-checked only)
 1. **Restore asks first.** Settings ▸ Backup & support ▸ Export a backup (✅ the file is named
-   `sleepulator-backup-<date>`). Change a mix and a setting, then Restore from a backup and pick
+   `sleepulator-backup-<date>`, in Gregorian years even with Settings ▸ General ▸ Language &
+   Region ▸ Calendar set to Japanese). Change a mix and a setting, then Restore from a backup and pick
    that file. ✅ As the picker closes, an alert asks "Replace with the backup from <date>?" and
    names what's in it ("… 4 mixes, 12 shows …"). Cancel. ✅ Nothing changed.
 2. **Restore, then Undo.** Restore again and tap Replace. ✅ "Backup restored" names what came back

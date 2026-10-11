@@ -64,7 +64,8 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   reload (`RestoreReloadTests`), the real-AVPlayer suites (`PodcastPlayerRebuildTests`,
   `PodcastLoadHoldTests`, `PodcastItemEndTests`), and more);
   `PersistenceTests.swift` (`PersistenceMigrator` / `MixStore`); `BackupRoundTripTests.swift`
-  (export, read, restore and Undo, the `Backup.kinds` checks, a restore never switching mode);
+  (export, read, restore and Undo, the `Backup.kinds` checks, a restore never switching mode;
+  `BackupControllerTests` for the Backup page's controller);
   `FocusDriversTests.swift`; `GenerativeAudioEngineTests.swift` (`GenerativeMediaResetTests`).
 
 ## Services (the core)
@@ -86,7 +87,13 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   `Backup.kinds` is the restore allowlist with each setting's type and range (a JSON null raised
   an uncatchable exception in UserDefaults): keep new persisted settings in sync there. A restore
   never changes the mode (`Backup.modeKey`); a backup from the other mode lands its sounds in the
-  per-mode picks instead.
+  per-mode picks instead. A restore stores what decoded (encoded again, trimmed to what the engine
+  plays, clamped), never the file's own JSON: the decoder ignores unknown keys, so a hand-edited
+  backup could carry megabytes into the preferences plist. The engine's queued writes land first
+  (`AudioEngine.flushPendingWrites`, handed to `Backup.restore`/`undo` as `settle`): before the
+  Undo copy and again just before the writes. A new background write in the engine belongs in that
+  flush. An export writes only settings a restore takes back, reads a file's `.bak` when the
+  primary won't parse (`StorageManager.rawData`), and fits under the 50 MB a restore reads.
 
 ## Audio + state invariants (the hard-won stuff — change with care)
 - **Never block the render thread.** It reads params lock-free; hand-offs are atomic. No locks,
