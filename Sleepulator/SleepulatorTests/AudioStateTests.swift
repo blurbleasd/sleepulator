@@ -3572,3 +3572,38 @@ final class PodcastItemEndTests: XCTestCase {
         XCTAssertNil(p.savedPositions[id], "a finished episode keeps no resume point")
     }
 }
+
+// MARK: - Settings' pure rules
+
+final class SettingsRulesTests: XCTestCase {
+
+    func testLimiterChoiceReadsTheStoredFlags() {
+        XCTAssertEqual(LimiterChoice.from(nightLimiter: false, byMode: false), .off)
+        XCTAssertEqual(LimiterChoice.from(nightLimiter: true, byMode: false), .always)
+        // Following the mode wins whatever the mode last set the limiter to.
+        XCTAssertEqual(LimiterChoice.from(nightLimiter: true, byMode: true), .whileSleeping)
+        XCTAssertEqual(LimiterChoice.from(nightLimiter: false, byMode: true), .whileSleeping)
+    }
+
+    func testLimiterChoiceRoundTripsThroughItsFlags() {
+        for choice in LimiterChoice.allCases {
+            let flags = choice.flags
+            // While sleeping leaves the limiter to the mode; either mode's value reads back the same.
+            for modeSet in [true, false] {
+                let stored = flags.nightLimiter ?? modeSet
+                XCTAssertEqual(LimiterChoice.from(nightLimiter: stored, byMode: flags.byMode), choice)
+            }
+        }
+    }
+
+    func testMinutesAreSingularForOne() {
+        XCTAssertEqual(SettingsCopy.minutes(1), "1 minute")
+        XCTAssertEqual(SettingsCopy.minutes(5), "5 minutes")
+    }
+
+    func testSofteningNeverSaysOffAboveTheFloor() {
+        XCTAssertEqual(SettingsCopy.softening(SettingsCopy.eqFloor), "Light")
+        XCTAssertEqual(SettingsCopy.softening(1.0), "Medium")
+        XCTAssertEqual(SettingsCopy.softening(2.0), "Strong")
+    }
+}

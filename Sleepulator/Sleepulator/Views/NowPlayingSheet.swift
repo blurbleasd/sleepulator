@@ -200,7 +200,7 @@ struct NowPlayingSheet: View {
         } else if audio.limiterOffForStream {
             // The one quiet word on the limiter: here, in dim, where the podcast is. It used
             // to be an amber ⚠ banner on Home and replaced "Playing" in the mini-player.
-            Text("Night Limiter can't soften this stream")
+            Text("Can't soften loud moments on this stream")
                 .font(.caption)
                 .foregroundColor(pal.dim)
                 .multilineTextAlignment(.center)

@@ -130,7 +130,8 @@ Install via Xcode onto the device (not the simulator). Then:
    ✅ The spike is audibly tamed; speech stays intelligible; no pumping/distortion.
 2. Let it run ≥ 1 hour locked. ✅ No glitches, dropouts, or battery anomalies
    (the tap must never block the real-time thread).
-3. Toggle "limiter follows mode": ✅ on in Sleep, off in Focus, mid-playback switch is clean.
+3. Settings ▸ Podcasts at night ▸ Soften loud moments ▸ **While sleeping**: ✅ on in Sleep, off in
+   Focus, mid-playback switch is clean. **Always** stays on in Focus; **Off** stays off in Sleep.
 
 ### E. All-night soak
 1. Full night (or ≥ 4 h): mix + timer, screen locked. ✅ Still behaving at the end —
@@ -465,7 +466,7 @@ changes are the ones a simulator can't settle.
    night".
 6. **The Night Limiter line, only with the limiter on.** Limiter off (the default): play a stream
    the tap can't attach to (HLS). ✅ No limiter wording anywhere. Turn the limiter on in Settings
-   and load it again. ✅ One dim line in the full player, "Night Limiter can't soften this
+   and load it again. ✅ One dim line in the full player, "Can't soften loud moments on this
    stream"; no amber banner on Home, and the mini-player keeps its normal status. A regular MP3
    episode with the limiter on → no line.
 7. **Build mix clears the loaded bar on a small phone.** On the smallest supported iPhone (SE /

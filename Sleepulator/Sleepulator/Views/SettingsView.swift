@@ -31,23 +31,19 @@ struct SettingsView: View {
     @AppStorage("focusMode") private var focusMode = false
     var pal: Palette { Palette(focusMode: focusMode) }
 
-    private var eqAmountLabel: String {
-        switch settings.sleepEQIntensity {
-        case ..<0.05: return "Off"
-        case ..<0.8:  return "Light"
-        case ..<1.3:  return "Medium"
-        default:      return "Strong"
-        }
-    }
-    
+    /// The sleep-aware queue hold, read by AudioEngine when an episode ends (no live plumbing).
+    @AppStorage("holdQueueDuringSleepTimer") private var holdQueue = false
 
-    
-    /// UserDefaults-backed binding for the sleep-aware queue hold (read at advance time by
-    /// AudioEngine, so no live plumbing is needed).
-    private var holdQueueBinding: Binding<Bool> {
+    /// "Soften loud moments" as one choice over the two stored flags (`LimiterChoice`).
+    private var limiterChoice: Binding<LimiterChoice> {
         Binding(
-            get: { UserDefaults.standard.bool(forKey: "holdQueueDuringSleepTimer") },
-            set: { UserDefaults.standard.set($0, forKey: "holdQueueDuringSleepTimer") }
+            get: { LimiterChoice.from(nightLimiter: settings.nightLimiter, byMode: settings.limiterByMode) },
+            set: { choice in
+                let flags = choice.flags
+                // Following the mode sets the limiter itself (onLimiterByMode → applyLimiterForMode).
+                settings.limiterByMode = flags.byMode
+                if let on = flags.nightLimiter { settings.nightLimiter = on }
+            }
         )
     }
 
@@ -62,12 +58,9 @@ struct SettingsView: View {
         Binding(get: { value }, set: { write($0) })
     }
 
-    /// One settings row: the label in the text tone (dim labels read as disabled), the value or
-    /// control trailing.
-    private func label(_ title: String) -> some View {
-        Text(title)
-            .foregroundStyle(pal.text)
-            .fixedSize(horizontal: false, vertical: true)
+    /// One settings row's label, with an optional note under it (`SettingLabel`).
+    private func label(_ title: String, note: String? = nil) -> SettingLabel {
+        SettingLabel(title: title, note: note, pal: pal)
     }
 
     private func header(_ title: String) -> some View {
@@ -107,29 +100,44 @@ struct SettingsView: View {
                     }
 
                     Section {
-                        Toggle(isOn: $settings.nightLimiter) {
-                            label(settings.limiterByMode ? "Soften loud moments (follows the mode)" : "Soften loud moments")
+                        // What happens to a podcast at night, in one place: how loud it can get,
+                        // how it sounds, and whether the next one starts. The hold used to sit in
+                        // the daytime Podcasts section, worded like the timer's one-off "Stop
+                        // after this episode", which stops everything.
+                        Picker(selection: limiterChoice) {
+                            ForEach(LimiterChoice.allCases) { Text($0.title).tag($0) }
+                        } label: {
+                            label("Soften loud moments", note: "Keeps a sudden loud moment from waking you.")
                         }
-                        .disabled(settings.limiterByMode)
-                        Toggle(isOn: $settings.limiterByMode) { label("On while sleeping, off while focusing") }
-                        Toggle(isOn: $settings.sleepEQ) { label("Soften harsh highs and boomy lows") }
+                        Toggle(isOn: $settings.sleepEQ) {
+                            label("Soften harsh highs and boomy lows", note: "Gentler voices at low volume.")
+                        }
                         if settings.sleepEQ {
-                            VStack(alignment: .leading, spacing: 8) {
+                            VStack(alignment: .leading, spacing: UI.sm) {
                                 HStack {
                                     label("How much")
                                     Spacer()
-                                    Text(eqAmountLabel).foregroundStyle(pal.dim)
+                                    Text(SettingsCopy.softening(settings.sleepEQIntensity)).foregroundStyle(pal.dim)
                                 }
-                                VolumeBar(value: $settings.sleepEQIntensity, accent: pal.accent, range: 0...2, style: .parameter, tapToSet: true)
-                                    .accessibilityLabel("Softening amount")
-                                    .accessibilityValue(eqAmountLabel)
+                                VolumeBar(value: $settings.sleepEQIntensity, accent: pal.accent,
+                                          range: SettingsCopy.eqFloor...2, style: .parameter, tapToSet: true)
+                                    // The visible label, so Voice Control's "How much" finds it.
+                                    .accessibilityLabel("How much softening")
+                                    .accessibilityValue(SettingsCopy.softening(settings.sleepEQIntensity))
                             }
-                            .padding(.vertical, 4)
+                            .padding(.vertical, UI.xs)
                         }
+                        Toggle(isOn: $holdQueue) {
+                            label("Don't start the next episode during a sleep timer",
+                                  note: queue.autoPlay ? "The one playing finishes; your sounds carry on."
+                                                       : "Only applies when the next episode plays automatically.")
+                        }
+                        // With Auto-Play off the next episode never starts on its own anyway.
+                        .disabled(!queue.autoPlay)
                     } header: {
                         header("Podcasts at night")
                     } footer: {
-                        footer("Keeps a sudden loud moment in a podcast from waking you, and gentles voices at low volume. Podcasts only; your sounds are already steady.")
+                        footer("Softening is for podcasts only; your sounds are already steady.")
                     }
 
                     Section {
@@ -190,7 +198,6 @@ struct SettingsView: View {
 
                     Section {
                         Toggle(isOn: $queue.autoPlay) { label("Play the next episode automatically") }
-                        Toggle(isOn: holdQueueBinding) { label("During a sleep timer, stop after this episode") }
                         Toggle(isOn: $queue.shuffleQueue) { label("Shuffle the queue") }
                         Picker(selection: Binding(get: { Int(settings.skipInterval) }, set: { settings.skipInterval = Double($0) })) {
                             ForEach([10, 15, 30, 45], id: \.self) { Text("\($0) seconds").tag($0) }
@@ -201,8 +208,6 @@ struct SettingsView: View {
                         Toggle(isOn: $queue.hideFinishedEpisodes) { label("Hide played episodes") }
                     } header: {
                         header("Podcasts")
-                    } footer: {
-                        footer("With a sleep timer running, the current episode finishes and only your sounds carry on, so you don't sleep through the next one.")
                     }
 
                     Section {
@@ -381,5 +386,25 @@ struct DiagnosticsListView: View {
         .navigationTitle("Diagnostics")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { files = MetricsCollector.shared.payloadFiles() }
+    }
+}
+
+/// A settings row's label: the title in the text tone, and an optional short note under it in
+/// the dim tone. A disabled row dims its title too: at full cream it read as live, with only the
+/// switch's knob greyed.
+struct SettingLabel: View {
+    let title: String
+    var note: String?
+    let pal: Palette
+    @Environment(\.isEnabled) private var isEnabled
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title).foregroundStyle(isEnabled ? pal.text : pal.dim)
+            if let note {
+                Text(note).font(.footnote).foregroundStyle(pal.dim)
+            }
+        }
+        .fixedSize(horizontal: false, vertical: true)
     }
 }
