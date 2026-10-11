@@ -497,10 +497,13 @@ struct HomeView: View {
                     if audio.focusMode {
                         // Focus: the depleting Pomodoro ring is the hero. The orb still
                         // play/pauses audio; the ring + readout report the session. Freeze the
-                        // ring/orb redraw when backgrounded or low-luminance (Focus never engages
-                        // the sleep veil, so scenesFrozen reduces to those two here).
+                        // ring/orb redraw whenever they aren't visibly animating, as the Sleep orb
+                        // does: the chrome has faded to the screensaver (Focus fades too, mid-
+                        // session), or the scenes are frozen (backgrounded, low-luminance, Moving
+                        // scenes off; Focus never engages the sleep veil). The paused ring still
+                        // steps with the Pomodoro's tick, so it wakes at the true time left.
                         FocusHero(audio: audio, pomodoro: audio.pomodoro, pal: pal, tap: heroTap,
-                                  paused: scenesFrozen)
+                                  paused: audio.ambientScreensaver || scenesFrozen)
 
                         FocusSessionReadout(pomodoro: audio.pomodoro,
                                             pal: pal,

@@ -232,6 +232,11 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   icon + text pairs in rows from an `HStack`. A sheet's data must reach it through
   `.sheet(item:)`, not a separate `@State` read only inside the sheet closure (the OPML picker
   opened empty that way).
+- **Never `TimelineView(.animation(paused:))`.** On ProMotion (120 Hz) phones that schedule stops
+  driving frames, so the view moves only when something else redraws it (device 2026-07-11). A
+  frame loop that freezes swaps instead: `if paused { staticFrame } else { TimelineView(…) }`,
+  with a `@State` `SceneClock` holding the pose (`ShaderBackdrop`, `OrbButton`). A view showing
+  real time, like the Focus ring, draws its static frame from the published value instead.
 
 ## Build / run
 - **Native Xcode build** — open `Sleepulator/Sleepulator.xcodeproj`. NOT Capacitor/CLI; there's

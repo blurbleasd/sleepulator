@@ -39,8 +39,16 @@ struct OrbButton: View {
             UIImpactFeedbackGenerator(style: .soft).impactOccurred()
             tap()
         }) {
-            TimelineView(.animation(minimumInterval: 1.0 / 20.0, paused: paused)) { tl in
-                orb(now: paused ? nil : tl.date)
+            // An if/else swap, not `TimelineView(.animation(paused:))`: the `paused:` schedule
+            // stops driving frames on ProMotion devices (device 2026-07-11, see ShaderBackdrop),
+            // so the orb breathed only on outside re-renders. The clock is @State, so the frozen
+            // orb still holds the pose it froze at.
+            if paused {
+                orb(now: nil)
+            } else {
+                TimelineView(.animation(minimumInterval: 1.0 / 20.0)) { tl in
+                    orb(now: tl.date)
+                }
             }
         }
         .buttonStyle(.plain)
