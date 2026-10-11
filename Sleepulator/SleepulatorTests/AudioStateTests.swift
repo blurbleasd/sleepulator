@@ -3652,3 +3652,25 @@ final class SettingsRulesTests: XCTestCase {
         XCTAssertEqual(SettingsCopy.softening(2.0), "Strong")
     }
 }
+
+// MARK: - A restore's engine reload
+
+@MainActor
+final class RestoreReloadTests: XCTestCase {
+
+    // Value: protects=a restore's reload applies the Pomodoro lengths and never cancels a running sleep timer; fails_when=reloadAfterRestore drops reloadLengths, or focusMode's didSet starts cancelling on a same-value assignment; why_new=no test called reloadAfterRestore; seam=none; no_claim=the stores' disk reloads
+    func testARestoreReloadAppliesPomodoroLengthsAndKeepsTheNightsTimer() {
+        let d = UserDefaults.standard
+        let savedWork = d.object(forKey: "pomoWork")
+        defer { if let savedWork { d.set(savedWork, forKey: "pomoWork") } else { d.removeObject(forKey: "pomoWork") } }
+        let engine = AudioEngine()
+        engine.focusMode = false
+        engine.sleepTimer.startSleepTimer(minutes: 45)
+        defer { engine.sleepTimer.cancelTimer() }
+        d.set(50, forKey: "pomoWork")
+        engine.reloadAfterRestore()
+        XCTAssertEqual(engine.pomodoro.workMinutes, 50, "the next session runs the restored length")
+        XCTAssertGreaterThan(engine.sleepTimer.timerRemaining, 0, "a restore never cancels a running sleep timer")
+    }
+}
+

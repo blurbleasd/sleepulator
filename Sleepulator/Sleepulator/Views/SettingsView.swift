@@ -16,17 +16,17 @@ struct SettingsView: View {
     @AppStorage("ambientMotion") private var ambientMotion = true
 
     /// Export, Restore and Undo. Owned here, not by the Backup & support page, so a restore still
-    /// finishes and reloads if that page is closed mid-way (see `BackupController`). Held in
-    /// @State, not @StateObject: this list shows none of its state, and observing it re-rendered
-    /// every section on each publish. The page and its rows observe it themselves.
-    @State private var backup: BackupController
+    /// finishes and reloads if that page is closed mid-way (see `BackupController`). A
+    /// @StateObject, whose autoclosure builds it once: @State's initial value was built on every
+    /// init, and ContentView re-inits this view on each engine publish (a mixer drag's every
+    /// frame). Its own publishes only fire during a backup action.
+    @StateObject private var backup: BackupController
 
     init(audio: AudioEngine, queue: PodcastQueueManager, settings: PlaybackSettings) {
         self.audio = audio
         self.queue = queue
         self.settings = settings
-        // A re-init's controller is dropped unused: @State keeps the first.
-        _backup = State(initialValue: BackupController(reload: { audio.reloadAfterRestore() }))
+        _backup = StateObject(wrappedValue: BackupController(reload: { audio.reloadAfterRestore() }))
     }
 
     /// Mode-aware like Home: Focus is cool everywhere, not just on Home. Read from the persisted
@@ -57,10 +57,10 @@ struct SettingsView: View {
 
     // Pomodoro lengths: shown from the persisted keys, written through the service (its didSet
     // persists them; the next phase uses them). A restore reloads them (`reloadLengths`).
-    @AppStorage("pomoWork") private var pomoWork = 25
-    @AppStorage("pomoRest") private var pomoRest = 5
-    @AppStorage("pomoLongRest") private var pomoLongRest = 15
-    @AppStorage("pomoCycles") private var pomoCycles = 4
+    @AppStorage("pomoWork") private var pomoWork = PomodoroService.defaultLengths.work
+    @AppStorage("pomoRest") private var pomoRest = PomodoroService.defaultLengths.rest
+    @AppStorage("pomoLongRest") private var pomoLongRest = PomodoroService.defaultLengths.longRest
+    @AppStorage("pomoCycles") private var pomoCycles = PomodoroService.defaultLengths.cycles
 
     private func pomodoroBinding(_ value: Int, _ write: @escaping (Int) -> Void) -> Binding<Int> {
         Binding(get: { value }, set: { write($0) })

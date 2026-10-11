@@ -569,20 +569,35 @@ final class PomodoroService: ObservableObject {
         return max(0, phaseTotal - max(0, end.timeIntervalSince(now)))
     }
 
+    /// The lengths when none are saved. Settings' steppers show the same defaults
+    /// (`SettingsView`'s @AppStorage), so the two can't disagree on a fresh install.
+    static let defaultLengths = (work: 25, rest: 5, longRest: 15, cycles: 4)
+
+    /// The saved lengths, or the defaults.
+    private static func storedLengths() -> (work: Int, rest: Int, longRest: Int, cycles: Int) {
+        let d = UserDefaults.standard
+        return (d.object(forKey: "pomoWork") as? Int ?? defaultLengths.work,
+                d.object(forKey: "pomoRest") as? Int ?? defaultLengths.rest,
+                d.object(forKey: "pomoLongRest") as? Int ?? defaultLengths.longRest,
+                d.object(forKey: "pomoCycles") as? Int ?? defaultLengths.cycles)
+    }
+
     init() {
-        workMinutes = UserDefaults.standard.object(forKey: "pomoWork") as? Int ?? 25
-        restMinutes = UserDefaults.standard.object(forKey: "pomoRest") as? Int ?? 5
-        longRestMinutes = UserDefaults.standard.object(forKey: "pomoLongRest") as? Int ?? 15
-        cyclesBeforeLongBreak = UserDefaults.standard.object(forKey: "pomoCycles") as? Int ?? 4
+        let lengths = Self.storedLengths()
+        workMinutes = lengths.work
+        restMinutes = lengths.rest
+        longRestMinutes = lengths.longRest
+        cyclesBeforeLongBreak = lengths.cycles
     }
 
     /// Re-read the lengths after a Backup restore or its Undo. They're otherwise read once, at
     /// launch: Settings showed the restored 50 min while the next session still ran 25.
     func reloadLengths() {
-        workMinutes = UserDefaults.standard.object(forKey: "pomoWork") as? Int ?? 25
-        restMinutes = UserDefaults.standard.object(forKey: "pomoRest") as? Int ?? 5
-        longRestMinutes = UserDefaults.standard.object(forKey: "pomoLongRest") as? Int ?? 15
-        cyclesBeforeLongBreak = UserDefaults.standard.object(forKey: "pomoCycles") as? Int ?? 4
+        let lengths = Self.storedLengths()
+        workMinutes = lengths.work
+        restMinutes = lengths.rest
+        longRestMinutes = lengths.longRest
+        cyclesBeforeLongBreak = lengths.cycles
     }
 
     deinit { timer?.cancel() }

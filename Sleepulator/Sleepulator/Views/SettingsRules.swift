@@ -39,7 +39,7 @@ enum SettingsCopy {
 
     /// The podcast softening amount in words. The bar starts at `eqFloor`, so it can't be set to
     /// "Off" while its switch is on; a lower value saved by the old 0...2 slider (or an old
-    /// backup) still reads "Off", since the EQ does nothing at it.
+    /// backup) still reads "Off": the EQ is negligible there (under 1 dB at the floor).
     static func softening(_ intensity: Double) -> String {
         switch intensity {
         case ..<eqFloor: return "Off"

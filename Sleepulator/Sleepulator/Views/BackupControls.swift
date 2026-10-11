@@ -1,6 +1,5 @@
 import SwiftUI
 import Combine
-import UniformTypeIdentifiers
 import os
 
 /// The Backup rows' state: export, the restore's read → confirm → write → Undo, and the alerts in
@@ -58,7 +57,10 @@ final class BackupController: ObservableObject {
             defer { busy = false }
             do {
                 let now = Date()
-                exportDocument = JSONDocument(data: try await Backup.exportData(at: now))
+                let data = try await Backup.exportData(at: now)
+                // Closed while it was being made: no save sheet popping up later, out of context.
+                guard pageVisible else { return }
+                exportDocument = JSONDocument(data: data)
                 exportName = Backup.filename(for: now)
                 isExporting = true
             } catch {

@@ -79,6 +79,9 @@ final class NightVeilUITests: XCTestCase {
         tapPoint.tap()
         var firstTap = Date()
         if !waitUntil(timeout: 2, { self.screenIsLit() }) {
+            // Let any glance that did start run out first (it shows 6 s and fades 2 s), so the
+            // retry reads as a fresh glance, never as the wake a slow-to-light glance would make it.
+            RunLoop.current.run(until: firstTap.addingTimeInterval(8.5))
             tapPoint.tap()
             firstTap = Date()
             XCTAssertTrue(waitUntil(timeout: 2) { self.screenIsLit() }, "The first tap showed no glance, twice")
