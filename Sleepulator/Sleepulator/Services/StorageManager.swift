@@ -2,7 +2,9 @@ import Foundation
 import os
 
 final class StorageManager {
-    static let shared = StorageManager()
+    // Nonisolated, like the inits: they touch only the file system and an immutable URL, so
+    // default arguments (`storage: StorageManager = .shared`) can name it without a warning.
+    nonisolated static let shared = StorageManager()
     private let appSupportURL: URL
     private let ioQueue = DispatchQueue(label: "app.sleepulator.storage.ioQueue", qos: .utility)
 
@@ -16,7 +18,7 @@ final class StorageManager {
     /// corruption that was (or wasn't) recovered from the backup.
     enum LoadOutcome: Equatable { case missing, loaded, recovered, failed }
 
-    convenience init() {
+    nonisolated convenience init() {
         let fm = FileManager.default
         // Same rationale as AudioDownloader: never launch-crash on a missing Application Support
         // URL — fall back to the temp dir (persistence degrades for the session, app still runs).
@@ -29,7 +31,7 @@ final class StorageManager {
     /// Seam initializer: point the store at an arbitrary directory. Production uses `init()`
     /// (Application Support); unit tests pass a temp dir so they're hermetic and never touch — or
     /// race — the real on-disk store.
-    init(directory: URL) {
+    nonisolated init(directory: URL) {
         let fm = FileManager.default
         if !fm.fileExists(atPath: directory.path) {
             try? fm.createDirectory(at: directory, withIntermediateDirectories: true, attributes: nil)

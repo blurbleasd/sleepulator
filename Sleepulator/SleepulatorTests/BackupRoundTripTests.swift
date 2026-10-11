@@ -858,3 +858,98 @@ final class BackupRoundTripTests: XCTestCase {
     }
 }
 
+
+// MARK: - The Backup page's controller
+
+/// `BackupController` against a temp store and defaults, with no alert delay. SwiftUI's own parts
+/// (the file exporter, the alert) aren't here: the controller's state is what they read.
+@MainActor
+final class BackupControllerTests: XCTestCase {
+
+    private struct Fixture {
+        let controller: BackupController
+        let dir: URL
+        let defaults: UserDefaults
+        let suite: String
+        func cleanUp() {
+            defaults.removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: dir)
+        }
+    }
+
+    private func fixture(reload: @escaping () -> Void = {}) throws -> Fixture {
+        let suite = "BackupControllerTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(suite)
+        let controller = BackupController(storage: StorageManager(directory: dir), defaults: defaults,
+                                          alertDelay: 0, reload: reload)
+        return Fixture(controller: controller, dir: dir, defaults: defaults, suite: suite)
+    }
+
+    private func waitUntil(_ condition: () -> Bool) async throws {
+        let deadline = Date().addingTimeInterval(5)
+        while !condition(), Date() < deadline { try await Task.sleep(for: .milliseconds(10)) }
+    }
+
+    // Value: protects=a failure that lands while Backup & support is closed is shown when it opens again, and a result with a one-tap Undo is still dropped; fails_when=present drops failures again, or keeps every result; why_new="Couldn't save a copy …, so nothing was replaced" was lost when the page had closed; seam=alertDelay 0, a temp store; no_claim=SwiftUI's alert presentation
+    func testAFailureWaitsForThePageButARestoreResultIsDropped() async throws {
+        var reloaded = false
+        let f = try fixture(reload: { reloaded = true })
+        defer { f.cleanUp() }
+        let backup = f.controller
+
+        backup.picked(.failure(CocoaError(.fileReadNoPermission)))           // the page is closed
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertNil(backup.prompt)
+        backup.pageAppeared()
+        try await waitUntil { backup.prompt != nil }
+        guard case .failed(let title, _)? = backup.prompt else { return XCTFail("the failure is shown once the page opens") }
+        XCTAssertEqual(title, "Couldn't restore")
+        backup.isPrompting.wrappedValue = false
+
+        backup.pageDisappeared()
+        let file: [String: Any] = ["masterVolume": 0.9, Backup.markerKey: 1]
+        backup.restore(Backup.Pending(data: try JSONSerialization.data(withJSONObject: file), contents: Backup.contents(of: file)))
+        try await waitUntil { reloaded && !backup.busy }
+        XCTAssertEqual(f.defaults.double(forKey: "masterVolume"), 0.9, accuracy: 1e-9, "the restore itself finished")
+        backup.pageAppeared()
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertNil(backup.prompt, "\"Backup restored\" with its one-tap Undo isn't shown out of context")
+    }
+
+    // Value: protects=the export's document is let go once the exporter closes, and a section the export left out is said after the save; fails_when=isExporting's didSet stops clearing the document, or exported(.success) stops reporting leftOut; why_new=the document (tens of MB) was kept all session, and a left-out section went unmentioned; seam=alertDelay 0, a temp store; no_claim=the file exporter's UI
+    func testTheExportLetsGoOfItsDocumentAndSaysWhatItLeftOut() async throws {
+        let f = try fixture()
+        defer { f.cleanUp() }
+        let backup = f.controller
+        try FileManager.default.createDirectory(at: f.dir, withIntermediateDirectories: true)
+        for name in ["library.json", "library.json.bak"] {
+            try Data("{ truncated".utf8).write(to: f.dir.appendingPathComponent(name))
+        }
+        backup.pageAppeared()
+        backup.export()
+        try await waitUntil { backup.isExporting }
+        XCTAssertNotNil(backup.exportDocument)
+
+        backup.exported(.success(f.dir.appendingPathComponent("saved.json")))
+        backup.isExporting = false                                           // SwiftUI resets it as the exporter closes
+        XCTAssertNil(backup.exportDocument)
+        try await waitUntil { backup.prompt != nil }
+        guard case .notice(_, let message)? = backup.prompt else { return XCTFail("the save says what it left out") }
+        XCTAssertEqual(message, Backup.leftOutMessage(["savedPodcasts"]))
+    }
+
+    // Value: protects=a cancelled export lets go of its document too; fails_when=the document is only cleared in the completion handler (not called on cancel); why_new=see above; seam=none; no_claim=the exporter's UI
+    func testACancelledExportLetsGoOfItsDocument() async throws {
+        let f = try fixture()
+        defer { f.cleanUp() }
+        let backup = f.controller
+        backup.pageAppeared()
+        backup.export()
+        try await waitUntil { backup.isExporting }
+        XCTAssertNotNil(backup.exportDocument)
+        backup.isExporting = false                                           // cancelled: no completion call
+        XCTAssertNil(backup.exportDocument)
+        XCTAssertNil(backup.prompt)
+    }
+}

@@ -19,7 +19,11 @@ final class BackupController: ObservableObject {
     }
 
     @Published var isImporting = false
-    @Published var isExporting = false
+    @Published var isExporting = false {
+        // The document can run to tens of MB. Once the exporter has closed (saved, failed or
+        // cancelled: SwiftUI resets this either way) nothing reads it; it was kept all session.
+        didSet { if !isExporting { exportDocument = nil } }
+    }
     @Published private(set) var exportDocument: JSONDocument?
     @Published private(set) var exportName = "sleepulator-backup"
     /// The sections the backup being saved couldn't include, said once the save lands.
@@ -29,10 +33,15 @@ final class BackupController: ObservableObject {
     @Published private(set) var busy = false
     /// When the snapshot Undo would put back was taken, while it's still offered.
     @Published private(set) var undoDate: Date?
-    /// The Backup & support page is on screen. Its alert lives there, so a result that lands after
-    /// the page closed is dropped, not stranded: it surfaced later, out of context, with a one-tap
-    /// Undo that skipped the "changes since will be lost" confirm.
-    var pageVisible = false
+    /// The Backup & support page is on screen (`pageAppeared` / `pageDisappeared`). Its alert
+    /// lives there, so a result that lands after the page closed is dropped, not stranded: it
+    /// surfaced later, out of context, with a one-tap Undo that skipped the "changes since will be
+    /// lost" confirm. A failure is kept for when the page opens again (`pendingFailure`).
+    private(set) var pageVisible = false
+    /// A failure that landed while the page was closed. "Couldn't save a copy …, so nothing was
+    /// replaced" is the only word that a restore didn't happen; dropped, the person was left
+    /// believing it had.
+    private var pendingFailure: Prompt?
 
     private let storage: StorageManager
     private let defaults: UserDefaults
@@ -41,13 +50,17 @@ final class BackupController: ObservableObject {
     private let settle: () -> Void
     private let reload: () -> Void
     /// When the last alert went away. SwiftUI drops an alert presented while another (or the file
-    /// picker) is still animating out, so the next one waits for it.
+    /// picker) is still animating out, so the next one waits for it (`alertDelay`).
     private var lastDismissal = Date.distantPast
+    /// How long after a dismissal an alert waits. The log exporter's alert waits as long.
+    nonisolated static let alertDelay: TimeInterval = 0.5
+    private let alertDelay: TimeInterval
 
-    init(storage: StorageManager = .shared, defaults: UserDefaults = .standard,
+    init(storage: StorageManager = .shared, defaults: UserDefaults = .standard, alertDelay: TimeInterval = BackupController.alertDelay,
          settle: @escaping () -> Void = {}, reload: @escaping () -> Void) {
         self.storage = storage
         self.defaults = defaults
+        self.alertDelay = alertDelay
         self.settle = settle
         self.reload = reload
     }
@@ -62,6 +75,19 @@ final class BackupController: ObservableObject {
 
     func refresh() {
         undoDate = Backup.undoDate(storage: storage, defaults: defaults)
+    }
+
+    func pageAppeared() {
+        pageVisible = true
+        refresh()
+        guard let failure = pendingFailure else { return }
+        pendingFailure = nil
+        lastDismissal = Date()                 // the page is still sliding in
+        Task { await present(failure) }
+    }
+
+    func pageDisappeared() {
+        pageVisible = false
     }
 
     func export() {
@@ -158,9 +184,12 @@ final class BackupController: ObservableObject {
     }
 
     private func present(_ next: Prompt) async {
-        let wait = 0.5 - Date().timeIntervalSince(lastDismissal)
+        let wait = alertDelay - Date().timeIntervalSince(lastDismissal)
         if wait > 0 { try? await Task.sleep(for: .seconds(wait)) }
-        guard pageVisible else { return }
+        guard pageVisible else {
+            if case .failed = next { pendingFailure = next }
+            return
+        }
         prompt = next
     }
 
