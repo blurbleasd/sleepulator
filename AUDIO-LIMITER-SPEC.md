@@ -26,8 +26,8 @@ Hard rules:
 - **Fail open**: if the tap can't attach (HLS/streamed asset with no accessible audio track, AirPlay, any
   error), playback proceeds **unprocessed** — never block or kill audio for the limiter. The player
   reports it through `PodcastPlayer.onLimiterUnavailable` (not a `playbackNote`); when the limiter is on,
-  `AudioEngine.limiterOffForStream` shows one dim line in the full Now Playing sheet ("Night Limiter
-  can't soften this stream"), never a Home banner or the mini-player's status.
+  `AudioEngine.limiterOffForStream` shows one dim line in the full Now Playing sheet ("Can't soften
+  loud moments on this stream"), never a Home banner or the mini-player's status.
 - Guard against denormals/NaN in the DSP (flush tiny values to 0; clamp final output to ±1).
 - Build green (`xcodebuild`) + `xcodebuild test` passing.
 

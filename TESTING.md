@@ -30,13 +30,18 @@ Suites in `SleepulatorTests/` (six files, many suites):
   sleep-timer suites (backstop, cancel, end-of-episode), layering, mode reconciliation, and the
   Podcasts-tab rules (`PodcastTextTests`, `ShowNotesPreviewTests`, `ShowNotesEdgeTests`,
   `TonightShelfTests`, `QueueMoveToHeadTests`), the player rules (`NowPlayingStateTests`,
-  `NightLineCopyTests`, `PlayerQueueActionTests`, `PodcastFailureStreakTests`), and three suites
+  `NightLineCopyTests`, `PlayerQueueActionTests`, `PodcastFailureStreakTests`), Settings' rules
+  (`SettingsRulesTests`: the limiter choice, stereo stops, section order), a restore's engine
+  reload (`RestoreReloadTests`: Pomodoro lengths applied, the night's timer kept), and three suites
   on a real `AVPlayer` in the simulator: `PodcastPlayerRebuildTests` (dead-pipeline rebuilds),
   `PodcastLoadHoldTests` (a pause, stop or call during a load sticks) and `PodcastItemEndTests`
   (an episode's end is filed under its own item).
 - `PersistenceTests.swift` — legacy `SavedMix` → `SoundPreset` migration, library seeding,
   position-map coercion, `MixStore` reloads.
-- `BackupRoundTripTests.swift` — settings Export → Import round-trip and its key allowlist.
+- `BackupRoundTripTests.swift` — the backup's export → restore round-trip, its typed allowlist
+  (`Backup.kinds`: a null, wrong type or out-of-range value is skipped), the confirm's counts,
+  restore → Undo end to end, refusing when the Undo copy can't be saved, and a restore never
+  switching mode.
 - `FocusDriversTests.swift` — the Pomodoro → Focus-scene look mapping.
 - `GenerativeAudioEngineTests.swift` — generative-bed rebuild after a media-services reset.
 
@@ -125,8 +130,9 @@ Install via Xcode onto the device (not the simulator). Then:
 
 ### D. Night Limiter (acceptance for enabling by default)
 `AppConfig.nightLimiterEnabled` ships `false` until this passes and is logged below.
-1. Enable the limiter in Settings. Play a podcast episode with a known loud spot
-   (dynamic ad read, intro sting), phone locked, at a low comfortable volume.
+1. Turn the limiter on (Settings ▸ Podcasts at night ▸ Soften loud moments ▸ **Always**). Play a
+   podcast episode with a known loud spot (dynamic ad read, intro sting), phone locked, at a low
+   comfortable volume.
    ✅ The spike is audibly tamed; speech stays intelligible; no pumping/distortion.
 2. Let it run ≥ 1 hour locked. ✅ No glitches, dropouts, or battery anomalies
    (the tap must never block the real-time thread).
@@ -182,8 +188,9 @@ the brightness you actually use at night, in **both** Sleep and Focus.
 
 1. **VolumeBar relative drag + fader tiers.** In the Build-mix drawer, grab a layer fader. ✅ It
    moves by the drag *delta* from where you grabbed (not jump-to-touch); a light tap does NOT
-   change volume; drifting the finger up/down off the track fine-trims. Then check Settings
-   (stereo width, Sleep EQ): a *tap* there DOES jump to that position (tapToSet). VoiceOver
+   change volume; drifting the finger up/down off the track fine-trims. Then check Settings'
+   "How much" softening bar (Podcasts at night; stereo width is now four named stops, §S7): a
+   *tap* there DOES jump to that position (tapToSet). VoiceOver
    reports the real value. Gain-staging reads at a glance: the master fader (bottom bar) is
    visibly the thickest, layer faders next, Settings params slimmest.
 1b. **Now-playing rim.** Apply a saved mix. ✅ Its card wears a brighter accent rim + fill and a
@@ -240,7 +247,7 @@ the brightness you actually use at night, in **both** Sleep and Focus.
    within ~30–60s resumes with no skip (ride out a real network dip); a genuinely dead stream is
    dropped after the bounded wait with an honest note, and the generative bed keeps playing. A
    404 / failed episode advances too — and is NOT recorded as "played" (doesn't vanish under
-   "hide finished episodes"). During a sleep timer with hold-queue on, a lost stream just leaves
+   "Hide played episodes"). During a sleep timer with hold-queue on, a lost stream just leaves
    the bed running (no jarring next episode at 2am).
 3. **Queue removes the right episode.** With delete-on-completion on, reorder the queue (or play a
    non-head episode) and let it finish. ✅ The episode that finished is the one removed/deleted —
@@ -484,9 +491,9 @@ changes are the ones a simulator can't settle.
    night".
 6. **The Night Limiter line, only with the limiter on.** Limiter off (the default): play a stream
    the tap can't attach to (HLS). ✅ No limiter wording anywhere. Turn the limiter on in Settings
-   and load it again. ✅ One dim line in the full player, "Can't soften loud moments on this
-   stream"; no amber banner on Home, and the mini-player keeps its normal status. A regular MP3
-   episode with the limiter on → no line.
+   (Soften loud moments ▸ Always) and load it again. ✅ One dim line in the full player, "Can't
+   soften loud moments on this stream"; no amber banner on Home, and the mini-player keeps its
+   normal status. A regular MP3 episode with the limiter on → no line.
 7. **Build mix clears the loaded bar on a small phone.** On the smallest supported iPhone (SE /
    mini), Sleep Home with an episode loaded. ✅ Build mix sits fully above the mini-player and
    takes taps; in Focus, so does Focus session. Check with the tab bar showing, after the
@@ -528,8 +535,9 @@ longest, so the window is widest). Export logs after each.
    (downloaded plays, streams fail as in 5). The lost episode is still in Up Next, and tapping it
    continues near where the stream was lost (unless Auto-Play reached it again overnight, which
    starts it over, as any auto-advance does).
-7. **Next right at an episode's end.** Settings → Delete Played Episodes ON, three downloaded
-   episodes queued. Scrub the first to its last 2 s, tap Next just as it ends (try a few times).
+7. **Next right at an episode's end.** Settings ▸ Podcasts ▸ Delete downloads once played ON,
+   three downloaded episodes queued. Scrub the first to its last 2 s, tap Next just as it ends
+   (try a few times).
    ✅ The second plays from where you left it (or its start), stays unplayed, and keeps its
    download (its row still shows the Downloaded tick); the third is still queued. If the end won the race, the
    log shows `ignoring the end of a podcast item that's since been replaced`, and nothing else
