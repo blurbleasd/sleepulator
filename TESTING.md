@@ -320,6 +320,23 @@ this section is where you do it. Do it in a dark room at your real bedtime brigh
 6. **Dark launch.** Cold-launch at night. ✅ No white flash before Home (warm near-black launch).
 7. **VoiceOver.** The ring is "Night length, 45 minutes", swipe up/down adjusts in 5s; the on-ramp
    close button says "Close without starting your mix" (and doesn't start it).
+   *Touch exploration (added 2026-10-10).* On Sleep Home at rest, slide a finger around the
+   screen. ✅ The mode switcher, the night line and Build mix are each found by touch, not only by
+   swipe. The orb's centre reads "Play", the band around it "Night length", and nothing reads from
+   the hidden mini-player's spot above Build mix.
+   *The bar's fade-out (added 2026-10-10).* With something queued but nothing loaded, go from
+   Podcasts to Sleep (Build mix is already in place there) and tap Build mix where the "Up next"
+   bar is still visibly fading; if the bar had already gone, try again. ✅ The mixer opens; never
+   Now Playing, Podcasts or a playing queue. With VoiceOver on, focus never lands on the fading
+   bar. To widen the window, run it in the Simulator with Debug ▸ Slow Animations (the ~1 s fade
+   takes about 9 s): a tap on Build mix through the half-faded bar must still open the mixer.
+   *The bar under the veil (added 2026-10-11).* With something queued but nothing loaded, start a
+   30-min night from the orb with a podcast-free mix (the bar must read "Up next"), go to Podcasts
+   and let the veil drop. ✅ With Voice Control's "Show names" only the veil is labelled,
+   and "Tap Play queue" and "Tap Up next: <episode title>" (the bar's full name, as "Show names"
+   labels it before the veil) do nothing (no podcast starts, Now Playing stays shut);
+   with VoiceOver turned on, swiping finds only the veil. (XCUITest can't tell: it lists the bar
+   either way.)
 8. **Ring drag keeps the controls awake.** Mid-night (sounds playing): tap to wake, then drag the
    ring slowly for 5+ s. ✅ The controls don't fade under the finger; ~3 s after release they do.
    Inside the last 10 minutes the ring is locked (handle dims); a drag that ends where it began

@@ -10,10 +10,9 @@ struct MiniPlayerView: View {
     @ObservedObject var queue: PodcastQueueManager
     @Binding var selectedTab: Int
     /// Owned by ContentView so Home's screensaver knows the full player is up (it must not fade
-    /// Home, the tab bar and this bar behind the sheet).
+    /// Home, the tab bar and this bar behind the sheet). ContentView presents the sheet too: it
+    /// takes this bar out of the hierarchy while hidden, and a sheet here would close with it.
     @Binding var showNowPlaying: Bool
-    /// A touch in the full player, for the night veil's countdown (see NowPlayingSheet).
-    var onSheetInteraction: () -> Void = {}
     @ScaledMetric(relativeTo: .title) private var playGlyph: CGFloat = 32
 
     /// Mode-aware like Home: Focus is cool everywhere, not just on Home. Read from the persisted
@@ -22,7 +21,8 @@ struct MiniPlayerView: View {
     var pal: Palette { Palette(focusMode: focusMode) }
 
     var body: some View {
-        // Always present (per design): full controls when an episode is loaded, an actionable
+        // Wherever it shows (ContentView takes it out on Sleep Home at rest and under the
+        // screensaver), per design: full controls when an episode is loaded, an actionable
         // "Up next" when the queue has items but nothing's loaded yet, and a quiet "Nothing
         // playing" otherwise — so transport/queue access is always one tap away.
         VStack(spacing: 0) {
@@ -61,13 +61,6 @@ struct MiniPlayerView: View {
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("miniPlayer")
         .padding(.bottom, 80) // float above the tab bar
-        .sheet(isPresented: $showNowPlaying) {
-            NowPlayingSheet(audio: audio, queue: audio.queueManager, progress: progress,
-                            isPresented: $showNowPlaying, pal: pal, onInteraction: onSheetInteraction)
-                // The system grabber (the hand-drawn one scrolled away with the content).
-                .presentationDragIndicator(.visible)
-                .presentationBackground(pal.bg)
-        }
     }
 
     // MARK: Loaded — full transport
