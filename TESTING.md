@@ -31,8 +31,10 @@ Suites in `SleepulatorTests/` (six files, many suites):
   Podcasts-tab rules (`PodcastTextTests`, `ShowNotesPreviewTests`, `ShowNotesEdgeTests`,
   `TonightShelfTests`, `QueueMoveToHeadTests`), the player rules (`NowPlayingStateTests`,
   `NightLineCopyTests`, `PlayerQueueActionTests`, `PodcastFailureStreakTests`), Settings' rules
-  (`SettingsRulesTests`: the limiter choice, stereo stops, section order), a restore's engine
-  reload (`RestoreReloadTests`: Pomodoro lengths applied, the night's timer kept), and three suites
+  (`SettingsRulesTests`: the limiter choice, stereo stops, section order, the hold's spoken
+  value), a restore's engine reload (`RestoreReloadTests`: Pomodoro lengths applied, the night's
+  timer kept, the queued writes flushed first, an undecodable queue left on disk, the played list
+  held to the backup's limits), and three suites
   on a real `AVPlayer` in the simulator: `PodcastPlayerRebuildTests` (dead-pipeline rebuilds),
   `PodcastLoadHoldTests` (a pause, stop or call during a load sticks) and `PodcastItemEndTests`
   (an episode's end is filed under its own item).
@@ -40,8 +42,12 @@ Suites in `SleepulatorTests/` (six files, many suites):
   position-map coercion, `MixStore` reloads.
 - `BackupRoundTripTests.swift` — the backup's export → restore round-trip, its typed allowlist
   (`Backup.kinds`: a null, wrong type or out-of-range value is skipped), the confirm's counts,
-  restore → Undo end to end, refusing when the Undo copy can't be saved, and a restore never
-  switching mode.
+  restore → Undo end to end, refusing when the Undo copy can't be saved, what a restore stores
+  (decoded and bounded, never the file's own JSON), Undo putting back its own copy exactly (and
+  keeping it when a file can't be saved), an export's `.bak` fallback and 50 MB cap, and a
+  restore never switching mode. `BackupControllerTests` covers the Backup page's controller:
+  results that land after the page closed, the export letting go of its document, an incomplete
+  Undo, and the queued writes landing first.
 - `FocusDriversTests.swift` — the Pomodoro → Focus-scene look mapping.
 - `GenerativeAudioEngineTests.swift` — generative-bed rebuild after a media-services reset.
 
