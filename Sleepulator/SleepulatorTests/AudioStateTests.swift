@@ -3723,6 +3723,36 @@ final class RestoreReloadTests: XCTestCase {
         storage.flush()
         XCTAssertEqual(manager.queue, [])
         XCTAssertEqual(storage.rawData(for: "queue.json"), drift, "left on disk, not saved over with []")
+
+        // Value: protects=after that, the next queue edit still saves, and a readable queue is loaded on reload; fails_when=persistsQueue isn't turned back on, or the decodable branch stops assigning; why_new=the test stopped at the reload; seam=none; no_claim=which mutators
+        let ep = Episode(id: "e", title: "E", audioUrl: "u", duration: nil, pubDate: nil, description: nil)
+        manager.queue.append(ep)
+        manager.flushPendingWrites()
+        storage.flush()
+        XCTAssertEqual(storage.load(from: "queue.json") as [Episode]?, [ep], "the next edit is saved")
+        let other = Episode(id: "f", title: "F", audioUrl: "v", duration: nil, pubDate: nil, description: nil)
+        try storage.writeRawNow(JSONEncoder().encode([other]), to: "queue.json")
+        manager.reloadFromDisk()
+        XCTAssertEqual(manager.queue, [other], "a readable queue is loaded")
+    }
+
+    // Value: protects=the played list is held to a backup's byte limits at runtime too; fails_when=markFinished trims by count only, or records an id over the item limit; why_new=a thousand 16 KB ids came to 16 MB in the plist; seam=none; no_claim=the 1,000-item cap (unchanged)
+    func testThePlayedListIsHeldToTheBackupLimitsAtRuntime() {
+        let defaults = UserDefaults.standard
+        let saved = defaults.object(forKey: "finishedEpisodes")
+        let manager = PodcastQueueManager()
+        defer {
+            manager.flushPendingWrites()
+            if let saved { defaults.set(saved, forKey: "finishedEpisodes") } else { defaults.removeObject(forKey: "finishedEpisodes") }
+        }
+        let ids = (0..<70).map { String(format: "%03d", $0) + String(repeating: "x", count: Backup.maxListItemBytes - 3) }
+        ids.forEach(manager.markFinished)
+        let stored = manager.finishedEpisodes
+        XCTAssertLessThanOrEqual(stored.reduce(0) { $0 + $1.utf8.count }, Backup.maxListBytes)
+        XCTAssertTrue(stored.contains(ids.last!), "the newest is kept")
+        XCTAssertFalse(stored.contains(ids.first!), "the oldest went to make room")
+        manager.markFinished(String(repeating: "y", count: Backup.maxListItemBytes + 1))
+        XCTAssertEqual(manager.finishedEpisodes, stored, "an id over the item limit isn't recorded")
     }
 
     // Value: protects=flushPositionsNow writes the player's in-memory saved places to positions.json before it returns; fails_when=flushPositionsNow skips the in-memory map (e.g. reduced to a queue barrier) or returns before the store writes it; why_new=this suite covered only mixes.json, and places held in memory reach disk only every ~30 s or on a pause; seam=none; no_claim=that AudioEngine.flushPendingWrites calls it (podPlayer is private to AudioEngine)

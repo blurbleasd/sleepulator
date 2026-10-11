@@ -203,9 +203,13 @@ final class BackupController: ObservableObject {
 
     // MARK: Alert copy
 
-    /// When the restore Undo would reverse was made: "Sunday 9:41 PM".
-    static func undoWhen(_ date: Date) -> String {
-        date.formatted(.dateTime.weekday(.wide).hour().minute())
+    /// When the restore Undo would reverse was made: "Sunday 9:41 PM", with the date once it's
+    /// six days or more ago ("Sunday 4 Oct 9:41 PM"). An incomplete Undo keeps the copy past the
+    /// week, and a weekday alone then read as last week's.
+    static func undoWhen(_ date: Date, now: Date = Date()) -> String {
+        now.timeIntervalSince(date) >= 6 * 86_400
+            ? date.formatted(.dateTime.weekday(.wide).day().month(.abbreviated).hour().minute())
+            : date.formatted(.dateTime.weekday(.wide).hour().minute())
     }
 
     var title: String {

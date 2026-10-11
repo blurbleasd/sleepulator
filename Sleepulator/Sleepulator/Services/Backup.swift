@@ -25,13 +25,16 @@ enum Backup {
     /// preferences plist, which loads at every launch.
     nonisolated private static let maxTextBytes = 256
     nonisolated private static let maxListItems = 20_000
-    nonisolated private static let maxListItemBytes = maxFeedFieldBytes
-    nonisolated private static let maxListBytes = 1_000_000
-    /// Longest id, title, address or name an episode or show may carry: the feed parser keeps
-    /// 4,000 characters of a guid or title (PodcastParser), up to 16 KB in UTF-8. A restored
-    /// episode or show over it is dropped; the app copies an episode's id and address into the
-    /// preferences plist (the Last Night snapshot, the played list). The played list's items
-    /// share it: at 2 KB a real guid was over the limit and the whole list was left out.
+    /// The played list's limits, which the app holds it to at runtime too (`markFinished`).
+    nonisolated static let maxListItemBytes = maxFeedFieldBytes
+    nonisolated static let maxListBytes = 1_000_000
+    /// Backup's own bound on an episode's or show's id, title, address or name, in UTF-8 bytes:
+    /// room for the parser's 4,000-character guid or title in ordinary text. (The parser counts
+    /// characters, and keeps addresses whole.) A restored episode or show whose id, title,
+    /// address or name is over it is dropped, and said so; over-long artwork is only cleared.
+    /// The app copies an episode's id and address into the preferences plist (the Last Night
+    /// snapshot, the played list). The played list's items share it: at 2 KB a real guid was
+    /// over the limit and the whole list was left out.
     nonisolated private static let maxFeedFieldBytes = 16_384
 
     /// The scalar UserDefaults settings a backup restores, and the shape of each. Single source of
@@ -101,7 +104,8 @@ enum Backup {
     /// then the only place what it couldn't save still is, so the week starts again from here;
     /// it expired on the restore's clock and was thrown away with no word.
     nonisolated static let undoKeptAtKey = "restoreUndoKeptAt"
-    /// How long Undo is offered. Past a week it would roll back everything since, which nobody
+    /// How long Undo is offered: a week from the restore, or from the last Undo that couldn't
+    /// finish (`undoKeptAtKey`). Past that it would roll back everything since, which nobody
     /// reaching for "undo" means.
     nonisolated static let undoWindow: TimeInterval = 7 * 24 * 3600
 
@@ -117,6 +121,8 @@ enum Backup {
         var positions = false
         var settings = false
         var exportedAt: Date?
+        /// Episodes, shows and mixes left out because a text in them was over the limits.
+        var tooLong = 0
 
         /// Record a file-backed section (a backup key) as restored with `count` items, or as not
         /// restored when nil. One place maps the keys, for `prepare` and `write` alike.
@@ -181,45 +187,60 @@ enum Backup {
     ///
     /// `encode: false` only counts (the read's confirm): `data` is then empty. The write encodes.
     nonisolated static func validatedFileSection(key: String, value: Any, encode: Bool = true,
-                                                 now: Date = Date()) -> (data: Data, count: Int)? {
+                                                 now: Date = Date()) -> (data: Data, count: Int, dropped: Int)? {
         guard let data = jsonData(value) else { return nil }
         let decoder = JSONDecoder()
-        func encoded<T: Encodable>(_ value: T, count: Int) -> (data: Data, count: Int)? {
-            guard encode else { return (Data(), count) }
-            return (try? JSONEncoder().encode(value)).map { ($0, count) }
+        var dropped = 0         // items left out for a text over the limits (`Contents.tooLong`)
+        func encoded<T: Encodable>(_ value: T, count: Int) -> (data: Data, count: Int, dropped: Int)? {
+            guard encode else { return (Data(), count, dropped) }
+            return (try? JSONEncoder().encode(value)).map { ($0, count, dropped) }
         }
-        /// An episode as restore keeps it: dropped when a text is over `maxFeedFieldBytes`, its
-        /// date dropped when it couldn't be real.
-        func kept(_ episode: Episode) -> Episode? {
-            guard fits([episode.id, episode.title, episode.audioUrl, episode.artworkUrl], within: maxFeedFieldBytes) else { return nil }
+        /// An episode as restore keeps it: dropped when its id, title or address is over
+        /// `maxFeedFieldBytes`; its artwork cleared when that is (artwork is only a picture, and
+        /// the parser keeps a data-URI image whole); its date dropped when it couldn't be real.
+        func bounded(_ episode: Episode) -> Episode? {
+            guard fits([episode.id, episode.title, episode.audioUrl], within: maxFeedFieldBytes) else {
+                dropped += 1
+                return nil
+            }
             var episode = episode
+            if !fits([episode.artworkUrl], within: maxFeedFieldBytes) { episode.artworkUrl = nil }
             episode.pubDate = plausibleDate(episode.pubDate, now: now)
             return episode
         }
-        func kept(_ show: Podcast) -> Podcast? {
-            guard fits([show.id, show.name, show.url, show.artworkUrl], within: maxFeedFieldBytes) else { return nil }
+        func bounded(_ show: Podcast) -> Podcast? {
+            guard fits([show.id, show.name, show.url], within: maxFeedFieldBytes) else {
+                dropped += 1
+                return nil
+            }
             var show = show
-            show.episodes = show.episodes.compactMap(kept)
+            if !fits([show.artworkUrl], within: maxFeedFieldBytes) { show.artworkUrl = nil }
+            show.episodes = show.episodes.compactMap { bounded($0) }
             return show
+        }
+        func keep<T>(_ items: [T], _ bound: (T) -> T?) -> [T] {
+            let kept = items.compactMap(bound)
+            dropped += items.count - kept.count
+            return kept
         }
         switch key {
         case "savedPlaylists":   // current schema is [SoundPreset]; older backups are [SavedMix]
             if let presets = try? decoder.decode([SoundPreset].self, from: data) {
-                let kept = presets.compactMap(sanitized)
-                return encoded(kept, count: kept.count)
+                let keptPresets = keep(presets, sanitized)
+                return encoded(keptPresets, count: keptPresets.count)
             }
             if let mixes = try? decoder.decode([SavedMix].self, from: data) {
-                let kept = mixes.compactMap(sanitizedLegacyPreset)
-                return encoded(kept, count: kept.count)
+                let keptMixes = keep(mixes, sanitizedLegacyPreset)
+                return encoded(keptMixes, count: keptMixes.count)
             }
             return nil
         case "savedPodcasts":
             guard let shows = try? decoder.decode([Podcast].self, from: data) else { return nil }
-            let keptShows = shows.compactMap(kept)
+            let keptShows = shows.compactMap { bounded($0) }
             return encoded(keptShows, count: keptShows.count)
         case "upNextQueue":
             guard let queue = try? decoder.decode([Episode].self, from: data) else { return nil }
-            let keptQueue = queue.compactMap(kept)
+            let keptQueue = queue.compactMap { bounded($0) }
             return encoded(keptQueue, count: keptQueue.count)
         case "episodePositions":
             guard let places = try? decoder.decode([String: Double].self, from: data) else { return nil }
@@ -270,12 +291,11 @@ enum Backup {
     /// An older backup's preset (a `SavedMix`), bounded the same way. Its podcast never belonged
     /// in a reusable recipe and is dropped when MixStore converts it, so it's dropped here.
     nonisolated private static func sanitizedLegacyPreset(_ mix: SavedMix) -> SavedMix? {
-        var mix = sanitized(mix)
+        var mix = mix
         mix.podcastUrl = nil
         mix.podcastId = nil
         mix.podcastPosition = nil
-        let layerTexts: [String?] = (mix.extraLayers ?? []).flatMap { [$0.id, $0.type] }
-        return fits([mix.id, mix.name, mix.noiseType, mix.binauralPreset] + layerTexts) ? mix : nil
+        return sanitized(mix)
     }
 
     /// The extra mixer layers as the engine can play them: no more than it stacks, at a volume it
@@ -284,8 +304,13 @@ enum Backup {
         layers.prefix(AudioEngine.maxExtraLayers).map { var layer = $0; layer.volume = unitClamped(layer.volume); return layer }
     }
 
-    /// The Last Night snapshot with its volumes, place and layers inside what the engine reads.
-    nonisolated static func sanitized(_ mix: SavedMix) -> SavedMix {
+    /// The Last Night snapshot with its volumes, place and layers inside what the engine reads,
+    /// or nil when a text is over the limits: its sounds at the settings' 256 bytes (Resume Last
+    /// Night writes them into the preferences plist), its episode at `maxFeedFieldBytes`.
+    nonisolated static func sanitized(_ mix: SavedMix) -> SavedMix? {
+        let layerTexts: [String?] = (mix.extraLayers ?? []).prefix(AudioEngine.maxExtraLayers).flatMap { [$0.id, $0.type] }
+        guard fits([mix.id, mix.name, mix.noiseType, mix.binauralPreset] + layerTexts),
+              fits([mix.podcastUrl, mix.podcastId], within: maxFeedFieldBytes) else { return nil }
         var mix = mix
         mix.noiseVolume = unitClamped(mix.noiseVolume)
         mix.binVolume = unitClamped(mix.binVolume)
@@ -335,8 +360,9 @@ enum Backup {
     }
 
     /// Longest a Data-encoded blob may be once re-encoded. The Last Night snapshot is a few
-    /// hundred bytes (an episode URL is the longest part); a padded name or id is refused here.
-    nonisolated private static let maxEncodedBytes = 16 * 1024
+    /// hundred bytes, but its episode's id and address may each be `maxFeedFieldBytes`, and the
+    /// app writes them as they are; the rest of it is bounded field by field (`sanitized`).
+    nonisolated private static let maxEncodedBytes = 48 * 1024
 
     /// A Data-encoded blob as restore stores it: decoded into its type, trimmed and clamped
     /// (`sanitized`), and encoded again, within `maxEncodedBytes`. Storing the backup's own JSON
@@ -348,7 +374,7 @@ enum Backup {
         let encoded: Data?
         switch key {
         case "lastMix":
-            encoded = (try? decoder.decode(SavedMix.self, from: data)).flatMap { try? encoder.encode(sanitized($0)) }
+            encoded = (try? decoder.decode(SavedMix.self, from: data)).flatMap(sanitized).flatMap { try? encoder.encode($0) }
         case "extraLayers":
             encoded = (try? decoder.decode([ExtraNoiseLayer].self, from: data)).flatMap { try? encoder.encode(sanitized($0)) }
         default:
@@ -416,6 +442,10 @@ enum Backup {
         if !o.unwritten.isEmpty {
             message += " Your \(joined(names(o.unwritten))) couldn't be saved on this iPhone and weren't changed."
         }
+        if o.contents.tooLong > 0 {
+            message += o.contents.tooLong == 1 ? " One item was left out: a text in it was too long."
+                                                : " \(o.contents.tooLong) items were left out: a text in each was too long."
+        }
         if o.skipped > 0 { message += " A few parts of the file weren't recognised and were left as they were." }
         return message
     }
@@ -456,7 +486,8 @@ enum Backup {
         "Your \(joined(names(keys))) couldn't be saved on this iPhone, so they weren't put back yet. Free up some space, then tap Undo the restore again."
     }
 
-    /// Whether Undo is still offered for a snapshot taken at `takenAt`. A snapshot from the
+    /// Whether Undo is still offered for a copy dated `takenAt` (the restore's, or the last
+    /// incomplete Undo's: `undoDate` asks for both). A date in the
     /// future (the clock set back since, or the stored time rounding a hair past now) is still
     /// offered, up to a week ahead: refusing it threw the snapshot away, and with it the only way
     /// back. Further ahead is no clock correction, and unbounded it kept a library-sized copy on
@@ -830,6 +861,7 @@ enum Backup {
             }
             p.files[file] = section.data
             p.contents.record(key, count: section.count)
+            p.contents.tooLong += section.dropped
         }
         let plan = restorePlan(from: dict, currentFocus: currentFocus, trusted: trusted)
         p.absentKeys = plan.absent
@@ -848,9 +880,10 @@ enum Backup {
         return p
     }
 
-    /// Empty values for a replacing write's absent files. Written, not deleted: a view that holds
-    /// the collection (LibraryView's shows) ignores a missing file, kept what the restore brought
-    /// in and saved it straight back, so Undo never removed restored shows.
+    /// Empty values for a replacing write's absent files: a file that wasn't there before the
+    /// restore. Written, not deleted, so the store says plainly that the collection is empty;
+    /// every reload reads a missing file as empty too (LibraryView once didn't, and saved the
+    /// restored shows straight back).
     nonisolated private static let emptyFile: [String: Data] = [
         "mixes.json": Data("[]".utf8), "library.json": Data("[]".utf8),
         "queue.json": Data("[]".utf8), "positions.json": Data("{}".utf8)

@@ -642,7 +642,8 @@ also pauses while its controls are faded to the screensaver, as the Sleep orb al
    pick; switch to Focus and ✅ its sound is the backup's Focus sound. Restore a backup with
    different Pomodoro lengths. ✅ The next Focus session uses them (no relaunch).
 9. **Undo puts the shows back too.** On a phone with no podcasts, restore a backup with shows,
-   open Podcasts, then Undo. ✅ The shows are gone and stay gone after adding one and relaunching.
+   open Podcasts, then Undo. ✅ The shows are gone at once (the list re-reads the library as at
+   launch) and stay gone after adding one and relaunching.
 10. **At 2am.** Sleep, room dark, brightness low. ✅ No amber switch tracks (copper), and the brightest
    things are the switch knobs, not rows of accent text.
 

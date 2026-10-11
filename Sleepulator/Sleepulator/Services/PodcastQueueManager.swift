@@ -113,11 +113,22 @@ final class PodcastQueueManager: ObservableObject {
     /// Mark an episode finished, keeping the set bounded by recency. Replaces a raw
     /// `finishedEpisodes.insert`, which had no upper limit.
     func markFinished(_ id: String) {
+        // Held to what a backup takes (Backup's list limits), in bytes as well as count: a
+        // restored id may be 16 KB, and a thousand of them came to 16 MB in the preferences
+        // plist, which loads at every launch. An id over the item limit isn't recorded.
+        guard id.utf8.count <= Backup.maxListItemBytes else { return }
         finishedOrder.removeAll { $0 == id }
         finishedOrder.append(id)
         if finishedOrder.count > finishedCap {
             finishedOrder.removeFirst(finishedOrder.count - finishedCap)
         }
+        var total = finishedOrder.reduce(0) { $0 + $1.utf8.count }
+        var oldest = 0
+        while total > Backup.maxListBytes, oldest < finishedOrder.count - 1 {
+            total -= finishedOrder[oldest].utf8.count
+            oldest += 1
+        }
+        finishedOrder.removeFirst(oldest)
         finishedEpisodes = Set(finishedOrder)   // triggers the persist in didSet
     }
 

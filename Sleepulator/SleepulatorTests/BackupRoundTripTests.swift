@@ -635,6 +635,9 @@ final class BackupRoundTripTests: XCTestCase {
         let earlier = now.addingTimeInterval(-3_600)
         try storage.writeRawNow(Data("{}".utf8), to: Backup.undoFile)        // an earlier restore's copy
         d.set(earlier.timeIntervalSince1970, forKey: Backup.undoTakenAtKey)
+        // An earlier Undo that couldn't finish: its restarted week mustn't be lost either.
+        let keptAt = now.addingTimeInterval(-1_800)
+        d.set(keptAt.timeIntervalSince1970, forKey: Backup.undoKeptAtKey)
         d.set(0.3, forKey: "masterVolume")
         try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: dir.path)
         let backup: [String: Any] = ["masterVolume": 0.9, Backup.markerKey: 1]
@@ -647,6 +650,8 @@ final class BackupRoundTripTests: XCTestCase {
                        earlier.timeIntervalSince1970, accuracy: 1e-3,
                        "nothing changed, so the earlier Undo still describes a real state and stays")
         XCTAssertEqual(storage.rawData(for: Backup.undoFile), Data("{}".utf8), "and its copy is still there")
+        XCTAssertEqual(d.double(forKey: Backup.undoKeptAtKey), keptAt.timeIntervalSince1970, accuracy: 1e-3,
+                       "a restore that replaced nothing leaves the restarted week as it was")
     }
 
     // MARK: pass 3: the shipping restore in Focus; a second restore within the week
@@ -1040,7 +1045,7 @@ final class BackupRoundTripTests: XCTestCase {
         XCTAssertEqual(d.data(forKey: "lastMix"), Data("not json".utf8), "left alone, not removed")
     }
 
-    // Value: protects=a restore whose only section couldn't be saved says Nothing could be restored and names it, and a places-only restore still says so; fails_when=write's unwritten switch stops clearing contents.positions, or restoredMessage loses a branch; why_new=only the shows arm and a non-empty message were tested; seam=none; no_claim=the mixes/Up Next arms
+    // Value: protects=a restore whose only section couldn't be saved says Nothing could be restored and names it, and a places-only restore still says so; fails_when=Contents.record stops clearing positions for an unwritten key, or write stops recording unwritten keys, or restoredMessage loses a branch; why_new=only the shows arm and a non-empty message were tested; seam=none; no_claim=the mixes/Up Next arms
     @MainActor
     func testARestoreThatSavedNothingSaysSo() async throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("BackupNothing-\(UUID().uuidString)")
@@ -1139,6 +1144,104 @@ final class BackupRoundTripTests: XCTestCase {
         XCTAssertEqual(exported.last, many.last, "the newest are kept")
         XCTAssertLessThanOrEqual(exported.reduce(0) { $0 + $1.utf8.count }, 1_000_000)
         XCTAssertEqual(Backup.restoreUserDefaults(from: file, into: d).skipped, 0, "and a restore takes it")
+    }
+
+    // MARK: pass 7: the last review's tests
+
+    // Value: protects=restore keeps episodes and shows with real-length texts, clears over-long artwork instead of dropping the item, and says how many it left out; fails_when=the bound falls back to 256 bytes, artwork drops the item, or dropped items go uncounted; why_new=every kept fixture text was under 20 bytes; seam=none; no_claim=the exact 16 KB boundary
+    func testRestoreKeepsRealLengthTextsClearsLongArtworkAndCountsWhatItDrops() throws {
+        let longTitle = String(repeating: "t", count: 4_000)                      // the parser's title cap
+        let longAddress = "https://x/" + String(repeating: "a", count: 5_000)     // a tracking redirect
+        let bigArtwork = "data:image/png;base64," + String(repeating: "A", count: 30_000)
+        let real = Episode(id: "a", title: longTitle, audioUrl: longAddress, duration: nil, pubDate: nil, description: nil)
+        var pictured = Episode(id: "b", title: "B", audioUrl: "u", duration: nil, pubDate: nil, description: nil)
+        pictured.artworkUrl = bigArtwork
+        let badId = Episode(id: String(repeating: "i", count: 20_000), title: "C", audioUrl: "u", duration: nil, pubDate: nil, description: nil)
+        var show = Podcast(id: "p", name: "P", url: "f", episodes: [real, pictured, badId])
+        show.artworkUrl = bigArtwork
+        let value = try JSONSerialization.jsonObject(with: JSONEncoder().encode([show]))
+
+        let section = try XCTUnwrap(Backup.validatedFileSection(key: "savedPodcasts", value: value))
+        XCTAssertEqual(section.count, 1, "the show stays")
+        XCTAssertEqual(section.dropped, 1, "only the episode whose id is too long is left out")
+        let kept = try XCTUnwrap(try JSONDecoder().decode([Podcast].self, from: section.data).first)
+        XCTAssertNil(kept.artworkUrl, "over-long artwork is cleared, not the show")
+        XCTAssertEqual(kept.episodes.map(\.id), ["a", "b"])
+        XCTAssertEqual(kept.episodes.first?.audioUrl, longAddress)
+        XCTAssertEqual(kept.episodes.first?.title, longTitle)
+        XCTAssertNil(kept.episodes.last?.artworkUrl)
+
+        let contents = Backup.contents(of: ["savedPodcasts": value])
+        XCTAssertEqual(contents.tooLong, 1)
+        XCTAssertEqual(Backup.restoredMessage(Backup.Outcome(contents: contents, skipped: 0)),
+                       "Restored 1 show. One item was left out: a text in it was too long.")
+    }
+
+    // Value: protects=a played-list id between 2 KB and 16 KB survives export and restore; fails_when=maxListItemBytes goes back to 2,048; why_new=every accepted id in the suite was under 2 KB; seam=none; no_claim=the 1 MB and 20,000-item caps
+    func testAPlayedListIdOfAFewKilobytesSurvives() throws {
+        let guid = String(repeating: "g", count: 10_000)
+        d.set(["a", guid], forKey: "finishedEpisodes")
+        let file = try throughBackupFile(Backup.userDefaults(from: d))
+        d.removePersistentDomain(forName: suite)
+        XCTAssertEqual(Backup.restoreUserDefaults(from: file, into: d).skipped, 0)
+        XCTAssertEqual(d.stringArray(forKey: "finishedEpisodes"), ["a", guid])
+    }
+
+    // Value: protects=after an incomplete Undo, the copy still goes once both weeks are over; fails_when=undoDate treats any kept date as available or skips the discard; why_new=only the extension was tested, not that it ends; seam=none; no_claim=the clock-set-back slack
+    @MainActor
+    func testTheRestartedUndoWeekAlsoEnds() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("BackupWeekEnds-\(UUID().uuidString)")
+        let storage = StorageManager(directory: dir)
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: dir.path)
+            try? FileManager.default.removeItem(at: dir)
+        }
+        let now = Date()
+        _ = try await restored(["episodePositions": ["ep9": 5.0], Backup.markerKey: 1], into: storage, now: now)
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: dir.path)
+        let first = await Backup.undo(now: now.addingTimeInterval(5 * 86_400), storage: storage, defaults: d)
+        guard case .incomplete = first else { return XCTFail("got \(first)") }
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: dir.path)
+        XCTAssertNil(Backup.undoDate(now: now.addingTimeInterval(13 * 86_400), storage: storage, defaults: d))
+        storage.flush()
+        XCTAssertNil(storage.rawData(for: Backup.undoFile), "the copy is thrown away")
+        XCTAssertNil(d.object(forKey: Backup.undoKeptAtKey))
+    }
+
+    // Value: protects=a new restore's copy gets its own week, not an earlier incomplete Undo's; fails_when=restore stops clearing undoKeptAtKey; why_new=no test set it before a restore; seam=none; no_claim=reachability (needs the clock set back)
+    @MainActor
+    func testANewRestoreStartsItsOwnUndoWeek() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("BackupOwnWeek-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let storage = StorageManager(directory: dir)
+        d.set(Date().timeIntervalSince1970, forKey: Backup.undoKeptAtKey)
+        _ = try await restored(["masterVolume": 0.5, Backup.markerKey: 1], into: storage, now: Date())
+        XCTAssertNil(d.object(forKey: Backup.undoKeptAtKey))
+    }
+
+    // Value: protects=a restored Last Night snapshot's sound names are held to the settings' limit; fails_when=sanitized(SavedMix) stops checking its texts; why_new=it was bounded only by the blob's size, and Resume wrote the name into the plist; seam=none; no_claim=the episode fields' bound
+    func testALastMixWithAnOverlongSoundNameIsSkipped() {
+        var mix: [String: Any] = ["id": "m", "name": "Last Night", "noiseOn": true, "noiseVolume": 0.5, "noiseType": "brown",
+                                  "binauralOn": false, "binVolume": 0.3, "binauralPreset": "delta", "podVolume": 0.7,
+                                  "podcastUrl": "https://x/" + String(repeating: "a", count: 10_000)]
+        XCTAssertEqual(Backup.restoreUserDefaults(from: ["lastMix": mix], into: d).restored, 1, "a long episode address is fine")
+        d.removeObject(forKey: "lastMix")
+        mix["binauralPreset"] = String(repeating: "b", count: 300)
+        let (restored, skipped) = Backup.restoreUserDefaults(from: ["lastMix": mix], into: d)
+        XCTAssertEqual(restored, 0)
+        XCTAssertEqual(skipped, 1)
+        XCTAssertNil(d.data(forKey: "lastMix"))
+    }
+
+    // Value: protects=the Undo row names the date once the restore is a week old; fails_when=undoWhen goes back to the weekday alone; why_new=an incomplete Undo keeps the copy past the week, and a weekday read as last week's; seam=none; no_claim=the locale's wording
+    @MainActor
+    func testTheUndoRowNamesTheDateOnceItIsOld() {
+        let now = Date(timeIntervalSince1970: 2_000_000_000)
+        let recent = now.addingTimeInterval(-2 * 86_400)
+        let old = now.addingTimeInterval(-8 * 86_400)
+        XCTAssertEqual(BackupController.undoWhen(recent, now: now), recent.formatted(.dateTime.weekday(.wide).hour().minute()))
+        XCTAssertEqual(BackupController.undoWhen(old, now: now),
+                       old.formatted(.dateTime.weekday(.wide).day().month(.abbreviated).hour().minute()))
     }
 }
 

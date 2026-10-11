@@ -102,7 +102,8 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   and its week starts again (`undoKeptAtKey`). Restored episodes and shows are held to the feed
   parser's limits (`maxFeedFieldBytes`): the app copies an episode's id and address into the
   plist. The reload after a restore reads files as launch does: a queue or library today's types
-  can't decode shows empty and stays on disk, never saved over.
+  can't decode shows empty and stays on disk: the reload doesn't save over it (the next edit
+  does, as at launch).
 
 ## Audio + state invariants (the hard-won stuff — change with care)
 - **Never block the render thread.** It reads params lock-free; hand-offs are atomic. No locks,
