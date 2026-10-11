@@ -85,8 +85,10 @@ final class NightVeilUITests: XCTestCase {
 
         // And the controls' idle fade restarted: they settle back to the scene 3 s later.
         XCTAssertTrue(wake.waitForExistence(timeout: 8), "Home's idle fade didn't restart after the wake")
-
-        pauseAudio(app)
+        // Left playing: the next test's launch ends the session, and nothing it leaves persists.
+        // Pausing here meant a wake tap then Pause inside Sleep's 3 s fade, and a slow CI runner
+        // took longer than that between the two taps every round, so the test failed after
+        // checking everything it's for. (Focus's test pauses inside its 10 s fade, and asserts it.)
     }
 
     // Value: protects=Focus's readout says what Play resumes at rest and, while sound plays, names the sounds once in the pills with no status line under the orb; fails_when=the readout shows the status line again while playing ("Pink" over a "Pink" pill), or drops the at-rest "Tap to begin"/"Resume" line; why_new=FocusSessionReadout's branches are view code with no pure seam, and HomeLayoutUITests never plays sound in Focus; seam=none
@@ -170,6 +172,17 @@ final class NightVeilUITests: XCTestCase {
         for _ in 0..<3 where !on {
             noise.tap()
             on = waitUntil(timeout: 3) { (noise.value as? String) == "1" }
+        }
+        if !on {
+            // Twice on CI and once locally, every tap on this switch went nowhere for a whole
+            // launch, each time after an earlier test failed. It hasn't reproduced on demand, so
+            // keep what it looked like.
+            let state = XCTAttachment(string: "switch: enabled \(noise.isEnabled), hittable \(noise.isHittable), "
+                                      + "frame \(noise.frame), value \(String(describing: noise.value))\n\n"
+                                      + app.debugDescription)
+            state.name = "Noise switch that won't turn on"
+            state.lifetime = .keepAlways
+            add(state)
         }
         XCTAssertTrue(on, "The noise switch didn't turn on")
 

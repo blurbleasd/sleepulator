@@ -23,11 +23,13 @@ final class GenerativeMediaResetTests: XCTestCase {
         Set(engine.attachedNodes.map(ObjectIdentifier.init))
     }
 
-    /// The configuration-change handler hops to main; let it run.
+    /// The configuration-change handler hops to main; let it run. Generous: the host app draws
+    /// Home behind the tests, and a loaded CI runner once held main past 2 s, which failed the
+    /// wait and the assertion after it. A drained queue returns at once.
     private func drainMainQueue() {
         let drained = expectation(description: "main queue drained")
         DispatchQueue.main.async { drained.fulfill() }
-        wait(for: [drained], timeout: 2)
+        wait(for: [drained], timeout: 10)
     }
 
     func testResetSwapsTheEngineAndRestartsWhenTheBedIsOn() throws {
