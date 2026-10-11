@@ -383,6 +383,8 @@ final class BackupRoundTripTests: XCTestCase {
                       "got \(String(describing: failure(missing)))")
         let notJSON = await Backup.read(try file("notes.json", Data("not json".utf8)))
         XCTAssertEqual(failure(notJSON), .notBackup)
+        let empty = await Backup.read(try file("empty.json", Data()))
+        XCTAssertEqual(failure(empty), .notBackup, "an empty file read fine; it just isn't a backup")
         let array = await Backup.read(try file("array.json", Data("[1, 2]".utf8)))
         XCTAssertEqual(failure(array), .notBackup)
         let otherApp = await Backup.read(try file("other.json", Data(#"{"name": "Another app", "evilKey": 1}"#.utf8)))
@@ -532,7 +534,7 @@ final class BackupRoundTripTests: XCTestCase {
 
     // MARK: pass 2: the export's mode, mode-less backups, Undo's remapped picks
 
-    // Value: protects=a real export names its mode, so a restore in the other mode sorts its sounds; fails_when=exportOnlyKeys is emptied; why_new=the sorting tests build their dicts by hand; seam=none; no_claim=the never-switched case (the next test)
+    // Value: protects=a real export names its mode, so a restore in the other mode sorts its sounds; fails_when=the export stops writing modeKey; why_new=the sorting tests build their dicts by hand; seam=none; no_claim=the never-switched case (the next test)
     func testAnExportFromFocusRestoredInSleepSortsItsSounds() throws {
         d.set(true, forKey: "focusMode")
         d.set("white", forKey: "noiseType")
@@ -576,6 +578,22 @@ final class BackupRoundTripTests: XCTestCase {
         XCTAssertEqual(skipped, 3)
         XCTAssertNil(d.object(forKey: "pomoWork"))
         XCTAssertEqual(d.integer(forKey: "ambientTailMinutes"), 10)
+    }
+
+    // Value: protects=the text caps count UTF-8 bytes, and the played list's total is capped; fails_when=maxTextBytes is checked against Character count, or the list's total byte cap is dropped; why_new=the cap test only used ASCII, where Characters and bytes agree, and lists under the total; seam=none; no_claim=the exact caps
+    func testTextCapsCountBytesNotCharacters() {
+        let marked = String(repeating: "e\u{0301}", count: 200)            // é as e + a combining acute
+        XCTAssertEqual(marked.count, 200)
+        XCTAssertEqual(marked.utf8.count, 600)
+        // 600 items of 2,000 bytes: each under the item cap, 1.2 MB in all.
+        let played = (0..<600).map { String(format: "%04d", $0) + String(repeating: "y", count: 1_996) }
+        let (restored, skipped) = Backup.restoreUserDefaults(from: ["sceneSleep": marked, "finishedEpisodes": played,
+                                                                    "sceneFocus": "current"], into: d)
+        XCTAssertEqual(restored, 1)
+        XCTAssertEqual(skipped, 2)
+        XCTAssertNil(d.object(forKey: "sceneSleep"), "200 Characters, but 600 bytes")
+        XCTAssertNil(d.object(forKey: "finishedEpisodes"), "every item fits, the list doesn't")
+        XCTAssertEqual(d.string(forKey: "sceneFocus"), "current")
     }
 
     // Value: protects=a file over the size cap is refused; fails_when=both the size check and the bounded read's count check are removed or compare the wrong way; why_new=the read test only uses small files; seam=none; no_claim=which of the two checks refused it
@@ -742,10 +760,16 @@ final class BackupRoundTripTests: XCTestCase {
         let compact = try await Backup.exportData(at: at, storage: storage, defaults: d, pretty: false).data
         XCTAssertLessThan(compact.count, pretty.count)
 
+        // Lengths, not bytes: the keys can come out in another order each time.
+        let newline = UInt8(ascii: "\n")
+        XCTAssertTrue(pretty.contains(newline))
+        XCTAssertFalse(compact.contains(newline))
         let fits = try await Backup.exportData(at: at, storage: storage, defaults: d, maxBytes: pretty.count)
-        XCTAssertEqual(fits.data, pretty, "pretty-printed when that fits")
+        XCTAssertEqual(fits.data.count, pretty.count)
+        XCTAssertTrue(fits.data.contains(newline), "pretty-printed when that fits")
         let squeezed = try await Backup.exportData(at: at, storage: storage, defaults: d, maxBytes: compact.count)
         XCTAssertEqual(squeezed.data.count, compact.count, "compact when only that fits")
+        XCTAssertFalse(squeezed.data.contains(newline))
         do {
             _ = try await Backup.exportData(at: at, storage: storage, defaults: d, maxBytes: compact.count - 1)
             XCTFail("a backup a restore would refuse isn't made")

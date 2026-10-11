@@ -54,12 +54,12 @@ enum Backup {
     /// The restorable scalar keys (`kinds`), in a stable order.
     nonisolated static let scalarKeys: [String] = kinds.keys.sorted()
 
-    /// Exported but never restored. The mode is where you are, not a setting: restoring a backup
-    /// made in the other mode switched mode on the spot, cancelling a running sleep timer or
-    /// Pomodoro. A backup's mode only decides which of its sounds belong to which mode
+    /// The mode, exported but never restored. The mode is where you are, not a setting: restoring
+    /// a backup made in the other mode switched mode on the spot, cancelling a running sleep timer
+    /// or Pomodoro. A backup's mode only decides which of its sounds belong to which mode
     /// (`restorePlan`). Always exported, even never written (someone who never switched modes has
     /// no key and is in Sleep), and read as Sleep when a backup predates it.
-    nonisolated static let exportOnlyKeys: [String] = ["focusMode"]
+    nonisolated static let modeKey = "focusMode"
 
     /// Backup keys that map to StorageManager files (not UserDefaults). Each must decode into its
     /// Codable type before restore will write it (`validatedFileSection`).
@@ -95,7 +95,7 @@ enum Backup {
     /// A backup's recognisable contents, for the confirm and the result. nil counts mean the
     /// section is absent (a restore leaves that part alone); 0 means it's there and empty (a
     /// restore empties it, which the confirm must say).
-    struct Contents: Equatable, Sendable {
+    nonisolated struct Contents: Equatable, Sendable {
         var mixes: Int?
         var shows: Int?
         var upNext: Int?
@@ -368,7 +368,7 @@ enum Backup {
         for key in scalarKeys {
             if let v = defaults.object(forKey: key), scalarValid(key: key, value: v) { out[key] = v }
         }
-        for key in exportOnlyKeys { out[key] = defaults.bool(forKey: key) }
+        out[modeKey] = defaults.bool(forKey: modeKey)
         for key in encodedKeys {
             if let data = defaults.data(forKey: key),
                let obj = try? JSONSerialization.jsonObject(with: data, options: .allowFragments) {
@@ -391,7 +391,7 @@ enum Backup {
         var values: [String: Any] = [:]
         var skipped = 0
         for (key, value) in dict {
-            if fileBacked[key] != nil || key == markerKey || key == exportedAtKey || exportOnlyKeys.contains(key) {
+            if fileBacked[key] != nil || key == markerKey || key == exportedAtKey || key == modeKey {
                 continue
             } else if encodedKeys.contains(key) {
                 if let encoded = encodedValue(key: key, value: value) { values[key] = encoded } else { skipped += 1 }
@@ -401,7 +401,7 @@ enum Backup {
                 skipped += 1                                   // unknown or malformed: never blind-write
             }
         }
-        let backupFocus = dict["focusMode"] as? Bool ?? false
+        let backupFocus = dict[modeKey] as? Bool ?? false
         if backupFocus != currentFocus {
             for (kind, currentKey) in [("noise", "noiseType"), ("binaural", "binauralPreset")] {
                 if let sound = values[currentKey] { values[AudioEngine.pickKey(kind, focus: backupFocus)] = sound }
@@ -427,7 +427,7 @@ enum Backup {
     /// app's restore goes through `write`. Returns (restored, skipped) for the UserDefaults keys.
     nonisolated static func restoreUserDefaults(from dict: [String: Any], into defaults: UserDefaults,
                                                 replacing: Bool = false) -> (restored: Int, skipped: Int) {
-        let plan = restorePlan(from: dict, currentFocus: defaults.bool(forKey: "focusMode"))
+        let plan = restorePlan(from: dict, currentFocus: defaults.bool(forKey: modeKey))
         apply(plan.values, absent: plan.absent, into: defaults, replacing: replacing)
         return (plan.values.count, plan.skipped)
     }
@@ -494,8 +494,9 @@ enum Backup {
     /// Read and validate a picked file. Writes nothing.
     static func read(_ url: URL) async -> Result<Pending, ReadFailure> {
         await Task.detached(priority: .userInitiated) { () -> Result<Pending, ReadFailure> in
-            // A file in the app's own container needs no security scope and returns false here,
-            // so only a failed read counts as no access.
+            // Whether iOS grants a scope varies: a file in the app's own container needs none and
+            // can return false here (the simulator returns true even for a temp file), so only
+            // a failed read counts as no access.
             let scoped = url.startAccessingSecurityScopedResource()
             defer { if scoped { url.stopAccessingSecurityScopedResource() } }
             // The size check refuses a big file before reading it; the bounded read holds the cap
@@ -505,8 +506,9 @@ enum Backup {
             }
             guard let handle = try? FileHandle(forReadingFrom: url) else { return .failure(scoped ? .unreadable : .noAccess) }
             defer { try? handle.close() }
-            guard let read = try? handle.read(upToCount: maxFileBytes + 1) else { return .failure(.unreadable) }
-            let data = read ?? Data()
+            // `try?` would fold "nothing to read" (an empty file) into a read failure.
+            let data: Data
+            do { data = try handle.read(upToCount: maxFileBytes + 1) ?? Data() } catch { return .failure(.unreadable) }
             guard data.count <= maxFileBytes else { return .failure(.tooLarge) }
             guard let dict = (try? JSONSerialization.jsonObject(with: data, options: [])) as? [String: Any] else {
                 return .failure(.notBackup)
@@ -575,11 +577,11 @@ enum Backup {
 
     /// The settings plan, handed from the detached task to the main actor. Unchecked: every value
     /// is an immutable property-list value that passed `propertyList(_:isValidFor:)`.
-    private struct PlanValues: @unchecked Sendable { let values: [String: Any] }
+    nonisolated private struct PlanValues: @unchecked Sendable { let values: [String: Any] }
 
     /// The validated writes a backup asks for, worked out off the main thread (Sendable, so the
     /// detached task can hand it back).
-    private struct Prepared: Sendable {
+    nonisolated private struct Prepared: Sendable {
         var files: [String: Data] = [:]      // filename → bytes
         var absentFiles: [String] = []       // files a replacing write empties
         var settings: PlanValues?            // the UserDefaults plan
@@ -635,7 +637,7 @@ enum Backup {
     /// app queued while the backup was parsed lands before the writes, not after.
     private static func write(_ data: Data, replacing: Bool, storage: StorageManager, defaults: UserDefaults,
                               settle: () -> Void) async -> (parsed: Bool, contents: Contents, skipped: Int) {
-        let currentFocus = defaults.bool(forKey: "focusMode")
+        let currentFocus = defaults.bool(forKey: modeKey)
         let prepared = await Task.detached(priority: .userInitiated) { () -> Prepared? in
             guard let dict = (try? JSONSerialization.jsonObject(with: data, options: [])) as? [String: Any] else { return nil }
             return prepare(dict, currentFocus: currentFocus, now: Date())

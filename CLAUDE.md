@@ -85,7 +85,7 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   week so Undo can put it back exactly; if that snapshot can't be saved, nothing is replaced.
   `Backup.kinds` is the restore allowlist with each setting's type and range (a JSON null raised
   an uncatchable exception in UserDefaults): keep new persisted settings in sync there. A restore
-  never changes the mode (`exportOnlyKeys`); a backup from the other mode lands its sounds in the
+  never changes the mode (`Backup.modeKey`); a backup from the other mode lands its sounds in the
   per-mode picks instead.
 
 ## Audio + state invariants (the hard-won stuff — change with care)

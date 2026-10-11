@@ -3642,6 +3642,8 @@ final class SettingsRulesTests: XCTestCase {
     func testBeatsNoteFollowsTheRouting() {
         XCTAssertTrue(SettingsCopy.beatsNote("headphones").contains("Needs headphones"))
         XCTAssertTrue(SettingsCopy.beatsNote("speaker").contains("speaker"))
+        // The default note also says "speaker", so the check above can't tell them apart.
+        XCTAssertNotEqual(SettingsCopy.beatsNote("speaker"), SettingsCopy.beatsNote("auto"))
         XCTAssertEqual(SettingsCopy.beatsNote("auto"), SettingsCopy.beatsNote("anything else"))
     }
 

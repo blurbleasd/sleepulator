@@ -1315,7 +1315,7 @@ final class AudioEngine: ObservableObject {
         // sleepEQIntensity live on the settings child; reload re-reads + re-applies them.
         settings.reload()
         pomodoro.reloadLengths()
-        // focusMode isn't re-read: a restore never changes the mode (Backup.exportOnlyKeys), and
+        // focusMode isn't re-read: a restore never changes the mode (Backup.modeKey), and
         // reassigning it ran its didSet's timer-stopping branch for nothing. The palette and the
         // limiter are reconciled below.
 

@@ -189,10 +189,10 @@ the brightness you actually use at night, in **both** Sleep and Focus.
 1. **VolumeBar relative drag + fader tiers.** In the Build-mix drawer, grab a layer fader. ✅ It
    moves by the drag *delta* from where you grabbed (not jump-to-touch); a light tap does NOT
    change volume; drifting the finger up/down off the track fine-trims. Then check Settings'
-   "How much" softening bar (Podcasts at night; stereo width is now four named stops, §S7): a
-   *tap* there DOES jump to that position (tapToSet). VoiceOver
-   reports the real value. Gain-staging reads at a glance: the master fader (bottom bar) is
-   visibly the thickest, layer faders next, Settings params slimmest.
+   "How much" softening bar (Podcasts at night, under "Soften harsh highs and boomy lows"; it's
+   Settings' only bar, since stereo width is a four-stop menu, §S7): a *tap* there DOES jump to
+   that position (tapToSet). VoiceOver reports the real value. Gain-staging reads at a glance: the
+   master fader (bottom bar) is visibly the thickest, layer faders next, the "How much" bar slimmest.
 1b. **Now-playing rim.** Apply a saved mix. ✅ Its card wears a brighter accent rim + fill and a
    bright (legible) summary line; the rim clears when you swap a sound or toggle a layer; exactly
    one card is lit (a "Brown" and a "Brown + Rain" preset don't both light); an idle/silent
