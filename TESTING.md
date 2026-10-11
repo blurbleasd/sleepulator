@@ -323,6 +323,10 @@ this section is where you do it. Do it in a dark room at your real bedtime brigh
    screen. ✅ The mode switcher, the night line and Build mix are each found by touch, not only by
    swipe. The orb's centre reads "Play", the band around it "Night length", and nothing reads from
    the hidden mini-player's spot above Build mix.
+   *The bar's fade-out (added 2026-10-10).* With something queued but nothing loaded, go from
+   Podcasts to Sleep, or from Focus to Sleep, and tap Build mix at once, inside the bar's ~1 s
+   fade. ✅ The mixer opens; never Now Playing, Podcasts or a playing queue. With VoiceOver on,
+   focus never lands on the fading bar.
 8. **Ring drag keeps the controls awake.** Mid-night (sounds playing): tap to wake, then drag the
    ring slowly for 5+ s. ✅ The controls don't fade under the finger; ~3 s after release they do.
    Inside the last 10 minutes the ring is locked (handle dims); a drag that ends where it began

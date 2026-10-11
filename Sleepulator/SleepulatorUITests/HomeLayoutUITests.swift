@@ -49,9 +49,35 @@ final class HomeLayoutUITests: XCTestCase {
         // Leave the app in Sleep: the unit tests run hosted in this same app and read its
         // persisted mode, so a run after this one must not start out in Focus.
         XCTAssertTrue(session.waitForExistence(timeout: 5))
+
+        // A tap on the shown bar reaches it. ContentView's wrapper switches the bar's hit testing
+        // off while it's hidden; on the wrong side of that gate every bar control is dead while the
+        // bar still exists and sits in place. "Nothing playing" leads to Podcasts; an "Up next" bar
+        // (a queue an earlier run left behind) opens Now Playing. Over Focus Home a tap that falls
+        // through lands on the backdrop, so a failure here changes nothing.
+        // Value: protects=a tap on the shown mini-player acts through ContentView's hiding wrapper;
+        // fails_when=the wrapper's hit-test gate is inverted or stuck off, so taps fall through the
+        // bar; why_new=no test sends the bar a tap, the Podcasts check reads only its accessibility
+        // hit point; seam=none
+        // Recorded here, checked after the switch to Sleep, so a failure still leaves the app in Sleep.
+        let podcastsTab = app.tabBars.buttons["Podcasts"]
+        let nowPlayingDone = app.buttons["Done"]
+        var barTapActed = false
+        if miniPlayer.waitForExistence(timeout: 5) {
+            miniPlayer.tap()
+            barTapActed = waitUntil(timeout: 5) { podcastsTab.isSelected || nowPlayingDone.exists }
+            if nowPlayingDone.exists {
+                nowPlayingDone.tap()
+                _ = nowPlayingDone.waitForNonExistence(timeout: 5)
+            }
+            if podcastsTab.isSelected { app.tabBars.buttons["Focus"].tap() }
+            _ = session.waitForExistence(timeout: 5)
+        }
+
         // Read before the switch, checked after it, so a failure here still leaves the app in Sleep.
         let barTop = miniPlayer.waitForExistence(timeout: 5) ? miniPlayer.frame.minY : nil
         app.buttons["Sleep mode"].tap()
+        XCTAssertTrue(barTapActed, "A tap on the mini-player in Focus did nothing: it didn't reach the bar")
         guard let barTop else { return XCTFail("No mini-player in Focus after the session") }
 
         // Sleep Home at rest: the bar fades out and leaves the tree, and Build mix drops into the spot
