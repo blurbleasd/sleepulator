@@ -128,26 +128,60 @@ enum Backup {
     /// for memory before anything was checked; 50 MB halves that worst case.
     nonisolated static let maxFileBytes = 50 * 1024 * 1024
 
-    /// Re-encode a file-backed section, confirm it decodes into the Codable type its file expects,
-    /// and count its items. nil if the section is malformed or unexpected.
+    /// Decode a file-backed section into the Codable type its file expects, count its items, and
+    /// encode what decoded. The decoded value is what's stored, never the backup's own JSON: the
+    /// decoder ignores keys it doesn't know, so a hand-edited section could carry any amount of
+    /// junk past the check. nil if the section is malformed or unexpected.
     nonisolated static func validatedFileSection(key: String, value: Any) -> (data: Data, count: Int)? {
         guard let data = jsonData(value) else { return nil }
         let decoder = JSONDecoder()
-        let count: Int?
+        func encoded<T: Encodable>(_ value: T, count: Int) -> (data: Data, count: Int)? {
+            (try? JSONEncoder().encode(value)).map { ($0, count) }
+        }
         switch key {
         case "savedPlaylists":   // current schema is [SoundPreset]; older backups are [SavedMix]
-            count = (try? decoder.decode([SoundPreset].self, from: data))?.count
-                 ?? (try? decoder.decode([SavedMix].self, from: data))?.count
+            if let presets = try? decoder.decode([SoundPreset].self, from: data) { return encoded(presets, count: presets.count) }
+            if let mixes = try? decoder.decode([SavedMix].self, from: data) { return encoded(mixes, count: mixes.count) }
+            return nil
         case "savedPodcasts":
-            count = (try? decoder.decode([Podcast].self, from: data))?.count
+            guard let shows = try? decoder.decode([Podcast].self, from: data) else { return nil }
+            return encoded(shows, count: shows.count)
         case "upNextQueue":
-            count = (try? decoder.decode([Episode].self, from: data))?.count
+            guard let queue = try? decoder.decode([Episode].self, from: data) else { return nil }
+            return encoded(queue, count: queue.count)
         case "episodePositions":
-            count = (try? decoder.decode([String: Double].self, from: data))?.count
+            guard let places = try? decoder.decode([String: Double].self, from: data) else { return nil }
+            return encoded(places.mapValues(clampedPosition), count: places.count)
         default:
-            count = nil
+            return nil
         }
-        return count.map { (data, $0) }
+    }
+
+    /// The furthest a saved place in an episode can be, in seconds (about 11 days): a sanity
+    /// bound, like `kinds`'s. A place of 1e300 traps in the time readouts' `Int(seconds)`.
+    nonisolated static let maxPosition: Double = 1_000_000
+
+    nonisolated private static func clampedPosition(_ seconds: Double) -> Double {
+        min(max(seconds, 0), maxPosition)
+    }
+
+    nonisolated private static func unitClamped(_ x: Double) -> Double { min(max(x, 0), 1) }
+
+    /// The extra mixer layers as the engine can play them: no more than it stacks, at a volume it
+    /// takes. A million layers decoded fine and went into the preferences plist whole.
+    nonisolated static func sanitized(_ layers: [ExtraNoiseLayer]) -> [ExtraNoiseLayer] {
+        layers.prefix(AudioEngine.maxExtraLayers).map { var layer = $0; layer.volume = unitClamped(layer.volume); return layer }
+    }
+
+    /// The Last Night snapshot with its volumes, place and layers inside what the engine reads.
+    nonisolated static func sanitized(_ mix: SavedMix) -> SavedMix {
+        var mix = mix
+        mix.noiseVolume = unitClamped(mix.noiseVolume)
+        mix.binVolume = unitClamped(mix.binVolume)
+        mix.podVolume = unitClamped(mix.podVolume)
+        mix.podcastPosition = mix.podcastPosition.map(clampedPosition)
+        mix.extraLayers = mix.extraLayers.map(sanitized)
+        return mix
     }
 
     /// Whether a restorable scalar's value has the shape its reader expects (`kinds`). The
@@ -181,16 +215,6 @@ enum Backup {
         }
     }
 
-    /// Validate that a Data-encoded backup blob decodes into its expected type before restore.
-    nonisolated private static func decodesForRestore(key: String, data: Data) -> Bool {
-        let dec = JSONDecoder()
-        switch key {
-        case "lastMix":     return (try? dec.decode(SavedMix.self, from: data)) != nil
-        case "extraLayers": return (try? dec.decode([ExtraNoiseLayer].self, from: data)) != nil
-        default:            return false
-        }
-    }
-
     /// Re-encode a parsed section. A section that isn't an array or object (a string where the
     /// show list should be) makes JSONSerialization raise an Objective-C exception that `try?`
     /// can't catch, which crashed the app on a hand-edited backup, so it's refused first.
@@ -199,9 +223,27 @@ enum Backup {
         return try? JSONSerialization.data(withJSONObject: value, options: [])
     }
 
+    /// Longest a Data-encoded blob may be once re-encoded. The Last Night snapshot is a few
+    /// hundred bytes (an episode URL is the longest part); a padded name or id is refused here.
+    nonisolated private static let maxEncodedBytes = 16 * 1024
+
+    /// A Data-encoded blob as restore stores it: decoded into its type, trimmed and clamped
+    /// (`sanitized`), and encoded again, within `maxEncodedBytes`. Storing the backup's own JSON
+    /// once it decoded let a hand-edited `lastMix` carry a 40 MB junk field (the decoder ignores
+    /// unknown keys) into the preferences plist, which loads at every launch.
     nonisolated private static func encodedValue(key: String, value: Any) -> Data? {
-        guard let encoded = jsonData(value),
-              decodesForRestore(key: key, data: encoded) else { return nil }
+        guard let data = jsonData(value) else { return nil }
+        let decoder = JSONDecoder(), encoder = JSONEncoder()
+        let encoded: Data?
+        switch key {
+        case "lastMix":
+            encoded = (try? decoder.decode(SavedMix.self, from: data)).flatMap { try? encoder.encode(sanitized($0)) }
+        case "extraLayers":
+            encoded = (try? decoder.decode([ExtraNoiseLayer].self, from: data)).flatMap { try? encoder.encode(sanitized($0)) }
+        default:
+            encoded = nil
+        }
+        guard let encoded, encoded.count <= maxEncodedBytes else { return nil }
         return encoded
     }
 

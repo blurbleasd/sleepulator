@@ -651,5 +651,70 @@ final class BackupRoundTripTests: XCTestCase {
         XCTAssertTrue(undone)
         XCTAssertEqual(d.double(forKey: "masterVolume"), 0.5, accuracy: 1e-9, "Undo returns to before the latest restore")
     }
+
+    // MARK: pass 4: what a restore stores is what decoded
+
+    // Value: protects=a restore stores the decoded, trimmed and clamped blobs, never the backup's own JSON; fails_when=encodedValue stores the backup's bytes again, or stops trimming layers or clamping volumes and the place; why_new=the blobs were only checked to decode, so unknown keys and any number of layers reached the plist; seam=none; no_claim=the file sections (below)
+    func testARestoreStoresTheDecodedBlobsNotTheBackupsJSON() throws {
+        let junk = String(repeating: "j", count: 100_000)
+        let layer: [String: Any] = ["id": "a", "type": "rain", "volume": 5.0]
+        var paddedLayer = layer
+        paddedLayer["junk"] = junk
+        let mix: [String: Any] = ["id": "m", "name": "Last night", "noiseOn": true, "noiseVolume": 3.0, "noiseType": "brown",
+                                  "binauralOn": false, "binVolume": -1.0, "binauralPreset": "delta", "podVolume": 0.5,
+                                  "podcastPosition": 1e300, "junk": junk,
+                                  "extraLayers": Array(repeating: paddedLayer, count: 5)]
+        let dict: [String: Any] = ["lastMix": mix, "extraLayers": Array(repeating: layer, count: 1_000)]
+        let (restored, skipped) = Backup.restoreUserDefaults(from: try throughBackupFile(dict), into: d)
+        XCTAssertEqual(restored, 2)
+        XCTAssertEqual(skipped, 0)
+
+        let layersData = try XCTUnwrap(d.data(forKey: "extraLayers"))
+        let layers = try JSONDecoder().decode([ExtraNoiseLayer].self, from: layersData)
+        XCTAssertEqual(layers.count, AudioEngine.maxExtraLayers, "no more layers than the engine stacks")
+        XCTAssertEqual(layers.map(\.volume), Array(repeating: 1.0, count: AudioEngine.maxExtraLayers))
+
+        let mixData = try XCTUnwrap(d.data(forKey: "lastMix"))
+        XCTAssertLessThan(mixData.count, 2_000, "the junk fields aren't stored")
+        XCTAssertFalse(String(decoding: mixData, as: UTF8.self).contains("junk"))
+        let saved = try JSONDecoder().decode(SavedMix.self, from: mixData)
+        XCTAssertEqual(saved.noiseVolume, 1)
+        XCTAssertEqual(saved.binVolume, 0)
+        XCTAssertEqual(saved.podVolume, 0.5)
+        XCTAssertEqual(saved.podcastPosition, Backup.maxPosition)
+        XCTAssertEqual(saved.extraLayers?.count, AudioEngine.maxExtraLayers)
+    }
+
+    // Value: protects=a blob padded in a field its type knows is refused, not stored; fails_when=the re-encoded blob's byte cap is dropped; why_new=re-encoding drops unknown keys but keeps a padded name; seam=none; no_claim=the exact cap
+    func testABlobPaddedInAKnownFieldIsSkipped() {
+        var mix: [String: Any] = ["id": "m", "name": "Last night", "noiseOn": true, "noiseVolume": 0.5,
+                                  "noiseType": "brown", "binauralOn": false, "binVolume": 0.3, "binauralPreset": "delta",
+                                  "podVolume": 0.7]
+        XCTAssertEqual(Backup.restoreUserDefaults(from: ["lastMix": mix], into: d).restored, 1,
+                       "the same snapshot with a short name restores")
+        d.removeObject(forKey: "lastMix")
+        mix["name"] = String(repeating: "n", count: 20_000)
+        let (restored, skipped) = Backup.restoreUserDefaults(from: ["lastMix": mix], into: d)
+        XCTAssertEqual(restored, 0)
+        XCTAssertEqual(skipped, 1)
+        XCTAssertNil(d.data(forKey: "lastMix"))
+    }
+
+    // Value: protects=a file section is written as its decoded value, saved places clamped; fails_when=validatedFileSection returns the backup's own bytes again or stops clamping places; why_new=testFileBackedValidationGate only checks the count; seam=none; no_claim=each type's field contents
+    func testAFileSectionIsStoredAsItDecoded() throws {
+        let show = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(
+            Podcast(id: "a", name: "A", url: "fa", episodes: []))) as? [String: Any])
+        var padded = show
+        padded["junk"] = String(repeating: "j", count: 10_000)
+        let shows = try XCTUnwrap(Backup.validatedFileSection(key: "savedPodcasts", value: [padded]))
+        XCTAssertEqual(shows.count, 1)
+        XCTAssertFalse(String(decoding: shows.data, as: UTF8.self).contains("junk"))
+        XCTAssertEqual(try JSONDecoder().decode([Podcast].self, from: shows.data).first?.id, "a")
+
+        let places = try XCTUnwrap(Backup.validatedFileSection(key: "episodePositions",
+                                                               value: ["ep1": 1e300, "ep2": -5.0, "ep3": 12.5]))
+        XCTAssertEqual(try JSONDecoder().decode([String: Double].self, from: places.data),
+                       ["ep1": Backup.maxPosition, "ep2": 0, "ep3": 12.5])
+    }
 }
 

@@ -175,7 +175,7 @@ final class AudioEngine: ObservableObject {
         }
     }
     /// Cap on *extra* stacked noise layers (the primary `noiseType` is always layer 0).
-    static let maxExtraLayers = kMaxNoiseLayers - 1
+    nonisolated static let maxExtraLayers = kMaxNoiseLayers - 1
     /// Additional simultaneous noise generators stacked on the primary noise (rain + brown, …).
     /// Gated by `noiseOn` like the primary; persisted as JSON; capped at `maxExtraLayers`.
     @Published var extraLayers: [ExtraNoiseLayer] = [] {
