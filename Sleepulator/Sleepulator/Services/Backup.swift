@@ -520,8 +520,13 @@ enum Backup {
     /// Write a confirmed backup, or nil if nothing was replaced. Snapshots what's here first, so
     /// Undo can put it back even if the write goes wrong part-way; when that copy can't be saved,
     /// the restore stops (the confirm promised Undo). The caller reloads the engine afterwards.
+    ///
+    /// `settle` lands the writes the app still has queued (`AudioEngine.flushPendingWrites`). It
+    /// runs before the copy, so the copy holds them, and again just before the restore writes,
+    /// so none lands on top of it.
     static func restore(_ pending: Pending, now: Date = Date(), storage: StorageManager = .shared,
-                        defaults: UserDefaults = .standard) async -> Outcome? {
+                        defaults: UserDefaults = .standard, settle: () -> Void = {}) async -> Outcome? {
+        settle()
         // The copy is written atomically before anything is replaced. When it can't be saved the
         // restore replaces nothing and the previous Undo stays as it was (file and date): nothing
         // changed, so it still describes a real earlier state.
@@ -530,7 +535,7 @@ enum Backup {
             return nil
         }
         defaults.set(now.timeIntervalSince1970, forKey: undoTakenAtKey)
-        let written = await write(pending.data, replacing: false, storage: storage, defaults: defaults)
+        let written = await write(pending.data, replacing: false, storage: storage, defaults: defaults, settle: settle)
         return Outcome(contents: written.contents, skipped: written.skipped)
     }
 
@@ -547,8 +552,9 @@ enum Backup {
 
     /// Put back what was here before the last restore. False if there's nothing to put back; a
     /// snapshot that's gone or unreadable is discarded too, so Undo stops being offered.
+    /// `settle` runs just before the writes, as in `restore`.
     static func undo(now: Date = Date(), storage: StorageManager = .shared,
-                     defaults: UserDefaults = .standard) async -> Bool {
+                     defaults: UserDefaults = .standard, settle: () -> Void = {}) async -> Bool {
         storage.flush()
         guard undoDate(now: now, storage: storage, defaults: defaults) != nil else { return false }
         // Read (and parsed, to fall back to the `.bak`) off the main thread: it's library-sized.
@@ -556,7 +562,7 @@ enum Backup {
             discardUndo(storage, defaults)
             return false
         }
-        let written = await write(data, replacing: true, storage: storage, defaults: defaults)
+        let written = await write(data, replacing: true, storage: storage, defaults: defaults, settle: settle)
         discardUndo(storage, defaults)
         storage.flush()
         return written.parsed
@@ -625,15 +631,17 @@ enum Backup {
     /// Parse, validate and write a backup's bytes. The parsing and validation run off the main
     /// thread; UserDefaults is written on the main actor (@AppStorage observers fire on the
     /// writing thread), and the files go through StorageManager, then flush so the caller's
-    /// reload reads them.
-    private static func write(_ data: Data, replacing: Bool, storage: StorageManager,
-                              defaults: UserDefaults) async -> (parsed: Bool, contents: Contents, skipped: Int) {
+    /// reload reads them. `settle` runs between the two, with nothing awaited after it: what the
+    /// app queued while the backup was parsed lands before the writes, not after.
+    private static func write(_ data: Data, replacing: Bool, storage: StorageManager, defaults: UserDefaults,
+                              settle: () -> Void) async -> (parsed: Bool, contents: Contents, skipped: Int) {
         let currentFocus = defaults.bool(forKey: "focusMode")
         let prepared = await Task.detached(priority: .userInitiated) { () -> Prepared? in
             guard let dict = (try? JSONSerialization.jsonObject(with: data, options: [])) as? [String: Any] else { return nil }
             return prepare(dict, currentFocus: currentFocus, now: Date())
         }.value
         guard let prepared else { return (false, Contents(), 0) }
+        settle()
         apply(prepared.settings?.values ?? [:], absent: prepared.absentKeys, into: defaults, replacing: replacing)
         for (file, bytes) in prepared.files { storage.writeRaw(bytes, to: file) }
         if replacing {

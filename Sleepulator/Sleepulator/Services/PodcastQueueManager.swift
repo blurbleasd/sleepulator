@@ -38,6 +38,11 @@ final class PodcastQueueManager: ObservableObject {
     
     private let storageQueue = DispatchQueue(label: "app.sleepulator.queueStorage", qos: .utility)
 
+    /// Wait for the queue and played-list writes already queued (`AudioEngine.flushPendingWrites`).
+    func flushPendingWrites() {
+        storageQueue.sync {}
+    }
+
     // Recency order (newest last) that bounds `finishedEpisodes` — without it the set grew
     // forever in UserDefaults as every episode you ever finished accumulated.
     private var finishedOrder: [String] = []

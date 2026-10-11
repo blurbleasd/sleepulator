@@ -336,6 +336,14 @@ final class PodcastPlayer: NSObject {
         return result
     }
 
+    /// Write the saved places now and wait for the write: the in-memory map (otherwise written
+    /// every ~30 s while playing) and anything already queued. Before a backup reads the store or
+    /// a restore writes over it (`AudioEngine.flushPendingWrites`).
+    func flushPositionsNow() {
+        flushPositionsToDisk()
+        storageQueue.sync {}
+    }
+
     func flushPositionsToDisk() {
         if let positions = cachedPositions {
             let pruned = Self.prunedPositions(positions, keeping: currentId)

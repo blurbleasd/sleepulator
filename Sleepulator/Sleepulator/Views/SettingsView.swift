@@ -26,7 +26,8 @@ struct SettingsView: View {
         self.audio = audio
         self.queue = queue
         self.settings = settings
-        _backup = StateObject(wrappedValue: BackupController(reload: { audio.reloadAfterRestore() }))
+        _backup = StateObject(wrappedValue: BackupController(settle: { audio.flushPendingWrites() },
+                                                             reload: { audio.reloadAfterRestore() }))
     }
 
     /// Mode-aware like Home: Focus is cool everywhere, not just on Home. Read from the persisted

@@ -754,6 +754,44 @@ final class BackupRoundTripTests: XCTestCase {
         }
     }
 
+    // MARK: pass 4: queued writes land first
+
+    // Value: protects=the app's queued writes land before the Undo copy and again before the restore's writes; fails_when=restore or undo stops calling settle at those points; why_new=nothing flushed the engine's queues, so a queued write landed after a restore and reverted part of it, and the copy missed it; seam=settle (the app passes AudioEngine.flushPendingWrites); no_claim=the engine's own queues (RestoreReloadTests)
+    @MainActor
+    func testARestoreLandsQueuedWritesFirst() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("BackupSettle-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let storage = StorageManager(directory: dir)
+        try storage.writeRawNow(JSONEncoder().encode(["ep1": 10.0]), to: "positions.json")
+        func places() -> [String: Double]? {
+            storage.flush()
+            return storage.rawData(for: "positions.json").flatMap { try? JSONDecoder().decode([String: Double].self, from: $0) }
+        }
+        var calls: [(copyTaken: Bool, restoreWritten: Bool)] = []
+        let settle = {
+            calls.append((storage.rawData(for: Backup.undoFile) != nil, places() == ["ep9": 5.0]))
+            // The first time, the place the engine still held in memory: the copy must hold it.
+            if calls.count == 1, let held = try? JSONEncoder().encode(["ep1": 42.0]) {
+                storage.writeRaw(held, to: "positions.json")
+            }
+        }
+        let backup: [String: Any] = ["episodePositions": ["ep9": 5.0], Backup.markerKey: 1]
+        let now = Date()
+        let restored = await Backup.restore(Backup.Pending(data: try JSONSerialization.data(withJSONObject: backup),
+                                                           contents: Backup.contents(of: backup)),
+                                            now: now, storage: storage, defaults: d, settle: settle)
+        XCTAssertNotNil(restored)
+        XCTAssertEqual(calls.map(\.copyTaken), [false, true], "before the copy, and again after it")
+        XCTAssertEqual(calls.map(\.restoreWritten), [false, false], "both before the restore writes")
+        XCTAssertEqual(places(), ["ep9": 5.0])
+
+        var undoSettles = 0
+        let undone = await Backup.undo(now: now, storage: storage, defaults: d, settle: { undoSettles += 1 })
+        XCTAssertTrue(undone)
+        XCTAssertEqual(undoSettles, 1)
+        XCTAssertEqual(places(), ["ep1": 42.0], "the copy held the write that was still queued")
+    }
+
     // MARK: pass 4: what a restore stores is what decoded
 
     // Value: protects=a restore stores the decoded, trimmed and clamped blobs, never the backup's own JSON; fails_when=encodedValue stores the backup's bytes again, or stops trimming layers or clamping volumes and the place; why_new=the blobs were only checked to decode, so unknown keys and any number of layers reached the plist; seam=none; no_claim=the file sections (below)

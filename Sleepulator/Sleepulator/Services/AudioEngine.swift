@@ -1275,6 +1275,19 @@ final class AudioEngine: ObservableObject {
         sleepTimer.cancelTimer()
     }
 
+    /// Land every write the engine has queued, before a backup reads the store or a restore
+    /// writes over it: the saved places (otherwise written every ~30 s while playing), the queue
+    /// and the played list, the volumes and sounds, and the deferred mixes.json. A write still
+    /// queued when a restore landed put the old value back over the restored one, and the Undo
+    /// copy taken before it missed it.
+    func flushPendingWrites() {
+        podPlayer.flushPositionsNow()
+        queueManager.flushPendingWrites()
+        mixStore.flushPendingWrites()
+        storageQueue.sync {}                  // the volumes' and sounds' UserDefaults writes
+        StorageManager.shared.flush()         // the file writes those queues handed on
+    }
+
     /// Reload all persisted state after a Backup restore so the new data takes effect WITHOUT an
     /// app relaunch. Flushes pending writes first (the import writes are async) so reads can't
     /// race them, re-seeds the persisted @Published settings from UserDefaults, reloads the

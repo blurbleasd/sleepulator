@@ -3676,5 +3676,22 @@ final class RestoreReloadTests: XCTestCase {
         XCTAssertEqual(engine.pomodoro.cyclesBeforeLongBreak, 6)
         XCTAssertGreaterThan(engine.sleepTimer.timerRemaining, 0, "a restore never cancels a running sleep timer")
     }
+
+    // Value: protects=flushPendingWrites lands the engine's deferred mixes.json write before it returns; fails_when=flushPendingWrites stops flushing the MixStore or the store; why_new=a restore didn't flush the engine's queues, so a queued write could land on top of it; seam=none; no_claim=the places, queue and volume queues (no seam holds their writes back, so a test can't tell flushed from fast)
+    func testFlushPendingWritesLandsTheDeferredMixesWrite() throws {
+        let storage = StorageManager.shared
+        storage.flush()
+        let before = storage.rawData(for: "mixes.json")
+        defer {
+            if let before { try? storage.writeRawNow(before, to: "mixes.json") } else { storage.delete(filename: "mixes.json") }
+            storage.flush()
+        }
+        let engine = AudioEngine()
+        let name = "Flush test \(UUID().uuidString)"
+        engine.savePreset(named: name)                     // written 0.5 s later, unless flushed
+        engine.flushPendingWrites()
+        let presets: [SoundPreset] = try XCTUnwrap(storage.load(from: "mixes.json"))
+        XCTAssertTrue(presets.contains { $0.name == name }, "the deferred write landed before flushPendingWrites returned")
+    }
 }
 

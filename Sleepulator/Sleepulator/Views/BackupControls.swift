@@ -34,12 +34,21 @@ final class BackupController: ObservableObject {
     /// Undo that skipped the "changes since will be lost" confirm.
     var pageVisible = false
 
+    private let storage: StorageManager
+    private let defaults: UserDefaults
+    /// Lands the engine's queued writes before a backup reads the store or a restore writes
+    /// over it (`AudioEngine.flushPendingWrites`).
+    private let settle: () -> Void
     private let reload: () -> Void
     /// When the last alert went away. SwiftUI drops an alert presented while another (or the file
     /// picker) is still animating out, so the next one waits for it.
     private var lastDismissal = Date.distantPast
 
-    init(reload: @escaping () -> Void) {
+    init(storage: StorageManager = .shared, defaults: UserDefaults = .standard,
+         settle: @escaping () -> Void = {}, reload: @escaping () -> Void) {
+        self.storage = storage
+        self.defaults = defaults
+        self.settle = settle
         self.reload = reload
     }
 
@@ -52,7 +61,7 @@ final class BackupController: ObservableObject {
     }
 
     func refresh() {
-        undoDate = Backup.undoDate()
+        undoDate = Backup.undoDate(storage: storage, defaults: defaults)
     }
 
     func export() {
@@ -62,7 +71,9 @@ final class BackupController: ObservableObject {
             defer { busy = false }
             do {
                 let now = Date()
-                let export = try await Backup.exportData(at: now, maxBytes: Backup.maxFileBytes)
+                settle()
+                let export = try await Backup.exportData(at: now, storage: storage, defaults: defaults,
+                                                         maxBytes: Backup.maxFileBytes)
                 // Closed while it was being made: no save sheet popping up later, out of context.
                 guard pageVisible else { return }
                 exportDocument = JSONDocument(data: export.data)
@@ -116,7 +127,7 @@ final class BackupController: ObservableObject {
     func restore(_ pending: Backup.Pending) {
         busy = true
         Task {
-            guard let outcome = await Backup.restore(pending) else {
+            guard let outcome = await Backup.restore(pending, storage: storage, defaults: defaults, settle: settle) else {
                 busy = false
                 refresh()
                 await present(.failed(title: "Couldn't restore", message: Backup.noSnapshotMessage))
@@ -137,7 +148,7 @@ final class BackupController: ObservableObject {
     func undo() {
         busy = true
         Task {
-            let undone = await Backup.undo()
+            let undone = await Backup.undo(storage: storage, defaults: defaults, settle: settle)
             if undone { reload() }
             busy = false
             refresh()
