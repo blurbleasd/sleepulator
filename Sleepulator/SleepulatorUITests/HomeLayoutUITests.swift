@@ -10,6 +10,10 @@ final class HomeLayoutUITests: XCTestCase {
     func testFocusRowClearsTheMiniPlayerAndStartsASession() {
         continueAfterFailure = false
         let app = XCUIApplication()
+        // Moving scenes off, for this launch only (the argument domain): with the scene, orb and
+        // ring redrawing every frame the app never idles, and on a loaded CI runner XCUITest
+        // waited up to 4 s before each tap, so Stop kept landing after the controls had faded.
+        app.launchArguments = ["-ambientMotion", "<false/>"]
         app.launch()
 
         // Focus from either start state: a no-op when the last run left the app in Focus.
@@ -41,12 +45,20 @@ final class HomeLayoutUITests: XCTestCase {
         XCTAssertTrue(stop.waitForExistence(timeout: 5), "Tapping Focus session didn't start the Pomodoro")
         // A running session lets Home's controls fade after 10 s (HomeScreensaverPolicy). A slow CI
         // runner can take that long between these steps, and then the tap lands on the faded
-        // screen's wake layer instead of Stop, and the session runs on. Wake the controls first.
+        // screen's wake layer instead of Stop, and the session runs on. Wake the controls first,
+        // and go round again if the tap still woke them instead (CI's took 4 s to land, just as
+        // the controls faded). Stop is re-checked before each tap, so a stopped session isn't
+        // restarted by a tap on the "Focus session" button in its place.
         let wake = app.buttons["Show controls"]
-        if wake.exists { wake.tap() }
-        stop.tap()
+        var stopped = false
+        for _ in 0..<3 where !stopped {
+            if wake.exists { wake.tap() }
+            if stop.exists { stop.tap() }
+            stopped = session.waitForExistence(timeout: 3)
+        }
 
-        XCTAssertTrue(session.waitForExistence(timeout: 5))
+        // A live session would put the Sleep switch behind its confirm.
+        XCTAssertTrue(stopped, "Couldn't stop the Focus session")
 
         // A tap on the shown bar reaches it. ContentView's wrapper switches the bar's hit testing
         // off while it's hidden; on the wrong side of that gate every bar control is dead while the
@@ -100,6 +112,9 @@ final class HomeLayoutUITests: XCTestCase {
     func testSleepHomeAtRestHasNoMiniPlayer() {
         continueAfterFailure = false
         let app = XCUIApplication()
+        // Moving scenes off, for this launch only: like the Focus test, so the app idles between
+        // taps on a loaded runner (Sleep Home's orb and scene otherwise redraw every frame).
+        app.launchArguments = ["-ambientMotion", "<false/>"]
         app.launch()
 
         // Sleep from either start state. A fresh launch has no episode loaded.

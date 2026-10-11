@@ -8,13 +8,12 @@ using namespace metal;
 // ----------------------------------------------------------------------------
 // A new generative showpiece (the catalog's "Deep space" entry). Volumetric feel
 // from layered, colour-ramped FBM; depth from multiple star tiers that parallax
-// by the gyro; a comet sweeps every ~40s instead of the night-sky meteor.
+// by the gyro; a comet sweeps every two minutes instead of the night-sky meteor.
 //
 // -- ATTRIBUTION / LICENSE ---------------------------------------------------
 // Original implementation. Standard hash + value-noise + FBM (public domain) and
-// the cosine-palette *technique* (a + b·cos(2π(c·t+d)) — a well-known shaping
-// trick, reimplemented here, no code copied). Clean to ship with credit to the
-// techniques.
+// a plain mix/smoothstep colour ramp. No code copied. Clean to ship with credit
+// to the techniques.
 //
 // Driven from SwiftUI `.colorEffect`. Swift owns phase, time, size,
 // nightProgress, audioLevel, gyro; everything else is a `constant` below
@@ -30,13 +29,27 @@ namespace neb {
 // ---- tunables --------------------------------------------------------------------
 constant int   OCTAVES   = 5;      // nebula detail — the battery knob (drop to 4 if warm).
 constant float DRIFT      = 0.012; // nebula drift speed
-constant float COMET_SEC  = 40.0;  // seconds between comets
-constant float COMET_WIN  = 0.16;  // fraction of the cycle a comet is visible
+// One comet every two minutes, ~6 s on screen. At 40 s apart it was a white streak across a
+// sleeping partner's peripheral vision every few breaths, not a rare delight.
+constant float COMET_SEC  = 120.0; // seconds between comets
+constant float COMET_WIN  = 0.05;  // fraction of the cycle a comet is visible (6 s)
 
 inline float hash21(float2 p) {
     p = fract(p * float2(123.34, 345.45));
     p += dot(p, p + 34.345);
     return fract(p.x * p.y);
+}
+// Star-cell hash on the cell's integer bits. `hash21` above is fine for noise, but on integer
+// cell ids it repeats: 345.45 × 20 and 123.34 × 50 are whole numbers, so the star field came out
+// as the same strip of stars every 20 cells down (thirds of the screen in Deep space, every 80 pt
+// in Aurora and Still water). `salt` picks an independent stream per use.
+inline float hashCell(float2 cell, uint salt) {
+    uint2 q = uint2(int2(cell));
+    uint h = q.x * 1597334677u ^ q.y * 3812015801u ^ salt * 2654435761u;
+    h ^= h >> 16; h *= 2246822519u;
+    h ^= h >> 13; h *= 3266489917u;
+    h ^= h >> 16;
+    return float(h) * (1.0 / 4294967296.0);
 }
 inline float vnoise(float2 p) {
     float2 i = floor(p), f = fract(p);
@@ -57,13 +70,12 @@ inline float fbm(float2 p) {
     return v;
 }
 
-// Cosine palette (iq-style technique): smooth violet→blue→magenta→cyan ramp.
+// Nebula ramp: dusky plum → rust → amber dust, so the showpiece keeps Sleep's warm dusk. (It was
+// a cosine palette meant as violet→blue→magenta→cyan; over the density range actually used it
+// rendered a muddy olive-khaki.)
 inline float3 palette(float d) {
-    float3 a = float3(0.16, 0.10, 0.22);
-    float3 b = float3(0.32, 0.22, 0.42);
-    float3 c = float3(1.0, 1.0, 1.0);
-    float3 e = float3(0.20, 0.45, 0.78);
-    return a + b * cos(6.28318530718 * (c * d + e));
+    float3 c = mix(float3(0.34, 0.10, 0.18), float3(0.70, 0.25, 0.13), smoothstep(0.35, 0.65, d));
+    return mix(c, float3(0.80, 0.48, 0.20), smoothstep(0.65, 0.95, d));
 }
 
 // One parallax star tier: a scrolling, gyro-shifted grid where rare cells hold a twinkling star.
@@ -76,13 +88,13 @@ inline float3 starTier(float2 uv, float drift, float twinkle, float depth, float
     p.y += drift * (0.002 + depth * 0.004);      // a slow downward drift
     float2 g = p * (60.0 + depth * 120.0);
     float2 id = floor(g);
-    float h = hash21(id + depth * 17.0);
+    float h = hashCell(id, 1u + uint(depth * 2.0));   // one stream per tier
     if (h < thresh) return float3(0.0);
     float2 st = fract(g) - 0.5;
     float d = length(st);
     float core = smoothstep(0.18, 0.0, d);
     float tw = 0.5 + 0.5 * sin(twinkle * (1.0 + h * 2.0) + h * 100.0);
-    float3 tint = mix(float3(0.75, 0.82, 1.0), float3(1.0, 0.9, 0.8), fract(h * 7.0));
+    float3 tint = mix(float3(0.96, 0.90, 0.84), float3(1.0, 0.82, 0.62), fract(h * 7.0));   // warm whites
     return tint * core * tw * (0.4 + depth * 0.8);
 }
 
@@ -103,7 +115,7 @@ half4 nebulaField(float2 pos, half4 color,
     float dim = (1.0 - 0.45 * p);
     float t = phase * DRIFT;                     // drift rate slowdown lives in phase
 
-    float3 col = float3(0.004, 0.005, 0.012);     // deep space black, faint blue lift
+    float3 col = float3(0.008, 0.005, 0.004);     // deep space black, a faint warm lift
 
     // --- nebula: two domain-warped FBM layers at different scales/colours for depth ---
     for (int L = 0; L < 2; L++) {
@@ -129,11 +141,12 @@ half4 nebulaField(float2 pos, half4 color,
 
     // --- a rare comet, sweeping diagonally every COMET_SEC ---
     // Transients sleep too: the comet fades out as the night deepens and is gone past
-    // p ≈ 0.75 — a bright streak at 4am is a wake risk, not a delight.
+    // p ≈ 0.4 (about 18 minutes into an untimed night) — a bright streak at 4am is a wake risk,
+    // not a delight.
     float idx = floor(time / COMET_SEC);
     float ph  = fract(time / COMET_SEC);
-    float win = smoothstep(0.0, 0.02, ph) * smoothstep(COMET_WIN, COMET_WIN - 0.05, ph);
-    win *= 1.0 - smoothstep(0.35, 0.75, p);
+    float win = smoothstep(0.0, 0.006, ph) * smoothstep(COMET_WIN, COMET_WIN - 0.015, ph);
+    win *= 1.0 - smoothstep(0.15, 0.40, p);
     if (win > 0.001) {
         float seg = ph / COMET_WIN;
         float2 s = float2(-0.15 * aspect, 0.12 + hash21(float2(idx, 1.0)) * 0.30);
@@ -145,7 +158,7 @@ half4 nebulaField(float2 pos, half4 color,
         float perp  = abs(dot(rel, float2(-dir.y, dir.x)));
         float tail = smoothstep(0.22, 0.0, along) * step(0.0, along) * smoothstep(0.010, 0.0, perp);
         float core = smoothstep(0.012, 0.0, length(rel));
-        col += float3(0.85, 0.92, 1.0) * (tail * 0.6 + core) * win * dim;
+        col += float3(1.0, 0.84, 0.62) * (tail * 0.5 + core * 0.7) * win * dim;
     }
 
     // Filmic roll-off + hash dither (kills OLED banding). Wrap `time` small before the hash: hours

@@ -94,8 +94,8 @@ struct FocusHero: View {
 }
 
 // Focus session readout — replaces the generic status line in Focus mode. While a
-// session runs it shows the phase, the live countdown, and progress through the set;
-// idle, it falls back to the same "what's playing" line as Sleep.
+// session runs it shows the phase, the live countdown, and progress through the set; with
+// sound playing and no session, the sound pills; at rest, what Play would resume.
 struct FocusSessionReadout: View {
     @ObservedObject var pomodoro: PomodoroService
     let pal: Palette
@@ -135,16 +135,17 @@ struct FocusSessionReadout: View {
                         .frame(minHeight: 44)
                 }
                 .buttonStyle(.plain)
-            } else {
+            } else if layers.isEmpty {
+                // At rest: what Play would resume ("Resume · Pink", "Tap to begin").
                 Text(idleStatus)
                     .font(.system(.callout, design: .rounded).weight(.medium))
                     .foregroundColor(pal.dim)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 30)
-
-                if !layers.isEmpty {
-                    LayerPills(layers: layers, pal: pal)
-                }
+            } else {
+                // Playing: the pills name the sounds, as under the Sleep orb. The status line
+                // said the same names again ("Pink" over a "Pink" pill).
+                LayerPills(layers: layers, pal: pal)
             }
         }
     }

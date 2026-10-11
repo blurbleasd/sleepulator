@@ -18,6 +18,9 @@ struct HomeView: View {
     var nowPlayingPresented: Bool = false
     /// Bumped by ContentView on every mini-player tap: Home interaction, pushes the countdown back.
     var miniPlayerTouches: Int = 0
+    /// The night ring's centre (global), measured here and owned by ContentView: Breathe centres
+    /// its glow on it, and the veil's glance draws the ember there.
+    @Binding var orbCenter: CGPoint?
     /// One-time first-run coachmark: points at "Build mix" so a new user discovers that the app
     /// layers noise + binaural + podcasts. Set once the user dismisses it (or builds a mix).
     @AppStorage("hasCompletedFirstRun") private var hasCompletedFirstRun = false
@@ -103,8 +106,11 @@ struct HomeView: View {
     /// setting. Previously freezing was gated on the sleep-timer veil alone, so a no-timer session
     /// animated at full rate all night. This is purely additive — it only adds reasons to freeze,
     /// never removes the veil case.
-    private var scenesFrozen: Bool {
-        audio.screenDimmed || scenePhase != .active || isLuminanceReduced || !ambientMotion
+    private var scenesFrozen: Bool { screenOutOfSight || !ambientMotion }
+
+    /// The screen itself is out of sight: the veil, backgrounded, or low luminance (Always-On).
+    private var screenOutOfSight: Bool {
+        audio.screenDimmed || scenePhase != .active || isLuminanceReduced
     }
 
     // Selected backdrop scene per mode (persisted). Changing it re-renders the home; the
@@ -130,7 +136,7 @@ struct HomeView: View {
 
     private func cycleScene(_ dir: Int) {
         let mood: SceneMood = audio.focusMode ? .focus : .sleep
-        let list = SceneRegistry.scenes(for: mood)
+        let list = SceneRegistry.swipeLoop(for: mood)
         guard list.count > 1 else { return }
         let curId = audio.focusMode ? focusSceneId : sleepSceneId
         let idx = list.firstIndex { $0.id == curId } ?? 0
@@ -215,6 +221,9 @@ struct HomeView: View {
 
     var pal: Palette { Palette(focusMode: audio.focusMode) }
 
+    /// Spacing in the orb's stack (orb, night line, pills). The veil's glance places its line from it.
+    static let heroSpacing: CGFloat = 20
+
     // The currently-playing layers, shown as pills under the orb.
     private var activeLayers: [String] {
         var p: [String] = []
@@ -286,7 +295,7 @@ struct HomeView: View {
             return
         }
 
-        // The night ring's timer starts with the session itself (AudioEngine.noteSessionStart).
+        // The night ring's timer starts with the session itself (AudioEngine.noteSessionEdge).
         let begin = resolveBegin()
         // Optional breathing wind-down before Sleep playback (never in Focus — Pomodoro starts now).
         if breathingOnRamp && !audio.focusMode {
@@ -423,11 +432,19 @@ struct HomeView: View {
                 palette: pal,
                 reduceMotion: reduceMotion,
                 paused: scenesFrozen,
+                occluded: screenOutOfSight,
                 sleepTimer: audio.sleepTimer,
                 pomodoro: audio.pomodoro,
                 audioLevel: { [weak audio] in audio?.audioLevel ?? 0 },
-                tilt: { tiltSource.tilt }
+                tilt: { tiltSource.tilt },
+                focalPoint: audio.focusMode ? nil : orbCenter
             ))
+            // Focus scenes step back while the controls show and take the stage once the
+            // screensaver hands them the screen. Full strength under live controls, Tide's crest
+            // ran near-white through "Focus session" and Sandfall's bulb washed out the mode
+            // switcher. Sleep scenes are already dim enough to sit under the controls.
+            .opacity(audio.focusMode && !audio.ambientScreensaver ? 0.55 : 1)
+            .animation(.easeInOut(duration: 0.9), value: audio.ambientScreensaver)
             .onAppear { reconcileMotion() }
             .onDisappear { tiltSource.stop() }
             .onChange(of: audio.screenDimmed) { _, _ in reconcileMotion() }
@@ -476,7 +493,7 @@ struct HomeView: View {
 
                 Spacer()
 
-                VStack(spacing: 20) {
+                VStack(spacing: Self.heroSpacing) {
                     if audio.focusMode {
                         // Focus: the depleting Pomodoro ring is the hero. The orb still
                         // play/pauses audio; the ring + readout report the session. Freeze the
@@ -515,6 +532,10 @@ struct HomeView: View {
                                       dragging: $ringDragging,
                                       openOptions: openTimerOptions)
                         }
+                        .onGeometryChange(for: CGPoint.self) { proxy in
+                            let f = proxy.frame(in: .global)
+                            return CGPoint(x: f.midX, y: f.midY)
+                        } action: { orbCenter = $0 }
 
                         NightLine(resumeText: statusText(),
                                   playing: audio.isAnythingPlaying,
@@ -634,6 +655,9 @@ struct HomeView: View {
                     // "Tap Show controls", "Tap Wake" or "Tap Controls".
                     .accessibilityInputLabels(["Show controls", "Wake", "Controls"])
                     .accessibilityAddTraits(.isButton)
+                    // Under the night veil only the veil should answer "Wake". Hidden here as well
+                    // as on the TabView; XCUITest can't see either, so it's device-checked (§Q.5).
+                    .accessibilityHidden(audio.screenDimmed)
             }
 
             // Transient backdrop name, shown for ~1.6s after a swipe changes the scene.
@@ -706,6 +730,8 @@ struct HomeView: View {
         .onChange(of: miniPlayerTouches) { _, _ in
             if !audio.ambientScreensaver { scheduleIdleFade() }
         }
+        // The controls woken from outside (the veil's second tap): restart the countdown.
+        .onChange(of: audio.ambientScreensaver) { _, on in if !on { scheduleIdleFade() } }
         // VoiceOver / Switch Control turned on mid-screensaver: bring every control back now.
         .onChange(of: assistiveTechRunning) { _, _ in wakeChrome() }
         // A sheet opening cancels the countdown; closing one wakes the chrome and restarts it.

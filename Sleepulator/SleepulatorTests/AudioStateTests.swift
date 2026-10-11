@@ -1563,12 +1563,33 @@ final class SessionGuardsTests: XCTestCase {
                                                      sleepSoundsPlaying: false, pomodoroRunning: false))
     }
 
+    // Value: protects=the 3am glance: first tap shows it, a quick follow-up doesn't skip it, a tap while it shows/fades wakes, VO/Switch wake at once; fails_when=a boundary flips or the settle/assistive guard goes; why_new=veilTapped is view wiring the UI test can only sample; seam=none
+    func testTheVeilGlancesFirstThenWakes() {
+        let hold = SessionGuards.glanceHold, fade = SessionGuards.glanceFade
+        XCTAssertEqual(SessionGuards.veilTap(sinceGlance: nil, assistiveTech: false), .glance)
+        XCTAssertEqual(SessionGuards.veilTap(sinceGlance: 0.3, assistiveTech: false), .ignore)
+        XCTAssertEqual(SessionGuards.veilTap(sinceGlance: SessionGuards.glanceSettle, assistiveTech: false), .wake)
+        XCTAssertEqual(SessionGuards.veilTap(sinceGlance: hold + fade - 0.1, assistiveTech: false), .wake)   // still fading
+        XCTAssertEqual(SessionGuards.veilTap(sinceGlance: hold + fade, assistiveTech: false), .glance)       // gone: glance again
+        XCTAssertEqual(SessionGuards.veilTap(sinceGlance: nil, assistiveTech: true), .wake)
+        XCTAssertEqual(SessionGuards.veilTap(sinceGlance: 0.3, assistiveTech: true), .wake)
+        XCTAssertEqual(SessionGuards.veilTap(sinceGlance: -120, assistiveTech: false), .glance,
+                       "a clock step back must not lock the veil against taps")
+    }
+
     func testVeilNeverDropsOverSilence() {
-        XCTAssertFalse(SessionGuards.mayNightDim(autoNightDim: true, focusMode: false, timerActive: true, playing: false))
-        XCTAssertTrue(SessionGuards.mayNightDim(autoNightDim: true, focusMode: false, timerActive: true, playing: true))
-        XCTAssertFalse(SessionGuards.mayNightDim(autoNightDim: true, focusMode: true, timerActive: true, playing: true))
-        XCTAssertFalse(SessionGuards.mayNightDim(autoNightDim: false, focusMode: false, timerActive: true, playing: true))
-        XCTAssertFalse(SessionGuards.mayNightDim(autoNightDim: true, focusMode: false, timerActive: false, playing: true))
+        XCTAssertFalse(SessionGuards.mayNightDim(autoNightDim: true, focusMode: false, playing: false, timerActive: true, onBedsideScreen: true))
+        XCTAssertTrue(SessionGuards.mayNightDim(autoNightDim: true, focusMode: false, playing: true, timerActive: true, onBedsideScreen: false))
+        XCTAssertFalse(SessionGuards.mayNightDim(autoNightDim: true, focusMode: true, playing: true, timerActive: true, onBedsideScreen: true))
+        XCTAssertFalse(SessionGuards.mayNightDim(autoNightDim: false, focusMode: false, playing: true, timerActive: true, onBedsideScreen: true))
+    }
+
+    // Value: protects=All night veils the bedside screens (Home, Now Playing) but not daytime listening on other tabs; fails_when=the Home or timer clause is dropped or inverted; why_new=the rule gained onBedsideScreen for untimed nights; seam=none
+    func testAllNightVeilsOnlyTheSleepScreen() {
+        XCTAssertTrue(SessionGuards.mayNightDim(autoNightDim: true, focusMode: false, playing: true, timerActive: false, onBedsideScreen: true))
+        XCTAssertFalse(SessionGuards.mayNightDim(autoNightDim: true, focusMode: false, playing: true, timerActive: false, onBedsideScreen: false))
+        XCTAssertTrue(SessionGuards.mayNightDim(autoNightDim: true, focusMode: false, playing: true, timerActive: true, onBedsideScreen: false),
+                      "a running timer veils every tab, as before")
     }
 
     func testTheFirstSessionIsTheLayeredBedHoweverTheTipWasDismissed() {
@@ -2016,8 +2037,13 @@ final class NightTimerSessionStartTests: XCTestCase {
     func testFocusNeverTimesAndAllNightStartsNothing() {
         let f = engine(length: 30, focus: true)
         defer { tearDownEngine(f) }
+        var now = Date(timeIntervalSinceReferenceDate: 1_000_000)
+        f.sleepTimer.now = { now }
         f.noiseOn = true
         XCTAssertEqual(f.sleepTimer.timerRemaining, 0)
+        // Value: protects=a Focus session never settles a night (the Focus orb reads nightProgress and would still to nothing); fails_when=beginSleepNight drops its !focusMode guard; why_new=only the switch into Focus was tested, not a Focus start from rest; seam=none
+        now += 60 * 60
+        XCTAssertEqual(f.sleepTimer.nightProgress, 0)
 
         let a = engine(length: 0)
         defer { tearDownEngine(a) }
@@ -2046,6 +2072,234 @@ final class NightTimerSessionStartTests: XCTestCase {
         length = 60
         e.noiseOn = true                                       // resume, or a podcast stall ending
         XCTAssertEqual(e.sleepTimer.timerRemaining, 30 * 60, accuracy: 2)
+    }
+}
+
+/// The untimed ("All night") night: it settles on the clock, a short pause keeps it, a long one
+/// ends it. Before, All night (the default) had nightProgress 0 all night, so no scene darkened.
+final class UntimedNightTests: XCTestCase {
+    private let t0 = Date(timeIntervalSinceReferenceDate: 1_000_000)
+
+    func testItSettlesAcrossFortyFiveMinutes() {
+        XCTAssertEqual(UntimedNight.progress(start: nil, stoppedAt: nil, now: t0), 0)
+        XCTAssertEqual(UntimedNight.progress(start: t0, stoppedAt: nil, now: t0), 0)
+        XCTAssertEqual(UntimedNight.progress(start: t0, stoppedAt: nil, now: t0 + 22.5 * 60), 0.5, accuracy: 1e-9)
+        XCTAssertEqual(UntimedNight.progress(start: t0, stoppedAt: nil, now: t0 + 6 * 3600), 1)
+    }
+
+    func testAShortPauseKeepsTheNightAndALongOneEndsIt() {
+        let stop = t0 + 3600
+        XCTAssertEqual(UntimedNight.progress(start: t0, stoppedAt: stop, now: stop + 60), 1)
+        XCTAssertEqual(UntimedNight.progress(start: t0, stoppedAt: stop, now: stop + 31 * 60), 0)
+        XCTAssertEqual(UntimedNight.start(previous: t0, stoppedAt: stop, now: stop + 5 * 60), t0)
+        XCTAssertEqual(UntimedNight.start(previous: t0, stoppedAt: stop, now: stop + 31 * 60), stop + 31 * 60)
+        XCTAssertEqual(UntimedNight.start(previous: nil, stoppedAt: nil, now: stop), stop)
+
+        // Value: protects=start and progress agree on the resumeWindow edge (night over ⇔ a new one starts); fails_when=one comparison flips (< vs <=), so the scene reads 0 but resumes at 1 (or the reverse); why_new=existing cases sit at 5 and 31 min, never the edge; seam=none
+        let w = UntimedNight.resumeWindow
+        XCTAssertEqual(UntimedNight.progress(start: t0, stoppedAt: stop, now: stop + w - 1), 1)
+        XCTAssertEqual(UntimedNight.start(previous: t0, stoppedAt: stop, now: stop + w - 1), t0)
+        XCTAssertEqual(UntimedNight.progress(start: t0, stoppedAt: stop, now: stop + w), 0)
+        XCTAssertEqual(UntimedNight.start(previous: t0, stoppedAt: stop, now: stop + w), stop + w)
+        // A night that never stopped carries on, however long it has run.
+        XCTAssertEqual(UntimedNight.start(previous: t0, stoppedAt: nil, now: t0 + 6 * 3600), t0)
+    }
+
+    func testATimerStillOwnsTheNightWhileItRuns() {
+        let timer = SleepTimerService()
+        timer.backstop = NoopBackstop()
+        var now = t0
+        timer.now = { now }
+        timer.noteSleepSessionStarted()
+        timer.startSleepTimer(minutes: 30)                        // from bedtime (base 0)
+        timer.timerRemaining = 15 * 60                            // halfway through the timer
+        now = t0 + 45 * 60                                        // the clock alone would say 1
+        XCTAssertEqual(timer.nightProgress, 0.5, accuracy: 1e-9)  // the timer's own curve
+        timer.cancelTimer()
+        // Value: protects=cancelling a timer mid-night (ring → All night) hands back the settled untimed night, not bedtime brightness; fails_when=cancelTimer ends the untimed night or nightProgress returns 0 with no timer; why_new=the test cancelled but never read nightProgress after; seam=none
+        XCTAssertEqual(timer.nightProgress, 1, accuracy: 1e-9)    // the clock's night again
+    }
+
+    // Value: protects=starting a timer mid-night continues from the night reached (no 2am snap-back to bedtime); fails_when=timedBase is dropped and the timer's curve restarts at 0; why_new=only a timer from rest was tested; seam=none
+    func testATimerStartedMidNightNeverBrightensTheScene() {
+        let timer = SleepTimerService()
+        timer.backstop = NoopBackstop()
+        var now = t0
+        timer.now = { now }
+        defer { timer.cancelTimer() }
+        timer.noteSleepSessionStarted()
+        now = t0 + 36 * 60                                        // an untimed night 80% settled
+        XCTAssertEqual(timer.nightProgress, 0.8, accuracy: 1e-6)
+        timer.startSleepTimer(minutes: 30)                        // drag the ring at 2am
+        XCTAssertEqual(timer.nightProgress, 0.8, accuracy: 0.01, "the timer settles on from 0.8, not from 0")
+        timer.timerRemaining = 15 * 60                            // halfway: settles on toward 1
+        XCTAssertEqual(timer.nightProgress, 0.9, accuracy: 1e-6)
+        timer.timerRemaining = 0
+        XCTAssertEqual(timer.nightProgress, 1, accuracy: 1e-9)
+        timer.startSleepTimer(minutes: 45)                        // a restart keeps the night too
+        XCTAssertEqual(timer.nightProgress, 1, accuracy: 1e-6)
+        timer.cancelTimer()
+        timer.startEndOfEpisode(remaining: 20 * 60)               // and so does an episode timer
+        XCTAssertEqual(timer.nightProgress, 1, accuracy: 1e-6)
+    }
+
+    // Value: protects=cancelling a short timer mid-night (ring → All night) keeps the night it reached; fails_when=cancelTimer drops back to the untimed clock from the session start; why_new=only a cancel after a fully settled night was tested; seam=none
+    func testCancellingATimerMidNightKeepsTheNightReached() {
+        let timer = SleepTimerService()
+        timer.backstop = NoopBackstop()
+        var now = t0
+        timer.now = { now }
+        defer { timer.cancelTimer() }
+        timer.noteSleepSessionStarted()
+        now = t0 + 9 * 60                                         // 0.2 into an untimed night
+        timer.startSleepTimer(minutes: 15)
+        timer.timerRemaining = 5 * 60                             // 10 of its 15 minutes gone
+        now = t0 + 19 * 60
+        let reached = timer.nightProgress                         // 0.2 + 0.8 × 2/3 ≈ 0.73
+        XCTAssertEqual(reached, 0.2 + 0.8 * 2.0 / 3.0, accuracy: 1e-6)
+        timer.cancelTimer()                                       // ring → All night
+        XCTAssertEqual(timer.nightProgress, reached, accuracy: 1e-6, "not the clock's 19/45 ≈ 0.42")
+    }
+
+    // Value: protects=the ambient tail carries the night straight on instead of dropping it as the podcast stops; fails_when=beginTail grows the total without re-basing; why_new=no test read nightProgress across the tail handoff; seam=none
+    func testTheAmbientTailNeverBrightensTheNight() {
+        let timer = SleepTimerService()
+        timer.backstop = NoopBackstop()
+        timer.ambientTailFn = { 15 * 60 }
+        timer.tailEligibleFn = { true }
+        timer.stopPodcastFn = {}
+        defer { timer.cancelTimer() }
+        timer.startSleepTimer(minutes: 0)                         // the deadline is now…
+        timer.timerTotal = 30 * 60                                // …of a 30-min night
+        Thread.sleep(forTimeInterval: 0.01)
+        timer.backgroundTick()                                    // fade complete → the tail
+        RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+        XCTAssertTrue(timer.inTail)
+        XCTAssertEqual(timer.nightProgress, 1, accuracy: 1e-6, "the scene held, not dropped by tail / (total + tail)")
+    }
+
+    // Value: protects=a settled night's end expires (resumeWindow), and a timer over silence settles nothing; fails_when=the end isn't recorded, or a timer over silence settles a night; why_new=the stop edge used to be the only thing bounding it; seam=none
+    func testASettledEndExpiresAndSilenceSettlesNothing() {
+        for path in ["tick", "reconcile"] {
+            let e = AudioEngine()
+            e.sleepTimer.backstop = NoopBackstop()
+            e.nightLengthProvider = { 0 }
+            e.focusMode = false
+            var now = t0
+            e.sleepTimer.now = { now }
+            defer { e.noiseOn = false; e.sleepTimer.cancelTimer(); e.focusMode = false }
+            e.noiseOn = true
+            e.sleepTimer.startSleepTimer(minutes: 0)              // the deadline is now…
+            e.sleepTimer.timerTotal = 30 * 60                     // …of a 30-min night
+            Thread.sleep(forTimeInterval: 0.01)
+            now = t0 + 30 * 60
+            if path == "tick" {
+                e.sleepTimer.backgroundTick()                     // the duration timer's fade-complete stop
+                RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+            } else {
+                e.sleepTimer.reconcileIfExpired()                 // a deadline passed while suspended
+            }
+            XCTAssertFalse(e.isAnythingPlaying, path)
+            XCTAssertEqual(e.sleepTimer.nightProgress, 1, accuracy: 1e-9, path)
+            now += UntimedNight.resumeWindow + 60
+            XCTAssertEqual(e.sleepTimer.nightProgress, 0, "\(path): the night is over")
+        }
+
+        let quiet = SleepTimerService()                           // a timer set over silence (Siri)
+        quiet.backstop = NoopBackstop()
+        var now = t0
+        quiet.now = { now }
+        quiet.startSleepTimer(minutes: 0)
+        Thread.sleep(forTimeInterval: 0.01)
+        quiet.reconcileIfExpired()
+        XCTAssertEqual(quiet.nightProgress, 0, accuracy: 1e-9, "a timer over silence settles nothing")
+        now += 6 * 3600                                           // the next evening
+        quiet.noteSleepSessionStarted()
+        XCTAssertEqual(quiet.nightProgress, 0, accuracy: 1e-9, "bedtime, not last night's settled state")
+    }
+
+    // Value: protects=a timed night that ends on its own stays settled through the silence; fails_when=the terminal stop's cancel stops carrying the reached night and stopAll's reset lifts the scene; why_new=nothing read nightProgress after a terminal stop; seam=none
+    func testATimedNightsEndLeavesTheSceneSettled() {
+        let e = AudioEngine()
+        e.sleepTimer.backstop = NoopBackstop()
+        e.nightLengthProvider = { 0 }
+        e.focusMode = false
+        var now = t0
+        e.sleepTimer.now = { now }
+        defer { e.noiseOn = false; e.sleepTimer.cancelTimer(); e.focusMode = false }
+        e.noiseOn = true
+        e.sleepTimer.startEndOfEpisode(remaining: 30 * 60)        // a 30-min "stop with the episode" night
+        now = t0 + 30 * 60
+        e.sleepTimer.episodeEnded()                               // its terminal stop (no tail: no podcast bed)
+        XCTAssertFalse(e.isAnythingPlaying)
+        XCTAssertEqual(e.sleepTimer.nightProgress, 1, accuracy: 1e-9, "the settled night must not lift as it ends")
+        now = t0 + 30 * 60 + 31 * 60                              // silent past the resume window
+        XCTAssertEqual(e.sleepTimer.nightProgress, 0, "that night is over; the next opens at bedtime")
+    }
+
+    // Value: protects=switching Focus→Sleep with sound playing starts the night (settle + ring timer); fails_when=the mode switch stops calling beginSleepNight; why_new=only starts from rest were covered; seam=none
+    func testSwitchingIntoSleepWhilePlayingStartsTheNight() {
+        let e = AudioEngine()
+        e.sleepTimer.backstop = NoopBackstop()
+        e.nightLengthProvider = { 30 }
+        e.focusMode = true
+        var now = t0
+        e.sleepTimer.now = { now }
+        defer { e.noiseOn = false; e.sleepTimer.cancelTimer(); e.focusMode = false }
+        e.noiseOn = true                                          // playing in Focus: no night, no timer
+        XCTAssertEqual(e.sleepTimer.timerRemaining, 0)
+        e.focusMode = false                                       // into Sleep, sound still going
+        XCTAssertTrue(e.isAnythingPlaying)
+        XCTAssertEqual(e.sleepTimer.timerRemaining, 30 * 60, accuracy: 2, "the ring's night starts as with Play")
+        e.sleepTimer.cancelTimer()                                // ring → All night
+        now = t0 + 45 * 60
+        XCTAssertEqual(e.sleepTimer.nightProgress, 1, accuracy: 1e-6, "and the untimed night settles on the clock")
+    }
+
+    // Value: protects=switching into Sleep at rest or re-assigning the same mode starts no night or countdown; fails_when=the switched/isAnythingPlaying guards go; why_new=only the playing switch was tested; seam=none
+    func testSwitchingIntoSleepAtRestOrToTheSameModeStartsNothing() {
+        let e = AudioEngine()
+        e.sleepTimer.backstop = NoopBackstop()
+        e.nightLengthProvider = { 30 }
+        e.focusMode = true
+        var now = t0
+        e.sleepTimer.now = { now }
+        defer { e.noiseOn = false; e.sleepTimer.cancelTimer(); e.focusMode = false }
+        e.focusMode = false                                       // into Sleep, nothing playing
+        XCTAssertEqual(e.sleepTimer.timerRemaining, 0, "no countdown over silence")
+        now += 45 * 60
+        XCTAssertEqual(e.sleepTimer.nightProgress, 0, "no night without sound")
+        e.nightLengthProvider = { 0 }
+        e.noiseOn = true                                          // an All night session
+        e.nightLengthProvider = { 30 }
+        e.focusMode = false                                       // same mode re-assigned (a restore)
+        XCTAssertEqual(e.sleepTimer.timerRemaining, 0, "not a switch: no night start")
+    }
+
+    func testAllNightOnTheEngineSettlesAndFocusEndsIt() {
+        let e = AudioEngine()
+        e.sleepTimer.backstop = NoopBackstop()
+        e.nightLengthProvider = { 0 }                             // All night
+        e.focusMode = false
+        var now = t0
+        e.sleepTimer.now = { now }
+        defer { e.noiseOn = false; e.sleepTimer.cancelTimer(); e.focusMode = false }
+
+        e.noiseOn = true
+        now = t0 + 22.5 * 60
+        XCTAssertEqual(e.sleepTimer.nightProgress, 0.5, accuracy: 1e-6)
+        e.noiseOn = false                                         // headphones out
+        now = t0 + 25 * 60
+        e.noiseOn = true                                          // back in: the same night
+        XCTAssertEqual(e.sleepTimer.nightProgress, 25.0 / 45.0, accuracy: 1e-6)
+
+        e.focusMode = true
+        XCTAssertEqual(e.sleepTimer.nightProgress, 0)
+    }
+
+    private final class NoopBackstop: SleepTimerBackstopScheduling {
+        func schedule(after seconds: TimeInterval) {}
+        func cancel() {}
     }
 }
 
@@ -2570,8 +2824,10 @@ final class VeilTimeoutNowPlayingTests: XCTestCase {
         XCTAssertEqual(SessionGuards.veilTimeout(mayDim: true, presenting: true, nowPlayingUp: false), .wait,
                        "any other sheet or dialog keeps the veil waiting")
         XCTAssertEqual(SessionGuards.veilTimeout(mayDim: true, presenting: true, nowPlayingUp: true,
-                                                 assistiveTech: true), .wait,
+                                                 assistiveTech: true), .stand,
                        "VoiceOver / Switch Control reach the sheet without touches")
+        XCTAssertEqual(SessionGuards.veilTimeout(mayDim: true, presenting: false, assistiveTech: true), .stand,
+                       "and navigate without them, so the veil never drops mid-navigation")
         XCTAssertEqual(SessionGuards.veilTimeout(mayDim: false, presenting: true, nowPlayingUp: true), .stand)
         XCTAssertEqual(SessionGuards.veilTimeout(mayDim: true, presenting: false, nowPlayingUp: false), .drop)
     }

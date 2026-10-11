@@ -8,8 +8,11 @@ import SwiftUI
 /// (`paused`), so it's never a wasted redraw. Gentle by design; runs regardless of system
 /// Reduce Motion.
 struct RainGlassView: View {
-    /// True only when the screen is occluded by the deep night-dim veil — freeze for battery.
+    /// Hold still: the screen is out of sight, or "Moving scenes" is off (`SceneContext.paused`).
     var paused: Bool = false
+    /// The screen itself is out of sight (not just "Moving scenes" off): the bokeh's fade stops
+    /// re-reading the night (see `SceneContext.occluded`).
+    var occluded: Bool = false
     /// The sleep timer, read *live* (not observed) inside the redraw so the rain eases off as
     /// the night progresses. Plain property on purpose — observing it here would re-render the
     /// whole scene every tick (the `rmsPower`/`@Published` storm CLAUDE.md warns about).
@@ -25,15 +28,17 @@ struct RainGlassView: View {
         let phase: Double      // 0…1 start offset
         let r: Double          // head radius, pt
         let len: Double        // trail length, pt
-        let wobAmp: Double     // sideways meander, pt
-        let wobFreq: Double
+        let wobAmp: Double     // sideways meander, pt (follows the drop's height)
         let opacity: Double
     }
     private struct Speck { let x, y, r, opacity: Double }
     private struct Bokeh { let x, y, r: Double; let color: Color }
 
+    // Every light here is warm, Sleep's dusk: amber and a deeper ember behind the glass, cream water
+    // on it. (Half the bokeh were a cool blue and the drops pure white, the coolest light in Sleep.)
     private static let warm = Color(red: 1.0, green: 0.82, blue: 0.55)
-    private static let cool = Color(red: 0.6, green: 0.78, blue: 1.0)
+    private static let ember = Color(red: 0.95, green: 0.55, blue: 0.36)
+    private static let water = Color(red: 1.0, green: 0.88, blue: 0.72)
 
     private static func rng(_ seed: UInt64) -> () -> Double {
         var s = seed
@@ -47,14 +52,12 @@ struct RainGlassView: View {
     private static let drops: [Drop] = {
         let n = rng(0x2A11DEADBEEF0042)
         return (0..<16).map { _ in
-            Drop(x: n(),
-                 speed: 0.035 + pow(n(), 2.0) * 0.16,   // ~6–28s to fall
-                 phase: n(),
-                 r: 1.5 + n() * 2.5,
-                 len: 24 + n() * 84,
-                 wobAmp: 1.5 + n() * 5.0,
-                 wobFreq: 0.15 + n() * 0.4,
-                 opacity: 0.16 + n() * 0.30)
+            let x = n(), speed = 0.035 + pow(n(), 2.0) * 0.16   // ~6–28s to fall
+            let phase = n(), r = 1.5 + n() * 2.5, len = 24 + n() * 84
+            let wobAmp = 1.5 + n() * 5.0
+            _ = n()   // a retired wobble-rate draw, kept so the seeded layout stays the same
+            return Drop(x: x, speed: speed, phase: phase, r: r, len: len, wobAmp: wobAmp,
+                        opacity: 0.12 + n() * 0.22)
         }
     }()
 
@@ -73,22 +76,22 @@ struct RainGlassView: View {
             Bokeh(x: 0.12 + n() * 0.76,
                   y: 0.42 + n() * 0.46,
                   r: 56 + n() * 120,
-                  color: n() < 0.5 ? warm : cool)
+                  color: n() < 0.5 ? warm : ember)
         }
     }()
 
     var body: some View {
         ZStack {
-            // Cold near-black glass.
+            // Warm near-black glass (Sleep's dusk, not a cold blue pane).
             LinearGradient(
-                colors: [Color(red: 0.02, green: 0.03, blue: 0.05),
-                         Color(red: 0.04, green: 0.05, blue: 0.09)],
+                colors: [Color(red: 0.035, green: 0.026, blue: 0.022),
+                         Color(red: 0.055, green: 0.040, blue: 0.030)],
                 startPoint: .top, endPoint: .bottom)
 
             // Blurred lights behind the glass — they dim out as the night settles, leaving a
             // dark fogged pane (isolated 1 Hz leaf; the animating drops dim separately, live).
             if let timer = sleepTimer {
-                NightFade(timer: timer, maxDim: 0.9) { bokehLights }
+                NightFade(timer: timer, maxDim: 0.9, occluded: occluded) { bokehLights }
             } else {
                 bokehLights
             }
@@ -98,7 +101,7 @@ struct RainGlassView: View {
                 for s in Self.specks {
                     let rect = CGRect(x: s.x * size.width - s.r, y: s.y * size.height - s.r,
                                       width: s.r * 2, height: s.r * 2)
-                    ctx.fill(Path(ellipseIn: rect), with: .color(.white.opacity(s.opacity)))
+                    ctx.fill(Path(ellipseIn: rect), with: .color(Self.water.opacity(s.opacity)))
                 }
             }
 
@@ -123,7 +126,7 @@ struct RainGlassView: View {
         .animation(.easeInOut(duration: 1.2), value: active)
     }
 
-    /// Out-of-focus warm/cool lights behind the pane. Extracted so the night-fade leaf can dim
+    /// Out-of-focus warm (amber / ember) lights behind the pane. Extracted so the night-fade leaf can dim
     /// them without observing the timer from the parent.
     private var bokehLights: some View {
         GeometryReader { geo in
@@ -133,14 +136,20 @@ struct RainGlassView: View {
                     .fill(b.color)
                     .frame(width: b.r, height: b.r)
                     .blur(radius: b.r * 0.5)
-                    .opacity(0.20)
+                    .opacity(0.17)
                     .position(x: b.x * geo.size.width, y: b.y * geo.size.height)
             }
         }
     }
 
-    /// - Parameter night: `nightProgress` (0 at the start of a sleep timer, →1 as it expires;
-    ///   0 when idle). As it rises the rain eases off — each drop fades over a window, with
+    /// A drop on glass, not a streak through the air: it clings, slips a short way, and clings
+    /// again, meandering only while it moves. The head is a lens (a mostly clear body, a bright
+    /// meniscus along its lower edge, a pinpoint highlight up top) and behind it lies a faint wet
+    /// path with a few beads left on the pane. The old drop slid continuously with a bright
+    /// head and a fading tail, which read as meteors falling past a window.
+    ///
+    /// - Parameter night: `nightProgress` (0 at bedtime, →1 as the timer runs out or, with no
+    ///   timer, as the untimed night settles; 0 in Focus). As it rises the rain eases off — each drop fades over a window, with
     ///   higher-`phase` drops retiring first, so the glass thins gradually to a still pane.
     ///   The fall *rate* is left untouched (scaling absolute `t` would jump the drop) — the
     ///   thinning alone reads as the rain letting up.
@@ -153,21 +162,44 @@ struct RainGlassView: View {
 
         let fall = size.height + 80
         let cycle = (t * d.speed + d.phase).truncatingRemainder(dividingBy: 1.0)
-        let y = pow(cycle, 1.3) * fall - 40          // accelerate as it slides (off-screen wrap)
-        let x = d.x * size.width + sin(t * d.wobFreq + d.phase * 6.283) * d.wobAmp
+        // Stick-slip: five holds per fall, each slip taking the last 40% of its step, eased.
+        let steps = 5.0
+        let u = cycle * steps
+        let step = u.rounded(.down)
+        let s = max(0, min(1, (u - step - 0.6) / 0.4))
+        let y = (step + s * s * (3 - 2 * s)) / steps * fall - 40
+        // The meander follows the drop's height, so a clinging drop holds still.
+        func xAt(_ yy: Double) -> Double {
+            d.x * size.width + sin(yy / 60 + d.phase * 6.283) * d.wobAmp
+        }
+        let x = xAt(y)
 
-        // Trail: a fading capsule above the head.
-        let trail = Path(roundedRect: CGRect(x: x - d.r * 0.5, y: y - d.len, width: d.r, height: d.len),
-                         cornerRadius: d.r * 0.5)
-        ctx.fill(trail, with: .linearGradient(
-            Gradient(colors: [.white.opacity(0), .white.opacity(op * 0.5)]),
-            startPoint: CGPoint(x: x, y: y - d.len), endPoint: CGPoint(x: x, y: y)))
+        // The wet path: a hair-thin line where the drop cleared the pane, and beads it left.
+        let len = min(d.len, y + 40)
+        if len > 2 {
+            let path = Path { pp in
+                for i in 0...8 {
+                    let yy = y - len * Double(i) / 8
+                    let pt = CGPoint(x: xAt(yy), y: yy)
+                    if i == 0 { pp.move(to: pt) } else { pp.addLine(to: pt) }
+                }
+            }
+            ctx.stroke(path, with: .color(water.opacity(op * 0.14)), lineWidth: max(0.6, d.r * 0.35))
+            for k in 1...3 {
+                let by = y - len * Double(k) * 0.28
+                let br = d.r * (0.45 - 0.1 * Double(k))
+                ctx.fill(Path(ellipseIn: CGRect(x: xAt(by) - br, y: by - br, width: br * 2, height: br * 2)),
+                         with: .color(water.opacity(op * (0.45 - 0.1 * Double(k)))))
+            }
+        }
 
-        // Head + a small catch-light.
-        ctx.fill(Path(ellipseIn: CGRect(x: x - d.r, y: y - d.r, width: d.r * 2, height: d.r * 2)),
-                 with: .color(.white.opacity(op)))
-        ctx.fill(Path(ellipseIn: CGRect(x: x - d.r * 0.4, y: y - d.r * 0.7,
-                                        width: d.r * 0.6, height: d.r * 0.6)),
-                 with: .color(.white.opacity(op * 0.7)))
+        // The head, a lens: a sliding drop sags a little longer than it is wide.
+        let h = d.r * 2.3
+        ctx.fill(Path(ellipseIn: CGRect(x: x - d.r, y: y - h * 0.5, width: d.r * 2, height: h)),
+                 with: .color(water.opacity(op * 0.22)))
+        ctx.fill(Path(ellipseIn: CGRect(x: x - d.r * 0.8, y: y + h * 0.12, width: d.r * 1.6, height: h * 0.32)),
+                 with: .color(water.opacity(op * 0.8)))                       // meniscus
+        ctx.fill(Path(ellipseIn: CGRect(x: x - d.r * 0.55, y: y - h * 0.36, width: d.r * 0.45, height: d.r * 0.45)),
+                 with: .color(water.opacity(op * 0.7)))                       // highlight
     }
 }

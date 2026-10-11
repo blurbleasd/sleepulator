@@ -152,7 +152,7 @@ class SceneClockTests: XCTestCase {
 /// sleep timer winds down.
 class NightDampingTests: XCTestCase {
     func testFullyAliveWithNoTimer() {
-        // nightProgress is 0 when no timer runs — full designed motion.
+        // nightProgress is 0 at bedtime — full designed motion.
         XCTAssertEqual(NightDamping.factor(nightProgress: 0, bedtime: false), 1.0, accuracy: 1e-9)
     }
 
@@ -246,5 +246,32 @@ class MetalShadersTests: XCTestCase {
         // never blank a working shader.
         XCTAssertTrue(MetalShaders.isAvailable("rainGlassLens", in: ["someVertexFn"], known: known))
         XCTAssertTrue(MetalShaders.isAvailable("stillWaterLens", in: [], known: known))
+    }
+}
+
+/// Home's swipe (`HomeView.cycleScene`) runs through `SceneRegistry.swipeLoop`: every shipping
+/// scene of the mood, in registry order, and none of the DEBUG A/B siblings, which stay pickable
+/// from the Backdrop chips.
+@MainActor
+final class SceneSwipeLoopTests: XCTestCase {
+    private let depthSibling = "rain-on-glass-depth"
+
+    // Value: protects=a Home swipe reaches every shipping scene of its mood in order and never the DEBUG depth sibling; fails_when=swipeLoop returns scenes(for:) again, or a shipping scene is flagged isExperiment; why_new=nothing tested SceneRegistry.swipeLoop or isExperiment; seam=none
+    func testTheSwipeLoopIsEveryShippingSceneAndNoExperiment() {
+        // The depth sibling is the only experiment (registered in DEBUG builds only).
+        let experiments = SceneRegistry.all.filter { $0.isExperiment }.map(\.id)
+        XCTAssertTrue(experiments.allSatisfy { $0 == depthSibling }, "unexpected experiments: \(experiments)")
+        if let depth = SceneRegistry.scenes(for: .sleep).first(where: { $0.id == depthSibling }) {
+            XCTAssertTrue(depth.isExperiment)
+            // Still pickable from the chips: the id resolves to itself, not the mood's fallback.
+            XCTAssertEqual(SceneRegistry.scene(id: depthSibling, mood: .sleep).id, depthSibling)
+        }
+
+        for mood in [SceneMood.sleep, .focus] {
+            let registered = SceneRegistry.scenes(for: mood).map(\.id)
+            let loop = SceneRegistry.swipeLoop(for: mood).map(\.id)
+            XCTAssertEqual(loop, registered.filter { $0 != depthSibling }, "\(mood)")
+            XCTAssertGreaterThanOrEqual(loop.count, 2, "\(mood): cycleScene needs two to swipe")
+        }
     }
 }

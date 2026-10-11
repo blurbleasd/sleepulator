@@ -119,7 +119,7 @@ struct SettingsView: View {
                     } header: {
                         header("Sleep")
                     } footer: {
-                        footer("With a sleep timer running, the screen goes black a minute after your last touch; tap to wake. Breathing leads into your mix, then it starts on its own.")
+                        footer("While Sleep plays on the Sleep screen or the player, or anywhere with a sleep timer running, the screen goes black a minute after your last touch; tap to wake. Breathing leads into your mix, then it starts on its own.")
                     }
 
                     Section {

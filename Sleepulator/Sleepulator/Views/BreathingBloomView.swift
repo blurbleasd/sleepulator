@@ -12,6 +12,10 @@ struct BreathingBloomView: View {
     /// only the glow: the near-black background holds, so the fade reads as the light dying,
     /// not the scene going transparent.
     var sleepTimer: SleepTimerService? = nil
+    /// Where the glow centres (global coordinates): Home passes the night ring's centre, so the
+    /// bloom breathes around the ring and its ember instead of ~60 pt below them. Nil centres it
+    /// on the screen (the breathing on-ramp).
+    var focus: CGPoint? = nil
 
     // A soft candle/amber warmth on near-black. Warm = cozy + sleep-appropriate.
     var tint: Color = Color(red: 1.0, green: 0.84, blue: 0.6)
@@ -41,9 +45,17 @@ struct BreathingBloomView: View {
     var body: some View {
         ZStack {
             Color(red: 0.03, green: 0.025, blue: 0.035).ignoresSafeArea()
-            TimelineView(.animation(minimumInterval: 1.0 / 20.0, paused: paused)) { tl in
-                bloom(Self.breath(ticked(tl.date)),
-                      nightDim: 1 - 0.8 * (sleepTimer?.nightProgress ?? 0))
+            // An if/else swap, not `TimelineView(.animation(paused:))`: the `paused:` schedule
+            // stops driving frames on ProMotion devices (device 2026-07-11, see ShaderBackdrop),
+            // so the scene moved only on outside re-renders. The clock is @State, so the frozen
+            // frame still holds the pose it froze at.
+            if paused {
+                bloom(Self.breath(clock.elapsed), nightDim: 1 - 0.8 * (sleepTimer?.nightProgress ?? 0))
+            } else {
+                TimelineView(.animation(minimumInterval: 1.0 / 20.0)) { tl in
+                    bloom(Self.breath(ticked(tl.date)),
+                          nightDim: 1 - 0.8 * (sleepTimer?.nightProgress ?? 0))
+                }
             }
         }
         .ignoresSafeArea()
@@ -61,6 +73,9 @@ struct BreathingBloomView: View {
     private func bloom(_ b: Double, nightDim: Double) -> some View {
         GeometryReader { geo in
             let d = min(geo.size.width, geo.size.height)
+            let origin = geo.frame(in: .global).origin
+            let center = focus.map { CGPoint(x: $0.x - origin.x, y: $0.y - origin.y) }
+                ?? CGPoint(x: geo.size.width / 2, y: geo.size.height / 2)
             ZStack {
                 Circle()
                     .fill(RadialGradient(colors: [tint.opacity(0.16), .clear],
@@ -68,14 +83,17 @@ struct BreathingBloomView: View {
                     .frame(width: d * 1.3, height: d * 1.3)
                     .blur(radius: 50)
                 Circle()
-                    .fill(RadialGradient(colors: [tint.opacity(0.5), .clear],
+                    .fill(RadialGradient(colors: [tint.opacity(0.38), .clear],
                                          center: .center, startRadius: 0, endRadius: d * 0.3))
                     .frame(width: d * 0.7, height: d * 0.7)
                     .blur(radius: 22)
             }
+            // The breath lives mostly in the swell, not the light: brightness moves 0.45…0.75 (was
+            // 0.4…0.9, a 2.25× pulse every 10 s in a partner's peripheral vision). Size still
+            // carries a full, followable breath.
             .scaleEffect(0.75 + 0.25 * b)
-            .opacity((0.4 + 0.5 * b) * nightDim)
-            .position(x: geo.size.width / 2, y: geo.size.height / 2)
+            .opacity((0.45 + 0.30 * b) * nightDim)
+            .position(center)
         }
     }
 }

@@ -150,7 +150,8 @@ everything below is display-link / render behavior only a device shows.
 
 1. **Freeze is truly static.** Start a Sleep mix + timer, let the veil engage. In Xcode's Debug
    navigator (or Instruments → Core Animation), FPS ≈ 0 and no CA commits from the app while
-   the veil is up. Repeat with each of: Night sky, Aurora, Embers, Still water, Deep space,
+   the veil is up, beyond a 1 Hz commit from the timer's observers on a timed night (NightDarken,
+   NightFade, the ring); on All night ≈ 0. Repeat with each of: Night sky, Aurora, Embers, Still water, Deep space,
    Breathe, Rain on glass. ✅ No redraws, no meteor wakeups (Night sky), gyro off (Aurora /
    Deep space — check with the Energy Log that CoreMotion isn't running).
 2. **Freeze-in-place, not reset.** Tap to wake after ≥ 10 min under the veil. ✅ Every scene
@@ -160,9 +161,9 @@ everything below is display-link / render behavior only a device shows.
    watch the last minutes. ✅ Motion eases — curtains/waves slow smoothly, never stall-and-
    reverse (the old `time × factor` bug) and never jump when nightProgress ticks.
 4. **Transients sleep.** Same short-timer run on Night sky and Deep space. ✅ Meteors dim as
-   the night deepens and stop past ~60%; the comet fades out past ~35% and is gone by ~75%;
+   the night deepens and stop past ~40%; the comet fades out past ~15% and is gone by ~40%;
    a freeze never leaves a comet/meteor burned on the frozen frame (try pausing repeatedly
-   around the 40 s comet cycle).
+   around the two-minute comet cycle).
 5. **Focus scenes.** Energy: sweep rotates smoothly (1/10 s cadence through the blur — check
    for stepping) and survives backgrounding (the old repeatForever animation died on the first
    app switch). Current: streams *flow* during a running pomodoro — no per-tick jitter — and
@@ -524,6 +525,48 @@ longest, so the window is widest). Export logs after each.
    download (its row still shows the Downloaded tick); the third is still queued. If the end won the race, the
    log shows `ignoring the end of a podcast item that's since been replaced`, and nothing else
    moved.
+
+### Q. Screensavers: warm scenes, the untimed night, the glance (added 2026-10-10, simulator-checked only)
+From the screensaver critique (24/40). The simulator showed every scene, the Focus controls and
+both glances, but brightness, colour at 2am, motion on ProMotion and anything over 45 minutes
+need the phone. Room dark, phone on the nightstand, brightness where you'd leave it at night.
+
+1. **Every Sleep scene is warm and dim.** Swipe through all seven at bedtime. ✅ No scene throws
+   blue light: Night sky's stars are pale and warm whites (a rare faint cool one), Aurora is red curtains, Still water a small round amber moon (not a tall
+   oval) with flat ripples, Rain on glass shows drops that cling and slip with a bright lower
+   edge (not meteors), Deep space a faint rust nebula. Embers churns slowly; Breathe's glow sits
+   on the ring and swells more than it brightens. ✅ No identical stars repeating down the
+   screen in Deep space, Aurora or Still water.
+2. **Night sky and Breathe actually move on ProMotion.** Watch each for a minute in the
+   screensaver. ✅ Stars twinkle and drift smoothly, Breathe swells and fades continuously. (Both
+   moved off `TimelineView(paused:)`, which stops driving frames on 120 Hz screens.)
+3. **All night gets the veil on the Sleep screen.** Ring set to All night, Play, don't touch.
+   ✅ The veil drops about a minute later. (Auto-Lock set to Never so the veil, not iOS, darkens
+   it.) Then play All night from the Podcasts tab and read a show page for over a minute. ✅ No
+   veil there, but open the full player and leave it: ✅ it closes and the veil drops. With a timer
+   running, ✅ it drops on any tab. With VoiceOver on, ✅ it never drops.
+   Focus with sound playing, switch to Sleep, don't touch. ✅ The veil arms (and the ring's timer
+   starts if one is set).
+4. **All night settles.** All night, Deep space or Night sky, Auto-Lock Never, veil off in
+   Settings so you can watch: check at 0, 20 and 45 min. ✅ The scene darkens and slows; no comet
+   or meteor after ~18 min; by 45 min it holds its darkest, stillest state. Pull the headphones
+   for a minute and reconnect. ✅ It doesn't brighten back to bedtime. Then drag the ring to
+   30m, and later back to All night. ✅ Nothing brightens either way. With an ambient tail set and
+   a podcast in the mix, ✅ the scene holds as the podcast stops. Repeat 4 on Night sky with Settings →
+   Moving scenes off: ✅ the still sky still darkens over the 45 minutes. Let a short timer end
+   on its own and wake the screen within half an hour. ✅ The scene is still at its darkest.
+5. **The glance.** On a 30-min night, let the veil drop, then tap once. ✅ Only the faint ember
+   and a dim "Nm left" appear at once (softly), and are gone after ~6 s (faded by ~8 s). A quick
+   double-tap still shows the glance. Tap again while it shows or fades. ✅ The scene and the
+   controls come back together. A tap on the "Tap to wake" words works too. On All night, ✅ the
+   glance says "All night" with no ember. Let the veil drop, then turn VoiceOver on (Accessibility
+   Shortcut): ✅ one double-tap wakes. Voice Control: "Tap Wake". ✅ The first shows the glance,
+   the second wakes, and nothing else on screen answers "Wake".
+6. **Focus scenes step back under the controls.** Focus, each scene, sound playing. ✅ With the
+   controls up the scene is dimmed and "Focus session" reads clearly; after 10 s the controls fade
+   and the scene rises to full. Tide at rest is a low line at the bottom edge. Sandfall at rest
+   has its sand settled dim in the bottom bulb, clear of the mode switcher; Start a session
+   and ✅ it flips and drains.
 
 ### R. Orb breath + Focus ring on ProMotion (added 2026-10-10, passed on device 2026-10-10)
 `OrbButton` and `FocusHero`'s ring moved off `TimelineView(.animation(paused:))`, which stops
