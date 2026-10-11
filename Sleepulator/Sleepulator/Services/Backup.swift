@@ -249,8 +249,8 @@ enum Backup {
 
     /// What a parsed backup would restore, without writing anything (the same `prepare` the
     /// write uses, so the confirm and the result can't disagree).
-    nonisolated static func contents(of dict: [String: Any]) -> Contents {
-        prepare(dict, currentFocus: false).contents
+    nonisolated static func contents(of dict: [String: Any], now: Date = Date()) -> Contents {
+        prepare(dict, currentFocus: false, now: now).contents
     }
 
     // MARK: Copy (pure, unit-tested)
@@ -314,20 +314,22 @@ enum Backup {
         }
     }
 
-    /// Whether Undo is still offered for a snapshot taken at `takenAt`.
+    /// Whether Undo is still offered for a snapshot taken at `takenAt`. A snapshot from the
+    /// future (the clock set back since, or the stored time rounding a hair past now) is still
+    /// offered: refusing it threw the snapshot away, and with it the only way back.
     nonisolated static func undoAvailable(takenAt: Date?, now: Date) -> Bool {
         guard let takenAt else { return false }
-        let age = now.timeIntervalSince(takenAt)
-        // A second of slack: the time goes through UserDefaults as seconds since 1970, and the
-        // round trip can land a hair after `now`. Without it Undo was refused (and its snapshot
-        // thrown away) right after the restore that made it.
-        return age > -1 && age < undoWindow
+        return now.timeIntervalSince(takenAt) < undoWindow
     }
 
     /// "sleepulator-backup-2026-10-11": dated, so a second export doesn't overwrite the first.
+    /// Always in Gregorian years: under the Japanese calendar the device's own named it
+    /// "sleepulator-backup-0008-10-11". Only `calendar`'s time zone is read.
     nonisolated static func filename(for date: Date, prefix: String = "sleepulator-backup",
                                      calendar: Calendar = .current) -> String {
-        let c = calendar.dateComponents([.year, .month, .day], from: date)
+        var gregorian = Calendar(identifier: .gregorian)
+        gregorian.timeZone = calendar.timeZone
+        let c = gregorian.dateComponents([.year, .month, .day], from: date)
         return prefix + String(format: "-%04d-%02d-%02d", c.year ?? 0, c.month ?? 0, c.day ?? 0)
     }
 
@@ -539,7 +541,7 @@ enum Backup {
 
     /// Validate a parsed backup once: each file-backed section, the settings plan, and what it
     /// all amounts to (`contents`). The read's confirm and the write both come here.
-    nonisolated private static func prepare(_ dict: [String: Any], currentFocus: Bool) -> Prepared {
+    nonisolated private static func prepare(_ dict: [String: Any], currentFocus: Bool, now: Date) -> Prepared {
         var p = Prepared()
         for (key, file) in fileBacked {
             guard let value = dict[key] else { p.absentFiles.append(file); continue }
@@ -555,7 +557,13 @@ enum Backup {
         let plan = restorePlan(from: dict, currentFocus: currentFocus)
         p.absentKeys = plan.absent
         p.skipped += plan.skipped
-        if let seconds = dict[exportedAtKey] as? Double { p.contents.exportedAt = Date(timeIntervalSince1970: seconds) }
+        // When it was made, if that's a time it could have been: from 1970 to a day from now
+        // (a clock that ran a little fast). The confirm's title formats it, and a hand-edited
+        // 1e300 went through Calendar and the date formatter unchecked.
+        if let seconds = dict[exportedAtKey] as? Double,
+           (0...now.addingTimeInterval(86_400).timeIntervalSince1970).contains(seconds) {
+            p.contents.exportedAt = Date(timeIntervalSince1970: seconds)
+        }
         if !plan.values.isEmpty {
             p.settings = PlanValues(values: plan.values)
             p.contents.settings = true
@@ -580,7 +588,7 @@ enum Backup {
         let currentFocus = defaults.bool(forKey: "focusMode")
         let prepared = await Task.detached(priority: .userInitiated) { () -> Prepared? in
             guard let dict = (try? JSONSerialization.jsonObject(with: data, options: [])) as? [String: Any] else { return nil }
-            return prepare(dict, currentFocus: currentFocus)
+            return prepare(dict, currentFocus: currentFocus, now: Date())
         }.value
         guard let prepared else { return (false, Contents(), 0) }
         apply(prepared.settings?.values ?? [:], absent: prepared.absentKeys, into: defaults, replacing: replacing)

@@ -238,9 +238,25 @@ final class BackupRoundTripTests: XCTestCase {
         XCTAssertTrue(Backup.undoAvailable(takenAt: now.addingTimeInterval(-60), now: now))
         XCTAssertTrue(Backup.undoAvailable(takenAt: now.addingTimeInterval(-6 * 86_400), now: now))
         XCTAssertFalse(Backup.undoAvailable(takenAt: now.addingTimeInterval(-8 * 86_400), now: now))
-        XCTAssertFalse(Backup.undoAvailable(takenAt: now.addingTimeInterval(60), now: now), "a clock set back")
         XCTAssertTrue(Backup.undoAvailable(takenAt: now.addingTimeInterval(1e-6), now: now),
                       "the stored time can round a hair past now")
+        XCTAssertTrue(Backup.undoAvailable(takenAt: now.addingTimeInterval(3_600), now: now),
+                      "a clock set back an hour keeps Undo")
+    }
+
+    // Value: protects=a clock set back keeps the Undo snapshot and its date; fails_when=undoDate treats a future snapshot as expired and discards it; why_new=only undoAvailable's slack second was tested; seam=none; no_claim=how long a future snapshot stays offered
+    @MainActor
+    func testAClockSetBackKeepsTheUndoCopy() {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("BackupClock-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let storage = StorageManager(directory: dir)
+        storage.writeRaw(Data("{}".utf8), to: Backup.undoFile)
+        let now = Date(timeIntervalSince1970: 2_000_000_000)
+        let takenAt = now.addingTimeInterval(2 * 3_600)                      // the clock went back 2 hours
+        d.set(takenAt.timeIntervalSince1970, forKey: Backup.undoTakenAtKey)
+        XCTAssertEqual(Backup.undoDate(now: now, storage: storage, defaults: d), takenAt)
+        storage.flush()
+        XCTAssertEqual(storage.rawData(for: Backup.undoFile), Data("{}".utf8), "the copy isn't thrown away")
     }
 
     func testExportFilenameIsDated() throws {
@@ -250,6 +266,13 @@ final class BackupRoundTripTests: XCTestCase {
                        "sleepulator-backup-2026-10-12")
         XCTAssertEqual(Backup.filename(for: Date(timeIntervalSince1970: 1_791_763_200), prefix: "sleepulator-log", calendar: cal),
                        "sleepulator-log-2026-10-12")
+        // Value: protects=the file name's year is Gregorian whatever the device's calendar; fails_when=filename reads years from the calendar it's given (Calendar.current); why_new=the test only used a Gregorian calendar; seam=none; no_claim=the time zone's day boundary
+        for identifier in [Calendar.Identifier.japanese, .buddhist, .hebrew] {
+            var other = Calendar(identifier: identifier)
+            other.timeZone = cal.timeZone
+            XCTAssertEqual(Backup.filename(for: Date(timeIntervalSince1970: 1_791_763_200), calendar: other),
+                           "sleepulator-backup-2026-10-12", "\(identifier)")
+        }
     }
 
     // MARK: restore → undo, end to end against a temp store
@@ -650,6 +673,21 @@ final class BackupRoundTripTests: XCTestCase {
         let undone = await Backup.undo(now: now.addingTimeInterval(120), storage: storage, defaults: d)
         XCTAssertTrue(undone)
         XCTAssertEqual(d.double(forKey: "masterVolume"), 0.5, accuracy: 1e-9, "Undo returns to before the latest restore")
+    }
+
+    // Value: protects=the confirm only names an export time that could be real; fails_when=prepare stops bounding exportedAt; why_new=a hand-edited 1e300 went through Calendar and the formatter unchecked; seam=none; no_claim=the title's wording
+    func testAnImpossibleExportTimeIsTreatedAsMissing() {
+        let now = Date(timeIntervalSince1970: 2_000_000_000)
+        func exportedAt(_ seconds: Double) -> Date? {
+            Backup.contents(of: ["autoPlay": true, Backup.exportedAtKey: seconds], now: now).exportedAt
+        }
+        XCTAssertEqual(exportedAt(1_000), Date(timeIntervalSince1970: 1_000))
+        XCTAssertNotNil(exportedAt(now.timeIntervalSince1970 + 3_600), "a clock a little fast is fine")
+        XCTAssertNil(exportedAt(1e300))
+        XCTAssertNil(exportedAt(-1))
+        XCTAssertNil(exportedAt(now.timeIntervalSince1970 + 2 * 86_400))
+        XCTAssertEqual(Backup.confirmTitle(Backup.contents(of: ["autoPlay": true, Backup.exportedAtKey: 1e300], now: now)),
+                       "Replace with this backup?")
     }
 
     // MARK: pass 4: what a restore stores is what decoded
