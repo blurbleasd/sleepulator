@@ -34,7 +34,9 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
 - **Widget** — `SleepulatorWidget/` (sleep-timer Live Activity).
 - **UI tests** — `SleepulatorUITests/` (XCUITest, in the shared scheme so CI runs it).
   `HomeLayoutUITests` checks Focus's Build mix / Focus session row clears the mini-player and
-  that a tap starts the Pomodoro. `NightVeilUITests` waits out the veil's minute on an untimed
+  that a tap starts the Pomodoro; that a tap on the shown bar reaches it, and on Podcasts it sits
+  above the tab bar; and that on Sleep Home at rest the bar is gone from the accessibility tree and
+  Home's controls stay hittable. `NightVeilUITests` waits out the veil's minute on an untimed
   night (~80 s), glances, wakes, and checks Focus's readout; it passes settings as launch
   arguments (plist literals, the argument domain) so persisted mode and night length stay put.
   CI's simulators are slow and sometimes drop a synthesized tap, so a tap that matters checks its
@@ -178,7 +180,7 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   `@AppStorage("focusMode")` (AudioEngine writes it) instead of observing `audio`.
   `Palette(bedtime:)` is legacy and only ever yields Sleep amber.
 - **Mini-player clearance is measured, not guessed.** ContentView measures the floating bar's top
-  edge and hands each tab `\.miniPlayerTop` (nil on Sleep Home unless a podcast plays). A screen
+  edge and hands each tab `\.miniPlayerTop` (nil on Sleep Home unless an episode is loaded). A screen
   that ends at the bottom edge (a tab root, a pushed show page) applies `.miniPlayerClearance()`.
   Home computes its own (`HomeView.homeClearance`) from the screen's bottom edge minus the insets
   anchored while the tab bar shows, so it holds still under the screensaver. No fixed bottom
@@ -186,6 +188,25 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   To measure a full-bleed view, put `.onGeometryChange` *before* its `.ignoresSafeArea()`.
   Placed after it, you get the un-expanded frame (the tab bar's top edge, not the screen's). That
   bug once hid Focus's whole bottom row under the bar; `HomeLayoutUITests` now guards it.
+- **Hidden means not rendered.** On iOS 26 a rendered SwiftUI view stays in the accessibility tree
+  XCUITest reads through `opacity(0)`, `.allowsHitTesting(false)` and even
+  `.accessibilityHidden(true)`. So ContentView takes the hidden mini-player out of the hierarchy
+  (`if !miniPlayerHidden`, an opacity transition), and presents its Now Playing sheet itself so the
+  sheet never depends on the bar. The removal fade still renders the bar for 0.9 s, so the
+  always-present wrapper also gates `.allowsHitTesting` on `miniPlayerHidden` and
+  `.accessibilityHidden` on `miniPlayerHidden || nightDimmed` (the veil's rule below): those stop
+  real taps and VoiceOver at once, though XCUITest's tree ignores them. Keep both halves: only
+  device steps check that they block (TESTING.md §M7 for the fade, §M7's veil step for
+  `nightDimmed`); HomeLayoutUITests checks only that the hit-test gate lets a tap reach the
+  shown bar. To
+  prove a hidden view is gone, assert `waitForNonExistence(timeout:)` in a UI test: a removal
+  transition keeps it in the tree until it finishes.
+- **A `.contentShape(.accessibility, …)` can become its container's frame.** NightRing's band shape
+  made Home's root accessibility container a 250 pt square around the orb, which clipped every
+  other Sleep Home control out of the accessibility hit test. XCUITest called them unhittable,
+  while real taps still worked. HomeView's root sets `.contentShape(.accessibility, Rectangle())`
+  to keep its own. If a screen's controls turn unhittable in XCUITest, compare each container's
+  frame in `app.debugDescription` with the screen.
 - **The night veil closes an idle Now Playing sheet.** Any touch anywhere restarts the veil's
   minute (`WindowActivity`), and a presented sheet or dialog makes it wait rather than drop over it
   (`SessionGuards.veilTimeout`). The Now Playing sheet is the exception (`.closeNowPlaying`): left
@@ -213,9 +234,11 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   a second tap lifts the veil and wakes the controls (`SessionGuards.veilTap`: a tap within
   0.8 s is ignored, and one counts as the wake until the glance has faded; timed on the
   monotonic clock). If VoiceOver or Switch Control turns on while the veil is down, one tap wakes.
-  Under the veil the tabs and Home's wake layer are hidden from accessibility, so only the veil
-  should answer "Wake". XCUITest still lists SwiftUI elements hidden from accessibility (even
-  Home's opacity-0 chrome), so check that with Voice Control on a device (TESTING.md §Q.5).
+  Under the veil the tabs, Home's wake layer and the mini-player are hidden from accessibility, so
+  only the veil should answer "Wake". XCUITest still lists SwiftUI elements hidden from
+  accessibility (even Home's opacity-0 chrome), so check that with Voice Control on a device
+  (TESTING.md §Q.5; for the mini-player, §M7's veil step, since §Q.5 runs where the bar isn't
+  rendered).
 - **One name per sound.** Name sounds through `SoundNames` (binaurals are "Deep", "Drift", …,
   never "Delta" / "Theta").
 - **Podcasts is split by depth.** The library and its Tonight shelf follow the 2am rules (artwork

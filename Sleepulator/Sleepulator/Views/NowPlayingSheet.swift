@@ -265,7 +265,7 @@ struct NowPlayingSheet: View {
         let artSize: CGFloat = (night ? 150 : 250) * (typeSize.isAccessibilitySize ? 0.6 : 1)
         ScrollView {
             VStack(spacing: UI.xxl) {
-                // The system's drag indicator (MiniPlayerView) replaces a hand-drawn one; Done is
+                // The system's drag indicator (ContentView) replaces a hand-drawn one; Done is
                 // the way out for anyone who doesn't swipe.
                 HStack {
                     Spacer()
