@@ -40,14 +40,21 @@ final class HomeLayoutUITests: XCTestCase {
         XCTAssertTrue(stop.waitForExistence(timeout: 5), "Tapping Focus session didn't start the Pomodoro")
         // A running session lets Home's controls fade after 10 s (HomeScreensaverPolicy). A slow CI
         // runner can take that long between these steps, and then the tap lands on the faded
-        // screen's wake layer instead of Stop, and the session runs on. Wake the controls first.
+        // screen's wake layer instead of Stop, and the session runs on. Wake the controls first,
+        // and go round again if the tap still woke them instead (CI's took 4 s to land, just as
+        // the controls faded). Stop is re-checked before each tap, so a stopped session isn't
+        // restarted by a tap on the "Focus session" button in its place.
         let wake = app.buttons["Show controls"]
-        if wake.exists { wake.tap() }
-        stop.tap()
+        var stopped = false
+        for _ in 0..<3 where !stopped {
+            if wake.exists { wake.tap() }
+            if stop.exists { stop.tap() }
+            stopped = session.waitForExistence(timeout: 3)
+        }
 
         // Leave the app in Sleep: the unit tests run hosted in this same app and read its
         // persisted mode, so a run after this one must not start out in Focus.
-        XCTAssertTrue(session.waitForExistence(timeout: 5))
+        XCTAssertTrue(stopped, "Couldn't stop the Focus session")
         app.buttons["Sleep mode"].tap()
     }
 

@@ -54,6 +54,10 @@ final class NightVeilUITests: XCTestCase {
 
         // No timer runs (All night), yet the veil still drops ~60 s after the last touch.
         XCTAssertTrue(veil.waitForExistence(timeout: 80), "No veil over an untimed night")
+        // XCUITest lists the veil the moment it's inserted, at the start of its 0.8 s fade-in, when
+        // a tap doesn't reach it yet (CI tapped there, and the glance came a tap late, so the
+        // "wake" tap only glanced). A sleepy tap lands on a screen already black: let it settle.
+        RunLoop.current.run(until: Date().addingTimeInterval(1.5))
         // (Not asserted: that only the veil answers "Wake" under it. XCUITest on iOS 26 still lists
         // SwiftUI elements hidden from accessibility, even Home's opacity-0 chrome, so it can't
         // tell; TESTING.md §Q.5 checks it with Voice Control on a device.)
@@ -159,8 +163,15 @@ final class NightVeilUITests: XCTestCase {
 
         let noise = app.switches.matching(NSPredicate(format: "label IN %@", Self.noiseNames)).firstMatch
         XCTAssertTrue(noise.waitForExistence(timeout: 5), "No noise switch in the mixer")
-        if (noise.value as? String) != "1" { noise.tap() }
-        XCTAssertTrue(waitUntil(timeout: 3) { (noise.value as? String) == "1" }, "The noise switch didn't turn on")
+        // A slow CI simulator sometimes drops a synthesized tap on the switch (it never moves, on
+        // target and in the right process), so tap again until it's on. It's re-read before each
+        // tap, so a late first tap can't be undone by the next.
+        var on = (noise.value as? String) == "1"
+        for _ in 0..<3 where !on {
+            noise.tap()
+            on = waitUntil(timeout: 3) { (noise.value as? String) == "1" }
+        }
+        XCTAssertTrue(on, "The noise switch didn't turn on")
 
         // Close the mixer: drag its header to the bottom edge (a quick swipe there doesn't).
         let header = app.staticTexts["Your mix"]
