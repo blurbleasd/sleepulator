@@ -333,7 +333,8 @@ this section is where you do it. Do it in a dark room at your real bedtime brigh
    *The bar under the veil (added 2026-10-11).* With something queued but nothing loaded, start a
    30-min night from the orb with a podcast-free mix (the bar must read "Up next"), go to Podcasts
    and let the veil drop. ✅ With Voice Control's "Show names" only the veil is labelled,
-   and "Tap Play queue" and "Tap Up next" do nothing (no podcast starts, Now Playing stays shut);
+   and "Tap Play queue" and "Tap Up next: <episode title>" (the bar's full name, as "Show names"
+   labels it before the veil) do nothing (no podcast starts, Now Playing stays shut);
    with VoiceOver turned on, swiping finds only the veil. (XCUITest can't tell: it lists the bar
    either way.)
 8. **Ring drag keeps the controls awake.** Mid-night (sounds playing): tap to wake, then drag the
