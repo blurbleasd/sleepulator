@@ -39,10 +39,16 @@ enum SessionGuards {
             cancel: "Stay in Focus")
     }
 
-    /// The night veil drops only over a sleep session that is actually playing. A countdown over
-    /// silence (timer running, everything paused) used to blank the screen on nothing.
-    static func mayNightDim(autoNightDim: Bool, focusMode: Bool, timerActive: Bool, playing: Bool) -> Bool {
-        autoNightDim && !focusMode && timerActive && playing
+    /// The night veil drops over a Sleep session that is actually playing: everywhere while a
+    /// timer runs, and on the bedside screens (Home, or the Now Playing sheet) for an untimed (All
+    /// night) night. A countdown
+    /// over silence (timer running, everything paused) used to blank the screen on nothing. It
+    /// used to need a timer, so All night, the default, never got the veil and the scene showed at
+    /// bedtime brightness until auto-lock; on any tab it would black out daytime listening in
+    /// Sleep mode (reading show notes in Podcasts).
+    static func mayNightDim(autoNightDim: Bool, focusMode: Bool, playing: Bool,
+                            timerActive: Bool, onBedsideScreen: Bool) -> Bool {
+        autoNightDim && !focusMode && playing && (timerActive || onBedsideScreen)
     }
 
     enum Begin: Equatable { case resume, firstBed, transport }
@@ -58,6 +64,26 @@ enum SessionGuards {
 
     enum VeilTimeout: Equatable { case drop, wait, stand, closeNowPlaying }
 
+    /// The 3am glance's timing: it shows for `glanceHold`, then fades over `glanceFade`.
+    static let glanceHold: TimeInterval = 6
+    static let glanceFade: TimeInterval = 2
+    /// A second tap this soon after the first is the same reach for the phone, not a request to
+    /// wake: it would skip the glance while it's still arriving.
+    static let glanceSettle: TimeInterval = 0.8
+
+    enum VeilTap: Equatable { case glance, wake, ignore }
+
+    /// What a tap on the veil does. The first shows the glance (the ember and the night line on
+    /// black); a tap while the glance shows or is still fading wakes the scene and the controls.
+    /// VoiceOver and Switch Control wake in one step: the veil's label already says what it is,
+    /// and they never needed the light. `sinceGlance` is nil when no glance has shown this veil.
+    static func veilTap(sinceGlance: TimeInterval?, assistiveTech: Bool) -> VeilTap {
+        if assistiveTech { return .wake }
+        // Negative only if the clock behind it stepped back: treat it as a stale glance.
+        guard let t = sinceGlance, t >= 0, t < glanceHold + glanceFade else { return .glance }
+        return t < glanceSettle ? .ignore : .wake
+    }
+
     /// What the veil's countdown does when it runs out (~60 s after the last touch). The veil is
     /// part of the root view, so a sheet, dialog or full-screen cover sits above it: dropping it
     /// then left that presentation lit on a black screen (a red "Switch to Focus?" at 2am). It
@@ -65,13 +91,16 @@ enum SessionGuards {
     ///
     /// The exception is an idle Now Playing sheet: its artwork and transport are the brightest
     /// surface on the night screen, and with no touch for the veil's minute nobody is using it, so
-    /// it closes and the veil drops (`.closeNowPlaying`). Not under VoiceOver or Switch Control,
-    /// which reach the sheet without the touches that restart the countdown.
+    /// it closes and the veil drops (`.closeNowPlaying`).
+    ///
+    /// Never under VoiceOver or Switch Control: they navigate without the touches that restart
+    /// the countdown, so the veil dropped every minute mid-navigation (the same reason Home's
+    /// screensaver stands down for them, `HomeScreensaverPolicy.mayFade`).
     static func veilTimeout(mayDim: Bool, presenting: Bool, nowPlayingUp: Bool = false,
                             assistiveTech: Bool = false) -> VeilTimeout {
-        guard mayDim else { return .stand }
+        guard mayDim, !assistiveTech else { return .stand }
         guard presenting else { return .drop }
-        return nowPlayingUp && !assistiveTech ? .closeNowPlaying : .wait
+        return nowPlayingUp ? .closeNowPlaying : .wait
     }
 
     /// Whether the status bar and home indicator go: under the veil, and under the Sleep

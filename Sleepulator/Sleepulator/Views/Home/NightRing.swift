@@ -329,6 +329,9 @@ struct NightLine: View {
     let pal: Palette
     let openOptions: () -> Void
 
+    /// The line's tap height. The veil's glance places its line from it.
+    static let minHeight: CGFloat = 44
+
     static func timerText(remaining: TimeInterval, inTail: Bool, endOfEpisode: Bool,
                           playing: Bool, lengthMinutes: Double) -> String {
         if inTail { return "Sounds easing out" }
@@ -375,7 +378,7 @@ struct NightLine: View {
             .foregroundColor(pal.dim)
             .multilineTextAlignment(.center)
             .padding(.horizontal, 30)
-            .frame(minHeight: 44)
+            .frame(minHeight: Self.minHeight)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

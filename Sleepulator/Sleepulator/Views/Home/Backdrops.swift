@@ -16,9 +16,12 @@ struct StarfieldView: View {
         let twAmp, twSpeed, twPhase: Double
     }
 
-    private static let coolWhite = Color(red: 0.93, green: 0.95, blue: 1.0)
+    // Sleep's palette: pale and warm whites, with a rare faint cool star for realism. Two-thirds
+    // of the field used to be a cool blue-white and an eighth plainly blue, the coolest light left
+    // in the warm mode.
+    private static let paleStar  = Color(red: 0.98, green: 0.95, blue: 0.90)
     private static let warmStar  = Color(red: 1.0,  green: 0.86, blue: 0.66)
-    private static let blueStar  = Color(red: 0.74, green: 0.84, blue: 1.0)
+    private static let coolStar  = Color(red: 0.86, green: 0.89, blue: 0.97)
 
     // Tuning knobs — all slow on purpose (a sleep aid, not a screensaver demo).
     private static let driftPeriod: Double = 300    // seconds to drift one screen-height down
@@ -30,7 +33,7 @@ struct StarfieldView: View {
     private static func build() -> [Star] {
         var rng: UInt64 = 0x5EED5160_0DECAF01
         func n() -> Double { rng ^= rng << 13; rng ^= rng >> 7; rng ^= rng << 17; return Double(rng % 1_000_000) / 1_000_000 }
-        func tint() -> Color { let t = n(); return t < 0.66 ? coolWhite : (t < 0.88 ? warmStar : blueStar) }
+        func tint() -> Color { let t = n(); return t < 0.66 ? paleStar : (t < 0.96 ? warmStar : coolStar) }
         var out: [Star] = []
         // Scattered field — cube the brightness so most stars are dim and only a few brighter.
         for _ in 0..<90 {
@@ -50,7 +53,7 @@ struct StarfieldView: View {
                             y: 0.06 + u * 0.5 + (n() - 0.5) * 0.16,
                             r: 0.4 + mag * 0.9,
                             baseOpacity: 0.12 + mag * 0.34,
-                            tint: coolWhite,
+                            tint: paleStar,
                             bright: false,
                             twAmp: 0.2 + n() * 0.3, twSpeed: 0.4 + n() * 0.8, twPhase: n() * 6.283))
         }
@@ -67,11 +70,17 @@ struct StarfieldView: View {
     var body: some View {
         ZStack {
             hazeBand
-            // `paused:` on the schedule (not an if/else branch swap) keeps the Canvas identity
-            // stable across the freeze.
-            TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: paused)) { tl in
-                let t = ticked(tl.date)
-                Canvas { ctx, size in Self.draw(ctx, size, t: t) }
+            // An if/else swap, not `TimelineView(.animation(paused:))`: the `paused:` schedule
+            // stops driving frames on ProMotion devices (device 2026-07-11, see ShaderBackdrop),
+            // so the scene moved only on outside re-renders. The clock is @State, so the frozen
+            // frame still holds the pose it froze at.
+            if paused {
+                Canvas { ctx, size in Self.draw(ctx, size, t: clock.elapsed) }
+            } else {
+                TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { tl in
+                    let t = ticked(tl.date)
+                    Canvas { ctx, size in Self.draw(ctx, size, t: t) }
+                }
             }
         }
         .allowsHitTesting(false)
@@ -88,7 +97,7 @@ struct StarfieldView: View {
     private var hazeBand: some View {
         GeometryReader { geo in
             Ellipse()
-                .fill(Color.white.opacity(0.03))
+                .fill(Color(red: 1.0, green: 0.90, blue: 0.78).opacity(0.03))
                 .frame(width: geo.size.width * 1.5, height: geo.size.height * 0.26)
                 .rotationEffect(.degrees(-22))
                 .position(x: geo.size.width * 0.5, y: geo.size.height * 0.28)
@@ -127,13 +136,16 @@ struct StarfieldView: View {
 // choice). The self-rescheduling loop is cancelled on disappear so it can't outlive the view.
 //
 // Transients sleep too: the loop also stops while `paused` (it used to keep waking the main
-// queue under the all-night veil), each meteor dims with `nightProgress`, and past ~0.6 the
-// sky stops producing them entirely — a bright streak at 4am is a wake risk, not a delight.
+// queue under the all-night veil), each meteor dims with `nightProgress`, and past 0.4 the sky
+// stops producing them entirely (about 18 minutes into an untimed night) — a bright streak at
+// 4am is a wake risk, not a delight.
 struct ShootingStarView: View {
     /// True only when the screen is occluded by the deep night-dim veil — stop scheduling.
     var paused: Bool = false
     /// Read live at each meteor's fire time (never observed) for the night dimming/gating.
     var sleepTimer: SleepTimerService? = nil
+
+    private static let meteor = Color(red: 1.0, green: 0.88, blue: 0.72)
 
     @State private var progress: CGFloat = 0
     @State private var active = false
@@ -190,7 +202,9 @@ struct ShootingStarView: View {
         let y = startY + progress * len * 0.42
         return Capsule()
             .fill(LinearGradient(
-                gradient: Gradient(colors: [Color.white.opacity(0), Color.white.opacity(0.9)]),
+                // A warm streak at two-thirds strength: a pure-white 0.9 meteor was the brightest
+                // thing the night sky ever drew.
+                gradient: Gradient(colors: [Self.meteor.opacity(0), Self.meteor.opacity(0.6)]),
                 startPoint: .leading, endPoint: .trailing))
             .frame(width: 66, height: 2)
             .rotationEffect(.degrees(22.8))
@@ -203,11 +217,11 @@ struct ShootingStarView: View {
         let appear = DispatchWorkItem {
             // Sampled at fire time so an hours-old schedule can't fire a bedtime-bright meteor.
             let night = sleepTimer?.nightProgress ?? 0
-            guard night < 0.6 else {
+            guard night < 0.4 else {
                 schedule(first: false)   // keep the loop alive; the sky may lighten (timer reset)
                 return
             }
-            brightness = 1 - night      // ember-faint as the night deepens
+            brightness = 1 - 1.5 * night   // ember-faint as the night deepens (0.4 at the cut-off)
             seed &+= 1
             progress = 0
             active = true
@@ -228,58 +242,6 @@ struct ShootingStarView: View {
     private func frac(_ n: Int) -> CGFloat {
         let v = sin(Double(n) * 12.9898) * 43758.5453
         return CGFloat(v - v.rounded(.down))
-    }
-}
-
-// Focus backdrop — a slow-rotating cool "energy" sweep over the deep-indigo gradient.
-// Runs regardless of Reduce Motion — a slow blurred glow drift is ambient, not the
-// vestibular kind of motion, and Focus should feel alive even with Reduce Motion on.
-//
-// TimelineView-driven (was a `repeatForever` CA animation, which kept compositing the
-// blurred rotation at native refresh even while "frozen" — the default Focus scene was
-// the only backdrop that never honored `paused`). The clock freezes the sweep in place.
-struct FocusBackdrop: View {
-    let accent: Color
-    let reduceMotion: Bool
-    /// True when the screen is occluded (veil, backgrounded, low luminance) — freeze the sweep.
-    var paused: Bool = false
-
-    /// One full revolution of the sweep, seconds (matches the old CA animation).
-    private static let revolutionSec: Double = 36
-
-    @State private var clock = SceneClock()
-
-    var body: some View {
-        // GeometryReader's footprint is always the proposed (screen) size — it never grows
-        // to fit the oversized/blurred glow, so the ZStack can't be widened (which was
-        // shoving the centered content off both edges). The glow is positioned at center.
-        GeometryReader { geo in
-            // 1/10s is plenty: one revolution takes 36s, so each step is ~0.36° through a
-            // 90pt blur — imperceptible, and a third of the body evaluations of 1/30.
-            TimelineView(.animation(minimumInterval: 1.0 / 10.0, paused: paused)) { tl in
-                AngularGradient(
-                    gradient: Gradient(colors: [
-                        accent.opacity(0.0), accent.opacity(0.30), accent.opacity(0.05),
-                        accent.opacity(0.22), accent.opacity(0.0)
-                    ]),
-                    center: .center
-                )
-                .frame(width: 640, height: 640)
-                .blur(radius: 90)
-                .rotationEffect(.degrees(sweepAngle(tl.date)))
-                .opacity(0.75)
-                .position(x: geo.size.width / 2, y: geo.size.height / 2 - 30)
-            }
-        }
-        .ignoresSafeArea()
-        .clipped()
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
-    }
-
-    private func sweepAngle(_ now: Date) -> Double {
-        if !paused { clock.tick(now: now.timeIntervalSinceReferenceDate, rate: 1) }
-        return (clock.elapsed / Self.revolutionSec) * 360
     }
 }
 

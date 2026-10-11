@@ -3,18 +3,20 @@ import SwiftUI
 /// "Sandfall" (Focus) — the Metal edition. A GPU fragment shader (`SandfallShader.metal`,
 /// `sandField`) renders a procedural hourglass: FBM-granular sand in both bulbs, the top draining
 /// and the bottom mounding as the Pomodoro `progress` runs 0→1, and a turbulent falling column
-/// through the neck — instead of the Canvas triangles + 14 stiff grains. A/B sibling of `SandfallView`.
+/// through the neck — instead of the Canvas triangles + 14 stiff grains it replaced.
 ///
-/// `progress` + sand tint come from the SAME reads the Canvas `SandfallView` uses (level tracks the
-/// Pomodoro; the fall animates off a `SceneClock`). Reduce Motion feeds rate 0 → the fall stills,
-/// and `paused` (occlusion) freezes to one static frame.
+/// `progress` + sand tint come from the shared `FocusDrivers` mapping (the fill tracks the
+/// Pomodoro; the fall animates off a `SceneClock`). `paused` (occlusion, or "Moving scenes" off)
+/// freezes it to one static frame. System Reduce Motion doesn't (SCREENSAVER-LIBRARY-SPEC §5).
 struct SandfallMetalView: View {
     var paused: Bool = false
     let pomodoro: PomodoroService
 
     private static let workSand = SIMD3<Double>(0.82, 0.85, 0.93)  // cool pale
     private static let restSand = SIMD3<Double>(0.55, 0.80, 0.74)  // teal (ease)
-    private static let idleSand = SIMD3<Double>(0.66, 0.70, 0.82)
+    // Settled sand at rest, dim: it lies in the bottom bulb, behind the Build mix / Focus session
+    // row, and at the working sand's brightness it cut "Focus session" to ~3:1.
+    private static let idleSand = SIMD3<Double>(0.40, 0.43, 0.54)
 
     @State private var clock = SceneClock(start: .random(in: 0...2048))
 
@@ -46,13 +48,15 @@ struct SandfallMetalView: View {
         let work = pomodoro.phase == .work
         let prog = min(max(pomodoro.progress, 0), 1)
         // Energy-first: the Pomodoro drives the downpour's INTENSITY (work builds + brightens; break
-        // eases; idle mid), not a slow hourglass level.
-        let energy = running ? (work ? 0.55 + 0.45 * prog : 0.40) : 0.50
+        // eases; idle settled and dim), not a slow hourglass level.
+        let energy = running ? (work ? 0.55 + 0.45 * prog : 0.40) : 0.0
         // THE reading: how far the hourglass has drained. v3 made this scene a comet downpour —
         // bolder, but it threw away the one genuinely time-meaningful metaphor in the app, where
         // "how full is the bottom bulb" IS the answer. `fill` 0→1 across a work interval drains
         // the top bulb into the bottom; a break runs it back.
-        let fill = FocusDrivers.fill(isRunning: running, isWork: work, progress: prog) ?? 0.0
+        // At rest an hourglass has its sand below; a session flips it. Idle used to show the top
+        // bulb full and nothing falling, which read as a stalled timer.
+        let fill = FocusDrivers.fill(isRunning: running, isWork: work, progress: prog) ?? 1.0
         let sand = running ? (work ? Self.workSand : Self.restSand) : Self.idleSand
 
         if let now {

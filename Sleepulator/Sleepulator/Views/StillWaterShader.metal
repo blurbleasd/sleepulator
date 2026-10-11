@@ -3,7 +3,7 @@
 using namespace metal;
 
 // ============================================================================
-// Still Water — a low moon over a dark pond, its light a shimmering reflected
+// Still Water — a low amber moon over a dark pond, its light a shimmering reflected
 // path on the surface, with faint concentric ripples spreading from a few points.
 // ----------------------------------------------------------------------------
 // The Metal replacement for the CPU `StillWaterView` (which stroked ellipse
@@ -31,10 +31,12 @@ namespace sw {
 
 // ---- tunables --------------------------------------------------------------------
 constant int   OCTAVES   = 4;      // FBM detail — the battery knob.
-constant float FLOW       = 0.50;  // surface drift speed (× phase — never re-scale by night here)
+constant float FLOW       = 0.32;  // surface drift speed (× phase — never re-scale by night here; was 0.50, the least still Sleep scene)
 constant float HORIZON    = 0.42;  // sky / water split (0 top → 1 bottom)
 constant float2 MOON      = float2(0.5, 0.16);   // moon position in the sky
-constant float3 MOONLIGHT = float3(0.66, 0.78, 0.98);  // cool moonlit blue-white
+// A low moon reads amber through the haze near the horizon, and keeps Sleep's warm dusk (it was a
+// cool blue-white, the bluest light in Sleep mode).
+constant float3 MOONLIGHT = float3(0.95, 0.72, 0.46);
 
 // Ripple sources (in uv space, in the water) and their phase offsets.
 constant float2 SRC[3] = { float2(0.30, 0.62), float2(0.70, 0.74), float2(0.50, 0.88) };
@@ -44,6 +46,18 @@ inline float hash21(float2 p) {
     p = fract(p * float2(123.34, 345.45));
     p += dot(p, p + 34.345);
     return fract(p.x * p.y);
+}
+// Star-cell hash on the cell's integer bits. `hash21` above is fine for noise, but on integer
+// cell ids it repeats: 345.45 × 20 and 123.34 × 50 are whole numbers, so the star field came out
+// as the same strip of stars every 20 cells down (thirds of the screen in Deep space, every 80 pt
+// in Aurora and Still water). `salt` picks an independent stream per use.
+inline float hashCell(float2 cell, uint salt) {
+    uint2 q = uint2(int2(cell));
+    uint h = q.x * 1597334677u ^ q.y * 3812015801u ^ salt * 2654435761u;
+    h ^= h >> 16; h *= 2246822519u;
+    h ^= h >> 13; h *= 3266489917u;
+    h ^= h >> 16;
+    return float(h) * (1.0 / 4294967296.0);
 }
 inline float vnoise(float2 p) {
     float2 i = floor(p), f = fract(p);
@@ -74,6 +88,10 @@ half4 stillWaterField(float2 pos, half4 color,
     using namespace sw;
 
     float2 uv = pos / size;
+    // Round shapes are measured in screen widths: `uv` stretches y by the screen's aspect (≈2.2 on
+    // a phone), which drew the moon as a tall oval and the ripples as tall loops.
+    float2 wv = pos / size.x;
+    float2 moonW = MOON * size / size.x;
     float p = clamp(night, 0.0, 1.0);
     float a = clamp(audio, 0.0, 1.0);
     float motion = 1.0 - 0.5 * p;              // stills ripple *amplitude* toward night
@@ -84,16 +102,16 @@ half4 stillWaterField(float2 pos, half4 color,
     float3 col;
     if (uv.y < HORIZON) {
         float s = uv.y / HORIZON;                         // 0 top → 1 horizon
-        col = mix(float3(0.05, 0.08, 0.15), float3(0.03, 0.05, 0.10), s);
+        col = mix(float3(0.026, 0.018, 0.020), float3(0.048, 0.030, 0.022), s);   // warmer toward the horizon
     } else {
         float d = (uv.y - HORIZON) / (1.0 - HORIZON);     // 0 horizon → 1 foreground
-        col = mix(float3(0.015, 0.02, 0.045), float3(0.008, 0.01, 0.025), d);
+        col = mix(float3(0.014, 0.010, 0.009), float3(0.006, 0.0045, 0.004), d);
     }
 
     // --- moon disc + halo ---
-    float md = distance(uv, MOON);
-    col += MOONLIGHT * smoothstep(0.045, 0.0, md) * 0.9 * moonDim;   // disc
-    col += float3(0.40, 0.55, 0.85) * smoothstep(0.28, 0.0, md) * 0.18 * moonDim;  // halo
+    float md = distance(wv, moonW);                   // in screen widths
+    col += MOONLIGHT * smoothstep(0.050, 0.0, md) * 0.6 * moonDim;   // disc
+    col += float3(0.55, 0.36, 0.20) * smoothstep(0.30, 0.0, md) * 0.14 * moonDim;  // halo
 
     // --- water surface ---
     if (uv.y >= HORIZON) {
@@ -108,9 +126,13 @@ half4 stillWaterField(float2 pos, half4 color,
 
         // Concentric ripples spreading from a few points — perturb the wave field locally
         // (extra sparkle rings) instead of being drawn as outlines. Far sources still first.
+        // Measured in screen widths and foreshortened like a circle seen across water: wide and
+        // flat, never taller than wide.
         float ripple = 0.0;
         for (int i = 0; i < 3; i++) {
-            float dist = distance(uv, SRC[i]);
+            float2 rd = wv - SRC[i] * size / size.x;
+            rd.y *= 2.6;
+            float dist = length(rd);
             float prog = fract(t * 0.10 + RPH[i]);
             float r    = prog * 0.55;
             float ring = smoothstep(0.045, 0.0, abs(dist - r)) * (1.0 - prog);
@@ -123,14 +145,14 @@ half4 stillWaterField(float2 pos, half4 color,
         if (reactive < 0.5) {
             // Shipping path — audio is a gentle GLOBAL brightness swell on the moonpath. Same
             // source as before the reactive uniform existed; Reduce Motion routes here too.
-            waves += ripple * 0.5 * motion;
+            waves += ripple * 0.35 * motion;
             swell = 1.0 + 0.30 * a;          // ripples reach a little brighter on a swell
         } else {
             // Structural — audio disturbs the SURFACE (the wave field), not the brightness, so the
             // reflection shimmers/breaks up where the light lives instead of the whole pond lifting.
             // Constants are first guesses; tune DOWN on device (subtle or it wakes you).
             float agitate = 1.0 + 0.6 * a;               // ripples spread harder on a swell
-            waves += ripple * 0.5 * motion * agitate;
+            waves += ripple * 0.35 * motion * agitate;
             if (a > 0.02) {                              // skip the extra fbm on silent passages
                 waves += (fbm(wuv * 1.7 + float2(0.0, t)) - 0.5) * 0.08 * a * motion;   // fine chop
             }
@@ -144,16 +166,16 @@ half4 stillWaterField(float2 pos, half4 color,
         // wave ridges catch the light. Wider + brighter toward the foreground.
         float column = smoothstep(0.34, 0.0, abs(x - MOON.x));
         float glint  = pow(clamp(waves, 0.0, 1.0), 5.0);
-        float path   = column * glint * (0.35 + 0.65 * depth);
+        float path   = column * glint * (0.35 + 0.65 * depth) * 0.75;
 
         col += MOONLIGHT * path * still * swell * moonDim;
 
         // A faint overall sheen so the dark water isn't dead flat.
-        col += float3(0.20, 0.30, 0.45) * pow(clamp(waves, 0.0, 1.0), 2.0) * 0.04 * still;
+        col += float3(0.40, 0.27, 0.17) * pow(clamp(waves, 0.0, 1.0), 2.0) * 0.04 * still;
     }
 
     // Faint band where sky meets water.
-    col += float3(0.30, 0.40, 0.60) * smoothstep(0.06, 0.0, abs(uv.y - HORIZON)) * 0.05;
+    col += float3(0.50, 0.32, 0.20) * smoothstep(0.06, 0.0, abs(uv.y - HORIZON)) * 0.05;
 
     // Stars in the sky, dimmed near the moon and as the night deepens.
     if (uv.y < HORIZON) {
@@ -164,13 +186,17 @@ half4 stillWaterField(float2 pos, half4 color,
         float2 sp  = pos / 4.0;
         float2 sg  = floor(sp);
         float2 sf  = fract(sp) - 0.5;
-        float  sh  = hash21(sg);
-        float2 soff = (float2(hash21(sg + 3.1), hash21(sg + 5.7)) - 0.5) * 0.7;
-        float  sd  = length(sf - soff);
-        float star = step(0.986, sh) * exp(-(sd * sd) / 0.04) * smoothstep(0.0, 0.5, (HORIZON - uv.y) / HORIZON);
-        float tw   = 0.55 + 0.45 * sin(time * 1.7 + sh * 100.0);
-        float nearMoon = smoothstep(0.0, 0.25, md);
-        col += float3(0.85, 0.90, 1.0) * star * tw * 0.5 * (1.0 - 0.6 * p) * nearMoon;
+        float  sh  = hashCell(sg, 0u);
+        // Only ~1.4% of cells hold a star: the rest skip the jitter, falloff and twinkle. Cells
+        // are 12 px, so a SIMD group spans a cell or two and the branch stays coherent.
+        if (sh >= 0.986) {
+            float2 soff = (float2(hashCell(sg, 1u), hashCell(sg, 2u)) - 0.5) * 0.7;
+            float  sd  = length(sf - soff);
+            float star = exp(-(sd * sd) / 0.04) * smoothstep(0.0, 0.5, (HORIZON - uv.y) / HORIZON);
+            float tw   = 0.55 + 0.45 * sin(time * 1.7 + sh * 100.0);
+            float nearMoon = smoothstep(0.0, 0.25, md);   // screen widths
+            col += float3(1.0, 0.88, 0.74) * star * tw * 0.45 * (1.0 - 0.6 * p) * nearMoon;
+        }
     }
 
     // Soft vignette to settle the eye toward the center.

@@ -292,22 +292,33 @@ final class AudioEngine: ObservableObject {
     private var lastActiveSnapshot: (noise: Bool, bin: Bool, pod: Bool) = (false, false, false)
     private var isMasterPauseTransition = false
     
-    @Published var noiseOn = false { didSet { syncGenEngine(); if !isMasterPauseTransition { lastActiveSnapshot.noise = noiseOn }; noteSessionStart(wasPlaying: oldValue || binauralOn || isPodPlaying) } }
-    @Published var binauralOn = false { didSet { syncGenEngine(); if !isMasterPauseTransition { lastActiveSnapshot.bin = binauralOn }; noteSessionStart(wasPlaying: noiseOn || oldValue || isPodPlaying) } }
-    @Published var isPodPlaying = false { didSet { syncGenEngine(); if !isMasterPauseTransition { lastActiveSnapshot.pod = isPodPlaying }; noteSessionStart(wasPlaying: noiseOn || binauralOn || oldValue) } }
+    @Published var noiseOn = false { didSet { syncGenEngine(); if !isMasterPauseTransition { lastActiveSnapshot.noise = noiseOn }; noteSessionEdge(wasPlaying: oldValue || binauralOn || isPodPlaying) } }
+    @Published var binauralOn = false { didSet { syncGenEngine(); if !isMasterPauseTransition { lastActiveSnapshot.bin = binauralOn }; noteSessionEdge(wasPlaying: noiseOn || oldValue || isPodPlaying) } }
+    @Published var isPodPlaying = false { didSet { syncGenEngine(); if !isMasterPauseTransition { lastActiveSnapshot.pod = isPodPlaying }; noteSessionEdge(wasPlaying: noiseOn || binauralOn || oldValue) } }
 
     /// The Home night ring's remembered length in minutes (0 = All night), read when a session
     /// starts. Injectable so tests don't depend on what the simulator's defaults hold.
     var nightLengthProvider: () -> Double = { UserDefaults.standard.double(forKey: "nightLengthMinutes") }
 
-    /// A Sleep session starting from rest honours the night ring however it was started: the orb,
-    /// the mixer's switches, a podcast, the lock screen or AirPods, Siri, the resume widget. (It
-    /// used to be the orb alone, so the other paths quietly played all night under a ring that
-    /// said "45m".) Nothing in Focus (the Pomodoro is its timer), for All night, or when a
-    /// countdown is already running: resuming after a pause, an interruption or a podcast stall
-    /// keeps the night you set. Main thread only (property didSets); never the render thread.
-    private func noteSessionStart(wasPlaying: Bool) {
+    /// The session's idle↔playing edges, however it started or stopped: the orb, the mixer's
+    /// switches, a podcast, the lock screen or AirPods, Siri, the resume widget. A start begins
+    /// the Sleep night (`beginSleepNight`); a stop marks the night for `UntimedNight`. Main thread
+    /// only (property didSets); never the render thread.
+    private func noteSessionEdge(wasPlaying: Bool) {
+        if wasPlaying, !isAnythingPlaying { sleepTimer.noteSleepSessionStopped(); return }
         guard !wasPlaying, isAnythingPlaying else { return }
+        beginSleepNight()
+    }
+
+    /// A Sleep night begins: from rest, or by switching from Focus with the sound still playing
+    /// (that path has no idle→playing edge, so the night never settled and the ring's timer never
+    /// started until the next pause and play). The night ring is honoured whichever way it began
+    /// (it used to be the orb alone, so the other paths quietly played all night under a ring that
+    /// said "45m"): nothing in Focus (the Pomodoro is its timer), for All night, or when a
+    /// countdown is already running, so resuming after a pause, an interruption or a podcast
+    /// stall keeps the night you set (`SessionGuards.timerOnPlay`).
+    private func beginSleepNight() {
+        if !focusMode { sleepTimer.noteSleepSessionStarted() }
         if let m = SessionGuards.timerOnPlay(focusMode: focusMode, lengthMinutes: nightLengthProvider(),
                                              timerActive: sleepTimer.timerRemaining > 0) {
             sleepTimer.startSleepTimer(minutes: m)
@@ -391,7 +402,7 @@ final class AudioEngine: ObservableObject {
         didSet {
             UserDefaults.standard.set(focusMode, forKey: "focusMode")
             // The two timers are mutually exclusive: leaving one mode stops its timer.
-            if focusMode { sleepTimer.cancelTimer() } else { pomodoro.stop() }
+            if focusMode { sleepTimer.cancelTimer(); sleepTimer.endUntimedNight() } else { pomodoro.stop() }
             // Each mode keeps its own pick: remember the one being left, so coming back restores
             // it. Without this, Sleep's Brown came back from Focus as Pink (Focus snapped it to
             // Pink, which Sleep also has, so it stuck).
@@ -408,6 +419,8 @@ final class AudioEngine: ObservableObject {
             // Apple Music is Focus-only: leaving Focus stops it and reverts the session to
             // exclusive playback so Sleep's all-night behavior (and the limiter) is unaffected.
             if !focusMode { stopAppleMusic() }
+            // Into Sleep with the sound still going: the same night start as pressing Play.
+            if switched, !focusMode, isAnythingPlaying { beginSleepNight() }
         }
     }
 
@@ -511,7 +524,8 @@ final class AudioEngine: ObservableObject {
         // reactive consumers observe the child directly instead:
         //   - sleepTimer / pomodoro (~1/sec): SessionButton, NightRing, NightLine, BumpTimerButton in
         //     HomeView; FocusHero / FocusSessionReadout / CycleDots; NightDarken in AmbientScene.
-        //     ContentView drives its night-dim off `sleepTimer.$timerRemaining` via onReceive.
+        //     ContentView subscribes to `$timerRemaining` only to catch the timer starting or
+        //     ending (`timerWasActive`); it arms the veil off `isAnythingPlaying` and touches.
         //   - playbackProgress (~1/sec): MiniPlayerView + NowPlayingSheet (Phase 1).
         //   - queueManager (user-action): NowPlayingSheet (queue list) + SettingsView (the
         //     Auto-Play / Shuffle toggles) observe it directly.

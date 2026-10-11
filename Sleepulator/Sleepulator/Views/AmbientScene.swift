@@ -11,11 +11,15 @@ enum SceneMood {
 struct SceneContext {
     let palette: Palette
     let reduceMotion: Bool
-    /// True when the screen is actually occluded — the night-dim veil, backgrounding, or a
-    /// low-luminance/Always-On display — so scenes settle to static for battery. NOT the
-    /// lighter controls-faded screensaver: scenes keep animating through that (it's the show).
+    /// Hold the scene still: the screen is out of sight (`occluded`), or the "Moving scenes"
+    /// setting is off. Scenes settle to a static frame. NOT the lighter controls-faded
+    /// screensaver: scenes keep animating through that (it's the show).
     /// See `HomeView.scenesFrozen` / the `nightDimmed → audio.screenDimmed` hand-off.
     let paused: Bool
+    /// The out-of-sight part of `paused`: the veil, backgrounded, low luminance. NightDarken and
+    /// NightFade stop their periodic re-reads only then, so with Moving scenes off Night sky and
+    /// Rain on glass still darken.
+    var occluded: Bool = false
     /// The sleep timer, for time-reactive sleep scenes (e.g. the setting moon).
     let sleepTimer: SleepTimerService
     /// The Pomodoro, for time-reactive Focus scenes (work/break phase + progress).
@@ -28,6 +32,9 @@ struct SceneContext {
     /// live, never observed. `.zero` when no motion-using scene is active. Closure for the same
     /// reasons as `audioLevel`.
     var tilt: () -> SIMD2<Float> = { .zero }
+    /// The night ring's centre (global coordinates), for a scene with one focal glow (Breathe)
+    /// that should sit where the ring and its ember sit. Nil when unmeasured, or in Focus.
+    var focalPoint: CGPoint? = nil
 }
 
 /// A self-contained ambient backdrop for the home screen. The point of the protocol is that
@@ -41,12 +48,15 @@ protocol AmbientScene {
     /// True if the scene reads `SceneContext.tilt` for gyro parallax — the owner uses this to
     /// gate CoreMotion so it runs *only* for a motion-using, on-screen, non-dimmed scene.
     var usesMotion: Bool { get }
+    /// A DEBUG A/B sibling: pickable from the Backdrop chips, but left out of Home's swipe loop.
+    var isExperiment: Bool { get }
     func makeBackdrop(_ ctx: SceneContext) -> AnyView
 }
 
 extension AmbientScene {
     /// Most scenes don't use motion; they opt in by overriding this.
     var usesMotion: Bool { false }
+    var isExperiment: Bool { false }
 }
 
 // MARK: - The built-in scenes (wrap today's backdrops verbatim)
@@ -69,7 +79,7 @@ struct NightSkyScene: AmbientScene {
                 // Darkening must observe the timer itself: nightProgress is computed (not
                 // @Published) and the timer is no longer forwarded through `audio`, so HomeView
                 // stops re-rendering each second — without this leaf the sky would freeze.
-                NightDarken(timer: ctx.sleepTimer)
+                NightDarken(timer: ctx.sleepTimer, occluded: ctx.occluded)
             }
             .ignoresSafeArea()
         )
@@ -77,41 +87,65 @@ struct NightSkyScene: AmbientScene {
 }
 
 /// The sleep sky-darkening overlay, isolated so it re-renders on each timer tick (it observes the
-/// timer directly) rather than relying on its parent's per-second re-render.
+/// timer directly) rather than relying on its parent's per-second re-render. An untimed night
+/// settles on the clock with nothing published, so it also re-reads every 20 s, except while the
+/// screen is out of sight (`occluded`). Under the veil it still follows a running timer's 1 Hz
+/// republish (TESTING.md §3H.1).
 private struct NightDarken: View {
     @ObservedObject var timer: SleepTimerService
+    var occluded: Bool = false
     var body: some View {
-        Color.black
-            .opacity(timer.nightProgress * 0.35)
-            .ignoresSafeArea()
-            .allowsHitTesting(false)
+        Group {
+            if occluded {
+                Color.black.opacity(timer.nightProgress * 0.35)
+            } else {
+                TimelineView(.periodic(from: .now, by: 20)) { _ in
+                    Color.black.opacity(timer.nightProgress * 0.35)
+                }
+            }
+        }
+        .ignoresSafeArea()
+        .allowsHitTesting(false)
     }
 }
 
 /// Fades arbitrary backdrop content toward dark as the sleep timer winds down — the
-/// general-purpose sibling of `NightDarken`, used for the warm static layers (the embers
-/// hearth glow, the rain-glass bokeh) that should dim with the night. Isolated so it
-/// re-renders only on the timer's ~1 Hz republish, never dragging its parent (or a sibling
-/// `TimelineView` animation loop) into a re-render. Animating Canvas layers don't use this —
+/// general-purpose sibling of `NightDarken`, used for warm static layers such as the rain-glass
+/// bokeh that should dim with the night. Isolated so it re-renders only on the timer's ~1 Hz
+/// republish and, unless the screen is out of sight, a 20 s re-read for an untimed night (which
+/// publishes nothing), never dragging its parent (or a sibling `TimelineView` animation loop)
+/// into a re-render. Animating Canvas layers don't use this —
 /// they read `nightProgress` live inside their own redraw instead.
 struct NightFade<Content: View>: View {
     @ObservedObject var timer: SleepTimerService
     /// Opacity removed at full night (`nightProgress == 1`). 0.8 → fades to a faint glow.
     var maxDim: Double = 0.8
+    /// The screen is out of sight (veil, background): no periodic re-reads.
+    var occluded: Bool = false
     @ViewBuilder var content: Content
     var body: some View {
-        content.opacity(1 - maxDim * timer.nightProgress)
+        if occluded {
+            content.opacity(1 - maxDim * timer.nightProgress)
+        } else {
+            faded
+        }
+    }
+
+    private var faded: some View {
+        TimelineView(.periodic(from: .now, by: 20)) { _ in
+            content.opacity(1 - maxDim * timer.nightProgress)
+        }
     }
 }
 
 // (EnergyScene retired 2026-07-06 — a rotating blurred glow with no depth/reactivity; a weak
-// concept Metal wouldn't save. Focus now defaults to "current". FocusBackdrop in Backdrops.swift
-// is now dead code, safe to delete in a cleanup pass.)
+// concept Metal wouldn't save. Focus now defaults to "current".)
 
 /// "Current" (Focus): cool streams that quicken/brighten through a work interval and ease on a
 /// break — momentum without flicker. A domain-warped FBM flow-field shader
 /// (`CurrentShader.metal` `currentField` via `CurrentMetalView`), driven by the shared
-/// `FocusDrivers` mapping. Reduce Motion feeds the flow clock rate 0 → static field.
+/// `FocusDrivers` mapping. System Reduce Motion doesn't still it (it gates parallax only,
+/// SCREENSAVER-LIBRARY-SPEC §5); the "Moving scenes" setting does, through `paused`.
 ///
 /// Promoted 2026-09-21: this WAS a DEBUG-only "(Metal)" A/B sibling sitting next to a Canvas
 /// `CurrentScene` that owned the "current" id — which is the id `sceneFocus` defaults to. So the
@@ -128,10 +162,11 @@ struct CurrentScene: AmbientScene {
     }
 }
 
-/// "Tide" (Focus): rising, pulsing bands whose energy builds across a work interval and eases on
-/// a break (`TideShader.metal` `tideField` via `TideMetalView`) — an FBM-modulated surge with a
-/// crisp crest and a counter-swell, instead of the flat Canvas fill it replaced. Reduce Motion
-/// stills the surface. Promoted 2026-09-21 out of its DEBUG A/B slot — see `CurrentScene`.
+/// "Tide" (Focus): one waterline whose height IS the interval, rising across a work interval and
+/// running back on a break, with a crisp crest (`TideShader.metal` `tideField` via
+/// `TideMetalView`). At rest the tide is out, a low line at the bottom edge. Promoted 2026-09-21
+/// out of its DEBUG A/B slot — see `CurrentScene`. System Reduce Motion doesn't still it (it gates
+/// parallax only, SCREENSAVER-LIBRARY-SPEC §5); the "Moving scenes" setting does, via `paused`.
 struct TideScene: AmbientScene {
     let id = "tide"
     let title = "Tide"
@@ -150,7 +185,7 @@ struct RainOnGlassScene: AmbientScene {
     let mood = SceneMood.sleep
 
     func makeBackdrop(_ ctx: SceneContext) -> AnyView {
-        AnyView(RainGlassView(paused: ctx.paused, sleepTimer: ctx.sleepTimer))
+        AnyView(RainGlassView(paused: ctx.paused, occluded: ctx.occluded, sleepTimer: ctx.sleepTimer))
     }
 }
 
@@ -166,6 +201,7 @@ struct RainOnGlassDepthScene: AmbientScene {
     /// The drops' far world parallaxes with gyro (held-in-hand bonus); flat on a nightstand it
     /// still reads deep from focus + refraction. HomeView.reconcileMotion gates CoreMotion on this.
     var usesMotion: Bool { true }
+    var isExperiment: Bool { true }
 
     func makeBackdrop(_ ctx: SceneContext) -> AnyView {
         AnyView(RainGlassDepthView(paused: ctx.paused,
@@ -186,7 +222,7 @@ struct BreathingBloomScene: AmbientScene {
     let mood = SceneMood.sleep
 
     func makeBackdrop(_ ctx: SceneContext) -> AnyView {
-        AnyView(BreathingBloomView(paused: ctx.paused, sleepTimer: ctx.sleepTimer))
+        AnyView(BreathingBloomView(paused: ctx.paused, sleepTimer: ctx.sleepTimer, focus: ctx.focalPoint))
     }
 }
 
@@ -272,10 +308,11 @@ struct DeepSpaceScene: AmbientScene {
     }
 }
 
-/// "Sandfall" (Focus): per-column comet streaks falling through a descending FBM curtain, whose
-/// intensity builds across a work interval (`SandfallShader.metal` `sandField` via
-/// `SandfallMetalView`) — replacing the 14 stiff Canvas grains. Reduce Motion stills the fall.
-/// Promoted 2026-09-21 out of its DEBUG A/B slot — see `CurrentScene`.
+/// "Sandfall" (Focus): an hourglass whose bottom bulb's fill IS the interval, draining across a
+/// work interval and running back on a break (`SandfallShader.metal` `sandField` via
+/// `SandfallMetalView`). At rest its sand lies settled in the bottom bulb. Promoted 2026-09-21
+/// out of its DEBUG A/B slot — see `CurrentScene`. System Reduce Motion doesn't still it (it gates
+/// parallax only, SCREENSAVER-LIBRARY-SPEC §5); the "Moving scenes" setting does, via `paused`.
 struct SandfallScene: AmbientScene {
     let id = "sandfall"
     let title = "Sandfall"
@@ -306,6 +343,11 @@ enum SceneRegistry {
 
     static func scenes(for mood: SceneMood) -> [any AmbientScene] {
         all.filter { $0.mood == mood }
+    }
+
+    /// What a swipe on Home cycles through: the mood's scenes without the A/B experiments.
+    static func swipeLoop(for mood: SceneMood) -> [any AmbientScene] {
+        scenes(for: mood).filter { !$0.isExperiment }
     }
 
     /// Resolve a selection id to a scene, falling back to the mood's first registered scene.

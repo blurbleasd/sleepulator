@@ -2,11 +2,10 @@ import SwiftUI
 
 /// "Current" (Focus) — the Metal edition. A GPU fragment shader (`CurrentShader.metal`,
 /// `currentField`) renders cool streams flowing across a deep-indigo field from domain-warped FBM,
-/// with a filmic roll-off + hash dither so the cool field doesn't band on OLED. It is the A/B
-/// sibling of the CPU `CurrentView` (which stroked sine paths on a Canvas).
+/// with a filmic roll-off + hash dither so the cool field doesn't band on OLED. It replaced a CPU
+/// Canvas edition that stroked sine paths.
 ///
-/// The look is driven by the shared `FocusDrivers` mapping — the SAME mapping the Canvas
-/// `CurrentView` uses — so the two scenes can differ only in rendering, never in how they read the
+/// The look is driven by the shared `FocusDrivers` mapping, the one place the Focus scenes read the
 /// Pomodoro. Values are sampled *live* each tick (never observed, so the per-tick redraw can't
 /// trigger the `@Published` re-render storm CLAUDE.md warns about).
 ///
@@ -20,7 +19,7 @@ struct CurrentMetalView: View {
     let pomodoro: PomodoroService
 
     /// Integrates `driveSpeed` into a flow phase (rate, not absolute-time × speed — see
-    /// `CurrentView`/`SceneClock`). Random start so the streams open at a fresh pose each appearance.
+    /// `SceneClock`). Random start so the streams open at a fresh pose each appearance.
     @State private var clock = SceneClock(start: .random(in: 0...2048))
 
     var body: some View {
