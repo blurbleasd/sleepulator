@@ -223,7 +223,7 @@ the brightness you actually use at night, in **both** Sleep and Focus.
    second). Force-quit from the app switcher. Relaunch. ✅ The saved mix is still there (the
    deferred write is flushed synchronously on background). Repeat with audio NOT playing.
 3. **Overnight log export.** After a night (or any session with a timer + a call/route change),
-   Settings ▸ Advanced ▸ Diagnostics ▸ "Export last night's log". ✅ The share sheet produces a
+   Settings ▸ Backup & support ▸ "Export last night's log". ✅ The share sheet produces a
    readable text timeline — sleep-timer start/bump/tail/terminal-stop, interruption began/ended
    (with the resume decision), route changes, limiter-attach outcome — not a wall of `<private>`
    (verify on a release build) and not slow to generate.
@@ -280,7 +280,7 @@ this section is where you do it. Do it in a dark room at your real bedtime brigh
    clear the power budget without cutting drop count / fps / DoF below where the "whoa" survives, cut
    back to the flat scene.
 6. **Measured, not eyeballed — read the F3 diagnostics log (P1 power budget).** After a 30–60 min run per
-   scene, Settings ▸ Advanced ▸ Diagnostics ▸ "Export last night's log". ✅ It carries
+   scene, Settings ▸ Backup & support ▸ "Export last night's log". ✅ It carries
    `scene=… fps=… thermal=… battery=…` lines (category `scene`). Confirm: fps holds ≈ 30 on the depth
    scenes; `thermal` stays `nominal`/`fair` (never `serious`); per-scene battery drain is ≤ the flat
    baseline (measure the shipping rain / still-water first as the baseline). Confirm an 8 h locked run's

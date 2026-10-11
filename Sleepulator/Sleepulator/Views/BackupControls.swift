@@ -156,20 +156,21 @@ final class BackupController: ObservableObject {
 /// The Backup rows: Export, Restore, and Undo while a recent restore can still be undone.
 struct BackupRows: View {
     @ObservedObject var backup: BackupController
+    let pal: Palette
 
     var body: some View {
         Button { backup.export() } label: {
-            Label("Export a backup", systemImage: "square.and.arrow.up")
+            SettingActionRow(title: "Export a backup", systemImage: "square.and.arrow.up", pal: pal)
         }
         .disabled(backup.busy)
         Button { backup.isImporting = true } label: {
-            Label("Restore from a backup", systemImage: "square.and.arrow.down")
+            SettingActionRow(title: "Restore from a backup", systemImage: "square.and.arrow.down", pal: pal)
         }
         .disabled(backup.busy)
         if let date = backup.undoDate {
             Button { backup.askToUndo() } label: {
-                Label("Undo the restore from \(date.formatted(.dateTime.weekday(.wide).hour().minute()))",
-                      systemImage: "arrow.uturn.backward")
+                SettingActionRow(title: "Undo the restore from \(date.formatted(.dateTime.weekday(.wide).hour().minute()))",
+                                 systemImage: "arrow.uturn.backward", pal: pal)
             }
             .disabled(backup.busy)
         }

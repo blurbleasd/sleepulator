@@ -51,3 +51,23 @@ enum SettingsCopy {
 
     static let eqFloor = 0.2
 }
+
+/// Settings' sections, in the order `SettingsOrder` gives them.
+enum SettingsSection: String, CaseIterable, Identifiable {
+    case sleep, nightPodcasts, focus, podcasts, sound, display
+    var id: String { rawValue }
+}
+
+/// Which sections lead in each mode. The current mode's own settings come first, then what both
+/// modes share; the other mode's are folded under one row at the end. In Sleep the podcast
+/// sections sit together (the night first), since a podcast is often what's playing at bedtime.
+enum SettingsOrder {
+    static func shown(focus: Bool) -> [SettingsSection] {
+        focus ? [.focus, .sound, .display, .podcasts]
+              : [.sleep, .nightPodcasts, .podcasts, .sound, .display]
+    }
+
+    static func folded(focus: Bool) -> [SettingsSection] {
+        focus ? [.sleep, .nightPodcasts] : [.focus]
+    }
+}

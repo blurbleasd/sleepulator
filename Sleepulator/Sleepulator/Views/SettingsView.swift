@@ -4,8 +4,8 @@ import os
 
 struct SettingsView: View {
     /// Held unobserved (a plain `let`): used for the restore's reload and the Pomodoro writes. All
-    /// reactive state is observed via the narrow children below, so unrelated engine publishes (podTitle, transport,
-    /// chrome) no longer re-render SettingsView.
+    /// reactive state is observed via the narrow children below, so unrelated engine publishes
+    /// (podTitle, transport, chrome) no longer re-render SettingsView.
     let audio: AudioEngine
     /// Observed directly so the Auto-Play / Shuffle toggles still refresh after Phase 3 dropped
     /// the queueManager objectWillChange forward into AudioEngine.
@@ -16,7 +16,8 @@ struct SettingsView: View {
     @AppStorage("breathingOnRamp") private var breathingOnRamp = false
     @AppStorage("ambientMotion") private var ambientMotion = true
 
-    /// Export, Restore and Undo: state that must outlive the rows (see `BackupController`).
+    /// Export, Restore and Undo. Owned here, not by the Backup & support page, so a restore still
+    /// finishes and reloads if that page is closed mid-way (see `BackupController`).
     @StateObject private var backup: BackupController
 
     init(audio: AudioEngine, queue: PodcastQueueManager, settings: PlaybackSettings) {
@@ -30,6 +31,9 @@ struct SettingsView: View {
     /// "focusMode" key (AudioEngine writes it) so this view needn't observe the whole engine.
     @AppStorage("focusMode") private var focusMode = false
     var pal: Palette { Palette(focusMode: focusMode) }
+
+    /// Whether the other mode's settings are unfolded. Folds again when the mode changes.
+    @State private var showOtherMode = false
 
     /// The sleep-aware queue hold, read by AudioEngine when an episode ends (no live plumbing).
     @AppStorage("holdQueueDuringSleepTimer") private var holdQueue = false
@@ -83,175 +87,24 @@ struct SettingsView: View {
         .accessibilityValue("\(value) minutes")
     }
 
-    // Order is the app's: Sleep first (the bedside case), then Focus, then what both share, then
-    // podcasts, then the rarely touched. It used to open on the podcast queue and storage, with
-    // the sleep controls below the fold.
+    // The current mode's settings lead, then what both modes share, then the other mode's folded
+    // under one row, then Backup & support. The list used to run in one order for both modes:
+    // Focus opened on Sleep's darkening and podcasts-at-night, Sleep had four Pomodoro steppers
+    // mid-list, and it ended on backup, diagnostics and a build timestamp.
     var body: some View {
         NavigationStack {
             List {
                 Group {
-                    Section {
-                        Toggle(isOn: $autoNightDim) { label("Darken the screen at night") }
-                        Toggle(isOn: $breathingOnRamp) { label("Start with a minute of breathing") }
-                    } header: {
-                        header("Sleep")
-                    } footer: {
-                        footer("While Sleep plays on the Sleep screen or the player, or anywhere with a sleep timer running, the screen goes black a minute after your last touch; tap to wake. Breathing leads into your mix, then it starts on its own.")
+                    ForEach(SettingsOrder.shown(focus: focusMode)) { section($0) }
+                    otherModeRow
+                    if showOtherMode {
+                        ForEach(SettingsOrder.folded(focus: focusMode)) { section($0) }
                     }
-
                     Section {
-                        // What happens to a podcast at night, in one place: how loud it can get,
-                        // how it sounds, and whether the next one starts. The hold used to sit in
-                        // the daytime Podcasts section, worded like the timer's one-off "Stop
-                        // after this episode", which stops everything.
-                        Picker(selection: limiterChoice) {
-                            ForEach(LimiterChoice.allCases) { Text($0.title).tag($0) }
+                        NavigationLink {
+                            BackupSupportView(backup: backup, pal: pal)
                         } label: {
-                            label("Soften loud moments", note: "Keeps a sudden loud moment from waking you.")
-                        }
-                        Toggle(isOn: $settings.sleepEQ) {
-                            label("Soften harsh highs and boomy lows", note: "Gentler voices at low volume.")
-                        }
-                        if settings.sleepEQ {
-                            VStack(alignment: .leading, spacing: UI.sm) {
-                                HStack {
-                                    label("How much")
-                                    Spacer()
-                                    Text(SettingsCopy.softening(settings.sleepEQIntensity)).foregroundStyle(pal.dim)
-                                }
-                                VolumeBar(value: $settings.sleepEQIntensity, accent: pal.accent,
-                                          range: SettingsCopy.eqFloor...2, style: .parameter, tapToSet: true)
-                                    // The visible label, so Voice Control's "How much" finds it.
-                                    .accessibilityLabel("How much softening")
-                                    .accessibilityValue(SettingsCopy.softening(settings.sleepEQIntensity))
-                            }
-                            .padding(.vertical, UI.xs)
-                        }
-                        Toggle(isOn: $holdQueue) {
-                            label("Don't start the next episode during a sleep timer",
-                                  note: queue.autoPlay ? "The one playing finishes; your sounds carry on."
-                                                       : "Only applies when the next episode plays automatically.")
-                        }
-                        // With Auto-Play off the next episode never starts on its own anyway.
-                        .disabled(!queue.autoPlay)
-                    } header: {
-                        header("Podcasts at night")
-                    } footer: {
-                        footer("Softening is for podcasts only; your sounds are already steady.")
-                    }
-
-                    Section {
-                        minutesStepper("Focus", value: pomoWork, range: 5...90, step: 5) { audio.pomodoro.workMinutes = $0 }
-                        minutesStepper("Short break", value: pomoRest, range: 1...30, step: 1) { audio.pomodoro.restMinutes = $0 }
-                        minutesStepper("Long break", value: pomoLongRest, range: 5...60, step: 5) { audio.pomodoro.longRestMinutes = $0 }
-                        Stepper(value: pomodoroBinding(pomoCycles) { audio.pomodoro.cyclesBeforeLongBreak = $0 }, in: 2...8) {
-                            HStack {
-                                label("Rounds before a long break")
-                                Spacer()
-                                Text("\(pomoCycles)").foregroundStyle(pal.dim).monospacedDigit()
-                            }
-                        }
-                        .accessibilityValue("\(pomoCycles) rounds")
-                    } header: {
-                        header("Focus")
-                    } footer: {
-                        footer("Changes apply from the next round.")
-                    }
-
-                    Section {
-                        VStack(alignment: .leading, spacing: 8) {
-                            HStack {
-                                label("Stereo width")
-                                Spacer()
-                                Text(settings.stereoWidth < 0.05 ? "Mono" : "\(Int((settings.stereoWidth / 1.5) * 100))%")
-                                    .foregroundStyle(pal.dim).monospacedDigit()
-                            }
-                            VolumeBar(value: $settings.stereoWidth, accent: pal.accent, range: 0...1.5, style: .parameter, tapToSet: true)
-                                .accessibilityLabel("Stereo width")
-                                .accessibilityValue(settings.stereoWidth < 0.05 ? "Mono" : "\(Int((settings.stereoWidth / 1.5) * 100)) percent")
-                        }
-                        .padding(.vertical, 4)
-                        // A true binaural beat needs one tone per ear; on a speaker the two sum in the
-                        // air and the beat vanishes, so a speaker gets a pulsed (isochronic) tone.
-                        Picker(selection: $settings.beatRouting) {
-                            Text("Auto").tag("auto")
-                            Text("Headphones").tag("headphones")
-                            Text("Speaker").tag("speaker")
-                        } label: {
-                            label("Beats for")
-                        }
-                    } header: {
-                        header("Sound")
-                    } footer: {
-                        footer(settings.beatRouting == "headphones" ? "Beats made for headphones, one tone in each ear. Lower width keeps the bass centred on a phone speaker."
-                               : settings.beatRouting == "speaker" ? "A gentle pulse that works on a speaker. Lower width keeps the bass centred on a phone speaker."
-                               : "Headphone beats with headphones in, a speaker-friendly pulse without. Lower width keeps the bass centred on a phone speaker.")
-                    }
-
-                    Section {
-                        Toggle(isOn: $ambientMotion) { label("Moving scenes") }
-                    } header: {
-                        header("Display")
-                    } footer: {
-                        footer("Off holds the backdrop on one still frame: calmer, and easier on the battery. The system's Reduce Motion already stops the tilt.")
-                    }
-
-                    Section {
-                        Toggle(isOn: $queue.autoPlay) { label("Play the next episode automatically") }
-                        Toggle(isOn: $queue.shuffleQueue) { label("Shuffle the queue") }
-                        Picker(selection: Binding(get: { Int(settings.skipInterval) }, set: { settings.skipInterval = Double($0) })) {
-                            ForEach([10, 15, 30, 45], id: \.self) { Text("\($0) seconds").tag($0) }
-                        } label: {
-                            label("Skip back and forward")
-                        }
-                        Toggle(isOn: $queue.deleteOnCompletion) { label("Delete downloads once played") }
-                        Toggle(isOn: $queue.hideFinishedEpisodes) { label("Hide played episodes") }
-                    } header: {
-                        header("Podcasts")
-                    }
-
-                    Section {
-                        BackupRows(backup: backup)
-                    } header: {
-                        header("Backup")
-                    } footer: {
-                        footer("Your mixes, podcasts, queue and settings, as one file.")
-                    }
-
-                    Section {
-                        NavigationLink { DiagnosticsListView(pal: pal) } label: { label("Reports from iOS") }
-                        Button {
-                            collectingLog = true
-                            Task {
-                                let text = await LogExport.collect()
-                                collectingLog = false
-                                logDocument = TextDocument(text: text)
-                                isExportingLog = true
-                            }
-                        } label: {
-                            HStack {
-                                Label("Export last night's log", systemImage: "doc.text")
-                                Spacer()
-                                if collectingLog { ProgressView() }
-                            }
-                        }
-                        // Gathering 12 hours of log lines takes a moment; a second tap mustn't
-                        // start another.
-                        .disabled(collectingLog)
-                    } header: {
-                        header("Diagnostics")
-                    } footer: {
-                        // Build identity: the build time is the line that tells manual builds apart.
-                        VStack(alignment: .leading, spacing: 6) {
-                            footer("Battery, hang and crash reports iOS delivers about once a day. Stored on this device only.")
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Sleepulator \(AppInfo.versionBuild)")
-                                if let built = AppInfo.builtAtLabel { Text("Built \(built)") }
-                            }
-                            .foregroundStyle(pal.dim)
-                            .padding(.top, 10)
-                            .accessibilityElement(children: .combine)
-                            .accessibilityLabel(AppInfo.accessibilitySummary)
+                            label("Backup & support")
                         }
                     }
                 }
@@ -261,37 +114,183 @@ struct SettingsView: View {
             .listStyle(.insetGrouped)
             .scrollContentBackground(.hidden)
             .background(pal.bg.ignoresSafeArea())
-            .tint(pal.accent)
+            .tint(pal.controlTint)
             // Room for the floating mini-player, measured.
             .miniPlayerClearance()
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.large)
-        }
-        .backupPresentations(backup)
-        // The log exporter must live on its OWN node: two .fileExporter modifiers chained on the
-        // same view shadow each other (only the last presents — a long-standing SwiftUI defect),
-        // which silently broke "Export Data" when this second exporter was added for the
-        // overnight log trail. A clear background anchor gives it a separate attachment point.
-        .background {
-            Color.clear
-                .fileExporter(isPresented: $isExportingLog, document: logDocument, contentType: .plainText, defaultFilename: "sleepulator-log") { result in
-                    if case .failure(let error) = result {
-                        Log.storage.error("Log export failed: \(error.localizedDescription, privacy: .public)")
-                        logExportFailed = true
-                    }
-                }
-        }
-        .alert("Couldn't save the log", isPresented: $logExportFailed) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text("Try again, or pick another place to save it.")
+            .onChange(of: focusMode) { showOtherMode = false }
         }
     }
 
-    @State private var isExportingLog = false
-    @State private var logDocument: TextDocument?
-    @State private var collectingLog = false
-    @State private var logExportFailed = false
+    /// The fold for the other mode's settings: a row that opens them below it.
+    private var otherModeRow: some View {
+        Section {
+            Button {
+                withAnimation(.easeOut(duration: 0.25)) { showOtherMode.toggle() }
+            } label: {
+                HStack {
+                    label(focusMode ? "Sleep settings" : "Focus settings",
+                          note: focusMode ? "Darkening, breathing and podcasts at night" : "Session and break lengths")
+                    Spacer()
+                    Image(systemName: "chevron.down")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(pal.dim)
+                        .rotationEffect(.degrees(showOtherMode ? 180 : 0))
+                        .accessibilityHidden(true)
+                }
+                .contentShape(Rectangle())
+            }
+            .accessibilityValue(showOtherMode ? "Expanded" : "Collapsed")
+        }
+    }
+
+    @ViewBuilder
+    private func section(_ section: SettingsSection) -> some View {
+        switch section {
+        case .sleep:         sleepSection
+        case .nightPodcasts: nightPodcastsSection
+        case .focus:         focusSection
+        case .sound:         soundSection
+        case .display:       displaySection
+        case .podcasts:      podcastsSection
+        }
+    }
+
+    private var sleepSection: some View {
+        Section {
+            Toggle(isOn: $autoNightDim) { label("Darken the screen at night") }
+            Toggle(isOn: $breathingOnRamp) { label("Start with a minute of breathing") }
+        } header: {
+            header("Sleep")
+        } footer: {
+            footer("While Sleep plays on the Sleep screen or the player, or anywhere with a sleep timer running, the screen goes black a minute after your last touch; tap to wake. Breathing leads into your mix, then it starts on its own.")
+        }
+    }
+
+    private var nightPodcastsSection: some View {
+        Section {
+            // What happens to a podcast at night, in one place: how loud it can get, how it
+            // sounds, and whether the next one starts. The hold used to sit in the daytime
+            // Podcasts section, worded like the timer's one-off "Stop after this episode", which
+            // stops everything.
+            Picker(selection: limiterChoice) {
+                ForEach(LimiterChoice.allCases) { Text($0.title).tag($0) }
+            } label: {
+                label("Soften loud moments", note: "Keeps a sudden loud moment from waking you.")
+            }
+            .tint(pal.dim)
+            Toggle(isOn: $settings.sleepEQ) {
+                label("Soften harsh highs and boomy lows", note: "Gentler voices at low volume.")
+            }
+            if settings.sleepEQ {
+                VStack(alignment: .leading, spacing: UI.sm) {
+                    HStack {
+                        label("How much")
+                        Spacer()
+                        Text(SettingsCopy.softening(settings.sleepEQIntensity)).foregroundStyle(pal.dim)
+                    }
+                    VolumeBar(value: $settings.sleepEQIntensity, accent: pal.controlTint,
+                              range: SettingsCopy.eqFloor...2, style: .parameter, tapToSet: true)
+                        // The visible label, so Voice Control's "How much" finds it.
+                        .accessibilityLabel("How much softening")
+                        .accessibilityValue(SettingsCopy.softening(settings.sleepEQIntensity))
+                }
+                .padding(.vertical, UI.xs)
+            }
+            Toggle(isOn: $holdQueue) {
+                label("Don't start the next episode during a sleep timer",
+                      note: queue.autoPlay ? "The one playing finishes; your sounds carry on."
+                                           : "Only applies when the next episode plays automatically.")
+            }
+            // With Auto-Play off the next episode never starts on its own anyway.
+            .disabled(!queue.autoPlay)
+        } header: {
+            header("Podcasts at night")
+        } footer: {
+            footer("Softening is for podcasts only; your sounds are already steady.")
+        }
+    }
+
+    private var focusSection: some View {
+        Section {
+            minutesStepper("Focus", value: pomoWork, range: 5...90, step: 5) { audio.pomodoro.workMinutes = $0 }
+            minutesStepper("Short break", value: pomoRest, range: 1...30, step: 1) { audio.pomodoro.restMinutes = $0 }
+            minutesStepper("Long break", value: pomoLongRest, range: 5...60, step: 5) { audio.pomodoro.longRestMinutes = $0 }
+            Stepper(value: pomodoroBinding(pomoCycles) { audio.pomodoro.cyclesBeforeLongBreak = $0 }, in: 2...8) {
+                HStack {
+                    label("Rounds before a long break")
+                    Spacer()
+                    Text("\(pomoCycles)").foregroundStyle(pal.dim).monospacedDigit()
+                }
+            }
+            .accessibilityValue("\(pomoCycles) rounds")
+        } header: {
+            header("Focus")
+        } footer: {
+            footer("Changes apply from the next round.")
+        }
+    }
+
+    private var soundSection: some View {
+        Section {
+            VStack(alignment: .leading, spacing: UI.sm) {
+                HStack {
+                    label("Stereo width")
+                    Spacer()
+                    Text(settings.stereoWidth < 0.05 ? "Mono" : "\(Int((settings.stereoWidth / 1.5) * 100))%")
+                        .foregroundStyle(pal.dim).monospacedDigit()
+                }
+                VolumeBar(value: $settings.stereoWidth, accent: pal.controlTint, range: 0...1.5, style: .parameter, tapToSet: true)
+                    .accessibilityLabel("Stereo width")
+                    .accessibilityValue(settings.stereoWidth < 0.05 ? "Mono" : "\(Int((settings.stereoWidth / 1.5) * 100)) percent")
+            }
+            .padding(.vertical, UI.xs)
+            // A true binaural beat needs one tone per ear; on a speaker the two sum in the
+            // air and the beat vanishes, so a speaker gets a pulsed (isochronic) tone.
+            Picker(selection: $settings.beatRouting) {
+                Text("Auto").tag("auto")
+                Text("Headphones").tag("headphones")
+                Text("Speaker").tag("speaker")
+            } label: {
+                label("Beats for")
+            }
+            .tint(pal.dim)
+        } header: {
+            header("Sound")
+        } footer: {
+            footer(settings.beatRouting == "headphones" ? "Beats made for headphones, one tone in each ear. Lower width keeps the bass centred on a phone speaker."
+                   : settings.beatRouting == "speaker" ? "A gentle pulse that works on a speaker. Lower width keeps the bass centred on a phone speaker."
+                   : "Headphone beats with headphones in, a speaker-friendly pulse without. Lower width keeps the bass centred on a phone speaker.")
+        }
+    }
+
+    private var displaySection: some View {
+        Section {
+            Toggle(isOn: $ambientMotion) { label("Moving scenes") }
+        } header: {
+            header("Display")
+        } footer: {
+            footer("Off holds the backdrop on one still frame: calmer, and easier on the battery. The system's Reduce Motion already stops the tilt.")
+        }
+    }
+
+    private var podcastsSection: some View {
+        Section {
+            Toggle(isOn: $queue.autoPlay) { label("Play the next episode automatically") }
+            Toggle(isOn: $queue.shuffleQueue) { label("Shuffle the queue") }
+            Picker(selection: Binding(get: { Int(settings.skipInterval) }, set: { settings.skipInterval = Double($0) })) {
+                ForEach([10, 15, 30, 45], id: \.self) { Text("\($0) seconds").tag($0) }
+            } label: {
+                label("Skip back and forward")
+            }
+            .tint(pal.dim)
+            Toggle(isOn: $queue.deleteOnCompletion) { label("Delete downloads once played") }
+            Toggle(isOn: $queue.hideFinishedEpisodes) { label("Hide played episodes") }
+        } header: {
+            header("Podcasts")
+        }
+    }
 }
 
 struct JSONDocument: FileDocument {

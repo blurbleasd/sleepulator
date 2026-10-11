@@ -3601,6 +3601,27 @@ final class SettingsRulesTests: XCTestCase {
         XCTAssertEqual(SettingsCopy.minutes(5), "5 minutes")
     }
 
+    func testEachModeLeadsWithItsOwnSettings() {
+        XCTAssertEqual(SettingsOrder.shown(focus: false).first, .sleep)
+        XCTAssertEqual(SettingsOrder.shown(focus: true).first, .focus)
+        XCTAssertFalse(SettingsOrder.shown(focus: false).contains(.focus), "the Pomodoro is folded in Sleep")
+        XCTAssertFalse(SettingsOrder.shown(focus: true).contains(.nightPodcasts), "the night is folded in Focus")
+    }
+
+    func testEverySectionAppearsExactlyOnceInEachMode() {
+        for focus in [false, true] {
+            let all = SettingsOrder.shown(focus: focus) + SettingsOrder.folded(focus: focus)
+            XCTAssertEqual(all.count, SettingsSection.allCases.count)
+            XCTAssertEqual(Set(all), Set(SettingsSection.allCases))
+        }
+    }
+
+    func testSleepKeepsItsPodcastSectionsTogether() throws {
+        let order = SettingsOrder.shown(focus: false)
+        let night = try XCTUnwrap(order.firstIndex(of: .nightPodcasts))
+        XCTAssertEqual(order[night + 1], .podcasts)
+    }
+
     func testSofteningNeverSaysOffAboveTheFloor() {
         XCTAssertEqual(SettingsCopy.softening(SettingsCopy.eqFloor), "Light")
         XCTAssertEqual(SettingsCopy.softening(1.0), "Medium")
