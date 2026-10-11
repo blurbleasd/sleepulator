@@ -15,6 +15,8 @@ final class HomeLayoutUITests: XCTestCase {
         // waited up to 4 s before each tap, so Stop kept landing after the controls had faded.
         app.launchArguments = ["-ambientMotion", "<false/>"]
         app.launch()
+        // Back to Sleep even when an assertion stops the test mid-way in Focus.
+        addTeardownBlock { @MainActor in Self.leaveInSleep(app) }
 
         // Focus from either start state: a no-op when the last run left the app in Focus.
         let focusMode = app.buttons["Focus mode"]
@@ -72,21 +74,27 @@ final class HomeLayoutUITests: XCTestCase {
         // Recorded here, checked after the switch to Sleep, so a failure still leaves the app in Sleep.
         let podcastsTab = app.tabBars.buttons["Podcasts"]
         let nowPlayingDone = app.buttons["Done"]
+        // CI sometimes drops a synthesized tap, so each tap that matters checks its effect and goes
+        // round again; the effect is re-read before each tap, so a late one isn't doubled.
         var barTapActed = false
         if miniPlayer.waitForExistence(timeout: 5) {
-            miniPlayer.tap()
-            barTapActed = waitUntil(timeout: 5) { podcastsTab.isSelected || nowPlayingDone.exists }
-            if nowPlayingDone.exists {
-                nowPlayingDone.tap()
-                _ = nowPlayingDone.waitForNonExistence(timeout: 5)
+            let acted = { podcastsTab.isSelected || nowPlayingDone.exists }
+            for _ in 0..<3 where !barTapActed {
+                if !acted(), miniPlayer.exists { miniPlayer.tap() }
+                barTapActed = waitUntil(timeout: 3, acted)
             }
-            if podcastsTab.isSelected { app.tabBars.buttons["Focus"].tap() }
+            // Back to Focus Home: close Now Playing, or leave Podcasts.
+            for _ in 0..<3 where acted() {
+                if nowPlayingDone.exists { nowPlayingDone.tap() } else { app.tabBars.buttons["Focus"].tap() }
+                _ = waitUntil(timeout: 3) { !acted() }
+            }
             _ = session.waitForExistence(timeout: 5)
         }
 
         // Leave the app in Sleep before any check below can stop the test: the unit tests run hosted
         // in this same app and read its persisted mode, so a run after this one must not start out
-        // in Focus. So the bar's top is read before the switch and checked after it.
+        // in Focus (the teardown is the fallback). So the bar's top is read before the switch and
+        // checked after it.
         let barTop = miniPlayer.waitForExistence(timeout: 5) ? miniPlayer.frame.minY : nil
         app.buttons["Sleep mode"].tap()
         guard let barTop else { return XCTFail("No mini-player in Focus after the session") }
@@ -155,6 +163,24 @@ final class HomeLayoutUITests: XCTestCase {
         XCTAssertTrue(miniPlayer.waitForNonExistence(timeout: 5),
                       "The mini-player stayed in the accessibility tree after returning to Sleep Home")
         XCTAssertTrue(buildMix.isHittable, "Build mix is covered after returning to Sleep Home")
+    }
+
+    /// Puts the app back in Sleep for the tests that follow (the unit tests hosted in this app read
+    /// its persisted mode), from wherever an assertion stopped the Focus test: Now Playing up, on
+    /// Podcasts, the controls faded, a session running.
+    @MainActor
+    private static func leaveInSleep(_ app: XCUIApplication) {
+        guard app.state == .runningForeground else { return }
+        let done = app.buttons["Done"]
+        if done.exists { done.tap(); _ = done.waitForNonExistence(timeout: 3) }
+        let homeTab = app.tabBars.buttons.matching(NSPredicate(format: "label IN %@", ["Focus", "Sleep"])).firstMatch
+        if homeTab.exists, !homeTab.isSelected { homeTab.tap() }
+        let wake = app.buttons["Show controls"]
+        if wake.exists { wake.tap() }
+        let stop = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Stop focus session")).firstMatch
+        if stop.exists { stop.tap() }
+        let sleep = app.buttons["Sleep mode"]
+        if sleep.waitForExistence(timeout: 3), !sleep.isSelected { sleep.tap() }
     }
 
     /// Polls `condition` on the main run loop until it holds or `timeout` passes.

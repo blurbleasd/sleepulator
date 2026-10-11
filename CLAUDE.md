@@ -189,9 +189,10 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   `.accessibilityHidden(true)`. So ContentView takes the hidden mini-player out of the hierarchy
   (`if !miniPlayerHidden`, an opacity transition), and presents its Now Playing sheet itself so the
   sheet never depends on the bar. The removal fade still renders the bar for 0.9 s, so the
-  always-present wrapper also gates `.allowsHitTesting` and `.accessibilityHidden` on
-  `miniPlayerHidden`: those stop real taps and VoiceOver at once, though XCUITest's tree ignores
-  them. Keep them (only TESTING.md §M7 checks the fade). To prove a hidden view is gone, assert
+  always-present wrapper also gates `.allowsHitTesting` on `miniPlayerHidden` and
+  `.accessibilityHidden` on `miniPlayerHidden || nightDimmed` (the veil's rule below): those stop
+  real taps and VoiceOver at once, though XCUITest's tree ignores them. Keep both halves (only
+  TESTING.md §M7 and §Q.5 check them, on a device). To prove a hidden view is gone, assert
   `waitForNonExistence(timeout:)` in a UI test: a removal transition keeps it in the tree until it
   finishes.
 - **A `.contentShape(.accessibility, …)` can become its container's frame.** NightRing's band shape
@@ -227,9 +228,10 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   a second tap lifts the veil and wakes the controls (`SessionGuards.veilTap`: a tap within
   0.8 s is ignored, and one counts as the wake until the glance has faded; timed on the
   monotonic clock). If VoiceOver or Switch Control turns on while the veil is down, one tap wakes.
-  Under the veil the tabs and Home's wake layer are hidden from accessibility, so only the veil
-  should answer "Wake". XCUITest still lists SwiftUI elements hidden from accessibility (even
-  Home's opacity-0 chrome), so check that with Voice Control on a device (TESTING.md §Q.5).
+  Under the veil the tabs, Home's wake layer and the mini-player are hidden from accessibility, so
+  only the veil should answer "Wake". XCUITest still lists SwiftUI elements hidden from
+  accessibility (even Home's opacity-0 chrome), so check that with Voice Control on a device
+  (TESTING.md §Q.5).
 - **One name per sound.** Name sounds through `SoundNames` (binaurals are "Deep", "Drift", …,
   never "Delta" / "Theta").
 - **Podcasts is split by depth.** The library and its Tonight shelf follow the 2am rules (artwork
