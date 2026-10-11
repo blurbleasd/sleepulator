@@ -111,35 +111,11 @@ final class StorageManager {
         return try? Data(contentsOf: backupURL(for: filename))
     }
 
-    /// Whether a file's primary copy is on disk. No read: the restore checks its Undo snapshot
-    /// landed without loading a library-sized file on the main thread.
-    func fileExists(_ filename: String) -> Bool {
-        FileManager.default.fileExists(atPath: fileURL(for: filename).path)
-    }
-
-    /// Replace `destination` with `source` (and its backup sibling), synchronously on the I/O
-    /// queue. False if the move failed; `destination` is then left as it was.
-    func moveFile(_ source: String, to destination: String) -> Bool {
-        ioQueue.sync {
-            let fm = FileManager.default
-            do {
-                let dest = fileURL(for: destination)
-                if fm.fileExists(atPath: dest.path) {
-                    _ = try fm.replaceItemAt(dest, withItemAt: fileURL(for: source))
-                } else {
-                    try fm.moveItem(at: fileURL(for: source), to: dest)
-                }
-                let bak = backupURL(for: source)
-                if fm.fileExists(atPath: bak.path) {
-                    try? fm.removeItem(at: backupURL(for: destination))
-                    try? fm.moveItem(at: bak, to: backupURL(for: destination))
-                }
-                return true
-            } catch {
-                Log.storage.error("Failed to move \(source, privacy: .public): \(error.localizedDescription, privacy: .public)")
-                return false
-            }
-        }
+    /// `writeRaw`, but synchronous and throwing: the write is atomic (a temp file renamed over
+    /// the old one), so when it throws the previous file is still there, untouched. The restore
+    /// writes its Undo copy this way, and refuses to go ahead when it fails.
+    func writeRawNow(_ data: Data, to filename: String) throws {
+        try ioQueue.sync { try writeBoth(data, filename: filename) }
     }
 
     /// Atomically write raw JSON bytes to a file (Backup/Restore import path), keeping the

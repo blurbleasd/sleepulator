@@ -277,6 +277,8 @@ final class BackupRoundTripTests: XCTestCase {
         XCTAssertEqual(d.double(forKey: "masterVolume"), 0.9, accuracy: 1e-9)
         XCTAssertEqual(d.double(forKey: "stereoWidth"), 1.2, accuracy: 1e-9)
         XCTAssertNotNil(storage.rawData(for: "library.json"), "an empty library in the backup empties it")
+        XCTAssertEqual(try JSONDecoder().decode([String: Double].self, from: try XCTUnwrap(storage.rawData(for: "positions.json"))),
+                       ["ep9": 5.0], "the restore wrote the backup's saved places")
         XCTAssertEqual(Backup.undoDate(now: now, storage: storage, defaults: d)?.timeIntervalSince1970 ?? 0,
                        now.timeIntervalSince1970, accuracy: 1e-3)
 
@@ -468,7 +470,7 @@ final class BackupRoundTripTests: XCTestCase {
 
     // MARK: no snapshot, no restore; a lost snapshot stops being offered
 
-    // Value: protects=a restore that can't save its Undo copy replaces nothing and leaves no older Undo; fails_when=restore goes ahead without a snapshot, or an older snapshot survives it; why_new=only the export refusal itself was tested; seam=none; no_claim=the alert copy
+    // Value: protects=a restore that can't save its Undo copy replaces nothing and leaves the previous Undo as it was; fails_when=restore goes ahead without a snapshot, or the earlier snapshot or its date is dropped; why_new=only the export refusal itself was tested; seam=none; no_claim=the alert copy
     @MainActor
     func testARestoreThatCantSaveItsUndoCopyReplacesNothing() async throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("BackupNoSnap-\(UUID().uuidString)")
@@ -488,6 +490,7 @@ final class BackupRoundTripTests: XCTestCase {
         XCTAssertEqual(Backup.undoDate(now: now, storage: storage, defaults: d)?.timeIntervalSince1970 ?? 0,
                        now.addingTimeInterval(-3600).timeIntervalSince1970, accuracy: 1e-3,
                        "nothing changed, so the earlier Undo still describes a real state and stays")
+        XCTAssertEqual(storage.rawData(for: Backup.undoFile), Data("{}".utf8), "and its copy is still there")
     }
 
     // Value: protects=an Undo whose snapshot is gone or unreadable reports failure and stops being offered; fails_when=undo keeps the key when the file is missing, or says "undone" after putting nothing back; why_new=only the expired case was tested; seam=none; no_claim=why the snapshot went missing
@@ -527,7 +530,7 @@ final class BackupRoundTripTests: XCTestCase {
 
     // MARK: pass 2: the export's mode, mode-less backups, Undo's remapped picks
 
-    // Value: protects=a real export names its mode, so a restore in the other mode sorts its sounds; fails_when=focusMode drops out of the export (exportOnlyKeys emptied, or only present keys exported); why_new=the sorting tests build their dicts by hand; seam=none; no_claim=AudioEngine's reload
+    // Value: protects=a real export names its mode, so a restore in the other mode sorts its sounds; fails_when=exportOnlyKeys is emptied; why_new=the sorting tests build their dicts by hand; seam=none; no_claim=the never-switched case (the next test)
     func testAnExportFromFocusRestoredInSleepSortsItsSounds() throws {
         d.set(true, forKey: "focusMode")
         d.set("white", forKey: "noiseType")
@@ -573,7 +576,7 @@ final class BackupRoundTripTests: XCTestCase {
         XCTAssertEqual(d.integer(forKey: "ambientTailMinutes"), 10)
     }
 
-    // Value: protects=a file over the size cap is refused before it's read whole; fails_when=the size guard is removed or compares the wrong way; why_new=the read test only uses small files; seam=none; no_claim=a file whose size can't be read
+    // Value: protects=a file over the size cap is refused; fails_when=both the size check and the bounded read's count check are removed or compare the wrong way; why_new=the read test only uses small files; seam=none; no_claim=which of the two checks refused it
     @MainActor
     func testReadRefusesAFileOverTheSizeCap() async throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("BackupBig-\(UUID().uuidString)")
@@ -588,7 +591,7 @@ final class BackupRoundTripTests: XCTestCase {
         XCTAssertEqual(failure, .tooLarge)
     }
 
-    // Value: protects=a restore whose Undo copy doesn't land replaces nothing and offers no Undo; fails_when=the staged copy's existence check is removed or the key is set first; why_new=the other no-snapshot test fails at the export, never at the write; seam=none; no_claim=why the write failed
+    // Value: protects=a restore whose Undo copy can't be written replaces nothing and offers no Undo; fails_when=the snapshot write's failure is ignored or the Undo date is set first; why_new=the other no-snapshot test fails at the export, never at the write; seam=none; no_claim=why the write failed
     @MainActor
     func testARestoreWhoseUndoCopyDoesntLandReplacesNothing() async throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("BackupRO-\(UUID().uuidString)")
@@ -607,4 +610,46 @@ final class BackupRoundTripTests: XCTestCase {
         XCTAssertEqual(d.double(forKey: "masterVolume"), 0.3, accuracy: 1e-9)
         XCTAssertNil(d.object(forKey: Backup.undoTakenAtKey))
     }
+
+    // MARK: pass 3: the shipping restore in Focus; a second restore within the week
+
+    // Value: protects=the shipping restore sorts a Sleep backup's sounds when run in Focus; fails_when=write passes the wrong current mode into prepare; why_new=the sorting tests go through restoreUserDefaults, a test convenience; seam=none; no_claim=AudioEngine's reload
+    @MainActor
+    func testTheShippingRestoreInFocusSortsASleepBackupsSounds() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("BackupFocus-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let storage = StorageManager(directory: dir)
+        d.set(true, forKey: "focusMode")
+        let backup: [String: Any] = ["focusMode": false, "noiseType": "brown", "lastPick.noise.focus": "fan", Backup.markerKey: 1]
+        let restored = await Backup.restore(Backup.Pending(data: try JSONSerialization.data(withJSONObject: backup),
+                                                           contents: Backup.contents(of: backup)),
+                                            storage: storage, defaults: d)
+        XCTAssertNotNil(restored)
+        XCTAssertEqual(d.string(forKey: "noiseType"), "fan")
+        XCTAssertEqual(d.string(forKey: "lastPick.noise.sleep"), "brown")
+        XCTAssertTrue(d.bool(forKey: "focusMode"), "still in Focus")
+    }
+
+    // Value: protects=a second restore within the week replaces the Undo copy, and Undo returns to the state before the latest restore; fails_when=the copy can't overwrite an existing one (every later restore refused) or Undo goes back too far; why_new=every restore test started with no Undo; seam=none; no_claim=the week window (tested above)
+    @MainActor
+    func testASecondRestoreReplacesTheUndoAndUndoReturnsToTheFirst() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("BackupTwice-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let storage = StorageManager(directory: dir)
+        d.set(0.1, forKey: "masterVolume")
+        func pending(_ volume: Double) throws -> Backup.Pending {
+            let backup: [String: Any] = ["masterVolume": volume, Backup.markerKey: 1]
+            return Backup.Pending(data: try JSONSerialization.data(withJSONObject: backup), contents: Backup.contents(of: backup))
+        }
+        let now = Date()
+        let first = await Backup.restore(try pending(0.5), now: now, storage: storage, defaults: d)
+        XCTAssertNotNil(first)
+        let second = await Backup.restore(try pending(0.9), now: now.addingTimeInterval(60), storage: storage, defaults: d)
+        XCTAssertNotNil(second, "an existing Undo copy is replaced, not a reason to refuse")
+        XCTAssertEqual(d.double(forKey: "masterVolume"), 0.9, accuracy: 1e-9)
+        let undone = await Backup.undo(now: now.addingTimeInterval(120), storage: storage, defaults: d)
+        XCTAssertTrue(undone)
+        XCTAssertEqual(d.double(forKey: "masterVolume"), 0.5, accuracy: 1e-9, "Undo returns to before the latest restore")
+    }
 }
+

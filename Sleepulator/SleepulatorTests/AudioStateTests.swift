@@ -3661,15 +3661,19 @@ final class RestoreReloadTests: XCTestCase {
     // Value: protects=a restore's reload applies the Pomodoro lengths and never cancels a running sleep timer; fails_when=reloadAfterRestore drops reloadLengths, or focusMode's didSet starts cancelling on a same-value assignment; why_new=no test called reloadAfterRestore; seam=none; no_claim=the stores' disk reloads
     func testARestoreReloadAppliesPomodoroLengthsAndKeepsTheNightsTimer() {
         let d = UserDefaults.standard
-        let savedWork = d.object(forKey: "pomoWork")
-        defer { if let savedWork { d.set(savedWork, forKey: "pomoWork") } else { d.removeObject(forKey: "pomoWork") } }
+        let keys = ["pomoWork", "pomoRest", "pomoLongRest", "pomoCycles"]
+        let saved = keys.map { d.object(forKey: $0) }
+        defer { for (key, value) in zip(keys, saved) { if let value { d.set(value, forKey: key) } else { d.removeObject(forKey: key) } } }
         let engine = AudioEngine()
         engine.focusMode = false
         engine.sleepTimer.startSleepTimer(minutes: 45)
         defer { engine.sleepTimer.cancelTimer() }
-        d.set(50, forKey: "pomoWork")
+        for (key, value) in zip(keys, [50, 7, 20, 6]) { d.set(value, forKey: key) }
         engine.reloadAfterRestore()
         XCTAssertEqual(engine.pomodoro.workMinutes, 50, "the next session runs the restored length")
+        XCTAssertEqual(engine.pomodoro.restMinutes, 7)
+        XCTAssertEqual(engine.pomodoro.longRestMinutes, 20)
+        XCTAssertEqual(engine.pomodoro.cyclesBeforeLongBreak, 6)
         XCTAssertGreaterThan(engine.sleepTimer.timerRemaining, 0, "a restore never cancels a running sleep timer")
     }
 }

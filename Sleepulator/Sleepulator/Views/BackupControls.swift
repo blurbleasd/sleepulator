@@ -70,6 +70,8 @@ final class BackupController: ObservableObject {
     }
 
     func exported(_ result: Result<URL, Error>) {
+        // The exporter is animating out now: an alert that follows waits for it, as after the picker.
+        lastDismissal = Date()
         switch result {
         case .success(let url):
             Log.storage.info("Exported backup to \(url.lastPathComponent, privacy: .public)")

@@ -32,6 +32,9 @@ struct BackupSupportView: View {
                         SettingActionRow(title: "Reports from iOS", systemImage: "waveform.path.ecg",
                                          note: "Battery and crash reports, about one a day. Kept on this iPhone.", pal: pal)
                     }
+                    // The title alone as the name (the note as the hint), as Settings' switches.
+                    .accessibilityLabel("Reports from iOS")
+                    .accessibilityHint("Battery and crash reports, about one a day. Kept on this iPhone.")
                     Button { exportLog() } label: {
                         // It's the process's own log (OSLogStore, current process): what played
                         // since the app last opened, capped at 12 hours. "Last night's" overpromised.
@@ -41,6 +44,8 @@ struct BackupSupportView: View {
                             if collectingLog { ProgressView() }
                         }
                     }
+                    .accessibilityLabel("Export the playback log")
+                    .accessibilityHint("What played and what went wrong since the app opened, up to 12 hours.")
                     // Gathering the log lines takes a moment; a second tap mustn't start another.
                     .disabled(collectingLog)
                 } header: {

@@ -79,19 +79,35 @@ struct SettingsView: View {
         Text(text).foregroundStyle(pal.dim)
     }
 
-    private func minutesStepper(_ title: String, value: Int, range: ClosedRange<Int>, step: Int,
-                                write: @escaping (Int) -> Void) -> some View {
+    /// A Pomodoro stepper: the value shown on the right, and spoken once.
+    private func stepperRow(_ title: String, value: Int, range: ClosedRange<Int>, step: Int = 1,
+                            shown: String, spoken: String, write: @escaping (Int) -> Void) -> some View {
         Stepper(value: pomodoroBinding(value, write), in: range, step: step) {
             HStack {
                 label(title)
                 Spacer()
                 // Held on one line: at the largest text sizes "15 min" split into "15 / min".
-                Text("\(value) min").foregroundStyle(pal.dim).monospacedDigit().fixedSize()
+                Text(shown).foregroundStyle(pal.dim).monospacedDigit().fixedSize()
             }
         }
         // Named once: the label row also holds the value, which VoiceOver read twice.
         .accessibilityLabel(title)
-        .accessibilityValue(SettingsCopy.minutes(value))
+        .accessibilityValue(spoken)
+    }
+
+    private func minutesStepper(_ title: String, value: Int, range: ClosedRange<Int>, step: Int,
+                                write: @escaping (Int) -> Void) -> some View {
+        stepperRow(title, value: value, range: range, step: step, shown: "\(value) min",
+                   spoken: SettingsCopy.minutes(value), write: write)
+    }
+
+    /// A switch whose spoken name is its title alone, with the note as the hint. With the note in
+    /// the label, Voice Control needed the whole sentence to tap it, and VoiceOver read it even
+    /// with hints off (choiceRow does the same).
+    private func settingToggle(_ title: String, note: String? = nil, isOn: Binding<Bool>) -> some View {
+        Toggle(isOn: isOn) { label(title, note: note) }
+            .accessibilityLabel(title)
+            .accessibilityHint(note ?? "")
     }
 
     /// A row that picks one of a few values: the label (and note) on the left, the value on the
@@ -187,6 +203,8 @@ struct SettingsView: View {
                 }
                 .contentShape(Rectangle())
             }
+            .accessibilityLabel(focusMode ? "Sleep settings" : "Focus settings")
+            .accessibilityHint(focusMode ? "Darkening, breathing and podcasts at night" : "Session and break lengths")
             .accessibilityValue(showOtherMode ? "Expanded" : "Collapsed")
         }
     }
@@ -208,13 +226,10 @@ struct SettingsView: View {
             // A short note per control. One 41-word footer covered both switches, ran to ten
             // lines at large text sizes, and still said "tap to wake" after the veil's glance
             // made it two taps.
-            Toggle(isOn: $autoNightDim) {
-                label("Darken the screen at night",
-                      note: "While Sleep plays, the screen goes black a minute after your last touch. Tap once to glance, twice to wake.")
-            }
-            Toggle(isOn: $breathingOnRamp) {
-                label("Start with a minute of breathing", note: "Then your mix starts on its own.")
-            }
+            settingToggle("Darken the screen at night",
+                          note: "While Sleep plays, the screen goes black a minute after your last touch. Tap once to glance, twice to wake.",
+                          isOn: $autoNightDim)
+            settingToggle("Start with a minute of breathing", note: "Then your mix starts on its own.", isOn: $breathingOnRamp)
         } header: {
             header("Sleep")
         }
@@ -228,9 +243,7 @@ struct SettingsView: View {
             // stops everything.
             choiceRow("Soften loud moments", note: "Keeps a sudden loud moment from waking you.",
                       selection: limiterChoice, options: LimiterChoice.allCases) { $0.title }
-            Toggle(isOn: $settings.sleepEQ) {
-                label("Soften harsh highs and boomy lows", note: "Gentler voices at low volume.")
-            }
+            settingToggle("Soften harsh highs and boomy lows", note: "Gentler voices at low volume.", isOn: $settings.sleepEQ)
             if settings.sleepEQ {
                 VStack(alignment: .leading, spacing: UI.sm) {
                     HStack {
@@ -249,11 +262,10 @@ struct SettingsView: View {
                 }
                 .padding(.vertical, UI.xs)
             }
-            Toggle(isOn: $holdQueue) {
-                label("Don't start the next episode during a sleep timer",
-                      note: queue.autoPlay ? "The one playing finishes; your sounds carry on."
-                                           : "Only applies when the next episode plays automatically.")
-            }
+            settingToggle("Don't start the next episode during a sleep timer",
+                          note: queue.autoPlay ? "The one playing finishes; your sounds carry on."
+                                               : "Only applies when the next episode plays automatically.",
+                          isOn: $holdQueue)
             // With Auto-Play off the next episode never starts on its own anyway.
             .disabled(!queue.autoPlay)
         } header: {
@@ -268,15 +280,8 @@ struct SettingsView: View {
             minutesStepper("Focus length", value: pomoWork, range: 5...90, step: 5) { audio.pomodoro.workMinutes = $0 }
             minutesStepper("Short break", value: pomoRest, range: 1...30, step: 1) { audio.pomodoro.restMinutes = $0 }
             minutesStepper("Long break", value: pomoLongRest, range: 5...60, step: 5) { audio.pomodoro.longRestMinutes = $0 }
-            Stepper(value: pomodoroBinding(pomoCycles) { audio.pomodoro.cyclesBeforeLongBreak = $0 }, in: 2...8) {
-                HStack {
-                    label("Rounds before a long break")
-                    Spacer()
-                    Text("\(pomoCycles)").foregroundStyle(pal.dim).monospacedDigit().fixedSize()
-                }
-            }
-            .accessibilityLabel("Rounds before a long break")
-            .accessibilityValue("\(pomoCycles) rounds")
+            stepperRow("Rounds before a long break", value: pomoCycles, range: 2...8,
+                       shown: "\(pomoCycles)", spoken: "\(pomoCycles) rounds") { audio.pomodoro.cyclesBeforeLongBreak = $0 }
         } header: {
             header("Focus")
         } footer: {
@@ -301,9 +306,8 @@ struct SettingsView: View {
 
     private var displaySection: some View {
         Section {
-            Toggle(isOn: $ambientMotion) {
-                label("Moving scenes", note: "Off holds the scene still: calmer, and easier on the battery.")
-            }
+            settingToggle("Moving scenes", note: "Off holds the scene still: calmer, and easier on the battery.",
+                          isOn: $ambientMotion)
         } header: {
             header("Display")
         }
@@ -312,15 +316,12 @@ struct SettingsView: View {
     private var podcastsSection: some View {
         Section {
             Toggle(isOn: $queue.autoPlay) { label("Play the next episode automatically") }
-            Toggle(isOn: $queue.shuffleQueue) {
-                label("Shuffle the queue", note: "The next episode comes from anywhere in Up Next.")
-            }
+            settingToggle("Shuffle the queue", note: "The next episode comes from anywhere in Up Next.", isOn: $queue.shuffleQueue)
             choiceRow("Skip back and forward",
                       selection: Binding(get: { Int(settings.skipInterval) }, set: { settings.skipInterval = Double($0) }),
                       options: [10, 15, 30, 45]) { "\($0) seconds" }
-            Toggle(isOn: $queue.deleteOnCompletion) {
-                label("Delete downloads once played", note: "Only finished episodes; a skipped one keeps its download.")
-            }
+            settingToggle("Delete downloads once played", note: "Only finished episodes; a skipped one keeps its download.",
+                          isOn: $queue.deleteOnCompletion)
             Toggle(isOn: $queue.hideFinishedEpisodes) { label("Hide played episodes") }
         } header: {
             header("Podcasts")
