@@ -339,10 +339,12 @@ enum Backup {
 
     /// Whether Undo is still offered for a snapshot taken at `takenAt`. A snapshot from the
     /// future (the clock set back since, or the stored time rounding a hair past now) is still
-    /// offered: refusing it threw the snapshot away, and with it the only way back.
+    /// offered, up to a week ahead: refusing it threw the snapshot away, and with it the only way
+    /// back. Further ahead is no clock correction, and unbounded it kept a library-sized copy on
+    /// disk until that date came round.
     nonisolated static func undoAvailable(takenAt: Date?, now: Date) -> Bool {
         guard let takenAt else { return false }
-        return now.timeIntervalSince(takenAt) < undoWindow
+        return abs(now.timeIntervalSince(takenAt)) < undoWindow
     }
 
     /// "sleepulator-backup-2026-10-11": dated, so a second export doesn't overwrite the first.

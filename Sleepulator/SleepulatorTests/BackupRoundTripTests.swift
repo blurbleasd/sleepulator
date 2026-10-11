@@ -242,6 +242,8 @@ final class BackupRoundTripTests: XCTestCase {
                       "the stored time can round a hair past now")
         XCTAssertTrue(Backup.undoAvailable(takenAt: now.addingTimeInterval(3_600), now: now),
                       "a clock set back an hour keeps Undo")
+        XCTAssertFalse(Backup.undoAvailable(takenAt: now.addingTimeInterval(8 * 86_400), now: now),
+                       "more than a week ahead is no clock correction; the copy isn't kept for it")
     }
 
     // Value: protects=a clock set back keeps the Undo snapshot and its date; fails_when=undoDate treats a future snapshot as expired and discards it; why_new=only undoAvailable's slack second was tested; seam=none; no_claim=how long a future snapshot stays offered
