@@ -120,15 +120,15 @@ final class HomeLayoutUITests: XCTestCase {
         // Off Home it comes back: Podcasts always shows it.
         app.tabBars.buttons["Podcasts"].tap()
         XCTAssertTrue(miniPlayer.waitForExistence(timeout: 5), "No mini-player on Podcasts")
-        // Rendered where it floats, above the tab bar, and taking taps: existence alone passes for a
-        // bar inserted out of place or covered.
-        // Value: protects=on Podcasts the bar sits above the tab bar and takes taps;
-        // fails_when=the bar's wrapper or insertion misplaces it or leaves it untappable;
+        // Rendered where it floats, above the tab bar and uncovered: existence alone passes for a bar
+        // inserted out of place or covered. (A real tap on the bar is the Focus test's check.)
+        // Value: protects=on Podcasts the bar sits above the tab bar, uncovered at its hit point;
+        // fails_when=the bar's wrapper or insertion misplaces it or something covers it;
         // why_new=only existence was checked; seam=none
         let tabBar = app.tabBars.firstMatch
         XCTAssertTrue(waitUntil(timeout: 5) { miniPlayer.frame.maxY <= tabBar.frame.minY },
                       "The mini-player isn't above the tab bar: bar \(miniPlayer.frame), tab bar \(tabBar.frame)")
-        XCTAssertTrue(miniPlayer.isHittable, "The mini-player on Podcasts doesn't take taps")
+        XCTAssertTrue(miniPlayer.isHittable, "The mini-player on Podcasts is covered at its hit point")
 
         // Back on Sleep Home it goes again. This time the bar was rendered and has to be taken out;
         // a fresh launch in Sleep never renders it, so the checks above can't see a removal.
