@@ -336,12 +336,14 @@ final class PodcastPlayer: NSObject {
         return result
     }
 
-    /// Write the saved places now and wait for the write: the in-memory map (otherwise written
-    /// every ~30 s while playing) and anything already queued. Before a backup reads the store or
-    /// a restore writes over it (`AudioEngine.flushPendingWrites`).
+    /// Write the saved places now and wait until they're on disk: the in-memory map (otherwise
+    /// written every ~30 s while playing) and anything already queued, then the store's own queue
+    /// (as MixStore.flushPendingWrites does). Before a backup reads the store or a restore writes
+    /// over it (`AudioEngine.flushPendingWrites`).
     func flushPositionsNow() {
         flushPositionsToDisk()
         storageQueue.sync {}
+        StorageManager.shared.flush()
     }
 
     func flushPositionsToDisk() {

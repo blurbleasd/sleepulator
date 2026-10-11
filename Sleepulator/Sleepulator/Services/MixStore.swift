@@ -89,13 +89,15 @@ final class MixStore: ObservableObject {
         storageQueue.asyncAfter(deadline: .now() + 0.5, execute: work)
     }
 
-    /// Run any deferred `mixes.json` write immediately and durably (called on app-background).
+    /// Run any deferred `mixes.json` write immediately and durably: on app-background, and
+    /// before a backup reads the store or a restore writes over it (`AudioEngine.flushPendingWrites`).
     /// `persistPresets` coalesces its write behind a 0.5 s timer; without this, a preset saved in
-    /// that window is lost if the app is jettisoned overnight. The write must actually land before
-    /// we return: `save` re-dispatches onto StorageManager's io queue, so we enqueue it then block
-    /// on `flush()` (an `ioQueue.sync {}` barrier) until it's on disk. Bounded to one small JSON
-    /// write on the storage queue — only on app-background, never a hot path. No-op unless a
-    /// preset was actually saved this session (`persistWork` stays nil otherwise).
+    /// that window is lost if the app is jettisoned overnight, or lands on top of a restore. The
+    /// write must actually land before we return: `save` re-dispatches onto StorageManager's io
+    /// queue, so we enqueue it then block on `flush()` (an `ioQueue.sync {}` barrier) until it's
+    /// on disk. Bounded to one small JSON write on the storage queue, and only on those occasions,
+    /// never a hot path. No-op unless a preset was actually saved this session (`persistWork`
+    /// stays nil otherwise).
     func flushPendingWrites() {
         guard persistWork != nil else { return }
         persistWork?.cancel()

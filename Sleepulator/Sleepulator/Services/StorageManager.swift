@@ -129,8 +129,10 @@ final class StorageManager {
 
     /// `writeRaw`, but synchronous and throwing: the write is atomic (a temp file renamed over
     /// the old one), so when it throws the previous file is still there, untouched. The restore
-    /// writes its Undo copy this way, and refuses to go ahead when it fails.
-    func writeRawNow(_ data: Data, to filename: String) throws {
+    /// writes its Undo copy this way, and refuses to go ahead when it fails; a restore and its
+    /// Undo write their files this way too, so a file that didn't land is known. Nonisolated, so
+    /// the library-sized Undo copy can be written off the main thread.
+    nonisolated func writeRawNow(_ data: Data, to filename: String) throws {
         try ioQueue.sync { try writeBoth(data, filename: filename) }
     }
 
@@ -150,7 +152,7 @@ final class StorageManager {
     /// Write `data` to the primary atomically, then mirror it to the backup. Sequenced so a crash
     /// between the two leaves at least one complete, valid file (primary new + backup old, or both
     /// new). MUST run on `ioQueue`.
-    private func writeBoth(_ data: Data, filename: String) throws {
+    nonisolated private func writeBoth(_ data: Data, filename: String) throws {
         try data.write(to: fileURL(for: filename), options: .atomic)
         do {
             try data.write(to: backupURL(for: filename), options: .atomic)

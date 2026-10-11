@@ -56,8 +56,10 @@ final class BackupController: ObservableObject {
     nonisolated static let alertDelay: TimeInterval = 0.5
     private let alertDelay: TimeInterval
 
+    /// `settle` has no default: leaving it out compiles and quietly brings back a queued write
+    /// landing on top of a restore.
     init(storage: StorageManager = .shared, defaults: UserDefaults = .standard, alertDelay: TimeInterval = BackupController.alertDelay,
-         settle: @escaping () -> Void = {}, reload: @escaping () -> Void) {
+         settle: @escaping () -> Void, reload: @escaping () -> Void) {
         self.storage = storage
         self.defaults = defaults
         self.alertDelay = alertDelay
@@ -174,12 +176,18 @@ final class BackupController: ObservableObject {
     func undo() {
         busy = true
         Task {
-            let undone = await Backup.undo(storage: storage, defaults: defaults, settle: settle)
-            if undone { reload() }
+            let result = await Backup.undo(storage: storage, defaults: defaults, settle: settle)
+            if result != .gone { reload() }        // an incomplete Undo still put most of it back
             busy = false
             refresh()
-            await present(undone ? .undone
-                          : .failed(title: "Couldn't undo", message: "The copy from before the restore is gone, so there's nothing to put back."))
+            switch result {
+            case .undone:
+                await present(.undone)
+            case .gone:
+                await present(.failed(title: "Couldn't undo", message: "The copy from before the restore is gone, so there's nothing to put back."))
+            case .incomplete(let unwritten):
+                await present(.failed(title: "Couldn't put everything back", message: Backup.undoIncompleteMessage(unwritten)))
+            }
         }
     }
 

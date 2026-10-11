@@ -3689,7 +3689,7 @@ final class RestoreReloadTests: XCTestCase {
         XCTAssertGreaterThan(engine.sleepTimer.timerRemaining, 0, "a restore never cancels a running sleep timer")
     }
 
-    // Value: protects=flushPendingWrites lands the engine's deferred mixes.json write before it returns; fails_when=flushPendingWrites stops flushing the MixStore or the store; why_new=a restore didn't flush the engine's queues, so a queued write could land on top of it; seam=none; no_claim=the places, queue and volume queues (no seam holds their writes back, so a test can't tell flushed from fast)
+    // Value: protects=flushPendingWrites lands the engine's deferred mixes.json write before it returns; fails_when=AudioEngine.flushPendingWrites stops calling mixStore.flushPendingWrites; why_new=a restore didn't flush the engine's queues, so a queued write could land on top of it; seam=none; no_claim=the queue and volume barriers and the store's flush (MixStore flushes it too); places: the next test
     func testFlushPendingWritesLandsTheDeferredMixesWrite() throws {
         let storage = StorageManager.shared
         storage.flush()
@@ -3704,6 +3704,30 @@ final class RestoreReloadTests: XCTestCase {
         engine.flushPendingWrites()
         let presets: [SoundPreset] = try XCTUnwrap(storage.load(from: "mixes.json"))
         XCTAssertTrue(presets.contains { $0.name == name }, "the deferred write landed before flushPendingWrites returned")
+    }
+
+    // Value: protects=flushPositionsNow writes the player's in-memory saved places to positions.json before it returns; fails_when=flushPositionsNow skips the in-memory map (e.g. reduced to a queue barrier) or returns before the store writes it; why_new=this suite covered only mixes.json, and places held in memory reach disk only every ~30 s or on a pause; seam=none; no_claim=that AudioEngine.flushPendingWrites calls it (podPlayer is private to AudioEngine)
+    func testFlushPositionsNowWritesThePlacesHeldInMemory() throws {
+        let storage = StorageManager.shared
+        storage.flush()
+        let before = storage.rawData(for: "positions.json")
+        defer {
+            if let before { try? storage.writeRawNow(before, to: "positions.json") } else { storage.delete(filename: "positions.json") }
+            storage.flush()
+        }
+        let player = PodcastPlayer()
+        let loaded = player.savedPositions
+        // Runs before the restore above. The player writes its map again as it goes (its deinit
+        // flushes), so it's handed back what it loaded: the test's place can't land after the restore.
+        defer {
+            player.setPositions(loaded)
+            player.flushPositionsNow()
+        }
+        let key = "flush-test-\(UUID().uuidString)"
+        player.setPositions([key: 42])                     // held in memory, as between the 30 s flushes
+        player.flushPositionsNow()                         // no store flush here: it must have landed
+        let places: [String: Double] = try XCTUnwrap(storage.load(from: "positions.json"))
+        XCTAssertEqual(places[key], 42, "the place held in memory was on disk when flushPositionsNow returned")
     }
 }
 

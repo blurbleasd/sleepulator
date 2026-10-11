@@ -94,6 +94,11 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   Undo copy and again just before the writes. A new background write in the engine belongs in that
   flush. An export writes only settings a restore takes back, reads a file's `.bak` when the
   primary won't parse (`StorageManager.rawData`), and fits under the 50 MB a restore reads.
+  Undo trusts its own copy, which is built differently (`undoCopy`): every setting as stored,
+  even one the restore's bounds refuse (a played list with a long episode id), file sections
+  written back as they were (even ones today's types can't decode), and what it couldn't hold
+  (`undoLeftOutKey`) left alone rather than removed or emptied. Files are written with an error
+  check (`writeRawNow`); an Undo that couldn't save one keeps its copy (`UndoResult.incomplete`).
 
 ## Audio + state invariants (the hard-won stuff — change with care)
 - **Never block the render thread.** It reads params lock-free; hand-offs are atomic. No locks,

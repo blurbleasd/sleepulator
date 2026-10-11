@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// The settings backup: the user's mixes, podcasts, queue and settings as one JSON file, and the
 /// restore that reads one back.
@@ -83,6 +84,10 @@ enum Backup {
 
     /// What was here before the last restore, which Undo puts back.
     nonisolated static let undoFile = "before-restore.json"
+    /// In the Undo copy only: the backup keys it couldn't hold (a stored value JSON can't carry,
+    /// a file neither of whose copies parses). Undo leaves those as they are; treating them as
+    /// absent removed the setting or wrote [] over the file.
+    nonisolated static let undoLeftOutKey = "undoLeftOut"
     /// When that snapshot was taken (seconds since 1970). Its own key so the Backup rows needn't
     /// parse a library-sized file to decide whether to offer Undo. Deliberately not backed up.
     nonisolated static let undoTakenAtKey = "restoreUndoTakenAt"
@@ -115,11 +120,18 @@ enum Backup {
         let contents: Contents
     }
 
-    /// What a restore wrote. `skipped` counts sections that weren't recognised or didn't validate.
+    /// What a restore wrote. `skipped` counts sections that weren't recognised or didn't validate;
+    /// `unwritten` names the sections (backup keys) whose files couldn't be saved, which were left
+    /// as they were and aren't in `contents`.
     struct Outcome: Sendable {
         let contents: Contents
         let skipped: Int
+        var unwritten: [String] = []
     }
+
+    /// How an Undo went. `incomplete`: some files couldn't be saved (a full disk), so the copy is
+    /// kept and Undo is still offered; the rest was put back.
+    enum UndoResult: Equatable, Sendable { case undone, gone, incomplete(unwritten: [String]) }
 
     enum ReadFailure: Error, Equatable, Sendable { case noAccess, unreadable, tooLarge, notBackup }
 
@@ -137,28 +149,45 @@ enum Backup {
     /// many times over as it's parsed, so a crafted file near this size could get the app killed
     /// for memory before anything was checked; 50 MB halves that worst case.
     nonisolated static let maxFileBytes = 50 * 1024 * 1024
+    /// `maxFileBytes` as the alerts say it.
+    nonisolated static let maxFileMB = maxFileBytes / (1024 * 1024)
 
     /// Decode a file-backed section into the Codable type its file expects, count its items, and
     /// encode what decoded. The decoded value is what's stored, never the backup's own JSON: the
     /// decoder ignores keys it doesn't know, so a hand-edited section could carry any amount of
     /// junk past the check. nil if the section is malformed or unexpected.
-    nonisolated static func validatedFileSection(key: String, value: Any) -> (data: Data, count: Int)? {
+    ///
+    /// `encode: false` only counts (the read's confirm): `data` is then empty. The write encodes.
+    nonisolated static func validatedFileSection(key: String, value: Any, encode: Bool = true,
+                                                 now: Date = Date()) -> (data: Data, count: Int)? {
         guard let data = jsonData(value) else { return nil }
         let decoder = JSONDecoder()
         func encoded<T: Encodable>(_ value: T, count: Int) -> (data: Data, count: Int)? {
-            (try? JSONEncoder().encode(value)).map { ($0, count) }
+            guard encode else { return (Data(), count) }
+            return (try? JSONEncoder().encode(value)).map { ($0, count) }
+        }
+        func dated(_ episode: Episode) -> Episode {
+            var episode = episode
+            episode.pubDate = plausibleDate(episode.pubDate, now: now)
+            return episode
         }
         switch key {
         case "savedPlaylists":   // current schema is [SoundPreset]; older backups are [SavedMix]
-            if let presets = try? decoder.decode([SoundPreset].self, from: data) { return encoded(presets, count: presets.count) }
-            if let mixes = try? decoder.decode([SavedMix].self, from: data) { return encoded(mixes, count: mixes.count) }
+            if let presets = try? decoder.decode([SoundPreset].self, from: data) {
+                let kept = presets.compactMap(sanitized)
+                return encoded(kept, count: kept.count)
+            }
+            if let mixes = try? decoder.decode([SavedMix].self, from: data) {
+                let kept = mixes.compactMap(sanitizedLegacyPreset)
+                return encoded(kept, count: kept.count)
+            }
             return nil
         case "savedPodcasts":
             guard let shows = try? decoder.decode([Podcast].self, from: data) else { return nil }
-            return encoded(shows, count: shows.count)
+            return encoded(shows.map { var show = $0; show.episodes = show.episodes.map(dated); return show }, count: shows.count)
         case "upNextQueue":
             guard let queue = try? decoder.decode([Episode].self, from: data) else { return nil }
-            return encoded(queue, count: queue.count)
+            return encoded(queue.map(dated), count: queue.count)
         case "episodePositions":
             guard let places = try? decoder.decode([String: Double].self, from: data) else { return nil }
             return encoded(places.mapValues(clampedPosition), count: places.count)
@@ -176,6 +205,45 @@ enum Backup {
     }
 
     nonisolated private static func unitClamped(_ x: Double) -> Double { min(max(x, 0), 1) }
+
+    /// A date a backup could really hold: from 1970 to a year from now. The show list and Up Next
+    /// format and sort episodes by it; a hand-edited 1e300 went through them unchecked, as the
+    /// export time did.
+    nonisolated private static func plausibleDate(_ date: Date?, now: Date) -> Date? {
+        guard let date, (0...now.addingTimeInterval(365 * 86_400).timeIntervalSince1970).contains(date.timeIntervalSince1970)
+        else { return nil }
+        return date
+    }
+
+    /// Whether every text fits the settings' text limit (`maxTextBytes`).
+    nonisolated private static func fits(_ texts: [String?]) -> Bool {
+        texts.allSatisfy { ($0?.utf8.count ?? 0) <= maxTextBytes }
+    }
+
+    /// A restored preset as the engine can play it, or nil when a text is over the settings'
+    /// limit. Tapping a preset writes its sounds and scene into the preferences plist, so a
+    /// padded one carried any amount of text there, the same hole `lastMix` had.
+    nonisolated static func sanitized(_ preset: SoundPreset) -> SoundPreset? {
+        var preset = preset
+        preset.extraLayers = preset.extraLayers.map(sanitized)
+        let layerTexts: [String?] = (preset.extraLayers ?? []).flatMap { [$0.id, $0.type] }
+        guard fits([preset.id, preset.name, preset.mode, preset.noiseType, preset.binauralPreset, preset.sceneId] + layerTexts)
+        else { return nil }
+        preset.noiseVolume = unitClamped(preset.noiseVolume)
+        preset.binVolume = unitClamped(preset.binVolume)
+        return preset
+    }
+
+    /// An older backup's preset (a `SavedMix`), bounded the same way. Its podcast never belonged
+    /// in a reusable recipe and is dropped when MixStore converts it, so it's dropped here.
+    nonisolated private static func sanitizedLegacyPreset(_ mix: SavedMix) -> SavedMix? {
+        var mix = sanitized(mix)
+        mix.podcastUrl = nil
+        mix.podcastId = nil
+        mix.podcastPosition = nil
+        let layerTexts: [String?] = (mix.extraLayers ?? []).flatMap { [$0.id, $0.type] }
+        return fits([mix.id, mix.name, mix.noiseType, mix.binauralPreset] + layerTexts) ? mix : nil
+    }
 
     /// The extra mixer layers as the engine can play them: no more than it stacks, at a volume it
     /// takes. A million layers decoded fine and went into the preferences plist whole.
@@ -260,7 +328,7 @@ enum Backup {
     /// What a parsed backup would restore, without writing anything (the same `prepare` the
     /// write uses, so the confirm and the result can't disagree).
     nonisolated static func contents(of dict: [String: Any], now: Date = Date()) -> Contents {
-        prepare(dict, currentFocus: false, now: now).contents
+        prepare(dict, currentFocus: false, now: now, encodeFiles: false).contents
     }
 
     // MARK: Copy (pure, unit-tested)
@@ -310,7 +378,11 @@ enum Backup {
 
     nonisolated static func restoredMessage(_ o: Outcome) -> String {
         let parts = phrases(o.contents, settings: "your settings")
-        var message = parts.isEmpty ? "Restored where you'd got to in each episode." : "Restored \(joined(parts))."
+        var message = !parts.isEmpty ? "Restored \(joined(parts))."
+            : o.contents.positions ? "Restored where you'd got to in each episode." : "Nothing could be restored."
+        if !o.unwritten.isEmpty {
+            message += " Your \(joined(names(o.unwritten))) couldn't be saved on this iPhone and weren't changed."
+        }
         if o.skipped > 0 { message += " A few parts of the file weren't recognised and were left as they were." }
         return message
     }
@@ -319,7 +391,7 @@ enum Backup {
         switch failure {
         case .noAccess:   return "Couldn't open that file. Pick it again from Files; if it's in iCloud, let it download first."
         case .unreadable: return "Couldn't read that file. Pick it again from Files; if it's in iCloud, let it download first."
-        case .tooLarge:   return "That file is too big to restore. A backup can be up to 50 MB."
+        case .tooLarge:   return "That file is too big to restore. A backup can be up to \(maxFileMB) MB."
         case .notBackup:  return "That isn't a Sleepulator backup. Make one with Export a backup."
         }
     }
@@ -327,14 +399,28 @@ enum Backup {
     /// Export couldn't fit under the size a restore reads (`ExportFailure.tooLarge`). Show notes
     /// are what makes a library big.
     nonisolated static let tooLargeToExportMessage =
-        "Your podcast library is too big for one backup file (over 50 MB). Remove shows you no longer listen to, then try again."
+        "Your podcast library is too big for one backup file (over \(maxFileMB) MB). Remove shows you no longer listen to, then try again."
+
+    /// The file-backed sections as a person names them, in the order they're listed.
+    nonisolated static let sectionNames: [(key: String, name: String)] = [
+        ("savedPlaylists", "mixes"), ("savedPodcasts", "podcasts"), ("upNextQueue", "Up Next"),
+        ("episodePositions", "places in episodes"),
+    ]
+
+    nonisolated private static func names(_ keys: [String]) -> [String] {
+        sectionNames.filter { keys.contains($0.key) }.map(\.name)
+    }
 
     /// The sections an export left out (`Export.leftOut`), named for a person; nil when none were.
     nonisolated static func leftOutMessage(_ keys: [String]) -> String? {
-        let names = [("savedPlaylists", "mixes"), ("savedPodcasts", "podcasts"), ("upNextQueue", "Up Next"),
-                     ("episodePositions", "places in episodes")].filter { keys.contains($0.0) }.map(\.1)
+        let names = names(keys)
         guard !names.isEmpty else { return nil }
         return "It was saved without your \(joined(names)), which couldn't be read. Everything else is in it."
+    }
+
+    /// An Undo that couldn't save every file (`UndoResult.incomplete`). The copy is kept.
+    nonisolated static func undoIncompleteMessage(_ keys: [String]) -> String {
+        "Your \(joined(names(keys))) couldn't be saved on this iPhone, so they weren't put back yet. Free up some space, then tap Undo the restore again."
     }
 
     /// Whether Undo is still offered for a snapshot taken at `takenAt`. A snapshot from the
@@ -380,6 +466,34 @@ enum Backup {
         return out
     }
 
+    /// The UserDefaults side of the Undo copy: every restorable setting as it's stored, and the
+    /// keys it couldn't hold (`undoLeftOutKey`). The restore's `kinds` bounds don't apply: these
+    /// are the app's own values (a played list holding one long episode id is one), and the export
+    /// leaving one out meant Undo removed it.
+    nonisolated static func undoUserDefaults(from defaults: UserDefaults) -> (values: [String: Any], leftOut: [String]) {
+        var out: [String: Any] = [modeKey: defaults.bool(forKey: modeKey)]
+        var leftOut: [String] = []
+        for key in scalarKeys {
+            guard let v = defaults.object(forKey: key) else { continue }
+            // The copy is JSON: a value it can't carry (a NaN) is left out, and left alone.
+            if PropertyListSerialization.propertyList(v, isValidFor: .binary), JSONSerialization.isValidJSONObject([v]) {
+                out[key] = v
+            } else {
+                leftOut.append(key)
+            }
+        }
+        for key in encodedKeys {
+            guard defaults.object(forKey: key) != nil else { continue }
+            if let data = defaults.data(forKey: key),
+               let obj = try? JSONSerialization.jsonObject(with: data, options: .allowFragments) {
+                out[key] = obj
+            } else {
+                leftOut.append(key)
+            }
+        }
+        return (out, leftOut)
+    }
+
     /// What a restore would write to UserDefaults: the allowlisted scalars that validate, the
     /// Data blobs re-encoded, and `absent`, the restorable keys the dictionary lacks (Undo removes
     /// those). Anything else counts as skipped; file-backed keys, the marker and the export-only
@@ -388,16 +502,25 @@ enum Backup {
     /// A backup made in the other mode (`currentFocus` differs from its `focusMode`): its current
     /// sounds are that mode's latest picks, and this mode's sounds are its remembered picks, the
     /// same memory a mode switch keeps (`AudioEngine.pickKey`).
-    nonisolated static func restorePlan(from dict: [String: Any], currentFocus: Bool)
+    ///
+    /// `trusted` (Undo, from its own copy): an allowlisted setting comes back as it was stored,
+    /// held only to being a property-list value, and a key the copy left out is neither written
+    /// nor removed.
+    nonisolated static func restorePlan(from dict: [String: Any], currentFocus: Bool, trusted: Bool = false)
         -> (values: [String: Any], absent: [String], skipped: Int) {
         var values: [String: Any] = [:]
         var skipped = 0
         for (key, value) in dict {
-            if fileBacked[key] != nil || key == markerKey || key == exportedAtKey || key == modeKey {
+            if fileBacked[key] != nil || key == markerKey || key == exportedAtKey || key == modeKey || key == undoLeftOutKey {
                 continue
             } else if encodedKeys.contains(key) {
-                if let encoded = encodedValue(key: key, value: value) { values[key] = encoded } else { skipped += 1 }
-            } else if scalarValid(key: key, value: value) {
+                if let encoded = trusted ? jsonData(value) : encodedValue(key: key, value: value) {
+                    values[key] = encoded
+                } else {
+                    skipped += 1
+                }
+            } else if trusted ? kinds[key] != nil && PropertyListSerialization.propertyList(value, isValidFor: .binary)
+                              : scalarValid(key: key, value: value) {
                 values[key] = value
             } else {
                 skipped += 1                                   // unknown or malformed: never blind-write
@@ -411,8 +534,9 @@ enum Backup {
             }
         }
         // Absent: not in the backup and not written by the remap (Undo removing a pick it had
-        // just written lost the other mode's remembered sound).
-        let absent = (scalarKeys + encodedKeys).filter { dict[$0] == nil && values[$0] == nil }
+        // just written lost the other mode's remembered sound), nor left out of an Undo copy.
+        let leftOut = trusted ? Set(dict[undoLeftOutKey] as? [String] ?? []) : []
+        let absent = (scalarKeys + encodedKeys).filter { dict[$0] == nil && values[$0] == nil && !leftOut.contains($0) }
         return (values, absent, skipped)
     }
 
@@ -429,14 +553,29 @@ enum Backup {
     /// app's restore goes through `write`. Returns (restored, skipped) for the UserDefaults keys.
     nonisolated static func restoreUserDefaults(from dict: [String: Any], into defaults: UserDefaults,
                                                 replacing: Bool = false) -> (restored: Int, skipped: Int) {
-        let plan = restorePlan(from: dict, currentFocus: defaults.bool(forKey: modeKey))
+        // Replacing is Undo, which trusts its own copy (`write` does the same).
+        let plan = restorePlan(from: dict, currentFocus: defaults.bool(forKey: modeKey), trusted: replacing)
         apply(plan.values, absent: plan.absent, into: defaults, replacing: replacing)
         return (plan.values.count, plan.skipped)
     }
 
     /// The whole backup dictionary: defaults, the file-backed collections' JSON, and the marker.
     nonisolated static func exportDictionary(defaults: UserDefaults, files: [String: Data], at date: Date) -> [String: Any] {
-        var dict = userDefaults(from: defaults)
+        adding(files: files, at: date, to: userDefaults(from: defaults))
+    }
+
+    /// The Undo copy's dictionary: every setting as stored (`undoUserDefaults`), the files, and
+    /// what it couldn't hold, the unreadable files (`unread`) included.
+    nonisolated static func undoDictionary(defaults: UserDefaults, files: [String: Data], unread: [String],
+                                           at date: Date) -> [String: Any] {
+        let settings = undoUserDefaults(from: defaults)
+        var dict = adding(files: files, at: date, to: settings.values)
+        dict[undoLeftOutKey] = settings.leftOut + unread
+        return dict
+    }
+
+    nonisolated private static func adding(files: [String: Data], at date: Date, to settings: [String: Any]) -> [String: Any] {
+        var dict = settings
         for (key, file) in fileBacked {
             if let data = files[file],
                let obj = try? JSONSerialization.jsonObject(with: data, options: .allowFragments) {
@@ -475,18 +614,26 @@ enum Backup {
     /// Pretty-printed when that fits, compact when only that does, refused (`ExportFailure`)
     /// when neither does: a file a restore refuses is no backup. The restore's own Undo copy
     /// passes none; it's never read through `read`.
+    ///
+    /// `undoCopy`: the restore's copy of what's here (`undoDictionary`), which keeps every setting
+    /// as stored rather than what a restore would take.
     static func exportData(at date: Date = Date(), storage: StorageManager = .shared,
                            defaults: UserDefaults = .standard, pretty: Bool = true,
-                           maxBytes: Int? = nil) async throws -> Export {
+                           maxBytes: Int? = nil, undoCopy: Bool = false) async throws -> Export {
         storage.flush()
         return try await Task.detached(priority: .userInitiated) {
             let current = currentFiles(storage)
-            let dict = exportDictionary(defaults: defaults, files: current.files, at: date)
+            let dict = undoCopy
+                ? undoDictionary(defaults: defaults, files: current.files, unread: current.leftOut, at: date)
+                : exportDictionary(defaults: defaults, files: current.files, at: date)
             // Refuse rather than raise: a non-JSON value would throw an uncatchable exception.
             guard JSONSerialization.isValidJSONObject(dict) else { throw CocoaError(.coderInvalidValue) }
             var data = try JSONSerialization.data(withJSONObject: dict, options: pretty ? .prettyPrinted : [])
             if let maxBytes, data.count > maxBytes {
-                if pretty { data = try JSONSerialization.data(withJSONObject: dict, options: []) }
+                if pretty {
+                    data = Data()       // let the pretty bytes go first: this is the largest library
+                    data = try JSONSerialization.data(withJSONObject: dict, options: [])
+                }
                 guard data.count <= maxBytes else { throw ExportFailure.tooLarge }
             }
             return Export(data: data, leftOut: current.leftOut)
@@ -534,13 +681,15 @@ enum Backup {
         // The copy is written atomically before anything is replaced. When it can't be saved the
         // restore replaces nothing and the previous Undo stays as it was (file and date): nothing
         // changed, so it still describes a real earlier state.
-        guard let snapshot = try? await exportData(at: now, storage: storage, defaults: defaults, pretty: false),
-              (try? storage.writeRawNow(snapshot.data, to: undoFile)) != nil else {
+        // Written off the main thread: it's library-sized, and nothing else writes this file.
+        guard let snapshot = try? await exportData(at: now, storage: storage, defaults: defaults, pretty: false, undoCopy: true),
+              (try? await Task.detached(priority: .userInitiated, operation: { try storage.writeRawNow(snapshot.data, to: undoFile) }).value) != nil
+        else {
             return nil
         }
         defaults.set(now.timeIntervalSince1970, forKey: undoTakenAtKey)
         let written = await write(pending.data, replacing: false, storage: storage, defaults: defaults, settle: settle)
-        return Outcome(contents: written.contents, skipped: written.skipped)
+        return Outcome(contents: written.contents, skipped: written.skipped, unwritten: written.unwritten)
     }
 
     /// When the snapshot Undo would put back was taken, if it's still offered. Clears an expired
@@ -554,22 +703,30 @@ enum Backup {
         return nil
     }
 
-    /// Put back what was here before the last restore. False if there's nothing to put back; a
-    /// snapshot that's gone or unreadable is discarded too, so Undo stops being offered.
+    /// Put back what was here before the last restore, exactly: Undo trusts its own copy (`write`'s
+    /// `replacing`). `gone` if there's nothing to put back; a copy that's gone or unreadable is
+    /// discarded too, so Undo stops being offered. `incomplete` when a file couldn't be saved: the
+    /// copy is kept, so Undo can run again. It used to be thrown away whatever happened, with
+    /// "back as they were" over a library a full disk had kept from coming back.
     /// `settle` runs just before the writes, as in `restore`.
     static func undo(now: Date = Date(), storage: StorageManager = .shared,
-                     defaults: UserDefaults = .standard, settle: () -> Void = {}) async -> Bool {
+                     defaults: UserDefaults = .standard, settle: () -> Void = {}) async -> UndoResult {
         storage.flush()
-        guard undoDate(now: now, storage: storage, defaults: defaults) != nil else { return false }
+        guard undoDate(now: now, storage: storage, defaults: defaults) != nil else { return .gone }
         // Read (and parsed, to fall back to the `.bak`) off the main thread: it's library-sized.
         guard let data = await Task.detached(priority: .userInitiated, operation: { storage.rawData(for: undoFile) }).value else {
             discardUndo(storage, defaults)
-            return false
+            return .gone
         }
         let written = await write(data, replacing: true, storage: storage, defaults: defaults, settle: settle)
+        guard written.parsed else {
+            discardUndo(storage, defaults)
+            return .gone
+        }
+        guard written.unwritten.isEmpty else { return .incomplete(unwritten: written.unwritten) }
         discardUndo(storage, defaults)
         storage.flush()
-        return written.parsed
+        return .undone
     }
 
     private static func discardUndo(_ storage: StorageManager, _ defaults: UserDefaults) {
@@ -594,11 +751,25 @@ enum Backup {
 
     /// Validate a parsed backup once: each file-backed section, the settings plan, and what it
     /// all amounts to (`contents`). The read's confirm and the write both come here.
-    nonisolated private static func prepare(_ dict: [String: Any], currentFocus: Bool, now: Date) -> Prepared {
+    ///
+    /// `trusted` (Undo, from its own copy): a file section is written back as the copy has it,
+    /// even one today's types can't decode (a schema change PersistenceMigrator leaves on disk
+    /// for a fixed build), and a section the copy couldn't read is left alone. `encodeFiles:
+    /// false` only counts (the read's confirm).
+    nonisolated private static func prepare(_ dict: [String: Any], currentFocus: Bool, now: Date,
+                                            trusted: Bool = false, encodeFiles: Bool = true) -> Prepared {
         var p = Prepared()
-        for (key, file) in fileBacked {
+        let leftOut = trusted ? Set(dict[undoLeftOutKey] as? [String] ?? []) : []
+        for (key, file) in fileBacked where !leftOut.contains(key) {
             guard let value = dict[key] else { p.absentFiles.append(file); continue }
-            guard let section = validatedFileSection(key: key, value: value) else { p.skipped += 1; continue }
+            if trusted {
+                if let data = jsonData(value) { p.files[file] = data } else { p.skipped += 1 }
+                continue
+            }
+            guard let section = validatedFileSection(key: key, value: value, encode: encodeFiles, now: now) else {
+                p.skipped += 1
+                continue
+            }
             p.files[file] = section.data
             switch key {
             case "savedPlaylists": p.contents.mixes = section.count
@@ -607,7 +778,7 @@ enum Backup {
             default:               p.contents.positions = true
             }
         }
-        let plan = restorePlan(from: dict, currentFocus: currentFocus)
+        let plan = restorePlan(from: dict, currentFocus: currentFocus, trusted: trusted)
         p.absentKeys = plan.absent
         p.skipped += plan.skipped
         // When it was made, if that's a time it could have been: from 1970 to a day from now
@@ -636,22 +807,41 @@ enum Backup {
     /// thread; UserDefaults is written on the main actor (@AppStorage observers fire on the
     /// writing thread), and the files go through StorageManager, then flush so the caller's
     /// reload reads them. `settle` runs between the two, with nothing awaited after it: what the
-    /// app queued while the backup was parsed lands before the writes, not after.
+    /// app queued while the backup was parsed lands before the writes, not after. So the files
+    /// are written here, each checked (`writeRawNow`): a file that couldn't be saved is left as it
+    /// was and named in `unwritten` (backup keys), and dropped from `contents`.
+    /// `replacing` is Undo, which trusts its own copy (`prepare`'s `trusted`).
     private static func write(_ data: Data, replacing: Bool, storage: StorageManager, defaults: UserDefaults,
-                              settle: () -> Void) async -> (parsed: Bool, contents: Contents, skipped: Int) {
+                              settle: () -> Void) async -> (parsed: Bool, contents: Contents, skipped: Int, unwritten: [String]) {
         let currentFocus = defaults.bool(forKey: modeKey)
         let prepared = await Task.detached(priority: .userInitiated) { () -> Prepared? in
             guard let dict = (try? JSONSerialization.jsonObject(with: data, options: [])) as? [String: Any] else { return nil }
-            return prepare(dict, currentFocus: currentFocus, now: Date())
+            return prepare(dict, currentFocus: currentFocus, now: Date(), trusted: replacing)
         }.value
-        guard let prepared else { return (false, Contents(), 0) }
+        guard let prepared else { return (false, Contents(), 0, []) }
         settle()
         apply(prepared.settings?.values ?? [:], absent: prepared.absentKeys, into: defaults, replacing: replacing)
-        for (file, bytes) in prepared.files { storage.writeRaw(bytes, to: file) }
+        var writes = prepared.files
         if replacing {
-            for file in prepared.absentFiles { if let empty = emptyFile[file] { storage.writeRaw(empty, to: file) } }
+            for file in prepared.absentFiles { if let empty = emptyFile[file] { writes[file] = empty } }
+        }
+        var unwritten: [String] = []
+        for (file, bytes) in writes {
+            do { try storage.writeRawNow(bytes, to: file) } catch {
+                Log.storage.error("Restore couldn't save \(file, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                if let key = fileBacked.first(where: { $0.value == file })?.key { unwritten.append(key) }
+            }
         }
         storage.flush()
-        return (true, prepared.contents, prepared.skipped)
+        var contents = prepared.contents
+        for key in unwritten {
+            switch key {
+            case "savedPlaylists": contents.mixes = nil
+            case "savedPodcasts":  contents.shows = nil
+            case "upNextQueue":    contents.upNext = nil
+            default:               contents.positions = false
+            }
+        }
+        return (true, contents, prepared.skipped, unwritten.sorted())
     }
 }
