@@ -1243,6 +1243,37 @@ final class BackupRoundTripTests: XCTestCase {
         XCTAssertEqual(BackupController.undoWhen(old, now: now),
                        old.formatted(.dateTime.weekday(.wide).day().month(.abbreviated).hour().minute()))
     }
+
+    // MARK: after the review cap: the adversarial pass's fixes
+
+    // Value: protects=restored saved places are held to the feed bound on keys and to the player's 100, and what's dropped is counted; fails_when=the places case keeps every key again; why_new=a hundred half-megabyte keys made a 50 MB file rewritten every 30 s; seam=none; no_claim=which 100 are kept
+    func testRestoredPlacesAreBoundedInKeysAndCount() throws {
+        var places: [String: Double] = [:]
+        for i in 0..<105 { places[String(format: "ep%03d", i)] = Double(i) }
+        places[String(repeating: "k", count: 20_000)] = 1
+        let section = try XCTUnwrap(Backup.validatedFileSection(key: "episodePositions", value: places))
+        XCTAssertEqual(section.count, Backup.maxPlaces)
+        XCTAssertEqual(section.dropped, 6, "the over-long key and the five past the player's hundred")
+        let kept = try JSONDecoder().decode([String: Double].self, from: section.data)
+        XCTAssertTrue(kept.keys.allSatisfy { $0.utf8.count < 100 })
+        XCTAssertEqual(Backup.contents(of: ["episodePositions": places]).tooLong, 6)
+    }
+
+    // Value: protects=a mix the person named at length (CJK, emoji) survives a restore, and the confirm says when items will be left out; fails_when=the preset name goes back to the 256-byte settings bound, or the confirm ignores tooLong; why_new=86 Japanese characters lost the mix; seam=none; no_claim=the mix name fields' own limits
+    func testALongMixNameSurvivesAndTheConfirmSaysWhatsLeftOut() throws {
+        let name = String(repeating: "夜の雨", count: 100)                              // 900 bytes
+        let mix = SoundPreset(name: name, mode: "sleep", noiseOn: true, noiseType: "rain", noiseVolume: 0.5, binauralOn: false,
+                              binauralPreset: "delta", binVolume: 0.3, sceneId: nil, extraLayers: nil)
+        var padded = mix
+        padded.binauralPreset = String(repeating: "b", count: 300)
+        let value = try JSONSerialization.jsonObject(with: JSONEncoder().encode([mix, padded]))
+        let section = try XCTUnwrap(Backup.validatedFileSection(key: "savedPlaylists", value: value))
+        XCTAssertEqual(try JSONDecoder().decode([SoundPreset].self, from: section.data).map(\.name), [name])
+        let contents = Backup.contents(of: ["savedPlaylists": value])
+        XCTAssertEqual(contents.tooLong, 1)
+        XCTAssertEqual(Backup.confirmMessage(contents),
+                       "This replaces what's on this iPhone with the backup's 1 mix. One item will be left out: a text in it is too long. You can undo it afterwards.")
+    }
 }
 
 
@@ -1352,6 +1383,25 @@ final class BackupControllerTests: XCTestCase {
         XCTAssertEqual(title, "Couldn't put everything back")
         XCTAssertEqual(reloads, 2, "an incomplete Undo still reloads what it put back")
         XCTAssertNotNil(backup.undoDate, "Undo is still offered")
+    }
+
+    // Value: protects=a restore that didn't land whole is still said when the page reopens, without its one-tap Undo; fails_when=present drops every .restored again; why_new=the only word that a section couldn't be saved was lost if you'd left the page; seam=alertDelay 0, a temp store; no_claim=the alert's presentation
+    func testAPartialRestoreIsSaidWhenThePageReopens() async throws {
+        var reloads = 0
+        let f = try fixture(reload: { reloads += 1 })
+        defer { f.cleanUp() }
+        let backup = f.controller
+        // A directory where the show list goes: that section can't be saved.
+        try FileManager.default.createDirectory(at: f.dir.appendingPathComponent("library.json"), withIntermediateDirectories: true)
+        let file: [String: Any] = ["savedPodcasts": [Any](), "masterVolume": 0.4, Backup.markerKey: 1]
+        backup.restore(Backup.Pending(data: try JSONSerialization.data(withJSONObject: file), contents: Backup.contents(of: file)))
+        try await waitUntil { reloads == 1 && !backup.busy }
+        XCTAssertNil(backup.prompt, "the page is closed")
+        backup.pageAppeared()
+        try await waitUntil { backup.prompt != nil }
+        guard case .notice(let title, let message)? = backup.prompt else { return XCTFail("got \(String(describing: backup.prompt))") }
+        XCTAssertEqual(title, "Backup restored")
+        XCTAssertTrue(message.contains("couldn't be saved"), message)
     }
 
     // Value: protects=a cancelled export lets go of its document too; fails_when=the document is only cleared in the completion handler (not called on cancel); why_new=see above; seam=none; no_claim=the exporter's UI

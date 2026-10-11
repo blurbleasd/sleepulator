@@ -101,7 +101,9 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   check (`writeRawNow`); an Undo that couldn't save one keeps its copy (`UndoResult.incomplete`),
   and its week starts again (`undoKeptAtKey`). Restored episodes and shows are held to the feed
   parser's limits (`maxFeedFieldBytes`): the app copies an episode's id and address into the
-  plist. The reload after a restore reads files as launch does: a queue or library today's types
+  plist. So are saved places' keys, and a restore takes no more places than the player keeps
+  (`maxPlaces`). Anything a restore leaves out for a text too long is counted and said, in the
+  confirm and the result (`Contents.tooLong`). The reload after a restore reads files as launch does: a queue or library today's types
   can't decode shows empty and stays on disk: the reload doesn't save over it (the next edit
   does, as at launch).
 

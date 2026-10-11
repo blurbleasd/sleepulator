@@ -36,12 +36,14 @@ final class BackupController: ObservableObject {
     /// The Backup & support page is on screen (`pageAppeared` / `pageDisappeared`). Its alert
     /// lives there, so a result that lands after the page closed is dropped, not stranded: it
     /// surfaced later, out of context, with a one-tap Undo that skipped the "changes since will be
-    /// lost" confirm. A failure is kept for when the page opens again (`pendingFailure`).
+    /// lost" confirm. A failure, or a restore that didn't land whole, is kept for when the page
+    /// opens again (`pendingPrompt`).
     private(set) var pageVisible = false
-    /// A failure that landed while the page was closed. "Couldn't save a copy …, so nothing was
-    /// replaced" is the only word that a restore didn't happen; dropped, the person was left
-    /// believing it had.
-    private var pendingFailure: Prompt?
+    /// What landed while the page was closed and must still be said: a failure ("Couldn't save a
+    /// copy …, so nothing was replaced" is the only word that a restore didn't happen), or a
+    /// restore that left a section unsaved or items out, as a notice without its one-tap Undo.
+    /// Dropped, the person was left believing everything had come back.
+    private var pendingPrompt: Prompt?
 
     private let storage: StorageManager
     private let defaults: UserDefaults
@@ -82,10 +84,10 @@ final class BackupController: ObservableObject {
     func pageAppeared() {
         pageVisible = true
         refresh()
-        guard let failure = pendingFailure else { return }
-        pendingFailure = nil
+        guard let pending = pendingPrompt else { return }
+        pendingPrompt = nil
         lastDismissal = Date()                 // the page is still sliding in
-        Task { await present(failure) }
+        Task { await present(pending) }
     }
 
     func pageDisappeared() {
@@ -195,7 +197,14 @@ final class BackupController: ObservableObject {
         let wait = alertDelay - Date().timeIntervalSince(lastDismissal)
         if wait > 0 { try? await Task.sleep(for: .seconds(wait)) }
         guard pageVisible else {
-            if case .failed = next { pendingFailure = next }
+            switch next {
+            case .failed:
+                pendingPrompt = next
+            case .restored(let outcome) where !outcome.unwritten.isEmpty || outcome.contents.tooLong > 0:
+                pendingPrompt = .notice(title: "Backup restored", message: Backup.restoredMessage(outcome))
+            default:
+                break
+            }
             return
         }
         prompt = next

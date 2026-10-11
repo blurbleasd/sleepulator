@@ -243,8 +243,16 @@ enum Backup {
             let keptQueue = queue.compactMap { bounded($0) }
             return encoded(keptQueue, count: keptQueue.count)
         case "episodePositions":
+            // Keys are episode ids, held like everywhere else, and no more places than the player
+            // keeps (`maxPlaces`): a hundred half-megabyte keys made a 50 MB positions.json the
+            // player rewrote every 30 seconds all night.
             guard let places = try? decoder.decode([String: Double].self, from: data) else { return nil }
-            return encoded(places.mapValues(clampedPosition), count: places.count)
+            var keptPlaces = places.filter { $0.key.utf8.count <= maxFeedFieldBytes }
+            if keptPlaces.count > maxPlaces {
+                keptPlaces = Dictionary(uniqueKeysWithValues: keptPlaces.sorted { $0.key < $1.key }.prefix(maxPlaces).map { ($0.key, $0.value) })
+            }
+            dropped += places.count - keptPlaces.count
+            return encoded(keptPlaces.mapValues(clampedPosition), count: keptPlaces.count)
         default:
             return nil
         }
@@ -253,6 +261,8 @@ enum Backup {
     /// The furthest a saved place in an episode can be, in seconds (about 11 days): a sanity
     /// bound, like `kinds`'s. A place of 1e300 traps in the time readouts' `Int(seconds)`.
     nonisolated static let maxPosition: Double = 1_000_000
+    /// The most saved places a restore takes: what the player keeps (`PodcastPlayer.prunedPositions`).
+    nonisolated static let maxPlaces = 100
 
     nonisolated private static func clampedPosition(_ seconds: Double) -> Double {
         min(max(seconds, 0), maxPosition)
@@ -274,14 +284,18 @@ enum Backup {
         texts.allSatisfy { ($0?.utf8.count ?? 0) <= limit }
     }
 
-    /// A restored preset as the engine can play it, or nil when a text is over the settings'
-    /// limit. Tapping a preset writes its sounds and scene into the preferences plist, so a
-    /// padded one carried any amount of text there, the same hole `lastMix` had.
+    /// A restored preset as the engine can play it, or nil when a text is over the limits.
+    /// Tapping a preset writes its sounds and scene into the preferences plist, so a padded one
+    /// carried any amount of text there, the same hole `lastMix` had: those are held to the
+    /// settings' 256 bytes. Its name stays in mixes.json and is the person's own (the mix name
+    /// fields have no limit), so it gets the larger feed bound: at 256 bytes, 86 Japanese
+    /// characters lost the mix on restore.
     nonisolated static func sanitized(_ preset: SoundPreset) -> SoundPreset? {
         var preset = preset
         preset.extraLayers = preset.extraLayers.map(sanitized)
         let layerTexts: [String?] = (preset.extraLayers ?? []).flatMap { [$0.id, $0.type] }
-        guard fits([preset.id, preset.name, preset.mode, preset.noiseType, preset.binauralPreset, preset.sceneId] + layerTexts)
+        guard fits([preset.id, preset.mode, preset.noiseType, preset.binauralPreset, preset.sceneId] + layerTexts),
+              fits([preset.name], within: maxFeedFieldBytes)
         else { return nil }
         preset.noiseVolume = unitClamped(preset.noiseVolume)
         preset.binVolume = unitClamped(preset.binVolume)
@@ -309,8 +323,8 @@ enum Backup {
     /// Night writes them into the preferences plist), its episode at `maxFeedFieldBytes`.
     nonisolated static func sanitized(_ mix: SavedMix) -> SavedMix? {
         let layerTexts: [String?] = (mix.extraLayers ?? []).prefix(AudioEngine.maxExtraLayers).flatMap { [$0.id, $0.type] }
-        guard fits([mix.id, mix.name, mix.noiseType, mix.binauralPreset] + layerTexts),
-              fits([mix.podcastUrl, mix.podcastId], within: maxFeedFieldBytes) else { return nil }
+        guard fits([mix.id, mix.noiseType, mix.binauralPreset] + layerTexts),
+              fits([mix.name, mix.podcastUrl, mix.podcastId], within: maxFeedFieldBytes) else { return nil }
         var mix = mix
         mix.noiseVolume = unitClamped(mix.noiseVolume)
         mix.binVolume = unitClamped(mix.binVolume)
@@ -429,7 +443,10 @@ enum Backup {
     nonisolated static func confirmMessage(_ c: Contents) -> String {
         let parts = phrases(c, settings: "settings")
         let what = parts.isEmpty ? "the backup's saved places in episodes" : "the backup's " + joined(parts)
-        return "This replaces what's on this iPhone with \(what). You can undo it afterwards."
+        let leftOut = c.tooLong == 0 ? ""
+            : c.tooLong == 1 ? " One item will be left out: a text in it is too long."
+            : " \(c.tooLong) items will be left out: a text in each is too long."
+        return "This replaces what's on this iPhone with \(what).\(leftOut) You can undo it afterwards."
     }
 
     /// When the copy of what's here can't be saved, the restore stops: the confirm promised Undo.
