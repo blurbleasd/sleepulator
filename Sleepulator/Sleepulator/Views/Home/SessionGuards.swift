@@ -40,14 +40,15 @@ enum SessionGuards {
     }
 
     /// The night veil drops over a Sleep session that is actually playing: everywhere while a
-    /// timer runs, and on Home for an untimed (All night) night, the bedside screen. A countdown
+    /// timer runs, and on the bedside screens (Home, or the Now Playing sheet) for an untimed (All
+    /// night) night. A countdown
     /// over silence (timer running, everything paused) used to blank the screen on nothing. It
     /// used to need a timer, so All night, the default, never got the veil and the scene showed at
     /// bedtime brightness until auto-lock; on any tab it would black out daytime listening in
     /// Sleep mode (reading show notes in Podcasts).
     static func mayNightDim(autoNightDim: Bool, focusMode: Bool, playing: Bool,
-                            timerActive: Bool, onHome: Bool) -> Bool {
-        autoNightDim && !focusMode && playing && (timerActive || onHome)
+                            timerActive: Bool, onBedsideScreen: Bool) -> Bool {
+        autoNightDim && !focusMode && playing && (timerActive || onBedsideScreen)
     }
 
     enum Begin: Equatable { case resume, firstBed, transport }

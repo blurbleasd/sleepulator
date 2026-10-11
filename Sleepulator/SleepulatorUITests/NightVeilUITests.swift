@@ -54,9 +54,9 @@ final class NightVeilUITests: XCTestCase {
 
         // No timer runs (All night), yet the veil still drops ~60 s after the last touch.
         XCTAssertTrue(veil.waitForExistence(timeout: 80), "No veil over an untimed night")
-        // Under the veil only the veil answers: Home's "Show controls" layer used to stay in the
-        // accessibility tree and answer "Wake" too, waking hidden chrome under the black.
-        XCTAssertFalse(wake.exists, "Home's wake layer still answers under the veil")
+        // (Not asserted: that only the veil answers "Wake" under it. XCUITest on iOS 26 still lists
+        // SwiftUI elements hidden from accessibility, even Home's opacity-0 chrome, so it can't
+        // tell; TESTING.md §Q.5 checks it with Voice Control on a device.)
 
         // A sleepy tap anywhere on the black.
         let tapPoint = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.25))
@@ -174,16 +174,18 @@ final class NightVeilUITests: XCTestCase {
     }
 
     /// Stops the session from the orb, waking the faded controls first. They fade again 3 s (Sleep)
-    /// or 10 s (Focus) after a touch, so a wake and the pause can race it: try a few times.
+    /// or 10 s (Focus) after a touch, and XCUITest's idle waits can eat most of that, so tap Pause
+    /// straight after the wake (XCUITest lists the orb even while faded) and check briefly. A tap
+    /// that lands on the wake layer instead just wakes the controls, so the next round pauses.
     @MainActor
     private func pauseAudio(_ app: XCUIApplication) {
         let pause = app.buttons["Pause all audio"]
         let wake = app.buttons["Show controls"]
         let play = app.buttons["Play"]
-        for _ in 0..<3 {
+        for _ in 0..<5 {
             if wake.exists { wake.tap() }
-            if pause.waitForExistence(timeout: 2), pause.isHittable { pause.tap() }
-            if play.waitForExistence(timeout: 3) { return }
+            if pause.exists { pause.tap() }
+            if play.waitForExistence(timeout: 1.5) { return }
         }
         XCTFail("Couldn't pause the session from the orb")
     }

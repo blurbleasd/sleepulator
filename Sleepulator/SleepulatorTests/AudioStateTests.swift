@@ -1578,17 +1578,17 @@ final class SessionGuardsTests: XCTestCase {
     }
 
     func testVeilNeverDropsOverSilence() {
-        XCTAssertFalse(SessionGuards.mayNightDim(autoNightDim: true, focusMode: false, playing: false, timerActive: true, onHome: true))
-        XCTAssertTrue(SessionGuards.mayNightDim(autoNightDim: true, focusMode: false, playing: true, timerActive: true, onHome: false))
-        XCTAssertFalse(SessionGuards.mayNightDim(autoNightDim: true, focusMode: true, playing: true, timerActive: true, onHome: true))
-        XCTAssertFalse(SessionGuards.mayNightDim(autoNightDim: false, focusMode: false, playing: true, timerActive: true, onHome: true))
+        XCTAssertFalse(SessionGuards.mayNightDim(autoNightDim: true, focusMode: false, playing: false, timerActive: true, onBedsideScreen: true))
+        XCTAssertTrue(SessionGuards.mayNightDim(autoNightDim: true, focusMode: false, playing: true, timerActive: true, onBedsideScreen: false))
+        XCTAssertFalse(SessionGuards.mayNightDim(autoNightDim: true, focusMode: true, playing: true, timerActive: true, onBedsideScreen: true))
+        XCTAssertFalse(SessionGuards.mayNightDim(autoNightDim: false, focusMode: false, playing: true, timerActive: true, onBedsideScreen: true))
     }
 
-    // Value: protects=All night veils the bedside (Home) screen but not daytime listening on other tabs; fails_when=the Home or timer clause is dropped or inverted; why_new=the rule gained onHome for untimed nights; seam=none
+    // Value: protects=All night veils the bedside screens (Home, Now Playing) but not daytime listening on other tabs; fails_when=the Home or timer clause is dropped or inverted; why_new=the rule gained onBedsideScreen for untimed nights; seam=none
     func testAllNightVeilsOnlyTheSleepScreen() {
-        XCTAssertTrue(SessionGuards.mayNightDim(autoNightDim: true, focusMode: false, playing: true, timerActive: false, onHome: true))
-        XCTAssertFalse(SessionGuards.mayNightDim(autoNightDim: true, focusMode: false, playing: true, timerActive: false, onHome: false))
-        XCTAssertTrue(SessionGuards.mayNightDim(autoNightDim: true, focusMode: false, playing: true, timerActive: true, onHome: false),
+        XCTAssertTrue(SessionGuards.mayNightDim(autoNightDim: true, focusMode: false, playing: true, timerActive: false, onBedsideScreen: true))
+        XCTAssertFalse(SessionGuards.mayNightDim(autoNightDim: true, focusMode: false, playing: true, timerActive: false, onBedsideScreen: false))
+        XCTAssertTrue(SessionGuards.mayNightDim(autoNightDim: true, focusMode: false, playing: true, timerActive: true, onBedsideScreen: false),
                       "a running timer veils every tab, as before")
     }
 
@@ -2178,7 +2178,7 @@ final class UntimedNightTests: XCTestCase {
         XCTAssertEqual(timer.nightProgress, 1, accuracy: 1e-6, "the scene held, not dropped by tail / (total + tail)")
     }
 
-    // Value: protects=a settled night's end expires (resumeWindow), and a timer over silence settles nothing; fails_when=settleNight stops recording the stop or settles without a Sleep night; why_new=the stop edge used to be the only thing bounding it; seam=none
+    // Value: protects=a settled night's end expires (resumeWindow), and a timer over silence settles nothing; fails_when=the end isn't recorded, or a timer over silence settles a night; why_new=the stop edge used to be the only thing bounding it; seam=none
     func testASettledEndExpiresAndSilenceSettlesNothing() {
         for path in ["tick", "reconcile"] {
             let e = AudioEngine()
@@ -2189,7 +2189,8 @@ final class UntimedNightTests: XCTestCase {
             e.sleepTimer.now = { now }
             defer { e.noiseOn = false; e.sleepTimer.cancelTimer(); e.focusMode = false }
             e.noiseOn = true
-            e.sleepTimer.startSleepTimer(minutes: 0)
+            e.sleepTimer.startSleepTimer(minutes: 0)              // the deadline is now…
+            e.sleepTimer.timerTotal = 30 * 60                     // …of a 30-min night
             Thread.sleep(forTimeInterval: 0.01)
             now = t0 + 30 * 60
             if path == "tick" {
@@ -2211,12 +2212,13 @@ final class UntimedNightTests: XCTestCase {
         quiet.startSleepTimer(minutes: 0)
         Thread.sleep(forTimeInterval: 0.01)
         quiet.reconcileIfExpired()
+        XCTAssertEqual(quiet.nightProgress, 0, accuracy: 1e-9, "a timer over silence settles nothing")
         now += 6 * 3600                                           // the next evening
         quiet.noteSleepSessionStarted()
         XCTAssertEqual(quiet.nightProgress, 0, accuracy: 1e-9, "bedtime, not last night's settled state")
     }
 
-    // Value: protects=a timed night that ends on its own stays settled through the silence; fails_when=the terminal stop's settleNight goes and stopAll's reset lifts the scene to the untimed clock; why_new=nothing read nightProgress after a terminal stop; seam=none
+    // Value: protects=a timed night that ends on its own stays settled through the silence; fails_when=the terminal stop's cancel stops carrying the reached night and stopAll's reset lifts the scene; why_new=nothing read nightProgress after a terminal stop; seam=none
     func testATimedNightsEndLeavesTheSceneSettled() {
         let e = AudioEngine()
         e.sleepTimer.backstop = NoopBackstop()

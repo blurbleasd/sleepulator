@@ -11,14 +11,14 @@ enum SceneMood {
 struct SceneContext {
     let palette: Palette
     let reduceMotion: Bool
-    /// True when the screen is actually occluded — the night-dim veil, backgrounding, or a
-    /// low-luminance/Always-On display — so scenes settle to static for battery. NOT the
-    /// lighter controls-faded screensaver: scenes keep animating through that (it's the show).
+    /// Hold the scene still: the screen is out of sight (`occluded`), or the "Moving scenes"
+    /// setting is off. Scenes settle to a static frame. NOT the lighter controls-faded
+    /// screensaver: scenes keep animating through that (it's the show).
     /// See `HomeView.scenesFrozen` / the `nightDimmed → audio.screenDimmed` hand-off.
     let paused: Bool
-    /// The screen itself is out of sight (the veil, backgrounded, low luminance), not just held
-    /// still by the "Moving scenes" setting. Static overlays stop their periodic re-reads only
-    /// then: with Moving scenes off the night still darkens.
+    /// The out-of-sight part of `paused`: the veil, backgrounded, low luminance. NightDarken and
+    /// NightFade stop their periodic re-reads only then, so with Moving scenes off Night sky and
+    /// Rain on glass still darken.
     var occluded: Bool = false
     /// The sleep timer, for time-reactive sleep scenes (e.g. the setting moon).
     let sleepTimer: SleepTimerService

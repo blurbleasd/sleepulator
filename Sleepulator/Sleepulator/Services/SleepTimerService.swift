@@ -158,26 +158,25 @@ final class SleepTimerService: ObservableObject {
         untimedStoppedAt = nil
     }
 
-    /// The night's timer reached its natural end: hold the scenes at their darkest, stillest state
-    /// through the silence that follows (resuming within `UntimedNight.resumeWindow` keeps it;
-    /// after that the night is over). `stopAll` resets the timer's total, so without this the
-    /// scene fell back to the untimed clock and lifted just as the night ended. Only over a Sleep
-    /// night (a timer set over silence has none), and it records the stop itself: a stop over
-    /// silence has no edge to record, and the settled night never expired.
-    private func settleNight() {
+    /// The night's timer reached its natural end at `at`: record it as the night's stop, so the
+    /// settled night (which `cancelTimer`'s carry leaves at 1) lasts `UntimedNight.resumeWindow`
+    /// from the real end and then is over. A stop over silence has no session edge to record it,
+    /// and the settled night never expired. Keeps an earlier stop (the sound already paused): a
+    /// deadline reconciled the next morning must not revive last night. Only over a Sleep night.
+    private func recordNightEnd(at: Date) {
         guard untimedStart != nil else { return }
-        untimedStart = now().addingTimeInterval(-UntimedNight.settle)
-        untimedStoppedAt = now()
+        untimedStoppedAt = min(untimedStoppedAt ?? at, at)
     }
 
-    /// The terminal stop, once per timer: hold the night settled, stop everything, clear the
-    /// timer. One place for the three paths (the duration fade, the episode's end, a deadline
-    /// passed while suspended), so a change to how the night ends can't miss one.
-    private func fireTerminalStop(_ reason: String) {
+    /// The terminal stop, once per timer: record the night's end, stop everything, clear the
+    /// timer (whose cancel holds the night settled). One place for the three paths (the duration
+    /// fade, the episode's end, a deadline passed while suspended), so none can miss a step.
+    /// `endedAt` is when the night really ended, if earlier than now.
+    private func fireTerminalStop(_ reason: String, endedAt: Date? = nil) {
         if timerRemaining != 0 { timerRemaining = 0 }
         didFire = true
         Log.timer.notice("terminal stop: \(reason, privacy: .public)")
-        settleNight()
+        recordNightEnd(at: endedAt ?? now())
         stopAllFn?()
         cancelTimer()
     }
@@ -338,7 +337,9 @@ final class SleepTimerService: ObservableObject {
     func reconcileIfExpired() {
         guard kind == .duration, !didFire, let end = sleepTimerEnd else { return }
         guard Date() >= end else { return }
-        fireTerminalStop("duration timer expired while suspended (reconcile on foreground)")
+        // The night ended at the deadline, not now (on the scenes' clock, which tests inject).
+        let ended = now().addingTimeInterval(-Date().timeIntervalSince(end))
+        fireTerminalStop("duration timer expired while suspended (reconcile on foreground)", endedAt: ended)
     }
 
     /// Drive the end-of-episode timer from the podcast clock. Runs on the main queue (its caller

@@ -135,12 +135,14 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   (`noteSessionEdge`) and a switch to Focus ends it. It's visual only (scenes darken and still,
   comets and meteors retire past 0.4, the orb calms); the audio fade never reads it. Views that
   observe the timer for darkening (`NightDarken`, `NightFade`) also re-read it every 20 s while
-  the screen is in sight (`SceneContext.occluded`; with "Moving scenes" off it still darkens),
+  the screen is in sight (`SceneContext.occluded`; with "Moving scenes" off, Night sky and Rain on
+  glass still darken),
   since an untimed night publishes nothing. The night never brightens on its own at a timer
   boundary: a timer started mid-night settles on from where the night already is
   (`SleepTimerService.timedBase`), the ambient tail re-bases instead of dropping back, a cancel
   hands the reached night to the untimed clock, and a natural end leaves it settled until the
-  resume window passes (`fireTerminalStop` → `settleNight`; `stopAll` resets the timer's total).
+  resume window passes from the real end (`cancelTimer` carries the reached night; `fireTerminalStop`
+  → `recordNightEnd`).
   Only a +15m bump eases it back, by design. Switching Focus → Sleep with the sound playing starts
   the night like Play (`AudioEngine.beginSleepNight`). Before this, All night never darkened.
 - **The stop-with-episode timer runs on the playback clock.** "Stop after this episode" (the timer
@@ -201,7 +203,9 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   a second tap lifts the veil and wakes the controls (`SessionGuards.veilTap`: a tap within
   0.8 s is ignored, and one counts as the wake until the glance has faded; timed on the
   monotonic clock). If VoiceOver or Switch Control turns on while the veil is down, one tap wakes.
-  Under the veil the tabs are hidden from accessibility, so only it answers.
+  Under the veil the tabs and Home's wake layer are hidden from accessibility, so only the veil
+  should answer "Wake". XCUITest still lists SwiftUI elements hidden from accessibility (even
+  Home's opacity-0 chrome), so check that with Voice Control on a device (TESTING.md §Q.5).
 - **One name per sound.** Name sounds through `SoundNames` (binaurals are "Deep", "Drift", …,
   never "Delta" / "Theta").
 - **Podcasts is split by depth.** The library and its Tonight shelf follow the 2am rules (artwork

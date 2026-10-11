@@ -542,8 +542,8 @@ need the phone. Room dark, phone on the nightstand, brightness where you'd leave
    or meteor after ~18 min; by 45 min it holds its darkest, stillest state. Pull the headphones
    for a minute and reconnect. ✅ It doesn't brighten back to bedtime. Then drag the ring to
    30m, and later back to All night. ✅ Nothing brightens either way. With an ambient tail set and
-   a podcast in the mix, ✅ the scene holds as the podcast stops. Repeat 4 with Settings → Moving
-   scenes off: ✅ the still sky still darkens over the 45 minutes. Let a short timer end
+   a podcast in the mix, ✅ the scene holds as the podcast stops. Repeat 4 on Night sky with Settings →
+   Moving scenes off: ✅ the still sky still darkens over the 45 minutes. Let a short timer end
    on its own and wake the screen within half an hour. ✅ The scene is still at its darkest.
 5. **The glance.** On a 30-min night, let the veil drop, then tap once. ✅ Only the faint ember
    and a dim "Nm left" appear at once (softly), and are gone after ~6 s (faded by ~8 s). A quick

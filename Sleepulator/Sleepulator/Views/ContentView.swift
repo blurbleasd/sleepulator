@@ -59,7 +59,7 @@ struct ContentView: View {
     }
 
     // App-wide night-dim: ~60s after the last touch in a Sleep session (anywhere while a timer
-    // runs, on Home for All night), drop a black veil over the whole app (tabs + mini-player) so a
+    // runs, on Home or the Now Playing sheet for All night), drop a black veil over the whole app (tabs + mini-player) so a
     // bedside screen goes dark. Tap to wake. Any touch anywhere (Home, the mixer, any sheet)
     // re-arms it (`WindowActivity`), as do tab changes. When the sound stops we only cancel the
     // pending dim, never force the screen bright mid-night. Only over a session that's actually
@@ -72,7 +72,7 @@ struct ContentView: View {
         SessionGuards.mayNightDim(autoNightDim: autoNightDim, focusMode: audio.focusMode,
                                   playing: audio.isAnythingPlaying,
                                   timerActive: timerActive ?? (audio.sleepTimer.timerRemaining > 0),
-                                  onHome: selectedTab == 0 || showNowPlaying)
+                                  onBedsideScreen: selectedTab == 0 || showNowPlaying)
     }
 
     /// Tracks the timer's active/idle state so the veil re-arms only on that transition, not on
@@ -277,6 +277,11 @@ struct ContentView: View {
             guard active != timerWasActive else { return }
             timerWasActive = active
             if !nightDimmed { scheduleDim(timerActiveNow: active) }
+        }
+        // Opening the full player is a bedside screen on an untimed night: arm the veil. The tap
+        // that opened it ran before the sheet was up, while the veil wasn't allowed.
+        .onChange(of: showNowPlaying) { _, up in
+            if up, !nightDimmed { scheduleDim() }
         }
         .onChange(of: audio.focusMode) { _, focus in
             if focus { cancelDim(); withAnimation(.easeInOut(duration: 0.4)) { nightDimmed = false } }

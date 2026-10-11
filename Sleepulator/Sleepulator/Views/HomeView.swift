@@ -106,8 +106,11 @@ struct HomeView: View {
     /// setting. Previously freezing was gated on the sleep-timer veil alone, so a no-timer session
     /// animated at full rate all night. This is purely additive — it only adds reasons to freeze,
     /// never removes the veil case.
-    private var scenesFrozen: Bool {
-        audio.screenDimmed || scenePhase != .active || isLuminanceReduced || !ambientMotion
+    private var scenesFrozen: Bool { screenOutOfSight || !ambientMotion }
+
+    /// The screen itself is out of sight: the veil, backgrounded, or low luminance (Always-On).
+    private var screenOutOfSight: Bool {
+        audio.screenDimmed || scenePhase != .active || isLuminanceReduced
     }
 
     // Selected backdrop scene per mode (persisted). Changing it re-renders the home; the
@@ -429,7 +432,7 @@ struct HomeView: View {
                 palette: pal,
                 reduceMotion: reduceMotion,
                 paused: scenesFrozen,
-                occluded: audio.screenDimmed || scenePhase != .active || isLuminanceReduced,
+                occluded: screenOutOfSight,
                 sleepTimer: audio.sleepTimer,
                 pomodoro: audio.pomodoro,
                 audioLevel: { [weak audio] in audio?.audioLevel ?? 0 },
@@ -649,6 +652,9 @@ struct HomeView: View {
                     // "Tap Show controls", "Tap Wake" or "Tap Controls".
                     .accessibilityInputLabels(["Show controls", "Wake", "Controls"])
                     .accessibilityAddTraits(.isButton)
+                    // Under the night veil only the veil should answer "Wake". Hidden here as well
+                    // as on the TabView; XCUITest can't see either, so it's device-checked (§Q.5).
+                    .accessibilityHidden(audio.screenDimmed)
             }
 
             // Transient backdrop name, shown for ~1.6s after a swipe changes the scene.
