@@ -233,7 +233,8 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   Under the veil the tabs, Home's wake layer and the mini-player are hidden from accessibility, so
   only the veil should answer "Wake". XCUITest still lists SwiftUI elements hidden from
   accessibility (even Home's opacity-0 chrome), so check that with Voice Control on a device
-  (TESTING.md §Q.5).
+  (TESTING.md §Q.5; for the mini-player, §M7's veil step, since §Q.5 runs where the bar isn't
+  rendered).
 - **One name per sound.** Name sounds through `SoundNames` (binaurals are "Deep", "Drift", …,
   never "Delta" / "Theta").
 - **Podcasts is split by depth.** The library and its Tonight shelf follow the 2am rules (artwork
