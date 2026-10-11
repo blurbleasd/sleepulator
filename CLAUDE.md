@@ -191,8 +191,10 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   sheet never depends on the bar. The removal fade still renders the bar for 0.9 s, so the
   always-present wrapper also gates `.allowsHitTesting` on `miniPlayerHidden` and
   `.accessibilityHidden` on `miniPlayerHidden || nightDimmed` (the veil's rule below): those stop
-  real taps and VoiceOver at once, though XCUITest's tree ignores them. Keep both halves (only
-  device steps check them: TESTING.md §M7 for the fade, §M7's veil step for `nightDimmed`). To
+  real taps and VoiceOver at once, though XCUITest's tree ignores them. Keep both halves: only
+  device steps check that they block (TESTING.md §M7 for the fade, §M7's veil step for
+  `nightDimmed`); HomeLayoutUITests checks only that the hit-test gate lets a tap reach the
+  shown bar. To
   prove a hidden view is gone, assert `waitForNonExistence(timeout:)` in a UI test: a removal
   transition keeps it in the tree until it finishes.
 - **A `.contentShape(.accessibility, …)` can become its container's frame.** NightRing's band shape

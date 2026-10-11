@@ -167,20 +167,26 @@ final class HomeLayoutUITests: XCTestCase {
 
     /// Puts the app back in Sleep for the tests that follow (the unit tests hosted in this app read
     /// its persisted mode), from wherever an assertion stopped the Focus test: Now Playing up, on
-    /// Podcasts, the controls faded, a session running.
+    /// Podcasts, the controls faded, a session running. Goes round again like the test's own taps,
+    /// and answers the "Switch to Sleep?" confirm a running session raises.
     @MainActor
     private static func leaveInSleep(_ app: XCUIApplication) {
         guard app.state == .runningForeground else { return }
         let done = app.buttons["Done"]
-        if done.exists { done.tap(); _ = done.waitForNonExistence(timeout: 3) }
         let homeTab = app.tabBars.buttons.matching(NSPredicate(format: "label IN %@", ["Focus", "Sleep"])).firstMatch
-        if homeTab.exists, !homeTab.isSelected { homeTab.tap() }
         let wake = app.buttons["Show controls"]
-        if wake.exists { wake.tap() }
         let stop = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Stop focus session")).firstMatch
-        if stop.exists { stop.tap() }
+        let confirm = app.alerts.buttons["Switch to Sleep"]
         let sleep = app.buttons["Sleep mode"]
-        if sleep.waitForExistence(timeout: 3), !sleep.isSelected { sleep.tap() }
+        for _ in 0..<3 where !(sleep.exists && sleep.isSelected) {
+            if confirm.exists { confirm.tap(); _ = confirm.waitForNonExistence(timeout: 3); continue }
+            if done.exists { done.tap(); _ = done.waitForNonExistence(timeout: 3) }
+            if homeTab.exists, !homeTab.isSelected { homeTab.tap() }
+            if wake.exists { wake.tap() }
+            if stop.exists { stop.tap() }
+            if sleep.waitForExistence(timeout: 3), !sleep.isSelected { sleep.tap() }
+            _ = confirm.waitForExistence(timeout: 1)
+        }
     }
 
     /// Polls `condition` on the main run loop until it holds or `timeout` passes.

@@ -332,8 +332,9 @@ this section is where you do it. Do it in a dark room at your real bedtime brigh
    takes about 9 s): a tap on Build mix through the half-faded bar must still open the mixer.
    *The bar under the veil (added 2026-10-11).* Start a 30-min night with something queued, go to
    Podcasts and let the veil drop. ✅ With Voice Control's "Show names" only the veil is labelled,
-   and "Tap Nothing playing" (or the bar's "Up next" label) does nothing; with VoiceOver turned
-   on, swiping finds only the veil. (XCUITest can't tell: it lists the bar either way.)
+   and "Tap Play queue" and "Tap Up next" do nothing (no podcast starts, Now Playing stays shut);
+   with VoiceOver turned on, swiping finds only the veil. (XCUITest can't tell: it lists the bar
+   either way.)
 8. **Ring drag keeps the controls awake.** Mid-night (sounds playing): tap to wake, then drag the
    ring slowly for 5+ s. ✅ The controls don't fade under the finger; ~3 s after release they do.
    Inside the last 10 minutes the ring is locked (handle dims); a drag that ends where it began
