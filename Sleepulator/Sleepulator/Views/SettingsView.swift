@@ -104,11 +104,14 @@ struct SettingsView: View {
 
     /// A switch whose spoken name is its title alone, with the note as the hint. With the note in
     /// the label, Voice Control needed the whole sentence to tap it, and VoiceOver read it even
-    /// with hints off (choiceRow does the same).
-    private func settingToggle(_ title: String, note: String? = nil, isOn: Binding<Bool>) -> some View {
+    /// with hints off (choiceRow does the same). `spokenValue` replaces the switch's own On/Off,
+    /// for a disabled switch to say why; the note isn't repeated as the hint then.
+    private func settingToggle(_ title: String, note: String? = nil, spokenValue: String? = nil,
+                               isOn: Binding<Bool>) -> some View {
         Toggle(isOn: isOn) { label(title, note: note) }
             .accessibilityLabel(title)
-            .accessibilityHint(note ?? "")
+            .accessibilityHint(spokenValue == nil ? note ?? "" : "")
+            .accessibilityValue(ifPresent: spokenValue)
     }
 
     /// A row that picks one of a few values: the label (and note) on the left, the value on the
@@ -264,8 +267,8 @@ struct SettingsView: View {
                 .padding(.vertical, UI.xs)
             }
             settingToggle("Don't start the next episode during a sleep timer",
-                          note: queue.autoPlay ? "The one playing finishes; your sounds carry on."
-                                               : "Only applies when the next episode plays automatically.",
+                          note: SettingsCopy.holdNote(autoPlay: queue.autoPlay),
+                          spokenValue: SettingsCopy.holdSpokenValue(isOn: holdQueue, autoPlay: queue.autoPlay),
                           isOn: $holdQueue)
             // With Auto-Play off the next episode never starts on its own anyway.
             .disabled(!queue.autoPlay)
@@ -438,6 +441,13 @@ struct DiagnosticsListView: View {
                        date: (try? url.resourceValues(forKeys: [.creationDateKey]))?.creationDate)
             }
         }
+    }
+}
+
+private extension View {
+    /// `accessibilityValue` when there's one to give; otherwise the control keeps its own.
+    @ViewBuilder func accessibilityValue(ifPresent value: String?) -> some View {
+        if let value { accessibilityValue(value) } else { self }
     }
 }
 

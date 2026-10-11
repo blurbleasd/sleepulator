@@ -619,14 +619,17 @@ also pauses while its controls are faded to the screensaver, as the Sleep orb al
 2. **Restore, then Undo.** Restore again and tap Replace. ✅ "Backup restored" names what came back
    and offers Undo. Tap Undo. ✅ "Restore undone"; the mix and setting you changed are back.
    Restore once more and tap OK. ✅ The Backup rows show "Undo the restore from <day, time>", and it
-   still works after the app is killed and relaunched.
+   still works after the app is killed and relaunched. With VoiceOver, ✅ the row reads "Undo the
+   restore, <day, time>"; with Voice Control, ✅ "Tap Undo the restore" opens the confirm.
 3. **A wrong file.** Pick any other JSON file. ✅ "That isn't a Sleepulator backup." and nothing
    changed. A backup with a section hand-edited to a plain string ("savedPodcasts": "x"). ✅ No
    crash; the rest restores and the result says a few parts weren't recognised.
 4. **One limiter choice.** Podcasts at night ▸ Soften loud moments: the whole row opens Off / While
    sleeping / Always. Then §3D step 3.
 5. **The hold.** Play the next episode automatically OFF. ✅ "Don't start the next episode during a
-   sleep timer" is dim, title and switch, and says it only applies with Auto-Play. Turn Auto-Play on
+   sleep timer" is dim, title and switch, and says it only applies with Auto-Play. With VoiceOver on
+   and hints off (VoiceOver ▸ Verbosity ▸ Speak Hints), ✅ it reads "Off. Only applies when the next
+   episode plays automatically." Turn Auto-Play on
    and the hold on, start a 15 min timer on a short episode, lock. ✅ The episode ends, the next one
    doesn't start, your sounds carry on.
 6. **Mode order.** In Sleep, ✅ the list opens on Sleep and Podcasts at night; the Pomodoro is folded

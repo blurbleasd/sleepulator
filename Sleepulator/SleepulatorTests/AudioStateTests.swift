@@ -3645,6 +3645,16 @@ final class SettingsRulesTests: XCTestCase {
         XCTAssertEqual(SettingsCopy.beatsNote("auto"), SettingsCopy.beatsNote("anything else"))
     }
 
+    // Value: protects=with Auto-Play off the hold switch says why it's off in its value, not only its hint; fails_when=holdSpokenValue returns nil while the switch is disabled, or drops its state; why_new=with hints off VoiceOver gave a dimmed switch and no reason; seam=none; no_claim=that VoiceOver reads it (TESTING.md §S5)
+    func testTheHoldSaysWhyItsOffInItsValue() {
+        XCTAssertNil(SettingsCopy.holdSpokenValue(isOn: true, autoPlay: true), "enabled, the switch says On or Off itself")
+        XCTAssertEqual(SettingsCopy.holdSpokenValue(isOn: false, autoPlay: false),
+                       "Off. Only applies when the next episode plays automatically.")
+        XCTAssertEqual(SettingsCopy.holdSpokenValue(isOn: true, autoPlay: false),
+                       "On. Only applies when the next episode plays automatically.")
+        XCTAssertNotEqual(SettingsCopy.holdNote(autoPlay: true), SettingsCopy.holdNote(autoPlay: false))
+    }
+
     func testSofteningNeverSaysOffAboveTheFloor() {
         XCTAssertEqual(SettingsCopy.softening(SettingsCopy.eqFloor), "Light")
         XCTAssertEqual(SettingsCopy.softening(0), "Off", "the old slider's zero: the EQ does nothing there")

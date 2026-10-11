@@ -51,6 +51,20 @@ enum SettingsCopy {
 
     static let eqFloor = 0.2
 
+    /// The note under "Don't start the next episode during a sleep timer": what it does, or why
+    /// it's off while Auto-Play is.
+    static func holdNote(autoPlay: Bool) -> String {
+        autoPlay ? "The one playing finishes; your sounds carry on."
+                 : "Only applies when the next episode plays automatically."
+    }
+
+    /// What VoiceOver says as the hold switch's value: nil while it's enabled (the switch says
+    /// On or Off itself); while Auto-Play disables it, its state and why. The reason was only in
+    /// the hint, which VoiceOver skips with hints off: a dimmed switch, and no word why.
+    static func holdSpokenValue(isOn: Bool, autoPlay: Bool) -> String? {
+        autoPlay ? nil : "\(isOn ? "On" : "Off"). \(holdNote(autoPlay: false))"
+    }
+
     /// The note under "Binaural beats for", for the chosen routing.
     static func beatsNote(_ routing: String) -> String {
         switch routing {

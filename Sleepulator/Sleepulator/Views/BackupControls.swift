@@ -195,6 +195,11 @@ final class BackupController: ObservableObject {
 
     // MARK: Alert copy
 
+    /// When the restore Undo would reverse was made: "Sunday 9:41 PM".
+    static func undoWhen(_ date: Date) -> String {
+        date.formatted(.dateTime.weekday(.wide).hour().minute())
+    }
+
     var title: String {
         switch prompt {
         case .confirm(let p):         return Backup.confirmTitle(p.contents)
@@ -213,7 +218,7 @@ final class BackupController: ObservableObject {
         case .failed(_, let message), .notice(_, let message): return message
         case .confirmUndo(let date):
             return "This puts back the mixes, podcasts, queue and settings you had before restoring on "
-                + "\(date.formatted(.dateTime.weekday(.wide).hour().minute())). Anything you've changed since will be lost."
+                + "\(Self.undoWhen(date)). Anything you've changed since will be lost."
         case .undone:                 return "Your mixes, podcasts, queue and settings are back as they were."
         case nil:                     return ""
         }
@@ -235,10 +240,14 @@ struct BackupRows: View {
         }
         .disabled(backup.busy)
         if let date = backup.undoDate {
+            let when = BackupController.undoWhen(date)
             Button { backup.askToUndo() } label: {
-                SettingActionRow(title: "Undo the restore from \(date.formatted(.dateTime.weekday(.wide).hour().minute()))",
-                                 systemImage: "arrow.uturn.backward", pal: pal)
+                SettingActionRow(title: "Undo the restore from \(when)", systemImage: "arrow.uturn.backward", pal: pal)
             }
+            // Named without the date, which goes in the value: Voice Control needed "Undo the
+            // restore from Sunday 9:41 PM" to tap it, and VoiceOver led with the date.
+            .accessibilityLabel("Undo the restore")
+            .accessibilityValue(when)
             .disabled(backup.busy)
         }
     }
