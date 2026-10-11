@@ -32,6 +32,8 @@ struct SettingsView: View {
     @AppStorage("focusMode") private var focusMode = false
     var pal: Palette { Palette(focusMode: focusMode) }
 
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
     /// Whether the other mode's settings are unfolded. Folds again when the mode changes.
     @State private var showOtherMode = false
 
@@ -88,6 +90,39 @@ struct SettingsView: View {
         // Named once: the label row also holds the value, which VoiceOver read twice.
         .accessibilityLabel(title)
         .accessibilityValue(SettingsCopy.minutes(value))
+    }
+
+    /// A row that picks one of a few values: the label (and note) on the left, the value on the
+    /// right, and the whole row opens the menu. A Picker with a two-line label dropped its value
+    /// onto a line of its own under the note, indented, like a stray control.
+    private func choiceRow<T: Hashable>(_ title: String, note: String? = nil, selection: Binding<T>,
+                                        options: [T], name: @escaping (T) -> String) -> some View {
+        Menu {
+            Picker(title, selection: selection) {
+                ForEach(options, id: \.self) { Text(name($0)).tag($0) }
+            }
+        } label: {
+            // At the accessibility text sizes the value goes under the label: beside it, the
+            // label was squeezed into a hyphenated column ("for- / ward").
+            let stacked = dynamicTypeSize.isAccessibilitySize
+            let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: UI.xs))
+                                 : AnyLayout(HStackLayout(spacing: UI.sm))
+            layout {
+                label(title, note: note)
+                if !stacked { Spacer(minLength: UI.sm) }
+                HStack(spacing: UI.xs) {
+                    Text(name(selection.wrappedValue))
+                    Image(systemName: "chevron.up.chevron.down").font(.caption.weight(.semibold))
+                }
+                .foregroundStyle(pal.dim)
+                .fixedSize()
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .accessibilityLabel(title)
+        .accessibilityValue(name(selection.wrappedValue))
+        .accessibilityHint(note ?? "")
     }
 
     /// Stereo width by named stop (`StereoWidth`).
@@ -189,12 +224,8 @@ struct SettingsView: View {
             // sounds, and whether the next one starts. The hold used to sit in the daytime
             // Podcasts section, worded like the timer's one-off "Stop after this episode", which
             // stops everything.
-            Picker(selection: limiterChoice) {
-                ForEach(LimiterChoice.allCases) { Text($0.title).tag($0) }
-            } label: {
-                label("Soften loud moments", note: "Keeps a sudden loud moment from waking you.")
-            }
-            .tint(pal.dim)
+            choiceRow("Soften loud moments", note: "Keeps a sudden loud moment from waking you.",
+                      selection: limiterChoice, options: LimiterChoice.allCases) { $0.title }
             Toggle(isOn: $settings.sleepEQ) {
                 label("Soften harsh highs and boomy lows", note: "Gentler voices at low volume.")
             }
@@ -205,8 +236,11 @@ struct SettingsView: View {
                         Spacer()
                         Text(SettingsCopy.softening(settings.sleepEQIntensity)).foregroundStyle(pal.dim)
                     }
+                    // The thumb in the mode's text tone (the default cream sat warm on Focus's
+                    // cyan), on a channel that shows against the flat row.
                     VolumeBar(value: $settings.sleepEQIntensity, accent: pal.controlTint,
-                              range: SettingsCopy.eqFloor...2, style: .parameter, tapToSet: true)
+                              range: SettingsCopy.eqFloor...2, thumbColor: pal.text,
+                              trackColor: pal.text.opacity(0.16), style: .parameter, tapToSet: true)
                         // The visible label, so Voice Control's "How much" finds it.
                         .accessibilityLabel("How much softening")
                         .accessibilityValue(SettingsCopy.softening(settings.sleepEQIntensity))
@@ -250,22 +284,14 @@ struct SettingsView: View {
 
     private var soundSection: some View {
         Section {
-            Picker(selection: stereoWidth) {
-                ForEach(StereoWidth.allCases) { Text($0.title).tag($0) }
-            } label: {
-                label("Stereo width", note: "How far the noise spreads, left to right. Narrow suits a phone speaker.")
-            }
-            .tint(pal.dim)
+            choiceRow("Stereo width", note: "How far the noise spreads, left to right. Narrow suits a phone speaker.",
+                      selection: stereoWidth, options: StereoWidth.allCases) { $0.title }
             // A true binaural beat needs one tone per ear; on a speaker the two sum in the
             // air and the beat vanishes, so a speaker gets a pulsed (isochronic) tone.
-            Picker(selection: $settings.beatRouting) {
-                Text("Auto").tag("auto")
-                Text("Headphones").tag("headphones")
-                Text("Speaker").tag("speaker")
-            } label: {
-                label("Binaural beats for", note: SettingsCopy.beatsNote(settings.beatRouting))
+            choiceRow("Binaural beats for", note: SettingsCopy.beatsNote(settings.beatRouting),
+                      selection: $settings.beatRouting, options: ["auto", "headphones", "speaker"]) {
+                ["headphones": "Headphones", "speaker": "Speaker"][$0] ?? "Auto"
             }
-            .tint(pal.dim)
         } header: {
             header("Sound")
         }
@@ -287,12 +313,9 @@ struct SettingsView: View {
             Toggle(isOn: $queue.shuffleQueue) {
                 label("Shuffle the queue", note: "The next episode comes from anywhere in Up Next.")
             }
-            Picker(selection: Binding(get: { Int(settings.skipInterval) }, set: { settings.skipInterval = Double($0) })) {
-                ForEach([10, 15, 30, 45], id: \.self) { Text("\($0) seconds").tag($0) }
-            } label: {
-                label("Skip back and forward")
-            }
-            .tint(pal.dim)
+            choiceRow("Skip back and forward",
+                      selection: Binding(get: { Int(settings.skipInterval) }, set: { settings.skipInterval = Double($0) }),
+                      options: [10, 15, 30, 45]) { "\($0) seconds" }
             Toggle(isOn: $queue.deleteOnCompletion) {
                 label("Delete downloads once played", note: "Only finished episodes; a skipped one keeps its download.")
             }
@@ -338,63 +361,79 @@ struct TextDocument: FileDocument {
     }
 }
 
-/// Settings ▸ Advanced ▸ Diagnostics: the MetricKit payloads MetricsCollector has stored,
-/// newest first, each shareable (AirDrop the JSON to a Mac for analysis). Payloads arrive
-/// on iOS's schedule (~daily), so an empty list on a fresh install is expected.
+/// Settings ▸ Backup & support ▸ Reports from iOS: the MetricKit payloads MetricsCollector has
+/// stored, newest first, each shareable (AirDrop the JSON to a Mac for analysis). Payloads
+/// arrive on iOS's schedule (~daily), so an empty list on a fresh install is expected.
 struct DiagnosticsListView: View {
     let pal: Palette
-    @State private var files: [URL] = []
+    @State private var reports: [Report] = []
+
+    /// One stored payload, named for a person: what kind it is and when it came.
+    struct Report: Identifiable {
+        let url: URL
+        let isCrash: Bool
+        let date: Date?
+        var id: URL { url }
+        var kind: String { isCrash ? "Crash or hang report" : "Battery and performance report" }
+        var when: String { date?.formatted(date: .abbreviated, time: .shortened) ?? "Date unknown" }
+    }
 
     var body: some View {
-        ZStack {
-            pal.bg.ignoresSafeArea()
-            if files.isEmpty {
-                VStack(spacing: 8) {
+        Group {
+            if reports.isEmpty {
+                VStack(spacing: UI.sm) {
                     Image(systemName: "waveform.path.ecg.rectangle")
                         .font(.largeTitle)
-                        .foregroundColor(pal.dim)
+                        .foregroundStyle(pal.dim)
+                        .accessibilityHidden(true)
                     Text("No reports yet")
                         .font(.headline)
-                        .foregroundColor(pal.text)
-                    Text("iOS delivers battery and stability reports about once a day. Check back after a night's use.")
-                        .font(.caption)
-                        .foregroundColor(pal.dim)
+                        .foregroundStyle(pal.text)
+                    Text("iOS sends battery and crash reports about once a day. Check back after a night's use.")
+                        .font(.footnote)
+                        .foregroundStyle(pal.dim)
                         .multilineTextAlignment(.center)
-                        .padding(.horizontal, 40)
+                        .padding(.horizontal, UI.xxl)
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(pal.bg.ignoresSafeArea())
             } else {
-                ScrollView {
-                    VStack(spacing: 10) {
-                        ForEach(files, id: \.self) { url in
-                            HStack {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(url.lastPathComponent.hasPrefix("diagnostic") ? "Crash / hang report" : "Daily metrics")
-                                        .font(.system(.subheadline, design: .rounded).weight(.semibold))
-                                        .foregroundColor(pal.text)
-                                    Text(url.lastPathComponent)
-                                        .font(.caption2)
-                                        .foregroundColor(pal.dim)
-                                        .lineLimit(1)
-                                }
-                                Spacer()
-                                ShareLink(item: url) {
-                                    Image(systemName: "square.and.arrow.up")
-                                        .foregroundColor(pal.accent)
-                                        .frame(width: 44, height: 44)
-                                }
-                                .accessibilityLabel("Share report")
+                // The list style of the pages around it; it used to be glass cards in a ScrollView
+                // with each report named by its raw filename.
+                List {
+                    ForEach(reports) { report in
+                        HStack(spacing: UI.md) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(report.kind).foregroundStyle(pal.text)
+                                Text(report.when).font(.footnote).foregroundStyle(pal.dim)
                             }
-                            .glassPanel()
+                            .accessibilityElement(children: .combine)
+                            Spacer(minLength: 0)
+                            ShareLink(item: report.url) {
+                                Image(systemName: "square.and.arrow.up")
+                                    .foregroundStyle(pal.dim)
+                                    .frame(width: 44, height: 44)
+                            }
+                            .accessibilityLabel("Share the \(report.kind.lowercased()) from \(report.when)")
                         }
                     }
-                    .padding(.horizontal, 20)
-                    .padding(.top, 12)
+                    .listRowBackground(pal.text.opacity(0.05))
                 }
+                .listStyle(.insetGrouped)
+                .scrollContentBackground(.hidden)
+                .background(pal.bg.ignoresSafeArea())
             }
         }
+        // Room for the floating mini-player, measured (a pushed page ends at the bottom edge).
+        .miniPlayerClearance()
         .navigationTitle("Reports from iOS")
         .navigationBarTitleDisplayMode(.inline)
-        .onAppear { files = MetricsCollector.shared.payloadFiles() }
+        .onAppear {
+            reports = MetricsCollector.shared.payloadFiles().map { url in
+                Report(url: url, isCrash: url.lastPathComponent.hasPrefix("diagnostic"),
+                       date: (try? url.resourceValues(forKeys: [.creationDateKey]))?.creationDate)
+            }
+        }
     }
 }
 
@@ -414,6 +453,8 @@ struct SettingLabel: View {
                 Text(note).font(.footnote).foregroundStyle(pal.dim)
             }
         }
+        // Leading even inside a Menu's label, which centres multi-line text.
+        .multilineTextAlignment(.leading)
         .fixedSize(horizontal: false, vertical: true)
     }
 }
