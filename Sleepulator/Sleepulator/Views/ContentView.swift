@@ -202,6 +202,9 @@ struct ContentView: View {
                 // The system grabber (the hand-drawn one scrolled away with the content).
                 .presentationDragIndicator(.visible)
                 .presentationBackground(pal.bg)
+                // The text-size cap it had when the bar presented it (MiniPlayerView's
+                // `.dynamicTypeSize`, which the sheet inherited).
+                .dynamicTypeSize(...DynamicTypeSize.accessibility2)
         }
         // Force dark mode for bedtime aesthetic
         .preferredColorScheme(.dark)

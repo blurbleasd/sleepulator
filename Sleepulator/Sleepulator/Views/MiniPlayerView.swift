@@ -21,7 +21,8 @@ struct MiniPlayerView: View {
     var pal: Palette { Palette(focusMode: focusMode) }
 
     var body: some View {
-        // Always present (per design): full controls when an episode is loaded, an actionable
+        // Wherever it shows (ContentView takes it out on Sleep Home at rest and under the
+        // screensaver), per design: full controls when an episode is loaded, an actionable
         // "Up next" when the queue has items but nothing's loaded yet, and a quiet "Nothing
         // playing" otherwise — so transport/queue access is always one tap away.
         VStack(spacing: 0) {
