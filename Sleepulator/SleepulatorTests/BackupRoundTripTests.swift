@@ -48,7 +48,6 @@ final class BackupRoundTripTests: XCTestCase {
         d.set(30.0,  forKey: "skipInterval")
         d.set(20,    forKey: "timerMinutes")
         d.set("green", forKey: "noiseType")
-        d.set(true,  forKey: "focusMode")
         d.set("still-water", forKey: "sceneSleep")
 
         let file = try throughBackupFile(Backup.userDefaults(from: d))
@@ -56,14 +55,13 @@ final class BackupRoundTripTests: XCTestCase {
         let (restored, skipped) = Backup.restoreUserDefaults(from: file, into: d)
 
         XCTAssertEqual(skipped, 0)
-        XCTAssertEqual(restored, 8)
+        XCTAssertEqual(restored, 7)
         XCTAssertEqual(d.double(forKey: "masterVolume"), 0.42, accuracy: 1e-9)
         XCTAssertTrue(d.bool(forKey: "autoPlay"))
         XCTAssertFalse(d.bool(forKey: "shuffleQueue"))
         XCTAssertEqual(d.double(forKey: "skipInterval"), 30, accuracy: 1e-9)
         XCTAssertEqual(d.integer(forKey: "timerMinutes"), 20)
         XCTAssertEqual(d.string(forKey: "noiseType"), "green")
-        XCTAssertTrue(d.bool(forKey: "focusMode"))
         XCTAssertEqual(d.string(forKey: "sceneSleep"), "still-water")
     }
 
@@ -111,9 +109,9 @@ final class BackupRoundTripTests: XCTestCase {
 
     func testFileBackedValidationGate() throws {
         let goodPositions = try JSONSerialization.jsonObject(with: JSONEncoder().encode(["ep1": 12.5]))
-        XCTAssertNotNil(Backup.validatedFileData(key: "episodePositions", value: goodPositions))
-        XCTAssertNil(Backup.validatedFileData(key: "episodePositions", value: ["ep1": "not-a-number"]))
-        XCTAssertNil(Backup.validatedFileData(key: "unknownFile", value: [String: Any]()))
+        XCTAssertEqual(Backup.validatedFileSection(key: "episodePositions", value: goodPositions)?.count, 1)
+        XCTAssertNil(Backup.validatedFileSection(key: "episodePositions", value: ["ep1": "not-a-number"]))
+        XCTAssertNil(Backup.validatedFileSection(key: "unknownFile", value: [String: Any]()))
     }
 
     // MARK: settings that used to be left out
@@ -132,6 +130,13 @@ final class BackupRoundTripTests: XCTestCase {
         XCTAssertEqual(d.stringArray(forKey: "finishedEpisodes"), ["ep1", "ep2"])
         XCTAssertEqual(d.string(forKey: "lastPick.noise.sleep"), "rain")
         XCTAssertEqual(d.string(forKey: "lastPick.binaural.focus"), "beta")
+        // Value: protects=every mode-memory key AudioEngine writes is in the backup allowlist; fails_when=pickKey's format changes and Backup's literal key list goes stale; why_new=the round trip above uses literals, blind to a rename; seam=none; no_claim=renamed kinds ("noise"/"binaural") or other persisted keys
+        for kind in ["noise", "binaural"] {
+            for focus in [false, true] {
+                XCTAssertTrue(Backup.scalarKeys.contains(AudioEngine.pickKey(kind, focus: focus)),
+                              "\(AudioEngine.pickKey(kind, focus: focus)) must be backed up")
+            }
+        }
     }
 
     func testPlayedListMustBeStrings() {
@@ -153,11 +158,15 @@ final class BackupRoundTripTests: XCTestCase {
         XCTAssertNil(d.object(forKey: Backup.exportedAtKey))
     }
 
-    func testReplacingRemovesAllowlistedKeysTheSnapshotLacks() {
+    func testReplacingRemovesAllowlistedKeysTheSnapshotLacks() throws {
         d.set(1.2, forKey: "stereoWidth")          // set by the restore being undone
         d.set("keep", forKey: "notOurs")            // never ours to touch
+        // Value: protects=Undo also removes encoded blobs (extra mixer layers) the restore added; fails_when=the replacing pass stops covering encodedKeys; why_new=this test covered scalar keys only; seam=none; no_claim=lastMix specifically
+        d.set(try JSONEncoder().encode([ExtraNoiseLayer(id: "a", type: "rain", volume: 0.6, muted: nil)]),
+              forKey: "extraLayers")               // also set by the restore being undone
         _ = Backup.restoreUserDefaults(from: ["masterVolume": 0.5], into: d, replacing: true)
         XCTAssertNil(d.object(forKey: "stereoWidth"))
+        XCTAssertNil(d.object(forKey: "extraLayers"), "an encoded blob the snapshot lacks goes too")
         XCTAssertEqual(d.string(forKey: "notOurs"), "keep")
         XCTAssertEqual(d.double(forKey: "masterVolume"), 0.5, accuracy: 1e-9)
     }
@@ -195,7 +204,7 @@ final class BackupRoundTripTests: XCTestCase {
         XCTAssertEqual(c.exportedAt, Date(timeIntervalSince1970: 1_000))
         XCTAssertEqual(Backup.confirmMessage(c),
                        "This replaces what's on this iPhone with the backup's no mixes, 2 shows, 1 episode in Up Next and settings. You can undo it afterwards.")
-        XCTAssertEqual(Backup.restoredMessage(Backup.Outcome(contents: c, skipped: 0, undoAvailable: true)),
+        XCTAssertEqual(Backup.restoredMessage(Backup.Outcome(contents: c, skipped: 0)),
                        "Restored no mixes, 2 shows, 1 episode in Up Next and your settings.")
     }
 
@@ -206,7 +215,7 @@ final class BackupRoundTripTests: XCTestCase {
     }
 
     func testSkippedPartsAreMentionedWithoutCounts() {
-        let o = Backup.Outcome(contents: Backup.Contents(settings: true), skipped: 3, undoAvailable: true)
+        let o = Backup.Outcome(contents: Backup.Contents(settings: true), skipped: 3)
         XCTAssertEqual(Backup.restoredMessage(o),
                        "Restored your settings. A few parts of the file weren't recognised and were left as they were.")
     }
@@ -259,9 +268,9 @@ final class BackupRoundTripTests: XCTestCase {
         ]
         let data = try JSONSerialization.data(withJSONObject: backup)
         let now = Date()
-        let outcome = await Backup.restore(Backup.Pending(data: data, contents: Backup.contents(of: backup)),
-                                           now: now, storage: storage, defaults: d)
-        XCTAssertTrue(outcome.undoAvailable)
+        let restored = await Backup.restore(Backup.Pending(data: data, contents: Backup.contents(of: backup)),
+                                            now: now, storage: storage, defaults: d)
+        let outcome = try XCTUnwrap(restored, "the snapshot was saved, so the restore went ahead")
         XCTAssertEqual(outcome.skipped, 0)
         XCTAssertEqual(d.double(forKey: "masterVolume"), 0.9, accuracy: 1e-9)
         XCTAssertEqual(d.double(forKey: "stereoWidth"), 1.2, accuracy: 1e-9)
@@ -273,7 +282,9 @@ final class BackupRoundTripTests: XCTestCase {
         XCTAssertTrue(undone)
         XCTAssertEqual(d.double(forKey: "masterVolume"), 0.3, accuracy: 1e-9)
         XCTAssertNil(d.object(forKey: "stereoWidth"), "a setting the restore added is gone again")
-        XCTAssertNil(storage.rawData(for: "library.json"), "a file the restore added is gone again")
+        // Emptied, not deleted: LibraryView ignores a missing file and saved the restored shows back.
+        XCTAssertEqual(try JSONDecoder().decode([Podcast].self, from: try XCTUnwrap(storage.rawData(for: "library.json"))), [],
+                       "the shows the restore added are gone again")
         let positions = try JSONDecoder().decode([String: Double].self, from: try XCTUnwrap(storage.rawData(for: "positions.json")))
         XCTAssertEqual(positions, ["ep1": 30.0])
         XCTAssertNil(Backup.undoDate(now: now, storage: storage, defaults: d), "Undo is offered once")
@@ -293,5 +304,218 @@ final class BackupRoundTripTests: XCTestCase {
         XCTAssertNil(storage.rawData(for: Backup.undoFile))
         let undone = await Backup.undo(now: now, storage: storage, defaults: d)
         XCTAssertFalse(undone)
+    }
+
+    // MARK: read: only a backup reaches the confirm
+
+    // Value: protects=Backup.read lets only a recognisable backup reach "Replace" and maps each failure to its message; fails_when=read drops its dict/restoresAnything guard or calls an unreadable file "not a backup"; why_new=read(url) had no test, only contents(of:); seam=none; no_claim=which of noAccess/unreadable, or the picker UI
+    @MainActor
+    func testReadAcceptsAnExportAndRefusesEverythingElse() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("BackupRead-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        func file(_ name: String, _ data: Data) throws -> URL {
+            let url = dir.appendingPathComponent(name)
+            try data.write(to: url)
+            return url
+        }
+        func failure(_ result: Result<Backup.Pending, Backup.ReadFailure>) -> Backup.ReadFailure? {
+            if case .failure(let f) = result { return f }
+            return nil
+        }
+
+        // A real export, as Export a backup saves it and the person later picks it.
+        let storage = StorageManager(directory: dir.appendingPathComponent("store"))
+        let ep = Episode(id: "e", title: "E", audioUrl: "u", duration: nil, pubDate: nil, description: nil)
+        storage.writeRaw(try JSONEncoder().encode([Podcast(id: "a", name: "A", url: "fa", episodes: [ep])]),
+                         to: "library.json")
+        d.set(0.6, forKey: "masterVolume")
+        let at = Date(timeIntervalSince1970: 1_000_000)
+        let exported = try await Backup.exportData(at: at, storage: storage, defaults: d)
+        let read = await Backup.read(try file("export.json", exported))
+        guard case .success(let pending) = read else { return XCTFail("an export must read back as a backup") }
+        XCTAssertEqual(pending.contents.shows, 1)
+        XCTAssertNil(pending.contents.mixes, "absent, so a restore leaves the mixes alone")
+        XCTAssertTrue(pending.contents.settings)
+        XCTAssertEqual(pending.contents.exportedAt, at)
+
+        // Saved places alone still make a backup, and the confirm says what it restores.
+        let positionsOnly = await Backup.read(try file("positions.json",
+            JSONSerialization.data(withJSONObject: ["episodePositions": ["ep1": 12.5]])))
+        guard case .success(let places) = positionsOnly else { return XCTFail("saved places alone are a backup") }
+        XCTAssertTrue(places.contents.positions)
+        XCTAssertEqual(Backup.confirmMessage(places.contents),
+                       "This replaces what's on this iPhone with the backup's saved places in episodes. You can undo it afterwards.")
+
+        // A file that can't be read is a read failure ("Pick it again from Files"), never "not a
+        // backup". Which of the two depends on whether iOS grants a scope (the simulator does,
+        // even for a temp file), so either is right here.
+        let missing = await Backup.read(dir.appendingPathComponent("gone.json"))
+        XCTAssertTrue([Backup.ReadFailure.noAccess, .unreadable].contains(failure(missing) ?? .notBackup),
+                      "got \(String(describing: failure(missing)))")
+        let notJSON = await Backup.read(try file("notes.json", Data("not json".utf8)))
+        XCTAssertEqual(failure(notJSON), .notBackup)
+        let array = await Backup.read(try file("array.json", Data("[1, 2]".utf8)))
+        XCTAssertEqual(failure(array), .notBackup)
+        let otherApp = await Backup.read(try file("other.json", Data(#"{"name": "Another app", "evilKey": 1}"#.utf8)))
+        XCTAssertEqual(failure(otherApp), .notBackup, "JSON with nothing of ours is not offered as a restore")
+    }
+
+    // MARK: a restore replaces only what the backup holds
+
+    // Value: protects=a restore replaces only the sections a backup holds, and absent or malformed sections keep their files; fails_when=a merge restore deletes absent files or writes an unvalidated section; why_new=the e2e test's absent files never existed, so a deletion went unseen; seam=none; no_claim=the engine reload
+    @MainActor
+    func testARestoreLeavesWhatTheBackupLacksAlone() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("BackupMerge-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let storage = StorageManager(directory: dir)
+        let ep = Episode(id: "e", title: "E", audioUrl: "u", duration: nil, pubDate: nil, description: nil)
+        let before: [String: Data] = [
+            "library.json": try JSONEncoder().encode([Podcast(id: "a", name: "A", url: "fa", episodes: [ep])]),
+            "queue.json": try JSONEncoder().encode([ep]),
+            "mixes.json": Data("[]".utf8),
+            "positions.json": try JSONEncoder().encode(["e": 30.0]),
+        ]
+        for (file, data) in before { storage.writeRaw(data, to: file) }
+
+        // Settings, plus an Up Next that doesn't decode: the queue must survive it.
+        let backup: [String: Any] = ["masterVolume": 0.8, "upNextQueue": [["bad": 1]], Backup.markerKey: 1]
+        let data = try JSONSerialization.data(withJSONObject: backup)
+        let restored = await Backup.restore(Backup.Pending(data: data, contents: Backup.contents(of: backup)),
+                                            storage: storage, defaults: d)
+        let outcome = try XCTUnwrap(restored)
+
+        XCTAssertEqual(d.double(forKey: "masterVolume"), 0.8, accuracy: 1e-9)
+        XCTAssertEqual(outcome.skipped, 1, "the malformed Up Next is skipped, not written")
+        XCTAssertNil(outcome.contents.upNext)
+        XCTAssertNil(outcome.contents.shows)
+        XCTAssertTrue(outcome.contents.settings)
+        for (file, data) in before {
+            XCTAssertEqual(storage.rawData(for: file), data, "\(file) isn't in the backup, so it stays as it was")
+        }
+    }
+
+    // MARK: export refuses what JSON can't hold
+
+    // Value: protects=export (and the restore's snapshot) throws on a non-JSON setting instead of raising an uncatchable ObjC exception; fails_when=exportData's isValidJSONObject guard is removed; why_new=no test drove exportData's failure path; seam=none; no_claim=the alert shown, or the restore-without-snapshot policy
+    @MainActor
+    func testExportRefusesASettingJSONCantHold() async {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("BackupExport-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let storage = StorageManager(directory: dir)
+        d.set(Double.nan, forKey: "masterVolume")      // JSON has no NaN
+        do {
+            _ = try await Backup.exportData(storage: storage, defaults: d)
+            XCTFail("a NaN setting must refuse the export, not write a file")
+        } catch {
+            // Refused, and the test process is still alive to see it.
+        }
+    }
+
+    // MARK: a setting must have the shape its reader expects
+
+    // Value: protects=a null, wrong-typed or out-of-range setting is skipped, never written; fails_when=scalarValid stops checking the property-list shape, type or range; why_new=no test fed a null (UserDefaults raised an uncatchable exception on it: a crash after Replace) or a huge number; seam=none; no_claim=the readers' own clamping
+    func testANullWrongTypeOrOutOfRangeSettingIsSkippedNotWritten() throws {
+        let dict = try XCTUnwrap(JSONSerialization.jsonObject(with: Data("""
+            {"masterVolume": null, "beatRouting": {"x": null}, "autoPlay": "yes",
+             "skipInterval": 1e300, "podVolume": 1000, "pomoWork": -5, "noiseType": 7,
+             "stereoWidth": 0.5}
+            """.utf8)) as? [String: Any])
+        let (restored, skipped) = Backup.restoreUserDefaults(from: dict, into: d)
+        XCTAssertEqual(restored, 1)
+        XCTAssertEqual(skipped, 7)
+        for key in ["masterVolume", "beatRouting", "autoPlay", "skipInterval", "podVolume", "pomoWork", "noiseType"] {
+            XCTAssertNil(d.object(forKey: key), "\(key) must not be written")
+        }
+        XCTAssertEqual(d.double(forKey: "stereoWidth"), 0.5, accuracy: 1e-9)
+        XCTAssertFalse(Backup.contents(of: ["masterVolume": NSNull()]).restoresAnything,
+                       "a backup of nothing but a null isn't offered as a restore")
+    }
+
+    // MARK: a restore never switches the mode
+
+    // Value: protects=a restore keeps the current mode and puts a backup's sounds in the right mode's picks; fails_when=focusMode is restored, or the backup's sounds land in the wrong mode; why_new=restoring the mode cancelled a running sleep timer and overwrote the remembered sounds; seam=none; no_claim=AudioEngine's reload
+    func testARestoreFromTheOtherModeKeepsTheModeAndSortsItsSounds() throws {
+        // In Sleep now; the backup was made in Focus, playing White, remembering Rain for Sleep.
+        let backup: [String: Any] = ["focusMode": true, "noiseType": "white", "binauralPreset": "beta",
+                                     "lastPick.noise.sleep": "rain", "lastPick.noise.focus": "fan",
+                                     "lastPick.binaural.sleep": "theta"]
+        _ = Backup.restoreUserDefaults(from: try throughBackupFile(backup), into: d)
+        XCTAssertNil(d.object(forKey: "focusMode"), "the mode is never restored")
+        XCTAssertEqual(d.string(forKey: "noiseType"), "rain", "this mode's sound is the backup's pick for it")
+        XCTAssertEqual(d.string(forKey: "binauralPreset"), "theta")
+        XCTAssertEqual(d.string(forKey: "lastPick.noise.focus"), "white", "the backup's playing sound is Focus's latest pick")
+        XCTAssertEqual(d.string(forKey: "lastPick.binaural.focus"), "beta")
+        XCTAssertEqual(d.string(forKey: "lastPick.noise.sleep"), "rain")
+    }
+
+    func testARestoreFromTheSameModeKeepsItsPlayingSound() throws {
+        d.set(true, forKey: "focusMode")
+        let backup: [String: Any] = ["focusMode": true, "noiseType": "white", "lastPick.noise.focus": "fan"]
+        _ = Backup.restoreUserDefaults(from: try throughBackupFile(backup), into: d)
+        XCTAssertEqual(d.string(forKey: "noiseType"), "white", "the playing sound is already this mode's latest pick")
+        XCTAssertEqual(d.string(forKey: "lastPick.noise.focus"), "fan")
+    }
+
+    func testAnOtherModeBackupWithoutAPickKeepsTodaysSound() throws {
+        d.set("brown", forKey: "noiseType")
+        _ = Backup.restoreUserDefaults(from: try throughBackupFile(["focusMode": true, "noiseType": "white"]), into: d)
+        XCTAssertEqual(d.string(forKey: "noiseType"), "brown")
+        XCTAssertEqual(d.string(forKey: "lastPick.noise.focus"), "white")
+    }
+
+    // MARK: no snapshot, no restore; a lost snapshot stops being offered
+
+    // Value: protects=a restore that can't save its Undo copy replaces nothing and leaves no older Undo; fails_when=restore goes ahead without a snapshot, or an older snapshot survives it; why_new=only the export refusal itself was tested; seam=none; no_claim=the alert copy
+    @MainActor
+    func testARestoreThatCantSaveItsUndoCopyReplacesNothing() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("BackupNoSnap-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let storage = StorageManager(directory: dir)
+        let now = Date(timeIntervalSince1970: 2_000_000_000)
+        storage.writeRaw(Data("{}".utf8), to: Backup.undoFile)                // an earlier restore's snapshot
+        d.set(now.addingTimeInterval(-3600).timeIntervalSince1970, forKey: Backup.undoTakenAtKey)
+        d.set(0.3, forKey: "masterVolume")
+        d.set(Double.nan, forKey: "stereoWidth")                            // JSON can't hold it: no snapshot
+        let backup: [String: Any] = ["masterVolume": 0.9, Backup.markerKey: 1]
+        let outcome = await Backup.restore(Backup.Pending(data: try JSONSerialization.data(withJSONObject: backup),
+                                                          contents: Backup.contents(of: backup)),
+                                           now: now, storage: storage, defaults: d)
+        XCTAssertNil(outcome, "the confirm promised Undo, so nothing is replaced without one")
+        XCTAssertEqual(d.double(forKey: "masterVolume"), 0.3, accuracy: 1e-9)
+        XCTAssertNil(Backup.undoDate(now: now, storage: storage, defaults: d), "no Undo to a snapshot from before an earlier restore")
+    }
+
+    // Value: protects=an Undo whose snapshot is gone or unreadable reports failure and stops being offered; fails_when=undo keeps the key when the file is missing, or says "undone" after putting nothing back; why_new=only the expired case was tested; seam=none; no_claim=why the snapshot went missing
+    @MainActor
+    func testAnUndoWhoseSnapshotIsGoneOrUnreadableStopsBeingOffered() async {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("BackupGone-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let storage = StorageManager(directory: dir)
+        let now = Date(timeIntervalSince1970: 2_000_000_000)
+
+        d.set(now.timeIntervalSince1970, forKey: Backup.undoTakenAtKey)    // a timestamp, no snapshot file
+        let gone = await Backup.undo(now: now, storage: storage, defaults: d)
+        XCTAssertFalse(gone)
+        XCTAssertNil(Backup.undoDate(now: now, storage: storage, defaults: d), "a failed Undo must not keep offering itself")
+
+        storage.writeRaw(Data("not json".utf8), to: Backup.undoFile)
+        d.set(now.timeIntervalSince1970, forKey: Backup.undoTakenAtKey)
+        let unreadable = await Backup.undo(now: now, storage: storage, defaults: d)
+        XCTAssertFalse(unreadable, "nothing was put back, so it must not report Restore undone")
+        XCTAssertNil(Backup.undoDate(now: now, storage: storage, defaults: d))
+    }
+
+    // MARK: the confirm names an old backup's year
+
+    func testConfirmTitleShowsTheYearOnlyWhenItIsNotThisOne() throws {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = try XCTUnwrap(TimeZone(identifier: "UTC"))
+        let now = Date(timeIntervalSince1970: 1_791_763_200)                 // 12 Oct 2026
+        let thisYear = Backup.Contents(settings: true, exportedAt: now.addingTimeInterval(-86_400))
+        let lastYear = Backup.Contents(settings: true, exportedAt: now.addingTimeInterval(-366 * 86_400))
+        XCTAssertFalse(Backup.confirmTitle(thisYear, now: now, calendar: cal).contains("2026"))
+        XCTAssertTrue(Backup.confirmTitle(lastYear, now: now, calendar: cal).contains("2025"))
+        XCTAssertEqual(Backup.confirmTitle(Backup.Contents(settings: true), now: now, calendar: cal), "Replace with this backup?")
     }
 }

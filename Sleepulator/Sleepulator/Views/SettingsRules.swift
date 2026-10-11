@@ -6,10 +6,8 @@ import Foundation
 /// "Soften loud moments", one choice over the two stored flags. It used to be two toggles, one of
 /// which ("On while sleeping, off while focusing") disabled the other and left no way to tell
 /// which was in charge.
-enum LimiterChoice: String, CaseIterable, Identifiable {
+enum LimiterChoice: CaseIterable {
     case off, whileSleeping, always
-
-    var id: String { rawValue }
 
     var title: String {
         switch self {
@@ -39,10 +37,12 @@ enum SettingsCopy {
     /// "1 minute" / "25 minutes", for VoiceOver (it used to read "1 minutes").
     static func minutes(_ n: Int) -> String { n == 1 ? "1 minute" : "\(n) minutes" }
 
-    /// The podcast softening amount in words. The bar starts at `eqFloor`, so it never reads
-    /// "Off" while its switch is on.
+    /// The podcast softening amount in words. The bar starts at `eqFloor`, so it can't be set to
+    /// "Off" while its switch is on; a lower value saved by the old 0...2 slider (or an old
+    /// backup) still reads "Off", since the EQ does nothing at it.
     static func softening(_ intensity: Double) -> String {
         switch intensity {
+        case ..<eqFloor: return "Off"
         case ..<0.8: return "Light"
         case ..<1.3: return "Medium"
         default:     return "Strong"
@@ -65,10 +65,8 @@ enum SettingsCopy {
 /// which read as turned down, and for Pink and Rain the engine clamps the width
 /// (`min(0.85 * width, 1)`), so the top fifth of the slider did nothing. Every stop sounds
 /// different for every noise.
-enum StereoWidth: Double, CaseIterable, Identifiable {
+enum StereoWidth: Double, CaseIterable {
     case mono = 0, narrow = 0.5, natural = 1.0, wide = 1.5
-
-    var id: Double { rawValue }
 
     var title: String {
         switch self {

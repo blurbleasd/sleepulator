@@ -3647,6 +3647,7 @@ final class SettingsRulesTests: XCTestCase {
 
     func testSofteningNeverSaysOffAboveTheFloor() {
         XCTAssertEqual(SettingsCopy.softening(SettingsCopy.eqFloor), "Light")
+        XCTAssertEqual(SettingsCopy.softening(0), "Off", "the old slider's zero: the EQ does nothing there")
         XCTAssertEqual(SettingsCopy.softening(1.0), "Medium")
         XCTAssertEqual(SettingsCopy.softening(2.0), "Strong")
     }

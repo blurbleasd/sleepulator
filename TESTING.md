@@ -396,10 +396,11 @@ this section is where you do it. Do it in a dark room at your real bedtime brigh
      - ✅ The empty state is centred on the screen, not stuck in its bottom half.
      - ✅ At the largest text size it scrolls instead of clipping.
    - **Settings:**
-     - ✅ It opens on Sleep, then Podcasts at night, Focus, Sound, Display, Podcasts, Backup and
-       Diagnostics, in sentence case.
+     - ✅ In Sleep it opens on Sleep, then Podcasts at night, Podcasts, Sound and Display, with the
+       Pomodoro folded under "Focus settings" and Backup & support one level down (§S6), in
+       sentence case.
      - ✅ The Focus steppers change the next Pomodoro phase.
-     - ✅ Backup export, restore and "Export the playback log" still work.
+     - ✅ Backup export, restore and "Export the playback log" still work (§S).
 
 ### N. Podcasts tab: Tonight shelf + hardening (added 2026-10-09, simulator-checked only)
 1. **Resume where you drifted off.** Play an episode for 20+ min, set the ring to 45, pause, kill
@@ -624,7 +625,13 @@ also pauses while its controls are faded to the screensaver, as the Sleep orb al
    under "Focus settings". Switch to Focus. ✅ It opens on Focus; the night is under "Sleep settings".
 7. **Stereo width.** Pink, headphones in. Step Mono → Narrow → Natural → Wide. ✅ Each stop sounds
    wider than the last (Wide used to sound the same as most of the slider below it).
-8. **At 2am.** Sleep, room dark, brightness low. ✅ No amber switch tracks (copper), and the brightest
+8. **A restore never switches mode.** In Sleep with a 45 min timer running, restore a backup
+   made in Focus. ✅ Still Sleep, the timer still counts down, the sound is the backup's Sleep
+   pick; switch to Focus and ✅ its sound is the backup's Focus sound. Restore a backup with
+   different Pomodoro lengths. ✅ The next Focus session uses them (no relaunch).
+9. **Undo puts the shows back too.** On a phone with no podcasts, restore a backup with shows,
+   open Podcasts, then Undo. ✅ The shows are gone and stay gone after adding one and relaunching.
+10. **At 2am.** Sleep, room dark, brightness low. ✅ No amber switch tracks (copper), and the brightest
    things are the switch knobs, not rows of accent text.
 
 ---

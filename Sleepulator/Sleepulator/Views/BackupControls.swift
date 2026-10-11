@@ -25,6 +25,10 @@ final class BackupController: ObservableObject {
     @Published private(set) var busy = false
     /// When the snapshot Undo would put back was taken, while it's still offered.
     @Published private(set) var undoDate: Date?
+    /// The Backup & support page is on screen. Its alert lives there, so a result that lands after
+    /// the page closed is dropped, not stranded: it surfaced later, out of context, with a one-tap
+    /// Undo that skipped the "changes since will be lost" confirm.
+    var pageVisible = false
 
     private let reload: () -> Void
     /// When the last alert went away. SwiftUI drops an alert presented while another (or the file
@@ -97,7 +101,12 @@ final class BackupController: ObservableObject {
     func restore(_ pending: Backup.Pending) {
         busy = true
         Task {
-            let outcome = await Backup.restore(pending)
+            guard let outcome = await Backup.restore(pending) else {
+                busy = false
+                refresh()
+                await present(.failed(title: "Couldn't restore", message: Backup.noSnapshotMessage))
+                return
+            }
             reload()
             busy = false
             refresh()
@@ -125,6 +134,7 @@ final class BackupController: ObservableObject {
     private func present(_ next: Prompt) async {
         let wait = 0.5 - Date().timeIntervalSince(lastDismissal)
         if wait > 0 { try? await Task.sleep(for: .seconds(wait)) }
+        guard pageVisible else { return }
         prompt = next
     }
 
@@ -176,45 +186,5 @@ struct BackupRows: View {
             }
             .disabled(backup.busy)
         }
-    }
-}
-
-extension View {
-    /// The Backup presentations: the file picker, the exporter and the one alert. Applied once, on
-    /// the screen (not a row), so they outlive the rows scrolling away.
-    func backupPresentations(_ backup: BackupController) -> some View {
-        modifier(BackupPresentations(backup: backup))
-    }
-}
-
-private struct BackupPresentations: ViewModifier {
-    @ObservedObject var backup: BackupController
-
-    func body(content: Content) -> some View {
-        content
-            .fileImporter(isPresented: $backup.isImporting, allowedContentTypes: [.json],
-                          allowsMultipleSelection: false) { backup.picked($0) }
-            .fileExporter(isPresented: $backup.isExporting, document: backup.exportDocument,
-                          contentType: .json, defaultFilename: backup.exportName) { backup.exported($0) }
-            .onAppear { backup.refresh() }
-            // Night-time confirms are plain alerts with no destructive role (CLAUDE.md): iOS 26 drew
-            // a red button alone on a dark screen.
-            .alert(backup.title, isPresented: backup.isPrompting) {
-                switch backup.prompt {
-                case .confirm(let pending):
-                    Button("Cancel", role: .cancel) {}
-                    Button("Replace") { backup.restore(pending) }
-                case .restored(let outcome) where outcome.undoAvailable:
-                    Button("OK", role: .cancel) {}
-                    Button("Undo") { backup.undo() }
-                case .confirmUndo:
-                    Button("Cancel", role: .cancel) {}
-                    Button("Undo restore") { backup.undo() }
-                default:
-                    Button("OK", role: .cancel) {}
-                }
-            } message: {
-                Text(backup.message)
-            }
     }
 }

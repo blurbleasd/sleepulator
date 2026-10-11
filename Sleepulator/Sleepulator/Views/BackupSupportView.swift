@@ -66,7 +66,31 @@ struct BackupSupportView: View {
         .miniPlayerClearance()
         .navigationTitle("Backup & support")
         .navigationBarTitleDisplayMode(.inline)
-        .backupPresentations(backup)
+        .onAppear { backup.pageVisible = true; backup.refresh() }
+        .onDisappear { backup.pageVisible = false }
+        .fileImporter(isPresented: $backup.isImporting, allowedContentTypes: [.json],
+                      allowsMultipleSelection: false) { backup.picked($0) }
+        .fileExporter(isPresented: $backup.isExporting, document: backup.exportDocument,
+                      contentType: .json, defaultFilename: backup.exportName) { backup.exported($0) }
+        // Night-time confirms are plain alerts with no destructive role (CLAUDE.md): iOS 26 drew a
+        // red button alone on a dark screen.
+        .alert(backup.title, isPresented: backup.isPrompting) {
+            switch backup.prompt {
+            case .confirm(let pending):
+                Button("Cancel", role: .cancel) {}
+                Button("Replace") { backup.restore(pending) }
+            case .restored:
+                Button("OK", role: .cancel) {}
+                Button("Undo") { backup.undo() }
+            case .confirmUndo:
+                Button("Cancel", role: .cancel) {}
+                Button("Undo restore") { backup.undo() }
+            default:
+                Button("OK", role: .cancel) {}
+            }
+        } message: {
+            Text(backup.message)
+        }
         // The log exporter must live on its OWN node: two .fileExporter modifiers chained on the
         // same view shadow each other (only the last presents, a long-standing SwiftUI defect),
         // which silently broke the backup export when this second exporter was added. A clear
@@ -109,15 +133,6 @@ struct SettingActionRow<Trailing: View>: View {
     var note: String?
     let pal: Palette
     @ViewBuilder var trailing: () -> Trailing
-
-    init(title: String, systemImage: String, note: String? = nil, pal: Palette,
-         @ViewBuilder trailing: @escaping () -> Trailing) {
-        self.title = title
-        self.systemImage = systemImage
-        self.note = note
-        self.pal = pal
-        self.trailing = trailing
-    }
 
     var body: some View {
         HStack(spacing: UI.md) {

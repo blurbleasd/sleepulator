@@ -74,8 +74,11 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   `AudioDownloader` (offline cache), `PodcastParser` / `OPMLParser` / `ITunesSearchManager`.
 - `Backup`: the backup file's export and restore. A restore reads and validates first, the person
   confirms in plain counts ("4 mixes, 12 shows"), and a snapshot of what was here is kept for a
-  week so Undo can put it back exactly. Its key lists are the restore allowlist: keep new persisted
-  settings in sync there.
+  week so Undo can put it back exactly; if that snapshot can't be saved, nothing is replaced.
+  `Backup.kinds` is the restore allowlist with each setting's type and range (a JSON null raised
+  an uncatchable exception in UserDefaults): keep new persisted settings in sync there. A restore
+  never changes the mode (`exportOnlyKeys`); a backup from the other mode lands its sounds in the
+  per-mode picks instead.
 
 ## Audio + state invariants (the hard-won stuff — change with care)
 - **Never block the render thread.** It reads params lock-free; hand-offs are atomic. No locks,
@@ -128,8 +131,10 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
 - **Sound palettes are mode-scoped.** Sleep and Focus share no sounds except Pink noise
   (`AudioEngine.reconcileSoundsToMode`). Each mode remembers its own last noise and binaural pick
   (`lastPick.*` keys), and a mode switch restores that pick. Without it, Sleep's Brown came back
-  from Focus as Pink: Focus snapped it to Pink, which Sleep also has. Launch and restore don't
-  apply the memory; there, the current sound is already that mode's latest pick.
+  from Focus as Pink: Focus snapped it to Pink, which Sleep also has. Launch doesn't apply the
+  memory; there, the current sound is already that mode's latest pick. A restore never switches
+  mode: a backup from the other mode puts its current sounds in that mode's picks and takes this
+  mode's sounds from its picks (`Backup.restorePlan`).
 - **The sleep timer starts from the Home orb's night ring.** `NightRing` sets
   `nightLengthMinutes` (0 = All night, the default, so an update never starts timing anyone out).
   Any Sleep session starting from rest starts the timer at that length: `AudioEngine.noteSessionEdge`

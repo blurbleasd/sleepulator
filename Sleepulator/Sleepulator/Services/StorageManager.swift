@@ -111,6 +111,12 @@ final class StorageManager {
         return try? Data(contentsOf: backupURL(for: filename))
     }
 
+    /// Whether a file's primary copy is on disk. No read: the restore checks its Undo snapshot
+    /// landed without loading a library-sized file on the main thread.
+    func fileExists(_ filename: String) -> Bool {
+        FileManager.default.fileExists(atPath: fileURL(for: filename).path)
+    }
+
     /// Atomically write raw JSON bytes to a file (Backup/Restore import path), keeping the
     /// `.bak` sibling in sync.
     func writeRaw(_ data: Data, to filename: String) {
