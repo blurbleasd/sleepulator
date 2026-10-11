@@ -39,7 +39,10 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   arguments (plist literals, the argument domain) so persisted mode and night length stay put.
   CI's simulators are slow and sometimes drop a synthesized tap, so a tap that matters checks its
   effect and goes round again (the noise switch, Focus's Stop, `pauseAudio`), and a test lets an
-  overlay finish fading in before tapping it (a tap on the veil as it arrives doesn't reach it). The target is made by `Sleepulator/setup_ui_tests.rb`
+  overlay finish fading in before tapping it (a tap on the veil as it arrives doesn't reach it).
+  They launch with Moving scenes off (`-ambientMotion <false/>`): an app redrawing every frame
+  never idles, and XCUITest's wait for idle before each tap outlasted Home's control fade. Never
+  race Sleep's 3 s fade with two taps; CI loses it. The target is made by `Sleepulator/setup_ui_tests.rb`
   (idempotent; re-run it after adding a file there). It runs in the same app the unit tests are
   hosted in, so a UI test must leave persisted state (mode, night length) as it found it.
 - **Tests** — `SleepulatorTests/` (XCTest). Six files, many suites: `AudioMathTests.swift`;

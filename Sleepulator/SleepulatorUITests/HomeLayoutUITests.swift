@@ -10,6 +10,10 @@ final class HomeLayoutUITests: XCTestCase {
     func testFocusRowClearsTheMiniPlayerAndStartsASession() {
         continueAfterFailure = false
         let app = XCUIApplication()
+        // Moving scenes off, for this launch only (the argument domain): with the scene, orb and
+        // ring redrawing every frame the app never idles, and on a loaded CI runner XCUITest
+        // waited up to 4 s before each tap, so Stop kept landing after the controls had faded.
+        app.launchArguments = ["-ambientMotion", "<false/>"]
         app.launch()
 
         // Focus from either start state: a no-op when the last run left the app in Focus.

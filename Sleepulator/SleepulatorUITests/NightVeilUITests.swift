@@ -12,11 +12,15 @@ final class NightVeilUITests: XCTestCase {
 
     /// Skips the first-run and "the timer moved" cards and the breathing on-ramp, whatever the
     /// simulator last saw. Plist literals: the app reads some of these with `as? Bool`.
+    /// Moving scenes off too: with the scenes, orb and ring redrawing every frame the app never
+    /// idles, and on a loaded CI runner XCUITest waited up to 4 s for it before each tap, long
+    /// enough for Home's controls to fade under it. Nothing here tests motion.
     private static let quietHome = [
         "-hasCompletedFirstRun", "<true/>",
         "-hasSeenNightRingTip", "<true/>",
         "-hasStartedFirstSession", "<true/>",
         "-breathingOnRamp", "<false/>",
+        "-ambientMotion", "<false/>",
     ]
 
     private static let veilLabel = "Screen dimmed for sleep. Tap to wake."
@@ -166,11 +170,19 @@ final class NightVeilUITests: XCTestCase {
         let noise = app.switches.matching(NSPredicate(format: "label IN %@", Self.noiseNames)).firstMatch
         XCTAssertTrue(noise.waitForExistence(timeout: 5), "No noise switch in the mixer")
         // A slow CI simulator sometimes drops a synthesized tap on the switch (it never moves, on
-        // target and in the right process), so tap again until it's on. It's re-read before each
-        // tap, so a late first tap can't be undone by the next.
-        var on = (noise.value as? String) == "1"
-        for _ in 0..<3 where !on {
-            noise.tap()
+        // target, enabled and hittable), so go round again, each time a different way in: the
+        // SwiftUI toggle, the UISwitch inside it, a drag of the knob. It's re-read before each
+        // try, so a late one can't be undone by the next.
+        let attempts: [() -> Void] = [
+            { noise.tap() },
+            { noise.switches.firstMatch.exists ? noise.switches.firstMatch.tap() : noise.tap() },
+            { noise.swipeRight() },
+        ]
+        var on = false
+        for attempt in attempts {
+            on = (noise.value as? String) == "1"
+            if on { break }
+            attempt()
             on = waitUntil(timeout: 3) { (noise.value as? String) == "1" }
         }
         if !on {
