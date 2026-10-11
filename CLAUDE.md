@@ -192,9 +192,9 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   always-present wrapper also gates `.allowsHitTesting` on `miniPlayerHidden` and
   `.accessibilityHidden` on `miniPlayerHidden || nightDimmed` (the veil's rule below): those stop
   real taps and VoiceOver at once, though XCUITest's tree ignores them. Keep both halves (only
-  TESTING.md §M7 and §Q.5 check them, on a device). To prove a hidden view is gone, assert
-  `waitForNonExistence(timeout:)` in a UI test: a removal transition keeps it in the tree until it
-  finishes.
+  device steps check them: TESTING.md §M7 for the fade, §M7's veil step for `nightDimmed`). To
+  prove a hidden view is gone, assert `waitForNonExistence(timeout:)` in a UI test: a removal
+  transition keeps it in the tree until it finishes.
 - **A `.contentShape(.accessibility, …)` can become its container's frame.** NightRing's band shape
   made Home's root accessibility container a 250 pt square around the orb, which clipped every
   other Sleep Home control out of the accessibility hit test. XCUITest called them unhittable,
