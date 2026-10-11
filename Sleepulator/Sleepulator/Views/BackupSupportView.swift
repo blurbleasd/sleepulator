@@ -14,6 +14,7 @@ struct BackupSupportView: View {
     @State private var logDocument: TextDocument?
     @State private var collectingLog = false
     @State private var logExportFailed = false
+    @State private var logName = "sleepulator-log"
 
     var body: some View {
         List {
@@ -28,29 +29,32 @@ struct BackupSupportView: View {
 
                 Section {
                     NavigationLink { DiagnosticsListView(pal: pal) } label: {
-                        SettingActionRow(title: "Reports from iOS", systemImage: "waveform.path.ecg", pal: pal)
+                        SettingActionRow(title: "Reports from iOS", systemImage: "waveform.path.ecg",
+                                         note: "Battery and crash reports, about one a day. Kept on this iPhone.", pal: pal)
                     }
                     Button { exportLog() } label: {
-                        SettingActionRow(title: "Export last night's log", systemImage: "doc.text", pal: pal) {
+                        // It's the process's own log (OSLogStore, current process): what played
+                        // since the app last opened, capped at 12 hours. "Last night's" overpromised.
+                        SettingActionRow(title: "Export the playback log", systemImage: "doc.text",
+                                         note: "What played and what went wrong since the app opened, up to 12 hours.",
+                                         pal: pal) {
                             if collectingLog { ProgressView() }
                         }
                     }
-                    // Gathering 12 hours of log lines takes a moment; a second tap mustn't start another.
+                    // Gathering the log lines takes a moment; a second tap mustn't start another.
                     .disabled(collectingLog)
                 } header: {
-                    Text("Diagnostics").foregroundStyle(pal.dim)
+                    Text("Troubleshooting").foregroundStyle(pal.dim)
                 } footer: {
                     // Build identity: the build time is the line that tells manual builds apart.
-                    VStack(alignment: .leading, spacing: UI.md) {
-                        Text("Battery, hang and crash reports iOS delivers about once a day. Stored on this device only.")
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Sleepulator \(AppInfo.versionBuild)")
-                            if let built = AppInfo.builtAtLabel { Text("Built \(built)") }
-                        }
-                        .accessibilityElement(children: .combine)
-                        .accessibilityLabel(AppInfo.accessibilitySummary)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Sleepulator \(AppInfo.versionBuild)")
+                        if let built = AppInfo.builtAtLabel { Text("Built \(built)") }
                     }
                     .foregroundStyle(pal.dim)
+                    .padding(.top, UI.sm)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel(AppInfo.accessibilitySummary)
                 }
             }
             .listRowBackground(pal.text.opacity(0.05))
@@ -70,7 +74,7 @@ struct BackupSupportView: View {
         .background {
             Color.clear
                 .fileExporter(isPresented: $isExportingLog, document: logDocument, contentType: .plainText,
-                              defaultFilename: "sleepulator-log") { result in
+                              defaultFilename: logName) { result in
                     if case .failure(let error) = result {
                         Log.storage.error("Log export failed: \(error.localizedDescription, privacy: .public)")
                         logExportFailed = true
@@ -90,6 +94,7 @@ struct BackupSupportView: View {
             let text = await LogExport.collect()
             collectingLog = false
             logDocument = TextDocument(text: text)
+            logName = Backup.filename(for: Date(), prefix: "sleepulator-log")
             isExportingLog = true
         }
     }
@@ -101,13 +106,15 @@ struct BackupSupportView: View {
 struct SettingActionRow<Trailing: View>: View {
     let title: String
     let systemImage: String
+    var note: String?
     let pal: Palette
     @ViewBuilder var trailing: () -> Trailing
-    @Environment(\.isEnabled) private var isEnabled
 
-    init(title: String, systemImage: String, pal: Palette, @ViewBuilder trailing: @escaping () -> Trailing) {
+    init(title: String, systemImage: String, note: String? = nil, pal: Palette,
+         @ViewBuilder trailing: @escaping () -> Trailing) {
         self.title = title
         self.systemImage = systemImage
+        self.note = note
         self.pal = pal
         self.trailing = trailing
     }
@@ -118,9 +125,7 @@ struct SettingActionRow<Trailing: View>: View {
                 .foregroundStyle(pal.dim)
                 .frame(minWidth: 24)
                 .accessibilityHidden(true)
-            Text(title)
-                .foregroundStyle(isEnabled ? pal.text : pal.dim)
-                .fixedSize(horizontal: false, vertical: true)
+            SettingLabel(title: title, note: note, pal: pal)
             Spacer(minLength: 0)
             trailing()
         }
@@ -129,7 +134,7 @@ struct SettingActionRow<Trailing: View>: View {
 }
 
 extension SettingActionRow where Trailing == EmptyView {
-    init(title: String, systemImage: String, pal: Palette) {
-        self.init(title: title, systemImage: systemImage, pal: pal) { EmptyView() }
+    init(title: String, systemImage: String, note: String? = nil, pal: Palette) {
+        self.init(title: title, systemImage: systemImage, note: note, pal: pal) { EmptyView() }
     }
 }

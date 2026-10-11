@@ -229,9 +229,10 @@ enum Backup {
     }
 
     /// "sleepulator-backup-2026-10-11": dated, so a second export doesn't overwrite the first.
-    nonisolated static func filename(for date: Date, calendar: Calendar = .current) -> String {
+    nonisolated static func filename(for date: Date, prefix: String = "sleepulator-backup",
+                                     calendar: Calendar = .current) -> String {
         let c = calendar.dateComponents([.year, .month, .day], from: date)
-        return String(format: "sleepulator-backup-%04d-%02d-%02d", c.year ?? 0, c.month ?? 0, c.day ?? 0)
+        return prefix + String(format: "-%04d-%02d-%02d", c.year ?? 0, c.month ?? 0, c.day ?? 0)
     }
 
     // MARK: UserDefaults halves (pure + parameterized on `defaults`, unit-tested)

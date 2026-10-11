@@ -50,6 +50,40 @@ enum SettingsCopy {
     }
 
     static let eqFloor = 0.2
+
+    /// The note under "Binaural beats for", for the chosen routing.
+    static func beatsNote(_ routing: String) -> String {
+        switch routing {
+        case "headphones": return "One tone in each ear. Needs headphones."
+        case "speaker":    return "A gentle pulse that works on a speaker."
+        default:           return "True binaural beats in headphones, a gentle pulse on the speaker."
+        }
+    }
+}
+
+/// Stereo width as four named stops. It was a slider showing "66%" at its default (width / 1.5),
+/// which read as turned down, and for Pink and Rain the engine clamps the width
+/// (`min(0.85 * width, 1)`), so the top fifth of the slider did nothing. Every stop sounds
+/// different for every noise.
+enum StereoWidth: Double, CaseIterable, Identifiable {
+    case mono = 0, narrow = 0.5, natural = 1.0, wide = 1.5
+
+    var id: Double { rawValue }
+
+    var title: String {
+        switch self {
+        case .mono:    return "Mono"
+        case .narrow:  return "Narrow"
+        case .natural: return "Natural"
+        case .wide:    return "Wide"
+        }
+    }
+
+    /// The stop nearest a stored width (the slider could store any value in 0...1.5). Reading
+    /// doesn't write: a width between stops stays as it is until a stop is picked.
+    static func nearest(_ width: Double) -> StereoWidth {
+        allCases.min { abs($0.rawValue - width) < abs($1.rawValue - width) } ?? .natural
+    }
 }
 
 /// Settings' sections, in the order `SettingsOrder` gives them.

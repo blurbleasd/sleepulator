@@ -75,6 +75,8 @@ final class BackupController: ObservableObject {
 
     /// The picker's answer: read and validate the file, then ask before replacing anything.
     func picked(_ result: Result<[URL], Error>) {
+        // The picker is animating out now: the alert that follows waits for it like any other.
+        lastDismissal = Date()
         guard case .success(let urls) = result, let url = urls.first else {
             if case .failure = result {
                 Task { await present(.failed(title: "Couldn't restore", message: Backup.failureMessage(.noAccess))) }

@@ -3622,6 +3622,29 @@ final class SettingsRulesTests: XCTestCase {
         XCTAssertEqual(order[night + 1], .podcasts)
     }
 
+    func testStereoWidthShowsTheNearestStop() {
+        XCTAssertEqual(StereoWidth.nearest(1.0), .natural, "the default reads Natural, not 66%")
+        XCTAssertEqual(StereoWidth.nearest(0.8), .natural)
+        XCTAssertEqual(StereoWidth.nearest(0.2), .mono)
+        XCTAssertEqual(StereoWidth.nearest(0.3), .narrow)
+        XCTAssertEqual(StereoWidth.nearest(1.3), .wide)
+        XCTAssertEqual(StereoWidth.nearest(9), .wide)
+    }
+
+    func testEveryStereoStopSoundsDifferentForEveryNoise() {
+        // The engine's width: min(base * width, 1), base 0.85 for Pink and Rain, 0.6 otherwise.
+        for base in [0.85, 0.6] {
+            let widths = StereoWidth.allCases.map { min(base * $0.rawValue, 1) }
+            XCTAssertEqual(Set(widths).count, StereoWidth.allCases.count, "base \(base)")
+        }
+    }
+
+    func testBeatsNoteFollowsTheRouting() {
+        XCTAssertTrue(SettingsCopy.beatsNote("headphones").contains("Needs headphones"))
+        XCTAssertTrue(SettingsCopy.beatsNote("speaker").contains("speaker"))
+        XCTAssertEqual(SettingsCopy.beatsNote("auto"), SettingsCopy.beatsNote("anything else"))
+    }
+
     func testSofteningNeverSaysOffAboveTheFloor() {
         XCTAssertEqual(SettingsCopy.softening(SettingsCopy.eqFloor), "Light")
         XCTAssertEqual(SettingsCopy.softening(1.0), "Medium")

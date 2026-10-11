@@ -223,7 +223,7 @@ the brightness you actually use at night, in **both** Sleep and Focus.
    second). Force-quit from the app switcher. Relaunch. ✅ The saved mix is still there (the
    deferred write is flushed synchronously on background). Repeat with audio NOT playing.
 3. **Overnight log export.** After a night (or any session with a timer + a call/route change),
-   Settings ▸ Backup & support ▸ "Export last night's log". ✅ The share sheet produces a
+   Settings ▸ Backup & support ▸ "Export the playback log". ✅ The share sheet produces a
    readable text timeline — sleep-timer start/bump/tail/terminal-stop, interruption began/ended
    (with the resume decision), route changes, limiter-attach outcome — not a wall of `<private>`
    (verify on a release build) and not slow to generate.
@@ -280,7 +280,7 @@ this section is where you do it. Do it in a dark room at your real bedtime brigh
    clear the power budget without cutting drop count / fps / DoF below where the "whoa" survives, cut
    back to the flat scene.
 6. **Measured, not eyeballed — read the F3 diagnostics log (P1 power budget).** After a 30–60 min run per
-   scene, Settings ▸ Backup & support ▸ "Export last night's log". ✅ It carries
+   scene, Settings ▸ Backup & support ▸ "Export the playback log". ✅ It carries
    `scene=… fps=… thermal=… battery=…` lines (category `scene`). Confirm: fps holds ≈ 30 on the depth
    scenes; `thermal` stays `nominal`/`fair` (never `serious`); per-scene battery drain is ≤ the flat
    baseline (measure the shipping rain / still-water first as the baseline). Confirm an 8 h locked run's
@@ -293,7 +293,7 @@ this section is where you do it. Do it in a dark room at your real bedtime brigh
    known shaders present`. If a lens ever fails to compile, its backdrop shows the bare far world
    (bokeh / sky), never a black pane, plus a `not in the default library` line. (To exercise on purpose,
    a dev can rename a stitchable function and rebuild — optional.)
-9. **Ambient-motion toggle (P6a).** Settings ▸ Display ▸ **Ambient motion → OFF**. ✅ The backdrop
+9. **Ambient-motion toggle (P6a).** Settings ▸ Display ▸ **Moving scenes → Off**. ✅ The backdrop
    immediately holds a single still frame (try rain-depth, ocean, and a `.colorEffect` scene like Aurora
    — all still), CoreMotion stops (Energy Log: no motion updates), tilt parallax gone. Back ON → the
    scene resumes from its frozen pose, no pop. The toggle survives Backup → Restore.
@@ -382,7 +382,7 @@ this section is where you do it. Do it in a dark room at your real bedtime brigh
      - ✅ It opens on Sleep, then Podcasts at night, Focus, Sound, Display, Podcasts, Backup and
        Diagnostics, in sentence case.
      - ✅ The Focus steppers change the next Pomodoro phase.
-     - ✅ Backup export, restore and "Export last night's log" still work.
+     - ✅ Backup export, restore and "Export the playback log" still work.
 
 ### N. Podcasts tab: Tonight shelf + hardening (added 2026-10-09, simulator-checked only)
 1. **Resume where you drifted off.** Play an episode for 20+ min, set the ring to 45, pause, kill

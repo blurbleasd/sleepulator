@@ -237,6 +237,8 @@ final class BackupRoundTripTests: XCTestCase {
         cal.timeZone = try XCTUnwrap(TimeZone(identifier: "UTC"))
         XCTAssertEqual(Backup.filename(for: Date(timeIntervalSince1970: 1_791_763_200), calendar: cal),
                        "sleepulator-backup-2026-10-12")
+        XCTAssertEqual(Backup.filename(for: Date(timeIntervalSince1970: 1_791_763_200), prefix: "sleepulator-log", calendar: cal),
+                       "sleepulator-log-2026-10-12")
     }
 
     // MARK: restore → undo, end to end against a temp store

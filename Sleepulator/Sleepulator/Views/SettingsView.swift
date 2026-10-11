@@ -81,10 +81,19 @@ struct SettingsView: View {
             HStack {
                 label(title)
                 Spacer()
-                Text("\(value) min").foregroundStyle(pal.dim).monospacedDigit()
+                // Held on one line: at the largest text sizes "15 min" split into "15 / min".
+                Text("\(value) min").foregroundStyle(pal.dim).monospacedDigit().fixedSize()
             }
         }
-        .accessibilityValue("\(value) minutes")
+        // Named once: the label row also holds the value, which VoiceOver read twice.
+        .accessibilityLabel(title)
+        .accessibilityValue(SettingsCopy.minutes(value))
+    }
+
+    /// Stereo width by named stop (`StereoWidth`).
+    private var stereoWidth: Binding<StereoWidth> {
+        Binding(get: { StereoWidth.nearest(settings.stereoWidth) },
+                set: { settings.stereoWidth = $0.rawValue })
     }
 
     // The current mode's settings lead, then what both modes share, then the other mode's folded
@@ -159,12 +168,18 @@ struct SettingsView: View {
 
     private var sleepSection: some View {
         Section {
-            Toggle(isOn: $autoNightDim) { label("Darken the screen at night") }
-            Toggle(isOn: $breathingOnRamp) { label("Start with a minute of breathing") }
+            // A short note per control. One 41-word footer covered both switches, ran to ten
+            // lines at large text sizes, and still said "tap to wake" after the veil's glance
+            // made it two taps.
+            Toggle(isOn: $autoNightDim) {
+                label("Darken the screen at night",
+                      note: "While Sleep plays, the screen goes black a minute after your last touch. Tap once to glance, twice to wake.")
+            }
+            Toggle(isOn: $breathingOnRamp) {
+                label("Start with a minute of breathing", note: "Then your mix starts on its own.")
+            }
         } header: {
             header("Sleep")
-        } footer: {
-            footer("While Sleep plays on the Sleep screen or the player, or anywhere with a sleep timer running, the screen goes black a minute after your last touch; tap to wake. Breathing leads into your mix, then it starts on its own.")
         }
     }
 
@@ -214,16 +229,17 @@ struct SettingsView: View {
 
     private var focusSection: some View {
         Section {
-            minutesStepper("Focus", value: pomoWork, range: 5...90, step: 5) { audio.pomodoro.workMinutes = $0 }
+            minutesStepper("Focus length", value: pomoWork, range: 5...90, step: 5) { audio.pomodoro.workMinutes = $0 }
             minutesStepper("Short break", value: pomoRest, range: 1...30, step: 1) { audio.pomodoro.restMinutes = $0 }
             minutesStepper("Long break", value: pomoLongRest, range: 5...60, step: 5) { audio.pomodoro.longRestMinutes = $0 }
             Stepper(value: pomodoroBinding(pomoCycles) { audio.pomodoro.cyclesBeforeLongBreak = $0 }, in: 2...8) {
                 HStack {
                     label("Rounds before a long break")
                     Spacer()
-                    Text("\(pomoCycles)").foregroundStyle(pal.dim).monospacedDigit()
+                    Text("\(pomoCycles)").foregroundStyle(pal.dim).monospacedDigit().fixedSize()
                 }
             }
+            .accessibilityLabel("Rounds before a long break")
             .accessibilityValue("\(pomoCycles) rounds")
         } header: {
             header("Focus")
@@ -234,18 +250,12 @@ struct SettingsView: View {
 
     private var soundSection: some View {
         Section {
-            VStack(alignment: .leading, spacing: UI.sm) {
-                HStack {
-                    label("Stereo width")
-                    Spacer()
-                    Text(settings.stereoWidth < 0.05 ? "Mono" : "\(Int((settings.stereoWidth / 1.5) * 100))%")
-                        .foregroundStyle(pal.dim).monospacedDigit()
-                }
-                VolumeBar(value: $settings.stereoWidth, accent: pal.controlTint, range: 0...1.5, style: .parameter, tapToSet: true)
-                    .accessibilityLabel("Stereo width")
-                    .accessibilityValue(settings.stereoWidth < 0.05 ? "Mono" : "\(Int((settings.stereoWidth / 1.5) * 100)) percent")
+            Picker(selection: stereoWidth) {
+                ForEach(StereoWidth.allCases) { Text($0.title).tag($0) }
+            } label: {
+                label("Stereo width", note: "How far the noise spreads, left to right. Narrow suits a phone speaker.")
             }
-            .padding(.vertical, UI.xs)
+            .tint(pal.dim)
             // A true binaural beat needs one tone per ear; on a speaker the two sum in the
             // air and the beat vanishes, so a speaker gets a pulsed (isochronic) tone.
             Picker(selection: $settings.beatRouting) {
@@ -253,39 +263,39 @@ struct SettingsView: View {
                 Text("Headphones").tag("headphones")
                 Text("Speaker").tag("speaker")
             } label: {
-                label("Beats for")
+                label("Binaural beats for", note: SettingsCopy.beatsNote(settings.beatRouting))
             }
             .tint(pal.dim)
         } header: {
             header("Sound")
-        } footer: {
-            footer(settings.beatRouting == "headphones" ? "Beats made for headphones, one tone in each ear. Lower width keeps the bass centred on a phone speaker."
-                   : settings.beatRouting == "speaker" ? "A gentle pulse that works on a speaker. Lower width keeps the bass centred on a phone speaker."
-                   : "Headphone beats with headphones in, a speaker-friendly pulse without. Lower width keeps the bass centred on a phone speaker.")
         }
     }
 
     private var displaySection: some View {
         Section {
-            Toggle(isOn: $ambientMotion) { label("Moving scenes") }
+            Toggle(isOn: $ambientMotion) {
+                label("Moving scenes", note: "Off holds the scene still: calmer, and easier on the battery.")
+            }
         } header: {
             header("Display")
-        } footer: {
-            footer("Off holds the backdrop on one still frame: calmer, and easier on the battery. The system's Reduce Motion already stops the tilt.")
         }
     }
 
     private var podcastsSection: some View {
         Section {
             Toggle(isOn: $queue.autoPlay) { label("Play the next episode automatically") }
-            Toggle(isOn: $queue.shuffleQueue) { label("Shuffle the queue") }
+            Toggle(isOn: $queue.shuffleQueue) {
+                label("Shuffle the queue", note: "The next episode comes from anywhere in Up Next.")
+            }
             Picker(selection: Binding(get: { Int(settings.skipInterval) }, set: { settings.skipInterval = Double($0) })) {
                 ForEach([10, 15, 30, 45], id: \.self) { Text("\($0) seconds").tag($0) }
             } label: {
                 label("Skip back and forward")
             }
             .tint(pal.dim)
-            Toggle(isOn: $queue.deleteOnCompletion) { label("Delete downloads once played") }
+            Toggle(isOn: $queue.deleteOnCompletion) {
+                label("Delete downloads once played", note: "Only finished episodes; a skipped one keeps its download.")
+            }
             Toggle(isOn: $queue.hideFinishedEpisodes) { label("Hide played episodes") }
         } header: {
             header("Podcasts")
@@ -382,7 +392,7 @@ struct DiagnosticsListView: View {
                 }
             }
         }
-        .navigationTitle("Diagnostics")
+        .navigationTitle("Reports from iOS")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { files = MetricsCollector.shared.payloadFiles() }
     }
