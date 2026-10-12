@@ -1711,17 +1711,211 @@ Every rated pass is 8+ after fixes. The remaining point on each is on-device che
 #### Unresolved Decisions (design)
 None.
 
+## Eng re-review (`/plan-eng-review`, run 2, 2026-10-11)
+
+Target: this plan after the design review, checking the architectural effects of design D3–D18 against E1–E5 and DT1–DT5. Report file: this file. This run's questions are numbered "eng-2 D1…" to keep them apart from the first eng run.
+
+### Scope record (run 2)
+feature answers: none proposed; structure: eng D1 (Smaller arrangement) reused. The design work adds edits to `ContentView.swift` (ask coordinator) and `FirstRunCoachmark.swift` (card content and buttons), no new classes. About 20 files, 2 new classes [estimated]. accepted scope: unchanged plus those two edits; pending remedies: none (EV-2 answered in eng-2 D1).
+
+### Scope Challenge findings (run 2)
+
+1. `[P1] (confidence: 9/10) Sleepulator/Sleepulator/Views/HomeView.swift:608-610`: the coachmark's dismiss closure assumes exactly two tips. Quote: `if tip == .firstRun { retireFirstRunTip() } else { hasSeenNightRingTip = true }`. With a third case (the tip card, design D3), "No thanks" would mark the night-ring tip seen instead of spending the card. Remedy (design D3/D6 implementation): each content carries its own actions; the tip card's decline spends the card; "Leave a tip" opens the sheet, and the sheet's `onDismiss` spends it (4A).
+2. `[P2] (confidence: 9/10) Sleepulator/Sleepulator/Views/HomeView.swift:186-187 and :597`: `CoachmarkContent.current(...)` runs in two places, the overlay and `tipShowing` (which delays the idle fade). Remedy: extend the pure function once with `tipCardDue` and `sessionActive`, keeping the precedence first-run → night ring → tip card, never in Focus, and the tip card never while something plays. `CoachmarkContentTests` (`AudioStateTests.swift:2308`) gets those rows.
+3. `[P2] (confidence: 8/10) Sleepulator/Sleepulator/Views/WindowActivity.swift:18`: nothing marks the moment a sheet closes. Quote: `var isPresenting: Bool { window?.rootViewController?.presentedViewController != nil }`. That's polled, not an edge, so it can't tell "a sheet just closed" (design D12). Remedy: explicit hooks feed one `naturalBreak()` in `ContentView`: the `onDismiss` of Build mix, the timer sheet, Now Playing and the tip sheet, plus `selectedTab` leaving Settings. `ContentView` then checks the `SessionGuards` ask rule and calls `requestReview`.
+   - Clarification of D12's wording: "never on a tab switch" means any tab switch except leaving Settings, which is the one that counts.
+4. `[P1] (confidence: 7/10) plan TS-2 + Spec review round 2 C5`: the card UI test can't show the card. The card renders only once StoreKit products load, and an Apple forum report says `xcodebuild test` on the iOS 26.5 simulator doesn't push a `.storekit` file to the simulator, so products may never load on that CI leg. **Pending EV-2 (eng-2 D1).**
+5. `[P2] (confidence: 6/10) plan TS-1`: medium confidence, verify this is actually an issue. The same report puts the StoreKitTest suite on the 26.5 CI leg at risk. The first eng review's contingency stands (Scope #3: a failing leg is a later decision, never a silent skip). The likely choices then: pin that leg's simulator, or run TipStoreTests on the 26.2 leg only, recorded.
+6. `[P2] (confidence: 8/10) design D8 (6A)`: "not a TestFlight build" needs a signal. Remedy: show the Rate row only when the App Store ID is set AND `AppTransaction.shared`'s environment is `.production` (StoreKit 2, iOS 16+; the app targets 17). Checked once per launch, off main, cached. It's hidden in Xcode and TestFlight runs. This is mechanism, not new behavior.
+
+Dispositions: #1, #2, #3, #6 accepted inside the design decisions (D3, D6, D12, D8) as required plumbing; #5 keeps the existing contingency; #4 accepted as EV-2 (eng-2 D1 → A, debug-only seam).
+
+### Eng re-review ledger
+
+### EV-2: how the card's UI test gets tip products
+Finding: run 2 Scope #4, P1, confidence 7/10, plan TS-2, reviewer: eng re-review (Claude).
+Plan baseline: TS-2 (CEO D15 → A): "Seeded clean night via launch args; card shows; Home controls hittable; clears the mini-player; \"No thanks\" → waitForNonExistence; persisted state left as found; both CI legs". Spec review round 2 C5 (repair): "the card shows only once products have loaded".
+Runtime evidence: no StoreKit configuration in the shared scheme today (`grep storekit` over `Sleepulator.xcodeproj`: no match). The Apple forum report (thread 826971) says the 26.5 CLI test action doesn't sync `.storekit` to storekitd; unverified on this project.
+Comparison grid:
+
+| Commitment | Source | Current | A (debug seam) | B (real StoreKit in UI tests) |
+|---|---|---|---|---|
+| What the card test proves | TS-2 (approved) | layout, hittable, clearance, dismiss | unchanged | unchanged |
+| How "products loaded" happens in the test | pending | — | a DEBUG-only launch argument makes TipStore report three fixed test products (no StoreKit call) | `Tips.storekit` set in the scheme / test plan, plus an SKTestSession in the UI test |
+| Release builds | — | — | the argument is compiled out (`#if DEBUG`) | unaffected |
+| CI on iOS 26.5 | ci-full-suite | both legs | runs | at risk per the forum report |
+| Purchase paths | TS-1 (approved) | StoreKitTest unit suite | unchanged (TS-1's job) | unchanged |
+
+Question eng-2 D1:
+D1 — EV-2: How does the tip card's UI test get products to show the card? <gstack-qid:plan-eng-review-test-gap>
+Project/branch/task: eng re-review of docs/designs/APP-STORE-LAUNCH-1.0.md on claude/app-store-readiness-391005.
+ELI10: The approved UI test checks that the tip card fits on Home without blocking anything. But the card only appears once the App Store's tip products have loaded, and in a UI test that means a fake StoreKit setup, which a recent report says breaks on the newest iOS simulator when run from the command line, as CI does. The alternative is a test-only switch, compiled out of real builds, that hands the app three fixed tip products, so the layout test doesn't depend on StoreKit at all.
+Stakes if we pick wrong: the card test fails or silently never shows the card on one CI leg, and the layout bug it guards against ships.
+Recommendation: A because the card test is about layout, not purchases (the StoreKit suite covers those), and a debug-only seam keeps it reliable on both CI legs.
+Completeness: A=9/10, B=7/10
+Net: a small debug-only seam that makes the layout test reliable, versus real StoreKit in UI tests that may break on CI.
+Header: Card test setup
+Options:
+A) Debug-only seam (recommended)
+A DEBUG-only launch argument (like the UI tests' existing settings arguments) makes TipStore report three fixed test products without calling StoreKit; release builds compile it out. The card test seeds a clean night and this argument; purchases stay with the StoreKitTest suite. Effort S (human: ~1 h / CC: ~10 min), risk low. ✅ The layout test runs the same on both CI legs, whatever StoreKit does on the simulator. ✅ Separates jobs: layout in the UI test, purchases in TS-1. ❌ One test-only code path in TipStore, guarded by #if DEBUG.
+B) Real StoreKit in UI tests
+Set Tips.storekit as the scheme's (or test plan's) StoreKit configuration and start an SKTestSession in the UI test so real test products load. Effort M (human: ~3 h / CC: ~20 min), risk medium. ✅ No test-only code in the app. ✅ Exercises the real product-loading path end to end. ❌ Reported broken under xcodebuild on the iOS 26.5 simulator, one of CI's two legs.
+
+State: approved
+Actual answer: A) Debug-only seam (recommended), eng-2 D1, 2026-10-11
+Accepted scope: a DEBUG-only launch argument makes TipStore report three fixed test products without calling StoreKit (compiled out of release builds); the TS-2 card test seeds a clean night plus this argument; purchase paths stay with TS-1. Proof: TS-2 passes on both CI legs; a release build has no trace of the argument (compile-time `#if DEBUG`).
+History: TS-2 assumed products would load in UI tests; run 2 Scope #4 found that unsafe on CI's 26.5 leg.
+
+**Approval readiness (eng run 2): PASS** (2026-10-11).
+- Checked: EV-2 (eng-2 D1, Debug-only seam).
+- Run-2 Scope #1–#3 and #6 are the required plumbing of design D3, D6, D12 and D8; their answers cover them.
+- Scope #5 reuses the first eng review's contingency.
+- The structure reuses eng D1.
+- No pending choices.
+
+### Section 1: Architecture (eng run 2)
+
+```
+ ContentView ── natural-break coordinator ─────────────────────────────────────────────────────────┐
+   ├─ selectedTab leaves Settings ──────────────────────────────> naturalBreak(.leftSettings)       │
+   ├─ Now Playing sheet onDismiss ──────────────────────────────> naturalBreak(.sheetClosed)        │
+   ├─ env \.naturalBreak ─> HomeView: Build mix / timer onDismiss, TipJar sheet onDismiss            │
+   │                                                                                               ▼
+   │   SessionGuards ask rules (pure): verdicts (NightJournal) · TipStore state · injected clock ·
+   │   mode · playing · isPresenting · version  ──> .rating ──> requestReview (SwiftUI env), log "asked"
+   │                                            ──> .tipCardDue ──> HomeView via a plain value (not @Published on AudioEngine)
+ HomeView ── CoachmarkContent.current(focusMode, hasCompletedFirstRun, hasSeenNightRingTip, tipCardDue, sessionActive)
+   └─ coachmark band: .firstRun / .nightRing (Got it, Ember) / .tip (Leave a tip → TipJar sheet, No thanks → spent)
+ BackupSupportView ── Troubleshooting (Send feedback first) · Support Sleepulator (TipRows, Rate row if appID && AppTransaction env == .production)
+```
+
+1. `[P2] (confidence: 8/10) Sleepulator/Sleepulator/Views/ContentView.swift:90`: the ask coordinator belongs in `ContentView`. It already owns the veil's presenting check: quote `switch SessionGuards.veilTimeout(mayDim: self.mayDim(), presenting: self.windowActivity.isPresenting,`. Home's sheets reach it through one environment action, not a closure threaded through every view.
+2. `[P2] (confidence: 8/10) CLAUDE.md § Audio + state invariants ("AudioEngine is a coarse ObservableObject")`: the tip card's due flag changes about once a day, but putting it on `AudioEngine` would add one more `@Published` field that every Home view re-renders on. `ContentView` computes it at scene activation and at each natural break, and passes it to HomeView as a plain value.
+3. `[P3] (confidence: 7/10) design D8`: `AppTransaction.shared` can fail offline or in odd environments. On failure the Rate row stays hidden; that's conservative, and it's re-checked next launch.
+
+Dispositions (Section 1): all accepted as mechanism inside D3, D8 and D12; no new choices.
+
+### Section 2: Code quality (eng run 2)
+
+1. `[P2] (confidence: 9/10) Sleepulator/Sleepulator/Views/Home/FirstRunCoachmark.swift:157-171`: `CoachmarkCard` is a `private` modifier with `.accessibilityElement(children: .combine)` hard-coded. Remedy (design D16): give it a grouping parameter (`.combine` for the one-button tips, `.contain` for the tip card), and keep the tip card's view in the same file so the modifier stays private.
+2. `[P2] (confidence: 8/10) CLAUDE.md § "Don't give a view @ObservedObject var audio unless it displays engine state"`: `TipRows` observes `TipStore` only, never `AudioEngine`.
+3. `[P3] (confidence: 9/10) design D15 (DT5)`: no UI test looks up "Got it" or "Export the playback log" (grep over `SleepulatorUITests/`: no match). The button-style change and the page reorder don't touch test lookups.
+
+Dispositions (Section 2): accepted inside D15, D16 and the CLAUDE.md rule; no new choices.
+
+### Section 3: Tests (eng run 2)
+
+Added required proof for the design decisions. All of it extends existing suites except TS-2, which uses the EV-2 seam:
+
+```
+[+] CoachmarkContentTests (AudioStateTests.swift:2308)      [★★★ planned] precedence first-run → night ring → tip; never in Focus; tip never while playing
+[+] SessionGuards ask rules (SessionGuardsTests :1532)      [★★★ planned] 19:59 / 20:00; sheet closed → ask; left Settings → ask; other tab switch → no ask;
+                                                                            Focus: rating yes, card no; spent only by an answer; pending lasts one visit
+[+] Rate row visibility (pure)                               [★★★ planned] appID nil → hidden; env .sandbox / .xcode → hidden; .production → shown
+[+] Feedback message builder (pure)                          [★★★ planned] lists attachments in words, no "://"; share text carries the address; "No night recorded yet."
+[+] TS-2 card UI test (HomeLayoutUITests)                    [★★★ planned] seam + seeded night → card in the band; two VoiceOver stops; "No thanks" → gone
+[+] Lasting thank-you                                        [★★  planned] tipped flag → Settings line; unit on state + §T sandbox tip
+REGRESSION: CoachmarkContentTests' existing rows (firstRun / nightRing) stay green unchanged; HomeLayoutUITests and NightVeilUITests unchanged.
+```
+
+Value card (TS-2 with the seam): protects=the card fits the band without blocking Home's controls; fails_when=the card leaves the band or covers a control; why_new=no UI test shows the card today; seam=EV-2's DEBUG-only launch argument (approved; compiled out of release); no_claim=real product loading (TS-1 and the §T sandbox purchase cover it).
+
+Test plan artifact updated with the run-2 paths (below). No new test policies; Section 3 has no question.
+
+### Section 4: Performance (eng run 2)
+
+No issues found. `AppTransaction.shared` runs once per launch, off main. The ask rules are pure checks run at scene activation and at natural breaks.
+
+### Eng outputs (run 2)
+
+#### Implementation Tasks (eng run 2)
+These amend E4 and DT1–DT5 with the plumbing this run found. Ratios: features ~30x, tests ~50x.
+
+- [ ] **R1 (P1, human: ~3h / CC: ~15min)** — ask coordinator — `naturalBreak()` in ContentView, fed by Now Playing's `onDismiss`, Settings exit, and an environment action used by Build mix, the timer sheet and the TipJar sheet; evaluates the ask rules; calls `requestReview`; computes `tipCardDue` as a plain value
+  - Surfaced by: run 2 Scope #3; Section 1 #1–#2
+  - Files: `Sleepulator/Sleepulator/Views/ContentView.swift`, `Sleepulator/Sleepulator/Views/HomeView.swift`, `Sleepulator/Sleepulator/Views/Home/SessionGuards.swift`
+  - Verify: SessionGuardsTests rows above; a dev build shows the prompt after closing Build mix in the window
+- [ ] **R2 (P1, human: ~2h / CC: ~10min)** — coachmark — Extend `CoachmarkContent.current` with `tipCardDue` and `sessionActive`; per-content actions (fixes the binary dismiss); a grouping parameter on `CoachmarkCard`
+  - Surfaced by: run 2 Scope #1–#2; Section 2 #1
+  - Files: `Sleepulator/Sleepulator/Views/Home/FirstRunCoachmark.swift`, `Sleepulator/Sleepulator/Views/HomeView.swift`, `Sleepulator/SleepulatorTests/AudioStateTests.swift`
+  - Verify: CoachmarkContentTests (old and new rows) green
+- [ ] **R3 (P1, human: ~1h / CC: ~10min)** — test seam — DEBUG-only launch argument for three fixed test products in TipStore; TS-2 uses it
+  - Surfaced by: run 2 Scope #4 (EV-2, eng-2 D1)
+  - Files: `Sleepulator/Sleepulator/Services/TipStore.swift`, `Sleepulator/SleepulatorUITests/HomeLayoutUITests.swift`
+  - Verify: TS-2 green on iOS 26.2 and 26.5; `grep` of a Release build's symbols shows no seam
+- [ ] **R4 (P2, human: ~1h / CC: ~10min)** — Rate row — Visibility = App ID set AND `AppTransaction` environment `.production`, cached per launch
+  - Surfaced by: run 2 Scope #6; Section 1 #3
+  - Files: new `Sleepulator/Sleepulator/Views/TipJar.swift`, `Sleepulator/Sleepulator/Views/BackupSupportView.swift`
+  - Verify: the pure visibility rule's unit rows; hidden in a TestFlight build (§T)
+- [ ] **R5 (P2, human: ~1h / CC: ~10min)** — feedback message — A pure builder for the mail body and share text (design D9)
+  - Surfaced by: Section 3 (run 2)
+  - Files: new `Sleepulator/Sleepulator/Views/TipJar.swift` (or the feedback helper's file), `Sleepulator/SleepulatorTests/AudioStateTests.swift`
+  - Verify: builder unit rows (no "://", address present, plain-words attachment list)
+
+#### Failure modes (run 2)
+| New path | Failure | Handling / test | User sees |
+|---|---|---|---|
+| Natural break | a sheet's `onDismiss` not wired | coordinator rule tests + dev-build check | rating asks less often (silent, harmless) |
+| Tip card dismiss | decline marks the wrong tip | R2 per-content actions + CoachmarkContentTests | nothing |
+| Rate row | `AppTransaction` fails | row hidden (conservative) | no Rate row this launch |
+| TS-2 on CI | StoreKit not synced on 26.5 | EV-2 seam | n/a (CI) |
+
+Critical gaps: 0.
+
+#### Parallelization (run 2)
+R2 and R3 extend lanes A/B and D from the first run; R1 joins lane D (it depends on the journal's verdicts and TipStore). Order: lane D runs R2 → R1 → DT1–DT4 → R4, R5. Conflict flags: `HomeView.swift` and `AudioStateTests.swift`, sequential within lane D.
+
+#### Reality rows (eng run 2)
+| # | Premise | Receipt | Verdict |
+|---|---|---|---|
+| 1 | The dismiss closure is binary | `HomeView.swift:608-610` | verified |
+| 2 | `CoachmarkContent.current` has two call sites | `HomeView.swift:186-187, 597` | verified |
+| 3 | `isPresenting` is polled | `WindowActivity.swift:18` | verified |
+| 4 | No StoreKit config in the scheme | grep over `Sleepulator.xcodeproj` (no match) | verified |
+| 5 | The xcodebuild 26.5 StoreKit sync failure | Apple forum thread 826971 | unverified |
+| 6 | No UI test looks up "Got it" / "Export the playback log" | grep over `SleepulatorUITests/` (no match) | verified |
+| 7 | `AppTransaction` environment distinguishes TestFlight | StoreKit 2 documentation knowledge | unverified |
+
+unverified=2.
+
+REALITY: premise-table finding 7 premises, unverified=2 (a forum report and StoreKit environment behavior) Sleepulator/Sleepulator/Views/HomeView.swift:608
+REALITY: already-done pass no NightJournal, TipStore or coachmark tip commits on origin/main since the merge at 2e1712c Sleepulator/Sleepulator/Views/Home/FirstRunCoachmark.swift:1
+REALITY: surface-check pass the only named tools (setup_tests.rb, setup_ui_tests.rb) exist Sleepulator/setup_ui_tests.rb:1
+REALITY: binding-decisions pass reuses eng D1/D2 and design D3–D18; nothing overruled is reintroduced docs/designs/APP-STORE-LAUNCH-1.0.md:6
+REALITY: numbers pass ~20 files, 2 classes [estimated]; effort figures [estimated] Sleepulator/Sleepulator/Views/ContentView.swift:90
+REALITY: deferred-asks pass nothing approved is left out; no new deferrals docs/designs/APP-STORE-LAUNCH-1.0.md:5
+REALITY: pr-count pass one PR per wave; run-2 tasks join the existing lanes Sleepulator/Sleepulator.xcodeproj/project.pbxproj:625
+
+#### Unresolved decisions (eng run 2)
+None.
+
+#### Completion summary (eng run 2)
+- Step 0: Scope Challenge — scope accepted as-is (structure eng D1 reused)
+- Reality rows: 7/7 applicable rows emitted, 2 unverified premises
+- Architecture Review: 3 issues found
+- Code Quality Review: 3 issues found
+- Test Review: diagram produced, 0 gaps identified (6 planned additions, regression rows named)
+- Performance Review: 0 issues found
+- NOT in scope: unchanged from run 1
+- What already exists: unchanged from run 1, plus `CoachmarkContentTests` and `WindowActivity`
+- TODOS.md updates: 0 items proposed
+- Failure modes: 0 critical gaps flagged
+- Unresolved decisions: 0 in this review
+- Outside voice: codex, disabled (`codex_reviews`)
+- Parallelization: R1–R5 join existing lanes; lane D sequential
+- Lake Score: N/A (no answered question offered a 10/10 option)
+
 ## GSTACK REVIEW REPORT
 
 | Review | Trigger | Why | Runs | Status | Findings |
 |--------|---------|-----|------|--------|----------|
 | CEO Review | `/plan-ceo-review` | Scope & strategy | 1 | CLEAR | 8 proposals, 7 accepted, 1 deferred |
-| Outside Review | codex via `/plan-ceo-review` and `/plan-eng-review` outside voice | Independent 2nd opinion | 2 | disabled | disabled by config (`codex_reviews`); no completed external review |
-| Eng Review | `/plan-eng-review` | Architecture & tests (required) | 1 | ISSUES OPEN | 12 issues, 0 critical gaps |
+| Outside Review | codex via `/plan-ceo-review` and `/plan-eng-review` outside voice | Independent 2nd opinion | 3 | disabled | disabled by config (`codex_reviews`); no completed external review |
+| Eng Review | `/plan-eng-review` | Architecture & tests (required) | 2 | ISSUES OPEN | 6 issues, 0 critical gaps |
 | Design Review | `/plan-design-review` | UI/UX gaps | 1 | CLEAR | score: 3/10 → 9/10, 16 decisions |
 | DX Review | `/plan-devex-review` | Developer experience gaps | 0 | — | — |
 
-- **OUTSIDE COVERAGE:** codex, plan-review phase, disabled by `codex_reviews` for the CEO and eng runs (recorded as skipped). Design phase: codex disabled; one in-host Claude design reviewer completed with 11 findings, all fixed. That is native coverage, not outside coverage. No completed external review exists.
-- **VERDICT:** CEO + DESIGN CLEARED. Eng Review ISSUES OPEN: its 12 findings are mapped to tasks E1–E5, with 0 unresolved and 0 critical gaps. Eng review required.
+- **OUTSIDE COVERAGE:** codex, plan-review phase, disabled by `codex_reviews` for the CEO run and both eng runs (recorded as skipped). In the design phase, one in-host Claude design reviewer completed with 11 findings, all fixed; that's native coverage, not outside coverage. No completed external review exists.
+- **VERDICT:** CEO + DESIGN CLEARED. Eng Review ISSUES OPEN: run 2's 6 findings are mapped to tasks R1–R5 (run 1's 12 are in E1–E5), with 0 unresolved and 0 critical gaps. Eng review required.
 
 NO UNRESOLVED DECISIONS
