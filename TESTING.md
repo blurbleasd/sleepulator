@@ -28,8 +28,8 @@ Suites in `SleepulatorTests/` (six files, many suites):
   dates, caps, enclosures), `OPMLParserTests` (scheme validation, dedupe, corrupt files),
   `StorageManagerTests` (backup recovery), `NetRetryTests`, `CacheEvictionTests`, the
   sleep-timer suites (backstop, cancel, end-of-episode), layering, mode reconciliation, the
-  Night sky's rules (`NightSkyMotionTests`: the screensaver settle, the night's slowing, meteors
-  only while the controls show and never popping), and the
+  Night sky meteor's rules (`NightSkyMotionTests`: only while the controls show, faint, rare after
+  the first, never popping), and the
   Podcasts-tab rules (`PodcastTextTests`, `ShowNotesPreviewTests`, `ShowNotesEdgeTests`,
   `TonightShelfTests`, `QueueMoveToHeadTests`), the player rules (`NowPlayingStateTests`,
   `NightLineCopyTests`, `PlayerQueueActionTests`, `PodcastFailureStreakTests`), Settings' rules
@@ -557,13 +557,13 @@ both glances, but brightness, colour at 2am, motion on ProMotion and anything ov
 need the phone. Room dark, phone on the nightstand, brightness where you'd leave it at night.
 
 1. **Every Sleep scene is warm and dim.** Swipe through all seven at bedtime. ✅ No scene throws
-   blue light: Night sky's stars are pale and warm whites, Aurora is red curtains, Still water a small round amber moon (not a tall
+   blue light: Night sky's stars and glow are warm, Aurora is red curtains, Still water a small round amber moon (not a tall
    oval) with flat ripples, Rain on glass shows drops that cling and slip with a bright lower
    edge (not meteors), Deep space a faint rust nebula. Embers churns slowly; Breathe's glow sits
    on the ring and swells more than it brightens. ✅ No identical stars repeating down the
    screen in Deep space, Aurora or Still water.
 2. **Night sky and Breathe actually move on ProMotion.** Watch each for a minute in the
-   screensaver. ✅ Stars drift smoothly (a sparse few twinkle, slowly), Breathe swells and fades
+   screensaver. ✅ The sky turns and its cloud drifts smoothly, Breathe swells and fades
    continuously. (Both
    moved off `TimelineView(paused:)`, which stops driving frames on 120 Hz screens.)
 3. **All night gets the veil on the Sleep screen.** Ring set to All night, Play, don't touch.
@@ -656,34 +656,35 @@ also pauses while its controls are faded to the screensaver, as the Sleep orb al
 10. **At 2am.** Sleep, room dark, brightness low. ✅ No amber switch tracks (copper), and the brightest
    things are the switch knobs, not rows of accent text.
 
-### T. Night sky: the settle, the night arc, meteors for watching (added 2026-10-11, simulator-checked only)
-From the Night sky critique (18/32). The simulator showed the settle, the ground, the night arc
-on a 5-minute night and the first meteor on a cold launch; colour and black level at 2am,
-ProMotion and a full night need the phone. Room dark, phone on the nightstand, brightness where
-you'd leave it at night, Night sky selected.
+### T. Night sky: the sky from a dark field (added 2026-10-11, rebuilt the same day, simulator-checked only)
+After the Night sky critique (18/32) a first pass calmed the Canvas starfield. On the phone it still
+read flat and static, so the scene was rebuilt as a Metal shader (`NightSkyShader.metal`). The
+simulator showed the turning sky, the Milky Way, the cloud and the land; black level and banding on
+OLED at 2am, ProMotion and a full night need the phone. Room dark, phone on the nightstand,
+brightness where you'd leave it at night, Night sky selected.
 
-1. **The settle.** All night, Play, don't touch. ✅ The controls and the ring fade; nothing is
-   left over the scene. Over the next ~40 s the brown behind the stars sinks to near-black, the
-   drift slows and the twinkle all but stops, with no visible step, and it's done before the veil
-   drops. Tap before the veil: ✅ the brown and the controls come back together in about a second,
-   with no flash.
-2. **No banding.** On the settled sky, look at the lower third and along the Milky Way. ✅ No
-   contour lines in the faint horizon lift or the haze (both measured dithered on the simulator;
-   OLED near-black is where steps would show).
-3. **The haze follows its stars.** Watch a few minutes with the controls up. ✅ The faint Milky Way
-   glow lies under its star band (upper left to lower right) and sinks with it; it slides off the
-   bottom as it reappears at the top, with no seam.
+1. **It has depth.** At bedtime with the controls faded. ✅ It reads as a sky over land, not dots on
+   a screen: a warm glow along the horizon, a hazy far ridge, a black treeline in front of it, stars
+   dimmer and warmer low down. Hold the phone and tilt it. ✅ The trees shift more than the ridge,
+   the ridge more than the sky.
+2. **It's alive but calm.** Watch two minutes. ✅ The sky turns slowly about a point near the top
+   (stars there barely move, lower ones wheel), the Milky Way's band and dark rift turn with it, and
+   thin cloud drifts across in front, dimming the stars it crosses. ✅ Nothing blinks; only the low
+   stars shimmer faintly.
+3. **Visible at night brightness.** ✅ The Milky Way, the horizon glow and the treeline are all
+   visible to dark-adapted eyes (they sit about 8-25 levels above black; OLED crushes the bottom few),
+   and nothing lights the room. ✅ No contour lines in the glow or the band.
 4. **Meteors only while you're watching.** Fresh launch, Sleep Home, nothing playing. ✅ One faint
-   warm meteor within ~25 s that kindles and burns out rather than popping. Hop to Podcasts and
-   back a few times. ✅ No meteor every 15 s; the next ones are minutes apart. Play and let the
-   screensaver run 5 minutes. ✅ No meteor under the screensaver.
-5. **The night arc.** A 15 min night, veil off in Settings so you can watch. ✅ By the end the
-   ground is black and the stars are faint (about a third) and barely moving. Tap at the end: ✅
-   the controls come up over black, not brown. With Moving scenes off: ✅ the still sky still dims
-   and its ground still goes black.
-6. **ProMotion and battery.** Watch a minute of the settled screensaver on a 120 Hz phone. ✅
-   Smooth drift, no stalls. Overnight with the veil on: ✅ battery no worse than before (the haze is
-   drawn in the scene's one Canvas now, and nothing animates under the veil).
+   warm meteor within ~25 s that kindles and burns out rather than popping. Hop to Podcasts and back
+   a few times. ✅ No meteor every 15 s; the next ones are minutes apart. Play and let the screensaver
+   run 5 minutes. ✅ No meteor under the screensaver. The ring fades with the controls; nothing is
+   left over the scene.
+5. **The night arc.** A 15 min night, veil off in Settings so you can watch. ✅ By the end the sky,
+   the Milky Way and the glow are much dimmer and the turn and drift have slowed. With Moving scenes
+   off: ✅ the still sky still dims over the night (it re-reads every 20 s).
+6. **ProMotion and battery.** Watch a minute on a 120 Hz phone. ✅ A smooth turn, no stalls. Overnight
+   with the veil on: ✅ battery comparable to Deep space (a full-screen shader at 30 fps while the sky
+   is in sight; nothing renders under the veil).
 
 ---
 
