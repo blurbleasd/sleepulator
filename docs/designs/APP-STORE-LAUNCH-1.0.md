@@ -27,7 +27,7 @@ Deferrals live in this file's "NOT in scope" section, not TODOS.md (binding deci
 | Crash / hang visibility | `MetricsCollector` (MetricKit, on-device, shared via Settings) | `Services/MetricsCollector.swift:1-40` |
 | "When is it OK to ask?" | Pure, unit-tested rules in `SessionGuards` / `HomeScreensaverPolicy` | `Views/Home/SessionGuards.swift` |
 | "Did the night end cleanly?" | Nothing persisted today: `recordNightEnd` is private, in-memory and runs only on a timer's terminal stop (`SleepTimerService.swift:166-169`), and the default is All night. The night signal is new work (NT-1) | `SleepTimerService.swift:160-181` |
-| New persisted keys | The night count and the "already asked / already tipped" flags stay on the device and out of backups, like `hasSeenNightRingTip` and `restoreUndoTakenAt` (`Backup.swift:87`). Not `exportOnlyKeys`: those export as Bools (`Backup.swift:302`) | `Services/Backup.swift:87, 302` |
+| New persisted keys | The night count and the "already asked / already tipped" flags stay on the device and out of backups, like `hasSeenNightRingTip` and `restoreUndoTakenAt`. (Eng correction after merging PR #33: `exportOnlyKeys` is gone; any key outside `Backup.kinds` and `encodedKeys` is never exported or removed, `Backup.swift:637`) | `Services/Backup.swift:637` |
 | First-run | `FirstRunCoachmark` already ships | `Views/Home/FirstRunCoachmark.swift` |
 | Store screenshots material | Live Activity, Resume widget, Siri shortcuts, scenes | `SleepulatorWidget/ResumeMixWidget.swift:63-69`, `Services/SleepulatorIntents.swift:34` |
 
@@ -563,6 +563,8 @@ Feasibility blockers: none found in code. External blockers, all user-owned: the
  BackupSupportView ──> Tip rows · Rate row · Send feedback ──> FeedbackComposer (MessageUI or ShareLink) <────────┘
                                                                      └── attaches NightTrail + MetricKit payloads + night summary
 ```
+
+> Superseded by the eng review's arrangement (eng D1): `NightRecorder`, `NightRecordStore` and `NightTrail` are one `NightJournal`; see "Section 1: Architecture (eng)".
 
 New coupling: one hook from `AudioEngine.noteSessionEdge` (and the player's rebuild/failure callbacks) into `NightRecorder`. Justified: those edges already define a Sleep night (UntimedNight), so the record follows the existing lifecycle instead of inventing one.
 
@@ -1105,17 +1107,334 @@ Spec review: 3 rounds (5 → 6 → 7/10), cap reached; round-3 fixes verified ag
 
 None. Every question asked (D1–D15) was answered.
 
+## Eng review (`/plan-eng-review`, 2026-10-11)
+
+Target (fixed): this plan, `docs/designs/APP-STORE-LAUNCH-1.0.md`, reviewed at branch `claude/app-store-readiness-391005` after merging `origin/main` (merge 2e1712c, which brings PR #33's backup hardening). Report file: this file. Eng question numbers restart at D1 (the CEO review's were D1–D16).
+
+### Scope record (Scope Challenge B)
+
+feature answers: none proposed (the CEO review settled scope; no code-level reason to cut); structure: **Smaller arrangement** (eng D1, 2026-10-11; recommended option chosen. The brief's "Recommendation: B" line had the letter wrong: the recommended option was listed first and carried the "(recommended)" label); accepted scope: every CEO-approved behavior, arranged as
+- **New:** `Services/NightJournal.swift` (a per-night event file + a small list of past verdicts; the verdict is a pure function over the events), `Services/TipStore.swift`, `Views/TipJar.swift` (the Support rows, the card, the mail sheet), `Tips.storekit`, `SleepulatorTests/TipStoreTests.swift`.
+- **Edits:** ask rules added to `Views/Home/SessionGuards.swift`; journal and rule suites added to `SleepulatorTests/AudioStateTests.swift`; the card's UI test added to `SleepulatorUITests/HomeLayoutUITests.swift`; hooks in `AudioEngine.swift` and `PodcastPlayer.swift`; `BackupSupportView.swift`, `HomeView.swift`, `SleepulatorApp.swift`, `MixPanel.swift`, `PrivacyInfo.xcprivacy`, `Info.plist`, `project.pbxproj`, `TESTING.md`, `CLAUDE.md`.
+- **Size:** about 19 files, 2 new classes [estimated].
+
+pending remedies: none.
+
+### Scope Challenge findings (C)
+
+1. `[P1] (confidence: 8/10) Sleepulator/Sleepulator/Services/PodcastPlayer.swift:868`: the journal's hooks land in the app's most-fixed code. Quote: `private func rebuildPlayer(at position: Double?) {`; history: `71a20fd fix(player): file an episode's end under the item that ended`, `a5a34db fix(player): a pause, stop or call during an episode's load sticks`. The hooks must observe only: they never change playback state, never block, and run on main (both live-tick sources already do: `DispatchQueue.main.async { self?.onRMSUpdate?(rms) }` at `GenerativeAudioEngine.swift:527-529`; `addPeriodicTimeObserver(forInterval: interval, queue: .main)` at `PodcastPlayer.swift:472`).
+2. `[P2] (confidence: 5/10) plan B1`: medium confidence, verify this is actually an issue. An Apple forum report says `Transaction.finish()` is a no-op in the iOS 27 beta 5 sandbox and `purchase()` then replays the same transaction; your phone runs iOS 27.0.1 (`TESTING.md:664`). Unverified for release builds.
+3. `[P2] (confidence: 7/10) plan TS-1`: forum reports of `StoreKitError.unknown` from `purchase()` under XCTest on some simulator versions, and of `askToBuyEnabled` not producing `.pending`. CI runs iOS 26.2 and 26.5 (ci-full-suite).
+4. `[P3] (confidence: 9/10) .github/workflows/ci.yml`: there's no publish path; CI builds and tests only. TestFlight uploads are manual from Xcode on your Mac. Fine for 1.0.
+5. `[P3] (confidence: 9/10) this plan, Section 1 diagram`: it names `NightRecorder`, `NightRecordStore` and `NightTrail`, now replaced by `NightJournal` (eng D1). The diagram is stale.
+
+Dispositions:
+- 1: accepted as a must-prove constraint, covered by the CEO's Section 4 invariant and CLAUDE.md's render-thread rule.
+- 2: accepted inside B1, no new behavior. One tip per transaction id: a replayed id finishes again and never thanks twice. §T adds a second sandbox tip on iOS 27 that must be a new transaction.
+- 3: accepted inside TS-1 as required test hygiene: `resetToDefaultState()`, `clearTransactions()` and `disableDialogs = true` in `setUp`, with the simulator OS pinned per CI leg. A leg that can't run StoreKitTest is a later decision, not a silent skip.
+- 4: noted; build automation is NOT in scope.
+- 5: factual correction applied (the CEO diagram gets a superseded note; the current one is below).
+
+Scope Challenge result: **scope accepted as-is** (the smaller arrangement keeps every approved behavior).
+Search: [Layer 1] start `Transaction.updates` at app launch, verify, finish, and handle `Transaction.unfinished` at launch; B1 already does all four. [EUREKA] derive the night's verdict from its event log instead of keeping a second piece of state: the record and the trail can't drift apart.
+
+### Section 1: Architecture (eng)
+
+```
+ SleepulatorApp ── @StateObject TipStore (Transaction.updates + .unfinished at init; nonisolated deinit)
+        │                                   └── environmentObject ──> TipJar views
+ ContentView ── @StateObject AudioEngine ── owns ──> NightJournal (nonisolated deinit; main-thread API; serial file queue)
+                     │  noteSessionEdge (idle↔playing, Sleep only) ──────────> journal.open / journal.pause
+                     │  genEngine.onRMSUpdate (main) / podPlayer.backgroundTick (main) ─> journal.live(Δ)   [checkpoint every 5 min]
+                     │  sleepTimer.onTerminalStop(reason, endedAt) ──────────> journal.close(.timer / .episodeEnd)
+                     │  podPlayer.onPipelineEvent(kind, at) ──────────────────> journal.taint(kind, at)     [EV-1: filed by time]
+                     │  handlePodcastFailure / failure streak ────────────────> journal.taint(.failure, at)
+                     │  interruption / route change (AudioSessionController) ─> journal.note(kind, at)
+                     │  willTerminate (running background-audio app) ─────────> journal.close(.person)  (sync)
+                     │  switch to Focus ──────────────────────────────────────> journal.close(.person)
+                     ▼
+   App Support/Sleepulator/nights/  (excluded from backup; default protection class)
+      <night-id>.jsonl   one event per line, schema v1, no URLs; last 2 nights kept  ──> feedback attachment (rendered text)
+      verdicts.json      [{id, start, end, clean, reason}] last ~30                  ──> SessionGuards ask rules ──> HomeView card / requestReview
+```
+
+Findings:
+1. `[P1] (confidence: 8/10) Sleepulator/Sleepulator/Services/AudioEngine.swift:922`: the CEO plan files late events "by the night id captured when it was raised". But the code that raises them knows nothing about nights. Quote: `func handlePodcastFailure(episodeId: String?) {` and `private func rebuildPlayer(at position: Double?) {` (`PodcastPlayer.swift:868`). Passing a night id down couples `PodcastPlayer` to the journal. **EV-1, approved in eng D2: file by occurrence time.**
+2. `[P2] (confidence: 8/10) Sleepulator/Sleepulator/Services/SleepTimerService.swift:175`: the journal needs to know why a night ended, but the terminal stop only logs it. Quote: `private func fireTerminalStop(_ reason: String, endedAt: Date? = nil) {`. The reconcile path passes `endedAt` (`:341-342`). Remedy: one `onTerminalStop: ((reason, endedAt) -> Void)?` closure next to `stopAllFn`, set by AudioEngine. That's needed plumbing for D8's "ended by the timer", so D8 covers it. "Played to its timer's end" compares live-audio time with the timer's length, with a tolerance for the fade. A deadline reconciled on the morning foreground adds no live time.
+3. `[P2] (confidence: 9/10) Sleepulator/Sleepulator/Views/ContentView.swift:6`: `@State private var selectedTab = 0`. A cold launch always opens Home, so the card lives in `HomeView` above `homeClearance`. On a warm return to another tab the card waits (CEO Section 4/C6: an ask is deferred, never used up).
+4. `[P3] (confidence: 8/10) plan Section 2`: a hard kill (not a force-quit) loses only writes still in the process's buffer. `FileHandle.write` calls are unbuffered syscalls, so lines already written survive app death. Power loss isn't a concern for this (a dead phone is a not-clean night anyway).
+
+Dispositions (Section 1): #1 accepted (EV-1, D2 → A); #2 accepted inside D8 (the `onTerminalStop` closure is needed plumbing for "ended by the timer"); #3 accepted inside TJ-1/C6 (the card is on Home, deferred elsewhere); #4 noted, no change.
+
+### Section 2: Code quality (eng)
+
+1. `[P1] (confidence: 9/10) Sleepulator/Sleepulator/Services/SleepTimerService.swift:178-181`: the order matters once the journal listens. Quote: `recordNightEnd(at: endedAt ?? now())` / `stopAllFn?()` / `cancelTimer()`. `stopAllFn` makes `AudioEngine` go idle, and its `noteSessionEdge` reports a pause. If the journal hears that pause before the terminal stop, the night is closed as "paused", not "ended by the timer". Remedy (D8 plumbing): call `onTerminalStop(reason, endedAt)` before `stopAllFn?()`, so the later pause lands on a closed night and changes nothing. Unit test: a terminal stop closes the night as `.timer` and the pause that follows is ignored.
+2. `[P2] (confidence: 9/10) Sleepulator/Sleepulator/Services/Backup.swift:637`: the plan's 0B cites `exportOnlyKeys` at `Backup.swift:302`, but PR #33 removed that list. Quote: `let absent = (scalarKeys + encodedKeys).filter { dict[$0] == nil && values[$0] == nil && !leftOut.contains($0) }`. Corrected: a key outside `Backup.kinds` and `encodedKeys` is never exported and never removed by a restore or an Undo. So the ask flags ("rated in version", "card shown", "tipped") stay device-only with no Backup edit, the same way `hasSeenNightRingTip` does.
+3. `[P2] (confidence: 8/10) Sleepulator/Sleepulator/Services/StorageManager.swift:25`: reuse. Quote: `let base = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first`. The verdict list (`verdicts.json`, rewritten whole at each close) goes through `StorageManager.save`, which writes atomically per key; `Backup` exports only the files it names (`Backup.swift:77-78`). The event files need appends, which `StorageManager` doesn't do, so they use `FileHandle` in `Sleepulator/nights/`, excluded from iCloud backup like `MetricsCollector`'s folder (`MetricsCollector.swift:20-31`).
+4. `[P2] (confidence: 8/10) Sleepulator/Sleepulator/Views/HomeView.swift`: HomeView changes often (29 commits in 30 days). The card is its own view in `TipJar.swift`; HomeView adds one overlay above `homeClearance` and nothing else.
+5. `[P3] (confidence: 7/10) plan B1`: `TipStore`'s `Transaction.updates` task is kept in a stored handle and cancelled in its `nonisolated deinit`. Tests create and free the store, and an orphaned listener would run into the next test.
+
+Shared code: no extraction proposed; the ask rules reuse `SessionGuards.veilTimeout`'s inputs (presenting, Now Playing up, veil) instead of re-deriving them. Diagrams in touched files: none (CEO audit), and the CEO Section 1 diagram is marked superseded.
+
+Dispositions (Section 2): #1 accepted inside D8 (plumbing + its test is required proof); #2 factual correction applied; #3 accepted (reuse, no behavior change); #4 accepted inside TJ-1; #5 accepted inside B1 and CLAUDE.md's deinit rule. No new choices.
+
+### Section 3: Tests (eng)
+
+Framework: XCTest + XCUITest (CLAUDE.md § Layout; CI runs every class on iOS 26.2 and 26.5). New suites join `AudioStateTests.swift`, which holds 47 suites today. `TipStoreTests.swift` is new, because it links StoreKitTest and needs `Tips.storekit` in the test bundle (`setup_tests.rb`). The card test joins `HomeLayoutUITests.swift`.
+
+```
+CODE PATHS                                                   USER FLOWS
+[+] NightJournal (new)                                       [+] A good night → the asks
+  ├── open / pause / close from noteSessionEdge                ├── [GAP→planned ★★★] 3 clean nights → rating at a natural break (rule unit + dev build)
+  │   └── [GAP→planned ★★★] AudioEngine wiring (temp dir)      ├── [GAP→planned ★★★] 5th clean night → card on Home (UI test, TS-2)
+  ├── live(Δ) from RMS / player ticks                          └── [GAP→planned ★★ ] card → tip sheet → thanks (sandbox, §T) [→E2E: device]
+  │   └── [GAP→planned ★★★] threshold, pauses < 30 min      [+] A night that broke
+  ├── close(.timer) before stopAllFn (Section 2 #1)            ├── [GAP→planned ★★★] app killed mid-night → open record, not clean (unit + §T)
+  │   └── [GAP→planned ★★★] the pause after is ignored         └── [GAP→planned ★★ ] Send feedback after it → trail + MetricKit attached (§T) [→E2E: device]
+  ├── reconcile on foreground                               [+] Tip edge cases
+  │   └── [GAP→planned ★★★] adds no live time                  ├── [GAP→planned ★★★] cancel / pending / failed / interrupted / late approval (TS-1)
+  ├── taint(kind, at) filed by time (EV-1)                     └── [GAP→planned ★★★] products don't load → "not available", card waits (TS-1 + rule unit)
+  │   ├── [GAP→planned ★★★] held event across close + reopen, both orders
+  │   └── [GAP→planned ★★★] late event flips a closed night to not clean
+  ├── verdict(events) pure
+  │   └── [GAP→planned ★★★] every state-machine edge (CEO Section 1)
+  └── files: append, rotate 2 nights, cap, partial last line, no "://"
+      └── [GAP→planned ★★★]
+[+] SessionGuards ask rules
+  └── [GAP→planned ★★★] 08:59/09:00, 1h59/2h, playing, sheet, veil, same day, new version, tipped, products not loaded
+[+] TipStore
+  ├── [GAP→planned ★★★] outcome → state mapping (pure)
+  └── [GAP→planned ★★★] StoreKitTest paths (TS-1); one tip per transaction id (Scope #2)
+[+] Existing behavior at risk (REGRESSION, must stay green)
+  ├── [★★★ TESTED] terminal stop + backstops — SleepTimerBackstopTests (AudioStateTests.swift:655), SleepTimerCancelTests (:736), SleepTimerTailTests (:959)
+  ├── [★★★ TESTED] rebuilds — PodcastPlayerRebuildTests (:1268); failures — PodcastFailureStreakTests (:3200); ends — PodcastItemEndTests (:3498)
+  ├── [★★★ TESTED] session rules — SessionGuardsTests (:1532)
+  └── [★★★ TESTED] Home layout — HomeLayoutUITests.swift:10, :120
+
+COVERAGE (planned): new paths 15/15 planned with ★★★/★★ tests, existing regressions guarded by 7 suites
+GAPS left: 0 unplanned. [→E2E: device] paths are in §T (approved)
+```
+
+Value cards (new proof beyond the CEO list, all required proof of approved behavior):
+- AudioEngine wiring. Value: protects=a Sleep session's start and stop open and close a journal night; fails_when=a hook is dropped or moved in an AudioEngine refactor; why_new=verdict tests never touch AudioEngine; seam=the journal's directory (as tests already pass a temp-dir StorageManager); no_claim=real audio-session edges at 3am (§3E/§T).
+- Terminal-stop order. Value: protects=a timer's stop closes the night as ended by the timer; fails_when=onTerminalStop moves after stopAllFn; why_new=no suite observes the order today; seam=none; no_claim=none beyond protects.
+- Late event, closed night. Value: protects=a failure that happened during a night marks that night; fails_when=the journal drops or misfiles late events (EV-1); why_new=new behavior from D2; seam=none; no_claim=real AVPlayer timing (held events stand in for the hop).
+
+Regression rule: the hooks only observe. The 7 existing suites above are the regression contract and must pass unchanged. If a hook needs one of them edited, the hook is wrong. Tests made obsolete by this plan: none.
+No new test policies or optional depths are proposed, so Section 3 has no question.
+
+Dispositions (Section 3): all planned tests are approved coverage (CEO Section 6, TS-1, TS-2) or required proof of approved behavior (D8, eng D2); nothing pending.
+
+### Section 4: Performance (eng)
+
+1. `[P3] (confidence: 8/10) Sleepulator/Sleepulator/Services/AudioEngine.swift:596-608`: `live(Δ)` rides the existing 20 Hz main-queue tick. Quote: `self.sleepTimer.backgroundTick()` inside `genEngine.onRMSUpdate`. It's an add in memory; a checkpoint line is written every 5 minutes of live audio, about 120 lines a night of ~120 bytes [estimated], ~15 KB, far under the 256 KB cap. No `@Published` state, so no SwiftUI invalidation (CLAUDE.md's coarse-ObservableObject rule).
+2. `[P3] (confidence: 7/10) plan B1/FB-1`: MetricKit diagnostic payloads can be large (call stacks). Bound the feedback attachments at 2 MB total, newest first, with a note listing what was left out [estimated; mail clients take far more].
+3. `[P3] (confidence: 8/10)`: computing a verdict reads one night's file (a few hundred lines) at close, off main; the asks read `verdicts.json` (~30 entries, a few KB). No loops over files on any hot path.
+
+Dispositions (Section 4): #1 accepted (no change); #2 accepted inside FB-1 (the CEO plan left the cap unspecified; 2 MB is an estimate the implementer may tune); #3 noted.
+
+### Eng decision ledger
+
+### EV-1: how a late night event is filed
+Finding: Section 1 #1, P1, confidence 8/10, `Sleepulator/Sleepulator/Services/AudioEngine.swift:922` and `PodcastPlayer.swift:868`, reviewer: eng review (Claude).
+Plan baseline: the CEO review's Section 4 must-prove note: "every event carries the night id captured when it was raised. The recorder ignores ids that aren't the open night (and taints N only if N is still open)". The approval-readiness line cites it as "filing by night id"; no user question was asked about the mechanism. The invariant itself ("an event is filed under the night that was open when it happened") stays fixed.
+Runtime evidence: `PodcastPlayer` raises rebuilds (`:618`, `:868`, `:916`) and `AudioEngine.handlePodcastFailure` (`:922`) handles failures on main after async hops, with no notion of a night. `handlePodcastFailure` already ignores failures from a replaced item (CLAUDE.md).
+Comparison grid:
+
+| Commitment | Source | Current | A (occurrence time) | B (night id passed down) |
+|---|---|---|---|---|
+| Invariant: filed under the night open when it happened | CEO Section 4 (fixed) | required | kept | kept |
+| What an event carries | pending | — | the time it happened, captured where detected | the open night's id, stamped into `PodcastPlayer` by `AudioEngine` |
+| Who knows about nights | pending | — | `NightJournal` only | `NightJournal`, `AudioEngine`, `PodcastPlayer` |
+| Late event for a night that already closed | CEO note: "taints N only if N is still open" | — | appended to N's file; N's verdict recomputed (not clean) | dropped; N stays clean though it failed |
+| Event outside every night | — | — | dropped | dropped |
+| `PodcastPlayer` API change | — | — | one closure `onPipelineEvent(kind, at:)` | the closure plus a stamped night id it must keep current |
+| Proof (approved coverage) | CEO Section 6 | — | held event across a close and a reopen, both orders | same |
+| Other approved values (D8 rule, D9 trail, cap, retention) | CEO decisions | — | unchanged | unchanged |
+
+Question D2:
+D2 — EV-1: How does a late player event get filed under the right night? <gstack-qid:plan-eng-review-arch-finding>
+Project/branch/task: eng review of docs/designs/APP-STORE-LAUNCH-1.0.md on claude/app-store-readiness-391005.
+ELI10: A podcast failure or a player rebuild can be reported a moment after it happens. In that gap the night may have ended and a new one begun, and filing the report under the wrong night is exactly the kind of bug this player code has had before. The CEO plan said to tag each report with the night's id, but the player code that raises them knows nothing about nights. Tagging each report with the time it happened does the same job, and only the journal needs to know about nights.
+Stakes if we pick wrong: a failure from last night can make tonight count as broken, or let a broken night count as good and trigger a rating ask.
+Recommendation: A because it keeps the player code unaware of nights, and a late failure still marks the night it happened in instead of being dropped.
+Completeness: A=9/10, B=7/10
+Net: file by when it happened, with no new coupling, versus file by an id the player has to keep in sync.
+Header: Event filing
+Options:
+A) File by occurrence time (recommended)
+Each event carries the time it happened, captured where it was detected; the journal files it into the night whose start and end contain that time, appends to that night's file even after it closed (the verdict is recomputed from its events), and drops events outside every night. PodcastPlayer gains one closure, onPipelineEvent(kind, at:). Effort S (human: ~2 h / CC: ~10 min), risk low, no new coupling to maintain. ✅ Only the journal knows about nights, so the player code stays as it is. ✅ A failure that lands after its night closed still marks that night, so a broken night can't trigger an ask. ❌ A clock change mid-night can misplace an event by the size of the jump, rare and conservative (worst case a good night counts as not clean).
+B) Pass the night id down
+The journal gives AudioEngine the open night's id, AudioEngine stamps it into PodcastPlayer when a night opens, and events carry that id; a late event for a night that already closed is dropped, as the CEO note said. Effort S (human: ~3 h / CC: ~15 min), risk medium, one more value to keep in sync. ✅ Matches the CEO plan's wording exactly. ✅ Immune to clock changes. ❌ Couples PodcastPlayer to nights, and a late failure for a closed night is dropped, so that night stays counted as good.
+
+State: approved
+Actual answer: A) File by occurrence time (recommended), eng D2, 2026-10-11
+Accepted scope: events carry the time they happened, captured where detected; NightJournal files each into the night whose start and end contain it, appends to that night's file even after it closed and recomputes its verdict, and drops events outside every night; PodcastPlayer gains one closure `onPipelineEvent(kind, at:)`; nothing else learns about nights. Proof: the approved held-event test (close and reopen, both orders), plus an event for an already-closed night that flips its verdict to not clean.
+History: replaces the CEO Section 4 note's mechanism ("night id captured when raised; taints N only if N is still open"); the invariant is unchanged.
+
+**Approval readiness (eng): PASS** (2026-10-11). Checked: the structure (eng D1, Smaller arrangement) and EV-1 (eng D2, File by occurrence time). Every other accepted remedy cites a CEO answer: Section 1 #2 and Section 2 #1 (the `onTerminalStop` closure, called before `stopAllFn`) → D8; Section 1 #3 (card on Home) → D4 and CEO C6; Scope #2 (one tip per transaction id) and Section 2 #5 (cancel the listener in deinit) → B1; Scope #3 (StoreKitTest hygiene) → D14; Section 4 #2 (2 MB attachment cap) → D9 (its cap was unspecified). Regression contract: the 7 existing suites listed in Section 3 stay green unchanged. No pending or deferred choices.
+
+### Eng outputs
+
+#### NOT in scope (eng)
+- Build automation (fastlane / Xcode Cloud): TestFlight uploads stay manual from Xcode for 1.0 (Scope #4).
+- A new UI-test file and separate service files per job: replaced by the smaller arrangement (eng D1).
+- Passing a night id into `PodcastPlayer`: not chosen (eng D2).
+
+#### What already exists (eng)
+Reused, not rebuilt:
+- **Live audio:** the 20 Hz main-queue ticks (`AudioEngine.swift:596-608`, `PodcastPlayer.swift:472`).
+- **Session edges:** `noteSessionEdge` (`AudioEngine.swift:307`) and `UntimedNight`'s 30-minute rule (`SleepTimerService.swift:68-90`).
+- **Item-level failure filtering:** `handlePodcastFailure` (`AudioEngine.swift:922`).
+- **Verdict storage:** `StorageManager`'s atomic App Support store (`StorageManager.swift:25`) holds the verdict list.
+- **Excluded-folder pattern:** `MetricsCollector`'s folder (`MetricsCollector.swift:20-31`), reused for the night files.
+- **Ask-rule inputs:** `SessionGuards`' pure rules and their tests (`SessionGuards.swift:7`, `AudioStateTests.swift:1532`).
+- **Device-only keys:** `Backup`'s listed-keys-only restore (`Backup.swift:637`), so no Backup edit.
+- **UI test pattern:** HomeLayoutUITests' launch-argument pattern (`HomeLayoutUITests.swift:16`).
+
+New: `NightJournal`, `TipStore`, the `TipJar` views. No shared-code extraction was proposed.
+
+#### Diagrams (eng)
+Produced:
+- the component and hook map (Section 1, eng)
+- the test coverage map (Section 3, eng)
+- the night journal's file pipeline, below
+
+The CEO plan's state machine still holds, with D2's filing rule. Inline diagram to add in code: a header comment in `NightJournal.swift` reproducing the hook map, since it spans four files.
+
+```
+ event(kind, at) ─> NightJournal (main) ─ which night contains `at`? ─┬─ open night N ──> append to N.jsonl (serial queue)
+                                                                      ├─ closed night N (file kept) ─> append; recompute N's verdict
+                                                                      └─ none ─> drop (logged once)
+ close(reason, at) ─> append end line ─> verdict(events) (pure) ─> StorageManager.save("verdicts.json")
+ rotation at open: keep the 2 newest night files (≤ 256 KB total) ─> feedback renders them newest-first (no URLs)
+```
+
+#### Failure modes (eng)
+| New path | Realistic failure | Test / handling | User sees |
+|---|---|---|---|
+| Journal hooks | A refactor drops a hook; nights never open | AudioEngine wiring test (Section 3) | nothing; caught in CI |
+| Terminal-stop order | The stop's own pause closes the night first | Order test (Section 2 #1) | nothing; caught in CI |
+| Late player event | Lands after its night closed | EV-1 tests, both orders + closed-night flip | nothing |
+| Night file write | Disk full | Dropped write, logged once; audio untouched (unit) | nothing |
+| Terminate notice | Not delivered (app was suspended, not playing) | Record stays open → not clean (conservative) | no ask after that night |
+| iOS 27 sandbox replay | `purchase()` returns an already-finished transaction | One tip per transaction id (unit + §T) | one thank-you |
+| StoreKitTest on CI | `StoreKitError.unknown` on a simulator OS | setUp hygiene; a failing leg is a decision, not a skip | n/a (CI) |
+
+Critical gaps: 0.
+
+#### Worktree parallelization strategy
+
+| Step | Modules touched | Depends on |
+|------|----------------|------------|
+| C: build settings, manifest, hide Apple Music | `Sleepulator.xcodeproj/`, `Sleepulator/` (plists), `Views/Home/` (MixPanel) | — |
+| A: night journal + hooks + suites | `Services/`, `SleepulatorTests/` | C (pbxproj) |
+| B: tip store + StoreKit tests | `Services/`, `Views/` (TipJar), `SleepulatorTests/`, `.storekit` | C (pbxproj) |
+| D: ask rules, card, rating, feedback rows, UI test | `Views/Home/`, `Views/`, `SleepulatorUITests/` | A, B |
+| E: TESTING.md §T, §3E step, CLAUDE.md | docs | — |
+
+Parallel lanes:
+- Lane 1: C → A
+- Lane 2: B, after C
+- Lane 3: E, independent
+- Lane 4: D, after A and B
+
+Execution order: launch C and E. Merge C. Launch A and B. Merge both, re-running `setup_tests.rb`. Then D, re-running `setup_ui_tests.rb` only if a UI-test file is added (D1 says none).
+
+Conflict flags:
+- `project.pbxproj`: touched by C, A and B. Land C first, and merge A and B one at a time.
+- `AudioStateTests.swift`: touched by A and D; D appends after A lands.
+- `Services/`: shared by A and B, but in different files.
+
+### Implementation Tasks (eng)
+Synthesized from this review's findings. These supersede the code tasks T2–T5 in the CEO list above; its user-owned tasks (T1, T6–T11) stand. Run with Claude Code; checkbox as you ship.
+Effort ratios assumed: features ~30x, tests ~50x, plumbing ~20x (human ÷ CC).
+
+- [ ] **E1 (P1, human: ~4h / CC: ~15min)** — build settings — Device family 1 and portrait on the app and widget; B5; B6 with C617.1; hide the Apple Music entry
+  - Surfaced by: CEO D2/D3, B5/B6; eng Scope #4
+  - Files: `Sleepulator/Sleepulator.xcodeproj/project.pbxproj`, `Sleepulator/Sleepulator/Info.plist`, `Sleepulator/Sleepulator/PrivacyInfo.xcprivacy`, `Sleepulator/Sleepulator/Views/Home/MixPanel.swift`
+  - Verify: HomeLayoutUITests green; first upload draws no ITMS-91053
+- [ ] **E2 (P1, human: ~3d / CC: ~1.5h)** — NightJournal — Event files, verdict as a pure function, events filed by occurrence time, `onTerminalStop` called before `stopAllFn`, live time from the main-queue ticks, terminate and Focus closes, `nonisolated deinit`
+  - Surfaced by: Section 1 #1–#4 (eng D2); Section 2 #1–#3; CEO D8/D9
+  - Files: new `Sleepulator/Sleepulator/Services/NightJournal.swift`; `Sleepulator/Sleepulator/Services/AudioEngine.swift`, `Sleepulator/Sleepulator/Services/PodcastPlayer.swift`, `Sleepulator/Sleepulator/Services/SleepTimerService.swift`, `Sleepulator/SleepulatorTests/AudioStateTests.swift`
+  - Verify: the journal suites (verdict edges, both-order held event, closed-night flip, wiring, stop order, cap/rotate/no "://"); the 7 regression suites unchanged and green
+- [ ] **E3 (P1, human: ~2d / CC: ~1.5h)** — TipStore — StoreKit 2 consumables, the listener at launch, `.unfinished`, one tip per transaction id, the pure outcome mapping, `Tips.storekit`, TipStoreTests with setUp hygiene
+  - Surfaced by: CEO B1/D14; eng Scope #2/#3; Section 2 #5
+  - Files: new `Sleepulator/Sleepulator/Services/TipStore.swift`, `Sleepulator/SleepulatorTests/TipStoreTests.swift`, `Tips.storekit`; `Sleepulator/Sleepulator/SleepulatorApp.swift`; `Sleepulator/setup_tests.rb` run
+  - Verify: TipStoreTests green on iOS 26.2 and 26.5; sandbox tip on device (§T), a second one on iOS 27 is a new transaction
+- [ ] **E4 (P1, human: ~2.5d / CC: ~1.5h)** — asks + Support UI — `SessionGuards` ask rules; `TipJar.swift` (Support rows, card, mail/share sheet with a 2 MB cap); card overlay in `HomeView`; `requestReview`; Rate row; card test in HomeLayoutUITests
+  - Surfaced by: CEO D4/D5/D6/D15; eng Section 1 #3; Section 2 #4; Section 4 #2
+  - Files: `Sleepulator/Sleepulator/Views/Home/SessionGuards.swift`, new `Sleepulator/Sleepulator/Views/TipJar.swift`, `Sleepulator/Sleepulator/Views/HomeView.swift`, `Sleepulator/Sleepulator/Views/BackupSupportView.swift`, `Sleepulator/SleepulatorTests/AudioStateTests.swift`, `Sleepulator/SleepulatorUITests/HomeLayoutUITests.swift`
+  - Verify: SessionGuardsTests additions; the card UI test on both legs; dev build shows the rating prompt
+- [ ] **E5 (P1, human: ~1d / CC: ~30min)** — docs — TESTING.md §T (killed night, force-quit, locked-phone writes, iOS 27 second tip, feedback after a killed night) and §3E's All-night step; CLAUDE.md invariants (filed by time, live audio only, stop-order, device-only keys)
+  - Surfaced by: eng Section 3 critical paths; CEO C5
+  - Files: `TESTING.md`, `CLAUDE.md`
+  - Verify: §T steps read like §3P's, each with a ✅ outcome
+
+#### Reality rows (eng)
+
+| # | Premise | Receipt | Verdict |
+|---|---|---|---|
+| 1 | Both live-tick sources run on main | `GenerativeAudioEngine.swift:527-529`; `PodcastPlayer.swift:472` | verified |
+| 2 | The terminal stop calls `stopAllFn` after recording | `SleepTimerService.swift:175-181` | verified |
+| 3 | A cold launch opens Home | `ContentView.swift:6` | verified |
+| 4 | Restore touches only listed keys | `Backup.swift:637, 646` | verified |
+| 5 | `exportOnlyKeys` is gone after PR #33 | grep over `Backup.swift` (no match) | verified |
+| 6 | StorageManager writes to App Support | `StorageManager.swift:25` | verified |
+| 7 | Backup exports only named files | `Backup.swift:77-78` | verified |
+| 8 | iOS 27 sandbox replays finished transactions | Apple forum report | unverified |
+| 9 | StoreKitTest is flaky on some CI simulators | Apple forum reports | unverified |
+| 10 | Lines written with `FileHandle` survive app death | platform knowledge | unverified |
+| 11 | A playing background-audio app gets the terminate notice on a force-quit | platform knowledge (device §T) | unverified |
+| 12 | HomeView changed in 29 commits in 30 days | `git log --since=30.days` count (CEO audit) | verified |
+| 13 | AudioStateTests holds 47 suites | grep count of `final class .*Tests` | verified |
+
+unverified=4. Numbers: 19 vs 26 files, 2 vs 5 classes [estimated]; ~120 lines and ~15 KB a night, 2 MB cap [estimated]; 47 suites, 29 commits [measured].
+
+REALITY: premise-table finding 13 premises, unverified=4 (platform and forum claims, two checked on device in §T) docs/designs/APP-STORE-LAUNCH-1.0.md:1
+REALITY: already-done pass origin/main since 2026-10-11 has no NightJournal, TipStore or StoreKit commits; this branch merged main at 2e1712c Sleepulator/Sleepulator/Services/Backup.swift:637
+REALITY: surface-check pass the named tools exist: Sleepulator/setup_tests.rb and Sleepulator/setup_ui_tests.rb Sleepulator/setup_tests.rb:1
+REALITY: binding-decisions pass the eng arrangement and filing rule (eng D1, D2) build on the CEO decisions; the no-TODOS decision is honored docs/designs/APP-STORE-LAUNCH-1.0.md:6
+REALITY: numbers pass every number tagged measured or estimated above Sleepulator/SleepulatorTests/AudioStateTests.swift:1532
+REALITY: deferred-asks pass nothing the CEO plan accepted is left out; eng NOT in scope lists build automation with its reason docs/designs/APP-STORE-LAUNCH-1.0.md:5
+REALITY: pr-count pass no ship policy file, so one PR per wave; lanes C, A, B, D and E land as one wave on this branch Sleepulator/Sleepulator.xcodeproj/project.pbxproj:625
+
+PLAN_REALITY: phase=eng rows=7/7 missing=none unverified=7 verdict=complete
+(The checker's `unverified=7` reads the CEO table's count earlier in this file; the eng table above has 4.)
+
+#### Unresolved decisions (eng)
+None.
+
+#### Completion summary (eng)
+- Step 0: Scope Challenge — scope accepted as-is (smaller arrangement, eng D1)
+- Reality rows: 7/7 applicable rows emitted, 4 unverified premises
+- Architecture Review: 4 issues found
+- Code Quality Review: 5 issues found
+- Test Review: diagram produced, 0 gaps identified (15 new paths planned with tests; 7 regression suites named)
+- Performance Review: 3 issues found
+- NOT in scope: written
+- What already exists: written
+- TODOS.md updates: 0 items proposed to user (the repo doesn't use TODOS.md)
+- Failure modes: 0 critical gaps flagged
+- Unresolved decisions: 0 in this review
+- Outside voice: codex, disabled (`codex_reviews`)
+- Parallelization: 4 lanes, 3 parallel (C+E, then A+B) / 1 sequential (D)
+- Lake Score: N/A (no answered question offered a 10/10 option)
+
+#### Suppressed findings
+None (no finding scored below 5).
+
 ## GSTACK REVIEW REPORT
 
 | Review | Trigger | Why | Runs | Status | Findings |
 |--------|---------|-----|------|--------|----------|
 | CEO Review | `/plan-ceo-review` | Scope & strategy | 1 | CLEAR | 8 proposals, 7 accepted, 1 deferred |
-| Outside Review | codex via `/plan-ceo-review` outside voice | Independent 2nd opinion | 1 | disabled | disabled by config (`codex_reviews`); no completed external review |
-| Eng Review | `/plan-eng-review` | Architecture & tests (required) | 0 | — | — |
+| Outside Review | codex via `/plan-ceo-review` and `/plan-eng-review` outside voice | Independent 2nd opinion | 2 | disabled | disabled by config (`codex_reviews`); no completed external review |
+| Eng Review | `/plan-eng-review` | Architecture & tests (required) | 1 | ISSUES OPEN | 12 issues, 0 critical gaps |
 | Design Review | `/plan-design-review` | UI/UX gaps | 0 | — | — |
 | DX Review | `/plan-devex-review` | Developer experience gaps | 0 | — | — |
 
-- **OUTSIDE COVERAGE:** codex, plan-review phase, disabled by `codex_reviews` (recorded as skipped); no external findings. The three in-session spec reviews are native subagents and don't count as outside coverage.
-- **VERDICT:** CEO CLEARED. Eng review required.
+- **OUTSIDE COVERAGE:** codex, plan-review phase, disabled by `codex_reviews` for both the CEO and eng runs (recorded as skipped); no external findings. The CEO run's three spec reviews were native subagents and don't count as outside coverage.
+- **VERDICT:** CEO CLEARED. Eng Review ISSUES OPEN: its 12 findings are all dispositioned and mapped to tasks E1–E5, with 0 unresolved and 0 critical gaps. Eng review required.
 
 NO UNRESOLVED DECISIONS
