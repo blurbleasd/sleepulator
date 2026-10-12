@@ -19,7 +19,7 @@ import os
 // keep their subscriber's secret in it).
 
 /// Why a night ended.
-enum NightEndReason: String, Codable, Equatable {
+nonisolated enum NightEndReason: String, Codable, Equatable {
     /// A pause that outlasted `UntimedNight.resumeWindow`, a force-quit while playing, or any
     /// stop a person made.
     case person
@@ -34,7 +34,7 @@ enum NightEndReason: String, Codable, Equatable {
 }
 
 /// One night's state, folded from its events. Pure data, so the rules are unit-tested.
-struct NightSummary: Codable, Equatable {
+nonisolated struct NightSummary: Codable, Equatable {
     var id: String
     var start: Date
     /// When the night ended; nil while it's open.
@@ -54,7 +54,7 @@ struct NightSummary: Codable, Equatable {
 }
 
 /// What the asks and the feedback summary need from a closed night.
-struct NightVerdict: Codable, Equatable {
+nonisolated struct NightVerdict: Codable, Equatable {
     let id: String
     let start: Date
     let end: Date
@@ -65,7 +65,7 @@ struct NightVerdict: Codable, Equatable {
 }
 
 /// The night's rules, pure.
-enum NightRules {
+nonisolated enum NightRules {
     /// All night counts as clean from this much live audio on.
     static let allNightThreshold: TimeInterval = 3 * 3600
     /// A checkpoint line every this much live audio, so a death keeps most of the count.
@@ -112,7 +112,7 @@ enum NightRules {
 }
 
 /// One line of a night's file.
-struct NightEvent: Codable, Equatable {
+nonisolated struct NightEvent: Codable, Equatable {
     var v = 1
     let at: Date
     /// opened, paused, resumed, live, threshold, taint, note, closed
@@ -120,7 +120,7 @@ struct NightEvent: Codable, Equatable {
     var detail: String?
 }
 
-extension NightSummary {
+nonisolated extension NightSummary {
     /// Fold one event into the summary: how a file is read back at launch.
     mutating func apply(_ e: NightEvent) {
         lastEventAt = max(lastEventAt, e.at)

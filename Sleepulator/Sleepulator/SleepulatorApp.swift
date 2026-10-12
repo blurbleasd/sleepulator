@@ -3,6 +3,9 @@ import SwiftUI
 @main
 struct SleepulatorApp: App {
     @Environment(\.scenePhase) private var scenePhase
+    /// The tip jar's store, alive for the whole app: it listens for transactions from launch
+    /// (an Ask to Buy approved while the app was closed lands here) and finishes any left over.
+    @StateObject private var tips = TipStore()
 
     init() {
         // MetricKit only accumulates while a subscriber is registered — register at launch,
@@ -22,6 +25,7 @@ struct SleepulatorApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .environmentObject(tips)
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .background {
