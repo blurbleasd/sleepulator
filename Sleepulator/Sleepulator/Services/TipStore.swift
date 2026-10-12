@@ -44,6 +44,8 @@ nonisolated enum TipOutcome: Equatable {
     case userCancelled
     case pending
     case failed
+    /// This phone can't buy (Screen Time, a managed device): the jar hides, nothing to retry.
+    case notAllowed
 }
 
 /// The pure step: an outcome and the ids already thanked → the next phase, and whether this is
@@ -61,6 +63,8 @@ nonisolated enum TipFlow {
             return (.pending, nil)
         case .failed:
             return (.failed, nil)
+        case .notAllowed:
+            return (.unavailable, nil)
         }
     }
 }
@@ -83,7 +87,10 @@ final class TipStore: ObservableObject {
     /// keeps the card from showing. Device-only (outside Backup.kinds).
     @Published private(set) var hasTipped: Bool
 
-    var canMakePayments: Bool { AppStore.canMakePayments }
+    /// False when this phone can't buy (Screen Time's In-app Purchases off, a managed device):
+    /// Settings hides the tip rows and the card waits (the plan's rescue map). Re-read on every
+    /// load, since it can change while the app runs.
+    @Published private(set) var purchasesAllowed = true
 
     private var storeProducts: [String: Product] = [:]
     /// Transaction ids already thanked, oldest first (the last 20 are kept).
@@ -104,6 +111,7 @@ final class TipStore: ObservableObject {
             return
         }
         #endif
+        purchasesAllowed = AppStore.canMakePayments
         guard startStoreKit else { return }
         listener = Task { [weak self] in
             for await update in Transaction.updates {
@@ -124,6 +132,7 @@ final class TipStore: ObservableObject {
     /// Load (or retry) the three products. An empty answer is "unavailable", never a spinner.
     func loadProducts() async {
         if products.isEmpty { phase = .loading }
+        purchasesAllowed = AppStore.canMakePayments
         do {
             let loaded = try await Product.products(for: Self.productIDs)
             storeProducts = Dictionary(uniqueKeysWithValues: loaded.map { ($0.id, $0) })
@@ -154,6 +163,10 @@ final class TipStore: ObservableObject {
             @unknown default:
                 outcome = .failed
             }
+        } catch Product.PurchaseError.purchaseNotAllowed {
+            Log.storage.error("tip purchase not allowed on this phone")
+            purchasesAllowed = false
+            outcome = .notAllowed
         } catch {
             Log.storage.error("tip purchase failed: \(error.localizedDescription, privacy: .public)")
             outcome = .failed

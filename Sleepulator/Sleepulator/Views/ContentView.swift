@@ -392,7 +392,7 @@ struct ContentView: View {
         let now = Date()
         var due = SessionGuards.tipCardDue(
             cleanNights: audio.nightJournal.cleanNightCount, tipped: tips.hasTipped, spent: tipCardSpent,
-            productsReady: !tips.products.isEmpty && tips.canMakePayments, focusMode: audio.focusMode,
+            productsReady: !tips.products.isEmpty && tips.purchasesAllowed, focusMode: audio.focusMode,
             playing: audio.isAnythingPlaying, ratingAskedToday: sameDay(ratingAskedOn, now), now: now,
             lastNightEnd: lastNightEnd)
         #if DEBUG

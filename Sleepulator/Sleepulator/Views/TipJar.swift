@@ -312,7 +312,8 @@ struct SupportSection: View {
             if tips.hasTipped {
                 Text(TipCopy.lastingThanks).foregroundStyle(pal.dim)
             }
-            TipRows(tips: tips, pal: pal)
+            // A phone that can't buy shows no tips at all (the plan's rescue map).
+            if tips.purchasesAllowed { TipRows(tips: tips, pal: pal) }
             if rateVisible, let id = AppInfo.appStoreID, let url = RateRowRule.writeReviewURL(appStoreID: id) {
                 Button { openURL(url) } label: {
                     SettingActionRow(title: "Rate Sleepulator", systemImage: "star",
@@ -322,7 +323,9 @@ struct SupportSection: View {
                 .accessibilityHint("On the App Store.")
             }
         } header: {
-            Text("Support Sleepulator").foregroundStyle(pal.dim)
+            if tips.hasTipped || tips.purchasesAllowed || rateVisible {
+                Text("Support Sleepulator").foregroundStyle(pal.dim)
+            }
         } footer: {
             // Build identity, moved here from Troubleshooting so it still closes the page.
             VStack(alignment: .leading, spacing: 2) {

@@ -23,6 +23,13 @@ final class TipFlowTests: XCTestCase {
         XCTAssertEqual(TipFlow.apply(.pending, handled: []).phase, .pending)
         XCTAssertEqual(TipFlow.apply(.failed, handled: []).phase, .failed)
     }
+
+    /// A phone that can't buy (Screen Time) gets no Try again and no tip; Settings hides the rows.
+    func testAPurchaseNotAllowedIsUnavailableNotATip() {
+        let step = TipFlow.apply(.notAllowed, handled: [])
+        XCTAssertEqual(step.phase, .unavailable)
+        XCTAssertNil(step.newTip)
+    }
 }
 
 /// The real purchase paths against Tips.storekit (CEO D14, TS-1).
