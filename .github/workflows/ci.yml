@@ -79,28 +79,46 @@ jobs:
             exit 1
           fi
 
-      # Boot first: a cold simulator makes `xcodebuild test` fail with
-      # "the test runner hung before establishing connection".
-      - name: Boot simulators
+      # Start both simulators booting in the background and build meanwhile: building doesn't need
+      # a booted simulator, and each first boot takes 4-5 min on the runner. Booting them one after
+      # the other before the build cost ~9 min a run. The tests wait for both boots to finish (a
+      # cold simulator makes `xcodebuild test` fail with "the test runner hung before establishing
+      # connection"). The runner reaps the background boots when the job ends.
+      - name: Start booting simulators
         run: |
           for udid in "${{ steps.sim.outputs.guard }}" "${{ steps.sim.outputs.latest }}"; do
-            xcrun simctl boot "$udid" || true
+            nohup xcrun simctl boot "$udid" > "boot-$udid.log" 2>&1 &
+          done
+
+      # Builds the app + widget + tests once (the compile gate, incl. Metal shaders); both
+      # simulators are arm64 iOS Simulator, so the one build serves both.
+      - name: Build for testing
+        run: |
+          set -o pipefail
+          xcodebuild build-for-testing \
+            -project Sleepulator/Sleepulator.xcodeproj \
+            -scheme Sleepulator \
+            -destination "id=${{ steps.sim.outputs.guard }}" \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Wait for simulators
+        run: |
+          for udid in "${{ steps.sim.outputs.guard }}" "${{ steps.sim.outputs.latest }}"; do
             xcrun simctl bootstatus "$udid" -b || true
           done
 
-      # Builds the app + widget + tests (the compile gate, incl. Metal shaders), then runs EVERY
-      # test class on both simulators, one after the other: two at once is a lot for the runner.
-      # The AudioEngine-owning suites used to be excluded as "crash on a headless CI simulator";
-      # the real cause was the isolated-deinit runtime bug, fixed in PR #18. None of this
-      # exercises real audio: the on-device gate in CLAUDE.md still applies.
-      - name: Build & test
+      # Runs EVERY test class on both simulators, one after the other: two at once is a lot for the
+      # runner. The AudioEngine-owning suites used to be excluded as "crash on a headless CI
+      # simulator"; the real cause was the isolated-deinit runtime bug, fixed in PR #18. None of
+      # this exercises real audio: the on-device gate in CLAUDE.md still applies.
+      - name: Test
         run: |
           set -o pipefail
           DESTINATIONS=(-destination "id=${{ steps.sim.outputs.guard }}")
           if [ "${{ steps.sim.outputs.latest }}" != "${{ steps.sim.outputs.guard }}" ]; then
             DESTINATIONS+=(-destination "id=${{ steps.sim.outputs.latest }}")
           fi
-          xcodebuild test \
+          xcodebuild test-without-building \
             -project Sleepulator/Sleepulator.xcodeproj \
             -scheme Sleepulator \
             "${DESTINATIONS[@]}" \
