@@ -14,6 +14,12 @@ enum AppConfig {
     /// timer run, known loud spot) before shipping enabled by default. Flip to `true` once that
     /// device pass is done and recorded in TESTING.md.
     static let nightLimiterEnabled = false
+
+    /// Whether Focus's mixer offers Apple Music. Off for 1.0: the MusicKit path has never had a
+    /// device pass, and it needs the MusicKit App Service on the App ID (a manual portal step).
+    /// It comes back in 1.1 after both (docs/designs/APP-STORE-LAUNCH-1.0.md, AM-1). The player
+    /// code stays; only the mixer's entry point is hidden.
+    static let appleMusicEnabled = false
 }
 
 /// Network reachability as its own tiny observable, so views that only care about online/offline
