@@ -61,7 +61,7 @@ struct HomeView: View {
     /// mini-player clearance can't feed back into its own measurement when Home overflows.
     @State private var screenMaxY: CGFloat = 0
     // Ambient screensaver: while a session plays, the controls fade after a spell of no
-    // interaction, leaving just the sky + moon. A tap brings them back. The flag lives on
+    // interaction, leaving just the scene. A tap brings them back. The flag lives on
     // `audio` so ContentView's tab bar + mini-player can fade with the home chrome. When it may
     // engage is `HomeScreensaverPolicy`'s call.
     @State private var idleFade: DispatchWorkItem?
@@ -433,6 +433,7 @@ struct HomeView: View {
                 reduceMotion: reduceMotion,
                 paused: scenesFrozen,
                 occluded: screenOutOfSight,
+                screensaver: audio.ambientScreensaver,
                 sleepTimer: audio.sleepTimer,
                 pomodoro: audio.pomodoro,
                 audioLevel: { [weak audio] in audio?.audioLevel ?? 0 },
@@ -620,18 +621,9 @@ struct HomeView: View {
             // Hold position while the screensaver has the tab bar hidden (see `chromeLift`).
             .padding(.top, chromeLift.top)
             .padding(.bottom, chromeLift.bottom)
+            // All of it fades, the ring too: the screensaver is the scene alone. The night's time
+            // left is a tap on the veil away (its glance), not a mark left over the scene.
             .opacity(audio.ambientScreensaver ? 0 : 1)
-            // Outside the fade: what's left of the ring once the chrome goes, in the ring's place.
-            .overlayPreferenceValue(CoachmarkAnchorKey.self) { anchors in
-                if let orb = anchors[.orb] {
-                    GeometryReader { proxy in
-                        let r = proxy[orb]
-                        NightEmber(sleepTimer: audio.sleepTimer, pal: pal,
-                                   screensaver: audio.ambientScreensaver, focusMode: audio.focusMode)
-                            .position(x: r.midX, y: r.midY)
-                    }
-                }
-            }
             .allowsHitTesting(!audio.ambientScreensaver)
             .animation(.easeInOut(duration: 0.9), value: audio.ambientScreensaver)
             // Any touch on the live controls is interaction — push the idle countdown back
@@ -643,7 +635,7 @@ struct HomeView: View {
             )
 
             // Once the controls have faded, a transparent layer catches the next tap to
-            // bring them back. The sky + moon stay visible underneath — the screensaver.
+            // bring them back. The scene stays visible underneath — the screensaver.
             if audio.ambientScreensaver {
                 Color.clear
                     .contentShape(Rectangle())

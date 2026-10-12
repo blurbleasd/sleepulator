@@ -2834,15 +2834,6 @@ final class VeilTimeoutNowPlayingTests: XCTestCase {
 }
 
 final class NightEmberMathTests: XCTestCase {
-    func testTheEmberShowsOnlyOverASleepCountdownInTheScreensaver() {
-        XCTAssertTrue(NightEmberMath.visible(screensaver: true, focusMode: false, timerActive: true))
-        XCTAssertFalse(NightEmberMath.visible(screensaver: false, focusMode: false, timerActive: true),
-                       "with the chrome up, the ring itself shows the night")
-        XCTAssertFalse(NightEmberMath.visible(screensaver: true, focusMode: false, timerActive: false),
-                       "All night has no time left to show")
-        XCTAssertFalse(NightEmberMath.visible(screensaver: true, focusMode: true, timerActive: true))
-    }
-
     func testTheEmberWandersWithinItsRadiusAndNeverJumps() {
         // Burn-in: it must keep moving over the hours, but only ever imperceptibly.
         var previous = NightEmberMath.drift(at: 0)
@@ -2857,6 +2848,75 @@ final class NightEmberMathTests: XCTestCase {
             previous = d
         }
         XCTAssertGreaterThan(farthest, NightEmberMath.driftRadius * 0.9, "it must actually move")
+    }
+}
+
+/// The Night sky's pure rules (`NightSkyMotion`, `SettleRamp`): it settles under the screensaver,
+/// slows and stills over the night, and keeps its meteors for someone watching.
+final class NightSkyMotionTests: XCTestCase {
+    func testTheSkySlowsWithTheNightAndTheSettleButNeverStops() {
+        XCTAssertEqual(NightSkyMotion.driftRate(night: 0, settle: 0), 1, accuracy: 1e-9, "bedtime, controls up")
+        XCTAssertLessThan(NightSkyMotion.driftRate(night: 0, settle: 1), NightSkyMotion.driftRate(night: 0, settle: 0))
+        XCTAssertLessThan(NightSkyMotion.driftRate(night: 1, settle: 0), NightSkyMotion.driftRate(night: 0.5, settle: 0))
+        // At its stillest the field still sinks: a frozen sky reads as a broken one.
+        XCTAssertEqual(NightSkyMotion.driftRate(night: 1, settle: 1), 0.2, accuracy: 1e-9)
+        XCTAssertEqual(NightSkyMotion.driftRate(night: 7, settle: -3), NightSkyMotion.driftRate(night: 1, settle: 0),
+                       accuracy: 1e-9, "inputs clamp")
+    }
+
+    func testTheTwinkleAllButStopsByTheSettledEndOfTheNight() {
+        XCTAssertEqual(NightSkyMotion.twinkleDepth(night: 0, settle: 0), 1, accuracy: 1e-9)
+        XCTAssertEqual(NightSkyMotion.twinkleDepth(night: 1, settle: 0), 0.35, accuracy: 1e-9)
+        XCTAssertEqual(NightSkyMotion.twinkleDepth(night: 1, settle: 1), 0.14, accuracy: 1e-9)
+        var previous = Double.infinity
+        for step in 0...10 {
+            let d = NightSkyMotion.twinkleDepth(night: Double(step) / 10, settle: 0)
+            XCTAssertLessThanOrEqual(d, previous, "the night never livens the twinkle")
+            previous = d
+        }
+    }
+
+    func testMeteorsAreOnlyForSomeoneWatching() {
+        XCTAssertTrue(NightSkyMotion.meteorMayFire(night: 0, screensaver: false))
+        XCTAssertFalse(NightSkyMotion.meteorMayFire(night: 0, screensaver: true),
+                       "under the screensaver someone is drifting off")
+        XCTAssertFalse(NightSkyMotion.meteorMayFire(night: 0.4, screensaver: false), "none past 0.4 of the night")
+        XCTAssertLessThanOrEqual(NightSkyMotion.meteorBrightness(night: 0), 0.35)
+        XCTAssertLessThan(NightSkyMotion.meteorBrightness(night: 0.3), NightSkyMotion.meteorBrightness(night: 0))
+        XCTAssertLessThan(NightSkyMotion.meteorDelay(first: true).upperBound,
+                          NightSkyMotion.meteorDelay(first: false).lowerBound,
+                          "the first meteor comes soon; the rest are rare")
+    }
+
+    func testAMeteorNeverPopsOnOrOff() {
+        // Its light is 0 at both ends of its run and rises and falls with no step between.
+        XCTAssertEqual(NightSkyMotion.meteorEnvelope(0), 0)
+        XCTAssertEqual(NightSkyMotion.meteorEnvelope(1), 0)
+        XCTAssertEqual(NightSkyMotion.meteorEnvelope(0.3), 1)
+        var previous = 0.0
+        for step in 1...1000 {
+            let e = NightSkyMotion.meteorEnvelope(Double(step) / 1000)
+            XCTAssertLessThan(abs(e - previous), 0.02, "a jump at \(step)/1000")
+            previous = e
+        }
+    }
+
+    func testTheSettleEasesAndAWakeMidSettleLiftsFromWhereItIs() {
+        var ramp = SettleRamp()
+        XCTAssertEqual(ramp.value(at: 100), 0, "controls up")
+        ramp.retarget(1, at: 100, duration: 40)
+        XCTAssertEqual(ramp.value(at: 100), 0, accuracy: 1e-9)
+        XCTAssertEqual(ramp.value(at: 120), 0.5, accuracy: 1e-9, "halfway, eased symmetrically")
+        XCTAssertEqual(ramp.value(at: 140), 1, accuracy: 1e-9)
+        ramp.retarget(1, at: 130, duration: 40)
+        XCTAssertEqual(ramp.value(at: 140), 1, accuracy: 1e-9, "the same target doesn't restart it")
+        // A tap 10 s into a fresh settle: the lift starts from there, not from fully settled.
+        var wake = SettleRamp()
+        wake.retarget(1, at: 0, duration: 40)
+        let reached = wake.value(at: 10)
+        wake.retarget(0, at: 10, duration: 1)
+        XCTAssertEqual(wake.value(at: 10), reached, accuracy: 1e-9)
+        XCTAssertEqual(wake.value(at: 11), 0, accuracy: 1e-9)
     }
 }
 

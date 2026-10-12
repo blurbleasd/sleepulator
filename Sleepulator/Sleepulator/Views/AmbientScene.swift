@@ -20,7 +20,10 @@ struct SceneContext {
     /// NightFade stop their periodic re-reads only then, so with Moving scenes off Night sky and
     /// Rain on glass still darken.
     var occluded: Bool = false
-    /// The sleep timer, for time-reactive sleep scenes (e.g. the setting moon).
+    /// Home's controls have faded to the screensaver. A scene may settle further under it (Night
+    /// sky's ground sinks and its stars calm) and hold back its transients (no meteors).
+    var screensaver: Bool = false
+    /// The sleep timer, for time-reactive sleep scenes (darkening, slowing, stilling).
     let sleepTimer: SleepTimerService
     /// The Pomodoro, for time-reactive Focus scenes (work/break phase + progress).
     let pomodoro: PomodoroService
@@ -33,7 +36,8 @@ struct SceneContext {
     /// reasons as `audioLevel`.
     var tilt: () -> SIMD2<Float> = { .zero }
     /// The night ring's centre (global coordinates), for a scene with one focal glow (Breathe)
-    /// that should sit where the ring and its ember sit. Nil when unmeasured, or in Focus.
+    /// that should sit where the ring sits (and the veil's glance draws its ember). Nil when
+    /// unmeasured, or in Focus.
     var focalPoint: CGPoint? = nil
 }
 
@@ -61,9 +65,14 @@ extension AmbientScene {
 
 // MARK: - The built-in scenes (wrap today's backdrops verbatim)
 
-/// The default Sleep backdrop: a calm, slowly drifting starfield with a gentle breathing
-/// brightness, a rare meteor, and a sky that deepens toward black as the sleep timer winds
-/// down. Built to lull — continuous + dim, with no bright focal point.
+/// The default Sleep backdrop: a calm, slowly sinking starfield along a soft Milky Way, a rare
+/// meteor while you're watching, and a sky that settles once the controls fade and goes dark and
+/// still across the night. Built to lull: continuous and dim, with no bright focal point.
+///
+/// The minute between the controls fading and the veil is one gesture: over 40 s the sky's own
+/// near-black ground replaces Home's brown and the stars calm (`NightSkyMotion.settleIn`); a tap
+/// lifts both back with the controls. Across the night the ground sinks to black and the stars
+/// dim to a third, slow and still.
 struct NightSkyScene: AmbientScene {
     let id = "night-sky"
     let title = "Night sky"
@@ -72,22 +81,29 @@ struct NightSkyScene: AmbientScene {
     func makeBackdrop(_ ctx: SceneContext) -> AnyView {
         AnyView(
             ZStack {
-                StarfieldView(paused: ctx.paused)
-                    .ignoresSafeArea()
-                ShootingStarView(paused: ctx.paused, sleepTimer: ctx.sleepTimer)
-                    .ignoresSafeArea()
-                // Darkening must observe the timer itself: nightProgress is computed (not
-                // @Published) and the timer is no longer forwarded through `audio`, so HomeView
-                // stops re-rendering each second — without this leaf the sky would freeze.
+                NightSkyGround()
+                    .opacity(ctx.screensaver ? 1 : 0)
+                    .animation(ctx.screensaver ? .easeInOut(duration: NightSkyMotion.settleIn)
+                                               : .easeOut(duration: NightSkyMotion.settleOut),
+                               value: ctx.screensaver)
+                // Under the stars: the ground goes to black with the night. Darkening observes
+                // the timer itself: nightProgress is computed (not @Published) and the timer isn't
+                // forwarded through `audio`, so without these leaves the sky wouldn't darken.
                 NightDarken(timer: ctx.sleepTimer, occluded: ctx.occluded)
+                NightFade(timer: ctx.sleepTimer, maxDim: 0.65, occluded: ctx.occluded) {
+                    StarfieldView(paused: ctx.paused, screensaver: ctx.screensaver, sleepTimer: ctx.sleepTimer)
+                }
+                ShootingStarView(paused: ctx.paused, screensaver: ctx.screensaver, sleepTimer: ctx.sleepTimer)
+                    .ignoresSafeArea()
             }
             .ignoresSafeArea()
         )
     }
 }
 
-/// The sleep sky-darkening overlay, isolated so it re-renders on each timer tick (it observes the
-/// timer directly) rather than relying on its parent's per-second re-render. An untimed night
+/// Takes what's under it to black as the night runs: black at `nightProgress`, so the Night sky's
+/// ground is black by the night's end. Isolated so it re-renders on each timer tick (it observes
+/// the timer directly) rather than relying on its parent's per-second re-render. An untimed night
 /// settles on the clock with nothing published, so it also re-reads every 20 s, except while the
 /// screen is out of sight (`occluded`). Under the veil it still follows a running timer's 1 Hz
 /// republish (TESTING.md §3H.1).
@@ -97,10 +113,10 @@ private struct NightDarken: View {
     var body: some View {
         Group {
             if occluded {
-                Color.black.opacity(timer.nightProgress * 0.35)
+                Color.black.opacity(timer.nightProgress)
             } else {
                 TimelineView(.periodic(from: .now, by: 20)) { _ in
-                    Color.black.opacity(timer.nightProgress * 0.35)
+                    Color.black.opacity(timer.nightProgress)
                 }
             }
         }
@@ -114,8 +130,10 @@ private struct NightDarken: View {
 /// bokeh that should dim with the night. Isolated so it re-renders only on the timer's ~1 Hz
 /// republish and, unless the screen is out of sight, a 20 s re-read for an untimed night (which
 /// publishes nothing), never dragging its parent (or a sibling `TimelineView` animation loop)
-/// into a re-render. Animating Canvas layers don't use this —
-/// they read `nightProgress` live inside their own redraw instead.
+/// into a re-render. Most animating Canvas layers don't use this; they read `nightProgress` live
+/// inside their own redraw instead. The Night sky's stars sit under one: their Canvas reads the
+/// night only for motion, and this keeps them dimming with Moving scenes off (a still Canvas
+/// doesn't redraw).
 struct NightFade<Content: View>: View {
     @ObservedObject var timer: SleepTimerService
     /// Opacity removed at full night (`nightProgress == 1`). 0.8 → fades to a faint glow.
