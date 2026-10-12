@@ -9,8 +9,13 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
 > The server-side "Sleep Safe" ffmpeg proxy is **gone**, replaced by an on-device Night
 > Limiter (see `AUDIO-LIMITER-SPEC.md`). There is **no longer any app-owned backend**: the
 > Cloudflare feed proxy was removed (the `AppConfig.feedProxyUrl` it lived in is gone — `AppConfig`
-> now holds only `nightLimiterEnabled`). RSS feeds are fetched **directly** from the publisher, and
-> the only external endpoint is Apple's iTunes podcast **search** API (`ITunesSearchManager`).
+> now holds `nightLimiterEnabled` and `appleMusicEnabled`, off for 1.0). RSS feeds are fetched
+> **directly** from the publisher; the only other endpoints are Apple's: the iTunes podcast
+> **search** API (`ITunesSearchManager`) and StoreKit for tips.
+>
+> **1.0 ships free with a tip jar**, iPhone only, portrait (`TARGETED_DEVICE_FAMILY = 1`; an iPad
+> runs it in an iPhone window). The launch plan and every review decision behind it are in
+> `docs/designs/APP-STORE-LAUNCH-1.0.md`; its device gate is TESTING.md §3A, §3B, §3C, §3E, §3P, §3T.
 
 ## Layout (Xcode project at `Sleepulator/Sleepulator.xcodeproj`)
 - **App** — `Sleepulator/Sleepulator/`
@@ -28,7 +33,10 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
     `LimiterChoice` (Soften loud moments: Off / While sleeping / Always, over the two stored limiter
     flags), `StereoWidth` (four named stops) and `SettingsOrder` (the current mode's sections
     first, the other mode's folded). `Views/BackupSupportView.swift` is Settings ▸ Backup & support
-    (Backup, Reports from iOS, the playback log); its `BackupController` (`Views/BackupControls.swift`)
+    (Backup; Troubleshooting: Send feedback, Reports from iOS, the playback log; Support
+    Sleepulator last: tips, Rate, the build line). `Views/TipJar.swift` holds the tip rows (one
+    view for Settings and the card's sheet), Send feedback, and the pure `RateRowRule` and
+    `FeedbackMessage`; the tip card itself is `CoachmarkContent.tip` in `FirstRunCoachmark`. Its `BackupController` (`Views/BackupControls.swift`)
     is owned by `SettingsView`, so a restore still finishes if that page is closed mid-way.
   - `Services/` — the engine + plumbing (below).
   - `Models/Models.swift` — `Podcast`, `Episode`, `SavedMix`, `NoiseType`. `Models/PodcastText.swift`
@@ -41,7 +49,9 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   `HomeLayoutUITests` checks Focus's Build mix / Focus session row clears the mini-player and
   that a tap starts the Pomodoro; that a tap on the shown bar reaches it, and on Podcasts it sits
   above the tab bar; and that on Sleep Home at rest the bar is gone from the accessibility tree and
-  Home's controls stay hittable. `NightVeilUITests` waits out the veil's minute on an untimed
+  Home's controls stay hittable; and that the tip card sits in the band above Build mix and leaves
+  on No thanks (DEBUG-only seams `-uiTestTipProducts` and `-uiTestTipCardDue`: fixed products
+  with no StoreKit, and the card due now; compiled out of release). `NightVeilUITests` waits out the veil's minute on an untimed
   night (~80 s), glances, wakes, and checks Focus's readout; it passes settings as launch
   arguments (plist literals, the argument domain) so persisted mode and night length stay put.
   CI's simulators are slow and sometimes drop a synthesized tap, so a tap that matters checks its
@@ -55,7 +65,7 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   look came inside the fade (`lookAfterTheWake`). The target is made by `Sleepulator/setup_ui_tests.rb`
   (idempotent; re-run it after adding a file there). It runs in the same app the unit tests are
   hosted in, so a UI test must leave persisted state (mode, night length) as it found it.
-- **Tests** — `SleepulatorTests/` (XCTest). Six files, many suites: `AudioMathTests.swift`;
+- **Tests** — `SleepulatorTests/` (XCTest). Seven files, many suites: `AudioMathTests.swift`;
   `AudioStateTests.swift` (also holds `PodcastParserTests`, `OPMLParserTests`,
   `StorageManagerTests`, `NetRetryTests`, `CacheEvictionTests`, the sleep-timer suites, Home's
   pure UI rules (`SessionGuardsTests`, `NightRingMathTests`, `MiniPlayerClearanceTests`,
@@ -64,11 +74,17 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   (`NowPlayingStateTests`, `NightLineCopyTests`, `PlayerQueueActionTests`,
   `PodcastFailureStreakTests`), Settings' rules (`SettingsRulesTests`) and a restore's engine
   reload (`RestoreReloadTests`), the real-AVPlayer suites (`PodcastPlayerRebuildTests`,
-  `PodcastLoadHoldTests`, `PodcastItemEndTests`), and more);
+  `PodcastLoadHoldTests`, `PodcastItemEndTests`), the night journal and the asks (`NightRulesTests`,
+  `NightJournalTests`, `NightJournalWiringTests`, `AskRulesTests`, `CoachmarkTipCardTests`,
+  `RateRowRuleTests`, `FeedbackMessageTests`), and more);
   `PersistenceTests.swift` (`PersistenceMigrator` / `MixStore`); `BackupRoundTripTests.swift`
   (export, read, restore and Undo, the `Backup.kinds` checks, a restore never switching mode;
   `BackupControllerTests` for the Backup page's controller);
-  `FocusDriversTests.swift`; `GenerativeAudioEngineTests.swift` (`GenerativeMediaResetTests`).
+  `FocusDriversTests.swift`; `GenerativeAudioEngineTests.swift` (`GenerativeMediaResetTests`);
+  `TipStoreTests.swift` (`TipFlowTests`, pure; `TipStoreTests`, StoreKitTest against
+  `Tips.storekit`). On iOS 26 simulators a command-line run (xcodebuild, CI) hits an Apple bug,
+  "[SKTestSession] Error saving configuration file … Code=3", and loads no products: those six
+  tests then SKIP with that reason. They run from Xcode (⌘U).
 
 ## Services (the core)
 - `AudioEngine` — the app-facing `ObservableObject` facade. Owns UI state + policy, delegates
@@ -83,6 +99,13 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   Focus Pomodoro. `AudioMath` holds the fade curve.
 - `PodcastQueueManager`, `MixStore`, `PersistenceMigrator`, `StorageManager` (JSON file store),
   `AudioDownloader` (offline cache), `PodcastParser` / `OPMLParser` / `ITunesSearchManager`.
+- `NightJournal` — one record per Sleep night, on this phone only: per-night `.jsonl` event files
+  (the last 2, in Application Support/Sleepulator/nights, excluded from backup) and a verdict list
+  (`night-verdicts.json`, the last 30). Clean nights pace the rating ask and the tip card; Send
+  feedback attaches the files.
+- `TipStore` — StoreKit 2 consumable tips, started at launch (`SleepulatorApp`): listens to
+  `Transaction.updates`, finishes every transaction, and maps each outcome through the pure
+  `TipFlow`. Nothing is unlocked by a tip.
 - `Backup`: the backup file's export and restore. A restore reads and validates first, the person
   confirms in plain counts ("4 mixes, 12 shows"), and a snapshot of what was here is kept for a
   week so Undo can put it back exactly; if that snapshot can't be saved, nothing is replaced.
@@ -199,6 +222,26 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   episode's end, from the last tick or the player's end-of-item report, goes through
   `episodeEnded()` (the tail if set, else the stop). In the tail an ended episode tidies the queue
   and never auto-plays the next; only a person's pick lifts the tail.
+- **The night journal only observes.** `NightJournal` never changes playback; it takes the
+  engine's edges (`noteSessionEdge`, `beginSleepNight`, the Focus switch), live-audio ticks (the
+  RMS tap and the podcast clock, gaps over 2 s not counted) and taints. A night is clean only on
+  sound that really played: to its timer's end while playing, or 3+ hours ended by a person, with
+  no player rebuild, pipeline death or podcast failure anywhere in it (any failure, by design).
+  A deadline reconciled on the morning foreground never counts, so `SleepTimerService.onTerminalStop`
+  fires before `stopAllFn` (the stop would otherwise read as a person's). Late news is filed by
+  when it happened (an off-main failure carries its time), into the night whose span holds it,
+  else dropped. A record found open at launch while playing is `died`. Nothing written may carry a
+  URL (`NightRules.scrub`): the files go out with Send feedback, and private feeds keep a
+  subscriber's secret in theirs. Writes are off main and best-effort; audio never waits on them.
+- **The asks are rare and daytime.** The rating prompt comes after 3 clean nights, the tip card
+  after 5, in either case never at night. Rating: at a natural break (a sheet closed, Settings
+  left; `\.naturalBreak`), 09:00–20:00, 2+ h after the night ended, nothing playing, once per
+  version, never on the tip card's day. The card: the same window, Sleep Home at rest only, once
+  products loaded and purchases allowed, never on the rating's day, in the coachmark band; only an
+  answer spends it. The rules live in
+  `SessionGuards` (`mayAskForRating`, `tipCardDue`), unit-tested. The asks' memory
+  (`tipCardSpent`, `ratingAskedVersion`, `ratingAskedOn`, `tipCardShownOn`, `tippedOnThisPhone`,
+  `tipTransactionsHandled`) is device-only: keep these keys OUT of `Backup.kinds`.
 - **Isolated deinits.** Under `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor` a class with no explicit
   `deinit` gets an implicit MainActor-*isolated* one (an explicit `deinit` is nonisolated). On the
   iOS 18.4–26.3 Swift runtimes that path aborts ("pointer being freed was not allocated" in

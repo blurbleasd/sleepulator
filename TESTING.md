@@ -148,6 +148,11 @@ Install via Xcode onto the device (not the simulator). Then:
 ### E. All-night soak
 1. Full night (or ≥ 4 h): mix + timer, screen locked. ✅ Still behaving at the end —
    timer fired, audio stopped, no crash log in Settings → Privacy → Analytics.
+2. A full night on the default: **All night** (the ring at its start), a mix plus three or more
+   queued episodes, Auto-Play on, screen locked. ✅ In the morning the mix is still playing, the
+   episodes played through in order (or the queue ran out and the mix carried on), and nothing
+   stopped on its own. Settings ▸ Backup & support ▸ Send feedback: ✅ the summary counts the night
+   as clean (3+ hours of sound, no rebuild or failure in it).
 
 ### F. Loop + generator quality
 1. Each noise type for several minutes. ✅ No click, gap, or pop; no drift in stereo width.
@@ -653,6 +658,76 @@ also pauses while its controls are faded to the screensaver, as the Sleep orb al
 10. **At 2am.** Sleep, room dark, brightness low. ✅ No amber switch tracks (copper), and the brightest
    things are the switch knobs, not rows of accent text.
 
+### T. Launch 1.0: the night record, Send feedback, tips and the asks (added 2026-10-11, simulator-checked only)
+The night journal (`NightJournal`), Send feedback, the tip jar (`TipStore`) and the two asks
+(docs/designs/APP-STORE-LAUNCH-1.0.md). Unit tests cover the rules; the phone covers what only a
+real night, a real kill and the real App Store do. Before the tip steps: the three tips exist in
+App Store Connect (`app.sleepulator.Sleepulator.tip.small` / `.kind` / `.generous`, consumable),
+the Paid Apps agreement is active, and the phone is signed in to a Sandbox Apple Account
+(Settings ▸ Developer ▸ Sandbox Apple Account). To read a night's file, Send feedback and share it
+to Files: each night is a `.jsonl` file, one event per line.
+
+1. **A killed night stays open.** Run from Xcode. Sleep, All night, play a mix, lock, wait 10+
+   minutes, then Product ▸ Stop in Xcode (a kill, like iOS ending the app: no notice reaches it).
+   Reopen the app. Send feedback. ✅ The summary reads "… 1 left open."; the newest night file
+   starts with `opened`, has a `live` line every 5 minutes of sound, and ends with
+   `closed` `died …`, timed at the last event before the kill. ✅ No `://` anywhere in either file
+   (play a podcast in one of the nights to be sure).
+2. **A force-quit while playing is yours.** Play, then swipe the app away in the app switcher
+   with the sound still on. Reopen, Send feedback. ✅ That night ends `closed` `person …`, not
+   `died`, and isn't counted as left open. (iOS delivers the terminate notice to a running
+   background-audio app. If this shows `died`, iOS didn't: log it, the asks will just wait longer.)
+3. **Locked-phone writes.** Run §3E's night (or a 45 min timer) with a passcode set, locked from
+   the start. Morning: Send feedback. ✅ The night's file has `live` lines all through the locked
+   hours and `closed` `timer …` at the timer's time (not `reconciled`); on All night, a
+   `threshold` line after 3 hours. ✅ The exported playback log has no `night journal write failed`.
+4. **Feedback after a killed night.** Right after step 1, Send feedback. With Mail set up and a
+   support address in the build (`AppInfo.supportEmail`), ✅ Mail opens to that address, subject
+   "Sleepulator feedback (1.0, build N)", the body names what's attached ("the last 2 nights'
+   playback events (no web addresses)", plus iOS reports when there are any), and the last two
+   nights' `.jsonl` files are attached. Without Mail, or with no address in the build, ✅ the share
+   sheet opens with the same text and files ("Please send this to …" leads when there's an
+   address). With an address, long-press the row: ✅ "Copy address". A night iOS itself ended
+   shows up only as exit counts in the next day's report: ✅ once Reports from iOS lists one, the
+   next Send feedback attaches it.
+5. **A sandbox tip.** Settings ▸ Backup & support ▸ Support Sleepulator. ✅ Small, Kind and
+   Generous tip, smallest first, at App Store Connect's prices in the phone's currency. Tap one,
+   confirm in the App Store sheet. ✅ "Thank you. Sleep well." replaces the rows. Leave the page
+   and come back: ✅ "Thank you for supporting Sleepulator." above the three tips, and the Home tip
+   card never shows on this phone again. Cancel on the App Store sheet instead: ✅ the rows are
+   back as they were, nothing thanked.
+6. **A second tip is a new tip (the iOS 27 sandbox).** Right after step 5, tip again. ✅ The App
+   Store sheet asks again, and it thanks again. If it thanks instantly with no App Store sheet, the
+   sandbox replayed the last transaction (reported on iOS 27): the app thanks but records nothing
+   new. Log which you saw and on which iOS.
+7. **No tips to show.** Airplane mode, kill and reopen the app, open Support Sleepulator. ✅ "Tips
+   aren't available right now." (never a spinner that stays). Back online, leave and reopen the
+   page: ✅ the three tips. Screen Time ▸ Content & Privacy Restrictions ▸ iTunes & App Store
+   Purchases ▸ In-app Purchases ▸ Don't Allow, reopen the page: ✅ no tips and no "Support
+   Sleepulator" header, just the build line (a tipped phone keeps its thank-you). Allow it again.
+8. **The tip card.** It comes after the fifth clean night. To see it now, add `-uiTestTipCardDue YES`
+   (and `-tipCardSpent NO`; `-uiTestTipProducts YES` too if the tips aren't in App Store Connect
+   yet) to the scheme's Run arguments; Debug builds only. Sleep Home at rest:
+   ✅ "Sleeping well?" in the band above Build mix, with No thanks and Leave a tip, clear of the
+   night line and the mini-player; the full card (message and "Tips stay in Settings ▸ Backup &
+   support.") where there's room, the title and answers where there isn't. ✅ Never in Focus,
+   never with sound playing, never under the veil (and, without the argument, only 09:00–20:00,
+   2+ hours after a night, never on the day the rating was asked). Leave a tip → the sheet with
+   the three tips; Close → the card is gone, and stays gone after a relaunch (remove the arguments
+   first). No thanks does the same. With VoiceOver: ✅ one stop reads the title and the message, then No
+   thanks, then Leave a tip.
+9. **The rating ask (dev build only).** Apple shows the review prompt every time in a build run
+   from Xcode, and never in TestFlight, so run this from Xcode once the journal has 3 clean nights
+   (steps 3 and §3E count). Between 09:00 and 20:00, 2+ hours after the last night ended, nothing
+   playing: open Build mix and close it. ✅ The rating prompt, once; the playback log shows
+   `asked for a rating (N clean nights)`. Close another sheet, or leave the Settings tab: ✅
+   nothing more this version. ✅ Never at launch, never with sound playing, never on the day the tip card showed, never before 09:00 or after 20:00 (those wait;
+   the ask still comes at the next suitable break).
+10. **iPad compatibility.** The app is iPhone only, and an iPad runs it in an iPhone-size window
+   (App Review may test it there). Install on an iPad, or run on an iPad simulator. ✅ It opens
+   portrait in the iPhone window, plays a mix, the timer and the Now Playing sheet work, nothing is
+   clipped. Rotate the iPad: ✅ the app stays portrait.
+
 ---
 
 ## Quick release checklist
@@ -667,6 +742,10 @@ also pauses while its controls are faded to the screensaver, as the Sleep orb al
 - [ ] Ambient scenes: freeze/resume + phase clock (§3H), after any scene-engine change
 - [ ] Depth scenes: freeze-in-place, reactive settle, A/B vs flat, F3 power log (§3L), after depth-scene changes
 - [ ] Podcast engine: holds, late ends, offline Auto-Play (§3P), after `PodcastPlayer` / queue changes
+- [ ] All-night soak on the default, All night with podcasts (§3E step 2)
+- [ ] Launch 1.0: killed and force-quit nights, locked writes, Send feedback, a sandbox tip, the card,
+      the rating ask, iPad compatibility (§3T). 1.0's gate: §3A, §3B, §3C, §3E (both runs), §3P and
+      §3T on the build to submit (docs/designs/APP-STORE-LAUNCH-1.0.md, LG-1)
 
 ## Device-pass log
 
