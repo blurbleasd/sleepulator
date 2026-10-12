@@ -291,6 +291,11 @@ final class AudioEngine: ObservableObject {
     /// Audio-session plumbing (activation, interruption/route/background observers, network
     /// monitor) lives in AudioSessionController (Slice A3); AudioEngine keeps the policy.
     private let sessionController = AudioSessionController()
+    /// One record per Sleep night: what the rating and tip asks count, and what "Send feedback"
+    /// attaches. Fed only by observing the engine (session edges, live ticks, the timer's stop,
+    /// player and failure news); it never changes playback. A var so tests can swap in a
+    /// temp-dir journal; `makeDefault` is already a throwaway one inside a unit-test host.
+    var nightJournal = NightJournal.makeDefault()
     /// Tokens for the block-based observers AudioEngine still owns directly
     /// (StartSleepulatorMix / SetSleepulatorTimer), removed in deinit.
     private var notificationTokens: [NSObjectProtocol] = []
@@ -311,7 +316,11 @@ final class AudioEngine: ObservableObject {
     /// the Sleep night (`beginSleepNight`); a stop marks the night for `UntimedNight`. Main thread
     /// only (property didSets); never the render thread.
     private func noteSessionEdge(wasPlaying: Bool) {
-        if wasPlaying, !isAnythingPlaying { sleepTimer.noteSleepSessionStopped(); return }
+        if wasPlaying, !isAnythingPlaying {
+            sleepTimer.noteSleepSessionStopped()
+            nightJournal.sessionStopped()
+            return
+        }
         guard !wasPlaying, isAnythingPlaying else { return }
         beginSleepNight()
     }
@@ -324,7 +333,10 @@ final class AudioEngine: ObservableObject {
     /// countdown is already running, so resuming after a pause, an interruption or a podcast
     /// stall keeps the night you set (`SessionGuards.timerOnPlay`).
     private func beginSleepNight() {
-        if !focusMode { sleepTimer.noteSleepSessionStarted() }
+        if !focusMode {
+            sleepTimer.noteSleepSessionStarted()
+            nightJournal.sessionStarted()
+        }
         if let m = SessionGuards.timerOnPlay(focusMode: focusMode, lengthMinutes: nightLengthProvider(),
                                              timerActive: sleepTimer.timerRemaining > 0) {
             sleepTimer.startSleepTimer(minutes: m)
@@ -408,7 +420,13 @@ final class AudioEngine: ObservableObject {
         didSet {
             UserDefaults.standard.set(focusMode, forKey: "focusMode")
             // The two timers are mutually exclusive: leaving one mode stops its timer.
-            if focusMode { sleepTimer.cancelTimer(); sleepTimer.endUntimedNight() } else { pomodoro.stop() }
+            if focusMode {
+                sleepTimer.cancelTimer()
+                sleepTimer.endUntimedNight()
+                nightJournal.switchedToFocus()
+            } else {
+                pomodoro.stop()
+            }
             // Each mode keeps its own pick: remember the one being left, so coming back restores
             // it. Without this, Sleep's Brown came back from Focus as Pink (Focus snapped it to
             // Pink, which Sleep also has, so it stuck).
@@ -572,6 +590,9 @@ final class AudioEngine: ObservableObject {
         sleepTimer.stopAllFn = { [weak self] in
             self?.stopAll()
         }
+        sleepTimer.onTerminalStop = { [weak self] episode, reconciled, endedAt in
+            self?.nightJournal.timerStopped(episode: episode, reconciled: reconciled, endedAt: endedAt)
+        }
         // Ambient tail: at expiry the podcast pauses (keeping episode + position for "Resume
         // Last Night" — saveLastMix captures a loaded-but-paused episode) and the bed plays on
         // for the configured span, continuing the fade. See SleepTimerService.beginTail().
@@ -612,6 +633,7 @@ final class AudioEngine: ObservableObject {
             // ride only the GCD timer (which iOS can curtail). The RMS tap fires whenever the
             // engine renders, giving the timer the same belt-and-suspenders as the pod path.
             self.sleepTimer.backgroundTick()
+            self.nightJournal.liveTick()
         }
 
         genEngine.onEngineError = { [weak self] msg in
@@ -653,7 +675,8 @@ final class AudioEngine: ObservableObject {
         }
         
         podPlayer.onPlaybackFailed = { [weak self] episodeId in
-            DispatchQueue.main.async { self?.handlePodcastFailure(episodeId: episodeId) }
+            let at = Date()   // when it failed, before the hop (EV-1)
+            DispatchQueue.main.async { self?.handlePodcastFailure(episodeId: episodeId, at: at) }
         }
 
         // Non-destructive note (buffering, "stream lost", "No podcast audio?"). Unlike
@@ -681,6 +704,10 @@ final class AudioEngine: ObservableObject {
         
         podPlayer.backgroundTick = { [weak self] in
             self?.sleepTimer.backgroundTick()
+            self?.nightJournal.liveTick()
+        }
+        podPlayer.onPipelineEvent = { [weak self] kind, at in
+            self?.nightJournal.taint(kind, at: at)
         }
 
         // A manual resume during the ambient tail means "I'm awake, keep the podcast going." The
@@ -925,8 +952,10 @@ final class AudioEngine: ObservableObject {
     /// The player gave up on an item. Ignored unless it's the episode the player is on now: the
     /// callback hops through the main queue, and a failure from an item that's since been replaced
     /// must not paint "Try again" over a working episode. (Internal: the tests drive it directly.)
-    func handlePodcastFailure(episodeId: String?) {
+    func handlePodcastFailure(episodeId: String?, at: Date = Date()) {
         guard episodeId == nil || episodeId == loadedEpisode?.id else { return }
+        // Any failure spoils the night (conservative: a stop it caused isn't a person's).
+        nightJournal.taint("podcast failed", at: at)
         // The system's reason ("The operation could not be completed") is logged by the player;
         // on screen it only alarmed. The player views offer Try again / Play next.
         playbackNote = NowPlayingState.failedCopy
@@ -1492,6 +1521,7 @@ final class AudioEngine: ObservableObject {
             // straight through the call, and the call's end should bring it back.
             let podActive = podcastIsPlayingOrStarting
             Log.timer.notice("interruption began (podWasPlaying=\(podActive, privacy: .public))")
+            nightJournal.note("interruption began")
             podWasPlayingBeforeInterruption = podWasPlayingBeforeInterruption || podActive
             genEngine.handleInterruption(shouldResume: false)
             if podActive { podPlayer.pause() }
@@ -1517,6 +1547,7 @@ final class AudioEngine: ObservableObject {
 
             let willResumePod = options.contains(.shouldResume) && podWasPlayingBeforeInterruption
             Log.timer.notice("interruption ended (shouldResume=\(options.contains(.shouldResume), privacy: .public), resumingPod=\(willResumePod, privacy: .public))")
+            nightJournal.note("interruption ended")
             if willResumePod {
                 podPlayer.resume()
             }
@@ -1529,6 +1560,7 @@ final class AudioEngine: ObservableObject {
               let reason = AVAudioSession.RouteChangeReason(rawValue: reasonValue) else { return }
 
         Log.timer.notice("route change: reason=\(reasonValue, privacy: .public) (headphones-gone=\(reason == .oldDeviceUnavailable, privacy: .public))")
+        nightJournal.note(reason == .oldDeviceUnavailable ? "headphones out" : "route change \(reasonValue)")
 
         // Headphones unplugged: follow the HIG for spoken media — pause the podcast so a
         // voice doesn't suddenly play out the phone speaker (waking the room). Keep the

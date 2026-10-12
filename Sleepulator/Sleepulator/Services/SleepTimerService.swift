@@ -172,11 +172,14 @@ final class SleepTimerService: ObservableObject {
     /// timer (whose cancel holds the night settled). One place for the three paths (the duration
     /// fade, the episode's end, a deadline passed while suspended), so none can miss a step.
     /// `endedAt` is when the night really ended, if earlier than now.
-    private func fireTerminalStop(_ reason: String, endedAt: Date? = nil) {
+    private func fireTerminalStop(_ reason: String, endedAt: Date? = nil, reconciled: Bool = false) {
         if timerRemaining != 0 { timerRemaining = 0 }
         didFire = true
         Log.timer.notice("terminal stop: \(reason, privacy: .public)")
         recordNightEnd(at: endedAt ?? now())
+        // Before stopAllFn: stopping everything reports a pause on the session edge, and the
+        // night journal must hear "ended by the timer" first, or it closes the night as a pause.
+        onTerminalStop?(kind == .endOfEpisode, reconciled, endedAt ?? Date())
         stopAllFn?()
         cancelTimer()
     }
@@ -194,6 +197,9 @@ final class SleepTimerService: ObservableObject {
     #endif
     
     var stopAllFn: (() -> Void)?
+    /// The terminal stop, reported before `stopAllFn`: whether it followed an episode, whether it
+    /// was a deadline found passed on the morning foreground, and when the night really ended.
+    var onTerminalStop: ((_ episode: Bool, _ reconciled: Bool, _ endedAt: Date) -> Void)?
     var updateFadeMultFn: ((Double) -> Void)?
 
     // MARK: Ambient tail — "keep the bed going after the podcast fades"
@@ -339,7 +345,8 @@ final class SleepTimerService: ObservableObject {
         guard Date() >= end else { return }
         // The night ended at the deadline, not now (on the scenes' clock, which tests inject).
         let ended = now().addingTimeInterval(-Date().timeIntervalSince(end))
-        fireTerminalStop("duration timer expired while suspended (reconcile on foreground)", endedAt: ended)
+        fireTerminalStop("duration timer expired while suspended (reconcile on foreground)", endedAt: ended,
+                         reconciled: true)
     }
 
     /// Drive the end-of-episode timer from the podcast clock. Runs on the main queue (its caller
