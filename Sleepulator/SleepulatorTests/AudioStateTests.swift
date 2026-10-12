@@ -2849,16 +2849,17 @@ final class VeilTimeoutNowPlayingTests: XCTestCase {
     }
 }
 
-final class NightEmberMathTests: XCTestCase {
-    func testTheEmberShowsOnlyOverASleepCountdownInTheScreensaver() {
-        XCTAssertTrue(NightEmberMath.visible(screensaver: true, focusMode: false, timerActive: true))
-        XCTAssertFalse(NightEmberMath.visible(screensaver: false, focusMode: false, timerActive: true),
-                       "with the chrome up, the ring itself shows the night")
-        XCTAssertFalse(NightEmberMath.visible(screensaver: true, focusMode: false, timerActive: false),
-                       "All night has no time left to show")
-        XCTAssertFalse(NightEmberMath.visible(screensaver: true, focusMode: true, timerActive: true))
+final class VeilDelayTests: XCTestCase {
+    func testTheVeilWaitsTheMinuteUnlessADebugLaunchShortensIt() {
+        XCTAssertEqual(SessionGuards.veilDelay(override: 0), 60, "no override: the real minute")
+        // The tests run a Debug build, where the argument-domain override applies, held to 5…60 s.
+        XCTAssertEqual(SessionGuards.veilDelay(override: 15), 15)
+        XCTAssertEqual(SessionGuards.veilDelay(override: 1), 5, "never a veil that drops mid-touch")
+        XCTAssertEqual(SessionGuards.veilDelay(override: 600), 60, "never longer than the minute")
     }
+}
 
+final class NightEmberMathTests: XCTestCase {
     func testTheEmberWandersWithinItsRadiusAndNeverJumps() {
         // Burn-in: it must keep moving over the hours, but only ever imperceptibly.
         var previous = NightEmberMath.drift(at: 0)
@@ -2873,6 +2874,35 @@ final class NightEmberMathTests: XCTestCase {
             previous = d
         }
         XCTAssertGreaterThan(farthest, NightEmberMath.driftRadius * 0.9, "it must actually move")
+    }
+}
+
+/// The Night sky meteor's pure rules (`NightSkyMotion`): only for someone watching, faint, rare
+/// after the first, and never popping on or off.
+final class NightSkyMotionTests: XCTestCase {
+    func testMeteorsAreOnlyForSomeoneWatching() {
+        XCTAssertTrue(NightSkyMotion.meteorMayFire(night: 0, screensaver: false))
+        XCTAssertFalse(NightSkyMotion.meteorMayFire(night: 0, screensaver: true),
+                       "under the screensaver someone is drifting off")
+        XCTAssertFalse(NightSkyMotion.meteorMayFire(night: 0.4, screensaver: false), "none past 0.4 of the night")
+        XCTAssertLessThanOrEqual(NightSkyMotion.meteorBrightness(night: 0), 0.35)
+        XCTAssertLessThan(NightSkyMotion.meteorBrightness(night: 0.3), NightSkyMotion.meteorBrightness(night: 0))
+        XCTAssertLessThan(NightSkyMotion.meteorDelay(first: true).upperBound,
+                          NightSkyMotion.meteorDelay(first: false).lowerBound,
+                          "the first meteor comes soon; the rest are rare")
+    }
+
+    func testAMeteorNeverPopsOnOrOff() {
+        // Its light is 0 at both ends of its run and rises and falls with no step between.
+        XCTAssertEqual(NightSkyMotion.meteorEnvelope(0), 0)
+        XCTAssertEqual(NightSkyMotion.meteorEnvelope(1), 0)
+        XCTAssertEqual(NightSkyMotion.meteorEnvelope(0.3), 1)
+        var previous = 0.0
+        for step in 1...1000 {
+            let e = NightSkyMotion.meteorEnvelope(Double(step) / 1000)
+            XCTAssertLessThan(abs(e - previous), 0.02, "a jump at \(step)/1000")
+            previous = e
+        }
     }
 }
 

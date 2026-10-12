@@ -27,7 +27,9 @@ Suites in `SleepulatorTests/` (six files, many suites):
 - `AudioStateTests.swift` — engine state/policy plus `PodcastParserTests` (CDATA, durations,
   dates, caps, enclosures), `OPMLParserTests` (scheme validation, dedupe, corrupt files),
   `StorageManagerTests` (backup recovery), `NetRetryTests`, `CacheEvictionTests`, the
-  sleep-timer suites (backstop, cancel, end-of-episode), layering, mode reconciliation, and the
+  sleep-timer suites (backstop, cancel, end-of-episode), layering, mode reconciliation, the
+  Night sky meteor's rules (`NightSkyMotionTests`: only while the controls show, faint, rare after
+  the first, never popping), and the
   Podcasts-tab rules (`PodcastTextTests`, `ShowNotesPreviewTests`, `ShowNotesEdgeTests`,
   `TonightShelfTests`, `QueueMoveToHeadTests`), the player rules (`NowPlayingStateTests`,
   `NightLineCopyTests`, `PlayerQueueActionTests`, `PodcastFailureStreakTests`), Settings' rules
@@ -391,13 +393,13 @@ this section is where you do it. Do it in a dark room at your real bedtime brigh
      drop under it. ✅ Close it; the veil drops a minute later.
    - Tap Focus mid-session. ✅ A centred alert shows both "Switch to Focus" and "Stay in Sleep",
      and nothing is red.
-16. **The ember: time left, no tap** (added 2026-10-10, simulator-checked only). On an OLED
-   iPhone in a dark room, at night brightness, start Sleep with a 45-minute night and let the
-   controls fade.
-   - ✅ A faint amber arc of the night left stays in the ring's place. A dark-adapted eye can
-     read it, and it never lights the room (it's ~8% amber).
-   - ✅ No arc for "All night", and none in Focus.
+16. **The ember: time left, on a glance** (added 2026-10-10, changed 2026-10-11, simulator-checked
+   only). On an OLED iPhone in a dark room, at night brightness, start Sleep with a 45-minute
+   night and let the controls fade.
+   - ✅ Nothing is left over the scene: the ring fades with the rest of the controls (the ember
+     used to stay in its place; it took from the screensaver).
    - ✅ Tap the veil once: the ember shows the time left with no controls, then the dark returns.
+     No arc for "All night", and none in Focus.
    - Check the first session on a fresh install: the first-run card stays up about 15 s before
      the fade. It comes back with the controls on a tap, and it's never held up all night.
 17. **First run teaches one thing at a time** (added 2026-10-10, simulator-checked only). On a
@@ -560,13 +562,14 @@ both glances, but brightness, colour at 2am, motion on ProMotion and anything ov
 need the phone. Room dark, phone on the nightstand, brightness where you'd leave it at night.
 
 1. **Every Sleep scene is warm and dim.** Swipe through all seven at bedtime. ✅ No scene throws
-   blue light: Night sky's stars are pale and warm whites (a rare faint cool one), Aurora is red curtains, Still water a small round amber moon (not a tall
+   blue light: Night sky's stars and glow are warm, Aurora is red curtains, Still water a small round amber moon (not a tall
    oval) with flat ripples, Rain on glass shows drops that cling and slip with a bright lower
    edge (not meteors), Deep space a faint rust nebula. Embers churns slowly; Breathe's glow sits
    on the ring and swells more than it brightens. ✅ No identical stars repeating down the
    screen in Deep space, Aurora or Still water.
 2. **Night sky and Breathe actually move on ProMotion.** Watch each for a minute in the
-   screensaver. ✅ Stars twinkle and drift smoothly, Breathe swells and fades continuously. (Both
+   screensaver. ✅ The sky turns and its cloud drifts smoothly, Breathe swells and fades
+   continuously. (Both
    moved off `TimelineView(paused:)`, which stops driving frames on 120 Hz screens.)
 3. **All night gets the veil on the Sleep screen.** Ring set to All night, Play, don't touch.
    ✅ The veil drops about a minute later. (Auto-Lock set to Never so the veil, not iOS, darkens
@@ -658,7 +661,37 @@ also pauses while its controls are faded to the screensaver, as the Sleep orb al
 10. **At 2am.** Sleep, room dark, brightness low. ✅ No amber switch tracks (copper), and the brightest
    things are the switch knobs, not rows of accent text.
 
-### T. Launch 1.0: the night record, Send feedback, tips and the asks (added 2026-10-11, simulator-checked only)
+### T. Night sky: the sky from a dark field (added 2026-10-11, rebuilt the same day, simulator-checked only)
+After the Night sky critique (18/32) a first pass calmed the Canvas starfield. On the phone it still
+read flat and static, so the scene was rebuilt as a Metal shader (`NightSkyShader.metal`). The
+simulator showed the turning sky, the Milky Way, the cloud and the land; black level and banding on
+OLED at 2am, ProMotion and a full night need the phone. Room dark, phone on the nightstand,
+brightness where you'd leave it at night, Night sky selected.
+
+1. **It has depth.** At bedtime with the controls faded. ✅ It reads as a sky over land, not dots on
+   a screen: a warm glow along the horizon, a hazy far ridge, a black treeline in front of it, stars
+   dimmer and warmer low down. Hold the phone and tilt it. ✅ The trees shift more than the ridge,
+   the ridge more than the sky.
+2. **It's alive but calm.** Watch two minutes. ✅ The sky turns slowly about a point near the top
+   (stars there barely move, lower ones wheel), the Milky Way's band and dark rift turn with it, and
+   thin cloud drifts across in front, dimming the stars it crosses. ✅ Nothing blinks; only the low
+   stars shimmer faintly.
+3. **Visible at night brightness.** ✅ The Milky Way, the horizon glow and the treeline are all
+   visible to dark-adapted eyes (they sit about 8-25 levels above black; OLED crushes the bottom few),
+   and nothing lights the room. ✅ No contour lines in the glow or the band.
+4. **Meteors only while you're watching.** Fresh launch, Sleep Home, nothing playing. ✅ One faint
+   warm meteor within ~25 s that kindles and burns out rather than popping. Hop to Podcasts and back
+   a few times. ✅ No meteor every 15 s; the next ones are minutes apart. Play and let the screensaver
+   run 5 minutes. ✅ No meteor under the screensaver. The ring fades with the controls; nothing is
+   left over the scene.
+5. **The night arc.** A 15 min night, veil off in Settings so you can watch. ✅ By the end the sky,
+   the Milky Way and the glow are much dimmer and the turn and drift have slowed. With Moving scenes
+   off: ✅ the still sky still dims over the night (it re-reads every 20 s).
+6. **ProMotion and battery.** Watch a minute on a 120 Hz phone. ✅ A smooth turn, no stalls. Overnight
+   with the veil on: ✅ battery comparable to Deep space (a full-screen shader at 30 fps while the sky
+   is in sight; nothing renders under the veil).
+
+### U. Launch 1.0: the night record, Send feedback, tips and the asks (added 2026-10-11, simulator-checked only)
 The night journal (`NightJournal`), Send feedback, the tip jar (`TipStore`) and the two asks
 (docs/designs/APP-STORE-LAUNCH-1.0.md). Unit tests cover the rules; the phone covers what only a
 real night, a real kill and the real App Store do. Before the tip steps: the three tips exist in
@@ -750,8 +783,8 @@ to Files: each night is a `.jsonl` file, one event per line.
 - [ ] Podcast engine: holds, late ends, offline Auto-Play (§3P), after `PodcastPlayer` / queue changes
 - [ ] All-night soak on the default, All night with podcasts (§3E step 2)
 - [ ] Launch 1.0: killed and force-quit nights, locked writes, Send feedback, a sandbox tip, the card,
-      the rating ask, iPad compatibility (§3T). 1.0's gate: §3A, §3B, §3C, §3E (both runs), §3P and
-      §3T on the build to submit (docs/designs/APP-STORE-LAUNCH-1.0.md, LG-1)
+      the rating ask, iPad compatibility (§3U). 1.0's gate: §3A, §3B, §3C, §3E (both runs), §3P and
+      §3U on the build to submit (docs/designs/APP-STORE-LAUNCH-1.0.md, LG-1)
 
 ## Device-pass log
 

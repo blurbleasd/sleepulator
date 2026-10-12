@@ -115,7 +115,8 @@ struct ContentView: View {
             }
         }
         windowActivity.pendingDim = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 60, execute: work)
+        let delay = SessionGuards.veilDelay(override: UserDefaults.standard.double(forKey: "veilDelaySeconds"))
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
     }
 
     private func wake() {
@@ -494,7 +495,7 @@ private struct VeilGlance: View {
                 p.x >= 0 && p.x <= geo.size.width && p.y >= 0
                     && p.y + Self.lineBelowRingCentre <= geo.size.height ? p : nil
             } ?? CGPoint(x: geo.size.width / 2, y: geo.size.height * 0.42)
-            NightEmber(sleepTimer: sleepTimer, pal: pal, screensaver: true, focusMode: false)
+            NightEmber(sleepTimer: sleepTimer, pal: pal)
                 .position(c)
             Text(text)
                 .font(.system(.callout, design: .rounded).weight(.medium))

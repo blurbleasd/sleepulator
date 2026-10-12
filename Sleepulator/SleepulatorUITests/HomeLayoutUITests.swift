@@ -118,7 +118,7 @@ final class HomeLayoutUITests: XCTestCase {
     /// hittable, and "No thanks" takes it out of the hierarchy.
     /// Value: protects=the card fits the band without blocking Home; fails_when=the card leaves the
     /// band or covers a control, or "No thanks" only hides it; why_new=no UI test shows the card;
-    /// seam=uiTestTipProducts + uiTestTipCardDue (DEBUG-only); no_claim=real product loading (TS-1, §T)
+    /// seam=uiTestTipProducts + uiTestTipCardDue (DEBUG-only); no_claim=real product loading (TS-1, TESTING §3U)
     @MainActor
     func testTipCardSitsInTheBandAndLeavesOnNoThanks() {
         continueAfterFailure = false

@@ -13,8 +13,8 @@ struct BreathingBloomView: View {
     /// not the scene going transparent.
     var sleepTimer: SleepTimerService? = nil
     /// Where the glow centres (global coordinates): Home passes the night ring's centre, so the
-    /// bloom breathes around the ring and its ember instead of ~60 pt below them. Nil centres it
-    /// on the screen (the breathing on-ramp).
+    /// bloom breathes around the ring (where the veil's glance draws its ember), not ~60 pt
+    /// below. Nil centres it on the screen (the breathing on-ramp).
     var focus: CGPoint? = nil
 
     // A soft candle/amber warmth on near-black. Warm = cozy + sleep-appropriate.

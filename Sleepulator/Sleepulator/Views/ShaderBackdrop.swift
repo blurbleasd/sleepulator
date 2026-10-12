@@ -88,6 +88,10 @@ struct ShaderBackdrop: View {
     var sleepTimer: SleepTimerService?
     var audioLevel: (() -> Double)?
     var tilt: (() -> SIMD2<Float>)? = nil
+    /// The screen is out of sight (veil, background, low luminance). Only read while `paused`: a
+    /// scene that passes it keeps darkening with Moving scenes off, its still frame re-read every
+    /// 20 s while in sight (an untimed night publishes nothing). Defaults to true: no re-reads.
+    var occluded: Bool = true
     /// Builds the scene's shader from this frame's inputs.
     var makeShader: (SceneShaderInputs) -> Shader
 
@@ -103,7 +107,12 @@ struct ShaderBackdrop: View {
             // Water read static). The SceneClock is @State, so it survives this if/else and the paused
             // frame renders the frozen pose (never a t:0 birth-pose snap — the original reason to fear
             // the swap; the clock, not the branch, owns the pose).
-            if paused {
+            if paused && !occluded {
+                // Still but in sight (Moving scenes off): the pose holds, the night is re-read.
+                TimelineView(.periodic(from: .now, by: 20)) { _ in
+                    field(size: size, now: nil)
+                }
+            } else if paused {
                 field(size: size, now: nil)
             } else {
                 TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { tl in

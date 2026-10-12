@@ -26,6 +26,7 @@ enum MetalShaders {
     // — device log 2026-07-11 flagged the false MISSING. This is the full set of shipping stitchables.
     static let known: Set<String> = [
         "auroraField", "emberField", "nebulaField", "stillWaterField",   // Sleep .colorEffect scenes
+        "nightSkyField",
         "currentField", "tideField", "sandField",                        // Focus .colorEffect scenes
         "rainGlassLens", "stillWaterLens",                               // depth .layerEffect lenses
     ]

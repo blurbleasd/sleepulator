@@ -40,7 +40,7 @@ final class TipFlowTests: XCTestCase {
 /// "[SKTestSession] Error saving configuration file: SKInternalErrorDomain Code=3" and loads no
 /// products (seen here on 26.3; reported on 26.5, Apple forum 826971). These tests then SKIP with
 /// that reason, visibly, instead of failing; they run from Xcode (⌘U). The purchase mapping is
-/// covered either way by TipFlowTests, and a real purchase by the TESTING.md §T sandbox step.
+/// covered either way by TipFlowTests, and a real purchase by the TESTING.md §3U sandbox step.
 /// Whether to keep this skip is an open decision (eng run 2, Scope #5).
 @MainActor
 final class TipStoreTests: XCTestCase {

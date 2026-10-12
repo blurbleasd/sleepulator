@@ -15,7 +15,7 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
 >
 > **1.0 ships free with a tip jar**, iPhone only, portrait (`TARGETED_DEVICE_FAMILY = 1`; an iPad
 > runs it in an iPhone window). The launch plan and every review decision behind it are in
-> `docs/designs/APP-STORE-LAUNCH-1.0.md`; its device gate is TESTING.md §3A, §3B, §3C, §3E, §3P, §3T.
+> `docs/designs/APP-STORE-LAUNCH-1.0.md`; its device gate is TESTING.md §3A, §3B, §3C, §3E, §3P, §3U.
 
 ## Layout (Xcode project at `Sleepulator/Sleepulator.xcodeproj`)
 - **App** — `Sleepulator/Sleepulator/`
@@ -23,9 +23,12 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   - `Views/` — SwiftUI screens + components (HomeView, LibraryView, PodcastDetailView,
     NowPlayingSheet, MiniPlayerView, SettingsView, BreathingView, the `AmbientScene` backdrop
     library, Components, Theme, `MiniPlayerClearance`, `SoundNames`). `Views/Home/` holds Home's
-    pieces: the orb + `NightRing`, `NightEmber` (the faint time-left arc left in the ring's place
-    under the Sleep screensaver), `ModeSwitcher`, `MixDrawer`, `TimerSelectionSheet`, and the
-    pure, unit-tested rules `SessionGuards` and `HomeScreensaverPolicy`. `Views/TonightShelfView.swift`
+    pieces: the orb + `NightRing`, `NightEmber` (the faint time-left arc the veil's glance shows
+    in the ring's place; nothing is left over the screensaver, which is the scene alone),
+    `ModeSwitcher`, `MixDrawer`, `TimerSelectionSheet`, `Backdrops` (Night sky's meteor:
+    `ShootingStarView` and its pure, unit-tested `NightSkyMotion` rules; the sky itself is
+    `Views/NightSkyMetalView.swift` + `NightSkyShader.metal`), and the pure, unit-tested rules
+    `SessionGuards` and `HomeScreensaverPolicy`. `Views/TonightShelfView.swift`
     is the Podcasts tab's "Tonight" (Focus: "Continue") shelf. `Views/NowPlayingState.swift` holds
     the player views' pure, unit-tested rules: `NowPlayingState` (hero, Up Next, phase),
     `PlayerClock` (times, speeds, lengths, clamped) and `NightLineCopy` (the Sleep player's
@@ -52,8 +55,10 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   above the tab bar; and that on Sleep Home at rest the bar is gone from the accessibility tree and
   Home's controls stay hittable; and that the tip card sits in the band above Build mix and leaves
   on No thanks (DEBUG-only seams `-uiTestTipProducts` and `-uiTestTipCardDue`: fixed products
-  with no StoreKit, and the card due now; compiled out of release). `NightVeilUITests` waits out the veil's minute on an untimed
-  night (~80 s), glances, wakes, and checks Focus's readout; it passes settings as launch
+  with no StoreKit, and the card due now; compiled out of release). `NightVeilUITests` drops the
+  veil on an untimed night (shortened to 15 s by the Debug-only `-veilDelaySeconds` launch
+  argument, `SessionGuards.veilDelay`; the real minute made it the slowest test), glances, wakes,
+  and checks Focus's readout; it passes settings as launch
   arguments (plist literals, the argument domain) so persisted mode and night length stay put.
   CI's simulators are slow and sometimes drop a synthesized tap, so a tap that matters checks its
   effect and goes round again (the noise switch, Focus's Stop, `pauseAudio`, the veil's first tap,
@@ -70,7 +75,7 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   `AudioStateTests.swift` (also holds `PodcastParserTests`, `OPMLParserTests`,
   `StorageManagerTests`, `NetRetryTests`, `CacheEvictionTests`, the sleep-timer suites, Home's
   pure UI rules (`SessionGuardsTests`, `NightRingMathTests`, `MiniPlayerClearanceTests`,
-  `HomeScreensaverPolicyTests`), the podcast rules (`PodcastTextTests`, `ShowNotesPreviewTests`,
+  `HomeScreensaverPolicyTests`, `NightSkyMotionTests`), the podcast rules (`PodcastTextTests`, `ShowNotesPreviewTests`,
   `ShowNotesEdgeTests`, `TonightShelfTests`, `QueueMoveToHeadTests`), the player rules
   (`NowPlayingStateTests`, `NightLineCopyTests`, `PlayerQueueActionTests`,
   `PodcastFailureStreakTests`), Settings' rules (`SettingsRulesTests`) and a restore's engine

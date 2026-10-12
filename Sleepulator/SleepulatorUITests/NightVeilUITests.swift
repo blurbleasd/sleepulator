@@ -30,16 +30,19 @@ final class NightVeilUITests: XCTestCase {
     private static let noiseNames = ["Brown", "Rain", "Ocean", "Pink", "Green", "Forest",
                                      "Fan", "White", "Gray"]
 
-    // Value: protects=an All-night Sleep session gets the veil ~60 s after the last touch, tap 1 is a glance, tap 2 brings Home's controls back and restarts their fade; fails_when=the veil only drops under a timer, the 1st tap wakes outright, or the 2nd leaves the "Show controls" layer over hidden controls; why_new=ContentView's scheduleDim/veilTapped wiring had no test (SessionGuardsTests pin the rules, not the overlay or the tap sequence); seam=none
+    // Value: protects=an All-night Sleep session gets the veil a set delay after the last touch (60 s; 15 s here), tap 1 is a glance, tap 2 brings Home's controls back and restarts their fade; fails_when=the veil only drops under a timer, the 1st tap wakes outright, or the 2nd leaves the "Show controls" layer over hidden controls; why_new=ContentView's scheduleDim/veilTapped wiring had no test (SessionGuardsTests pin the rules, not the overlay or the tap sequence); seam=none
     @MainActor
     func testAllNightVeilThenGlanceThenWake() {
         continueAfterFailure = false
         let app = XCUIApplication()
-        // An untimed night in Sleep with the veil on, for this launch only.
+        // An untimed night in Sleep with the veil on, for this launch only. The veil drops 15 s
+        // after the last touch rather than the real minute (a Debug-only override): the rules
+        // don't change with the delay, and waiting out the minute made this the slowest test.
         app.launchArguments = Self.quietHome + [
             "-nightLengthMinutes", "<real>0</real>",
             "-focusMode", "<false/>",
             "-autoNightDim", "<true/>",
+            "-veilDelaySeconds", "<real>15</real>",
         ]
         app.launch()
 
@@ -49,7 +52,7 @@ final class NightVeilUITests: XCTestCase {
             .matching(NSPredicate(format: "label == %@", Self.veilLabel)).firstMatch
 
         XCTAssertTrue(app.buttons["Sleep mode"].waitForExistence(timeout: 15), "No Sleep Home")
-        // The last touch is the mixer's close: the veil's minute runs from there.
+        // The last touch is the mixer's close: the veil's delay runs from there.
         startNoiseFromTheMixer(app)
 
         // Sleep's controls fade 3 s into a session: that wake layer proves the session is live
@@ -57,7 +60,7 @@ final class NightVeilUITests: XCTestCase {
         XCTAssertTrue(wake.waitForExistence(timeout: 10), "No screensaver over the session")
 
         // A slow runner's looks after the wake tap can all come too late to tell (see
-        // lookAfterTheWake): then go round once more. The veil drops again a minute after that tap.
+        // lookAfterTheWake): then go round once more. The veil drops again 15 s after that tap.
         var look = veilGlanceThenWake(app, veil: veil, wake: wake)
         if look == .tooLateToTell { look = veilGlanceThenWake(app, veil: veil, wake: wake) }
         XCTAssertNotEqual(look, .tooLateToTell,
@@ -76,12 +79,12 @@ final class NightVeilUITests: XCTestCase {
     /// What the looks after the veil's wake tap saw (`lookAfterTheWake`).
     private enum WakeLook { case woke, screensaverStayed, tooLateToTell }
 
-    /// One round of the night veil: it drops ~60 s after the last touch, the first tap glances and
+    /// One round of the night veil: it drops 15 s after the last touch, the first tap glances and
     /// the second wakes. Returns what the looks after the wake tap saw, once the veil has lifted.
     @MainActor
     private func veilGlanceThenWake(_ app: XCUIApplication, veil: XCUIElement, wake: XCUIElement) -> WakeLook {
-        // No timer runs (All night), yet the veil still drops ~60 s after the last touch.
-        XCTAssertTrue(veil.waitForExistence(timeout: 80), "No veil over an untimed night")
+        // No timer runs (All night), yet the veil still drops after the last touch (15 s here).
+        XCTAssertTrue(veil.waitForExistence(timeout: 35), "No veil over an untimed night")
         // XCUITest lists the veil the moment it's inserted, at the start of its 0.8 s fade-in, when
         // a tap doesn't reach it yet (CI tapped there, and the glance came a tap late, so the
         // "wake" tap only glanced). A sleepy tap lands on a screen already black: let it settle.
@@ -121,7 +124,7 @@ final class NightVeilUITests: XCTestCase {
         let tapped = Date()
         tapPoint.tap()
         let look = lookAfterTheWake(wake, tapped: tapped, tapReturned: Date())
-        // The veil goes for good (its minute restarts from the tap), so it's checked after the look.
+        // The veil goes for good (its delay restarts from the tap), so it's checked after the look.
         XCTAssertTrue(waitUntil(timeout: 5) { !veil.exists }, "The second tap didn't lift the veil")
         return look
     }

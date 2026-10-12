@@ -16,11 +16,14 @@ struct SceneContext {
     /// screensaver: scenes keep animating through that (it's the show).
     /// See `HomeView.scenesFrozen` / the `nightDimmed → audio.screenDimmed` hand-off.
     let paused: Bool
-    /// The out-of-sight part of `paused`: the veil, backgrounded, low luminance. NightDarken and
-    /// NightFade stop their periodic re-reads only then, so with Moving scenes off Night sky and
-    /// Rain on glass still darken.
+    /// The out-of-sight part of `paused`: the veil, backgrounded, low luminance. NightFade and Night
+    /// sky's still frame (`ShaderBackdrop.occluded`) stop their periodic re-reads only then, so with
+    /// Moving scenes off Night sky and Rain on glass still darken.
     var occluded: Bool = false
-    /// The sleep timer, for time-reactive sleep scenes (e.g. the setting moon).
+    /// Home's controls have faded to the screensaver. A scene holds back its transients under it
+    /// (Night sky's meteors are only for someone watching).
+    var screensaver: Bool = false
+    /// The sleep timer, for time-reactive sleep scenes (darkening, slowing, stilling).
     let sleepTimer: SleepTimerService
     /// The Pomodoro, for time-reactive Focus scenes (work/break phase + progress).
     let pomodoro: PomodoroService
@@ -33,7 +36,8 @@ struct SceneContext {
     /// reasons as `audioLevel`.
     var tilt: () -> SIMD2<Float> = { .zero }
     /// The night ring's centre (global coordinates), for a scene with one focal glow (Breathe)
-    /// that should sit where the ring and its ember sit. Nil when unmeasured, or in Focus.
+    /// that should sit where the ring sits (and the veil's glance draws its ember). Nil when
+    /// unmeasured, or in Focus.
     var focalPoint: CGPoint? = nil
 }
 
@@ -61,57 +65,33 @@ extension AmbientScene {
 
 // MARK: - The built-in scenes (wrap today's backdrops verbatim)
 
-/// The default Sleep backdrop: a calm, slowly drifting starfield with a gentle breathing
-/// brightness, a rare meteor, and a sky that deepens toward black as the sleep timer winds
-/// down. Built to lull — continuous + dim, with no bright focal point.
+/// The default Sleep backdrop: the sky from a dark field (`NightSkyMetalView`). Stars turn slowly
+/// about a pole near the top of the screen with the Milky Way arching through them, thin cloud
+/// drifts across in front, and a far ridge and a treeline stand along the horizon; across the night
+/// it dims and slows. A rare meteor crosses only while Home's controls are up. Built to lull: depth
+/// and slow continuous motion, no blinking, no bright focal point.
 struct NightSkyScene: AmbientScene {
     let id = "night-sky"
     let title = "Night sky"
     let mood = SceneMood.sleep
+    var usesMotion: Bool { true }   // the sky, the ridge and the trees parallax with gyro while held
 
     func makeBackdrop(_ ctx: SceneContext) -> AnyView {
         AnyView(
             ZStack {
-                StarfieldView(paused: ctx.paused)
+                NightSkyMetalView(paused: ctx.paused, occluded: ctx.occluded,
+                                  sleepTimer: ctx.sleepTimer, tilt: ctx.tilt)
+                ShootingStarView(paused: ctx.paused, screensaver: ctx.screensaver, sleepTimer: ctx.sleepTimer)
                     .ignoresSafeArea()
-                ShootingStarView(paused: ctx.paused, sleepTimer: ctx.sleepTimer)
-                    .ignoresSafeArea()
-                // Darkening must observe the timer itself: nightProgress is computed (not
-                // @Published) and the timer is no longer forwarded through `audio`, so HomeView
-                // stops re-rendering each second — without this leaf the sky would freeze.
-                NightDarken(timer: ctx.sleepTimer, occluded: ctx.occluded)
             }
             .ignoresSafeArea()
         )
     }
 }
 
-/// The sleep sky-darkening overlay, isolated so it re-renders on each timer tick (it observes the
-/// timer directly) rather than relying on its parent's per-second re-render. An untimed night
-/// settles on the clock with nothing published, so it also re-reads every 20 s, except while the
-/// screen is out of sight (`occluded`). Under the veil it still follows a running timer's 1 Hz
-/// republish (TESTING.md §3H.1).
-private struct NightDarken: View {
-    @ObservedObject var timer: SleepTimerService
-    var occluded: Bool = false
-    var body: some View {
-        Group {
-            if occluded {
-                Color.black.opacity(timer.nightProgress * 0.35)
-            } else {
-                TimelineView(.periodic(from: .now, by: 20)) { _ in
-                    Color.black.opacity(timer.nightProgress * 0.35)
-                }
-            }
-        }
-        .ignoresSafeArea()
-        .allowsHitTesting(false)
-    }
-}
-
-/// Fades arbitrary backdrop content toward dark as the sleep timer winds down — the
-/// general-purpose sibling of `NightDarken`, used for warm static layers such as the rain-glass
-/// bokeh that should dim with the night. Isolated so it re-renders only on the timer's ~1 Hz
+/// Fades arbitrary backdrop content toward dark as the sleep timer winds down, used for warm
+/// static layers such as the rain-glass bokeh that should dim with the night. Isolated so it
+/// re-renders only on the timer's ~1 Hz
 /// republish and, unless the screen is out of sight, a 20 s re-read for an untimed night (which
 /// publishes nothing), never dragging its parent (or a sibling `TimelineView` animation loop)
 /// into a re-render. Animating Canvas layers don't use this —

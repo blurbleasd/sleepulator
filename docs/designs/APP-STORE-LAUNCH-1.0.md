@@ -1907,6 +1907,9 @@ None.
 
 ## Implementation log (2026-10-11)
 
+> **Section name:** this plan's "§T" (the 1.0 device section) is **TESTING.md §3U**. Main took
+> §T for the Night sky rebuild while this branch was open, so the merge renamed this one.
+
 Built in the plan's lane order, one local commit per step, nothing pushed:
 
 | Step | Commit | What landed |
