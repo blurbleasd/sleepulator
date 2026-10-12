@@ -20,10 +20,10 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
     library, Components, Theme, `MiniPlayerClearance`, `SoundNames`). `Views/Home/` holds Home's
     pieces: the orb + `NightRing`, `NightEmber` (the faint time-left arc the veil's glance shows
     in the ring's place; nothing is left over the screensaver, which is the scene alone),
-    `ModeSwitcher`, `MixDrawer`, `TimerSelectionSheet`, `Backdrops` (Night sky: `StarfieldView`,
-    `ShootingStarView`, and its pure, unit-tested `NightSkyMotion` rules for the settle under
-    the screensaver, the night's slowing and when a meteor may cross), and the
-    pure, unit-tested rules `SessionGuards` and `HomeScreensaverPolicy`. `Views/TonightShelfView.swift`
+    `ModeSwitcher`, `MixDrawer`, `TimerSelectionSheet`, `Backdrops` (Night sky's meteor:
+    `ShootingStarView` and its pure, unit-tested `NightSkyMotion` rules; the sky itself is
+    `Views/NightSkyMetalView.swift` + `NightSkyShader.metal`), and the pure, unit-tested rules
+    `SessionGuards` and `HomeScreensaverPolicy`. `Views/TonightShelfView.swift`
     is the Podcasts tab's "Tonight" (Focus: "Continue") shelf. `Views/NowPlayingState.swift` holds
     the player views' pure, unit-tested rules: `NowPlayingState` (hero, Up Next, phase),
     `PlayerClock` (times, speeds, lengths, clamped) and `NightLineCopy` (the Sleep player's

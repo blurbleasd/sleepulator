@@ -45,8 +45,9 @@ and carry sourcing baggage; reserve them for a look that genuinely can't be done
 Tags: **⚙︎** generative (cheap, recommended) · **✦** time-reactive · **🔊** pairs with a sound.
 
 **Sleep (dark, calm, OLED-friendly):**
-- **Night sky** ⚙︎✦ — _current default._ Stars along a Milky Way, and a rare meteor while the
-  controls show. Settles once they fade and stills over the night. (The setting moon was removed.)
+- **Night sky** ⚙︎✦ — _current default._ The sky from a dark field (Metal): a turning dome of
+  stars, the Milky Way, drifting cloud, a horizon glow, a ridge and a treeline; dims and slows over
+  the night, a rare meteor while the controls show. (The setting moon was removed.)
 - **Rain on glass** ⚙︎🔊 — droplets running down a window, soft blurred lights behind. Pairs
   with the rain sound; the definitive sleep aesthetic. _(Highest-value next scene.)_
 - **Embers / fireplace** ⚙︎🔊 — slow flickering coals and rising sparks; warm and very dark.
@@ -117,8 +118,8 @@ to the mood's first scene — so nothing changes until you pick something.
 
 Every scene must honour:
 - **`paused`** — settle to static when the screen is out of sight or Moving scenes is off (an
-  all-night screen shouldn't animate under the veil), as `StarfieldView` does. Under the
-  screensaver itself scenes keep moving, but may settle further (`SceneContext.screensaver`).
+  all-night screen shouldn't animate under the veil), as `ShaderBackdrop` does. Under the
+  screensaver itself scenes keep moving, but hold back transients (`SceneContext.screensaver`).
 - **The ambient-motion preference** — NOT raw system Reduce Motion. We deliberately decided
   Sleep's decorative motion (twinkle, moon glide, meteor) should run even with system Reduce
   Motion on, because the opacity twinkle isn't vestibular motion and the sky reads dead static

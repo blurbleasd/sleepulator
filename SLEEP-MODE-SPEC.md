@@ -9,12 +9,11 @@ Priority key: **P0** must-have · **P1** strong follow-up · **P2** future.
 
 > **Status 2026-10-11 — read this first.** Much of this spec has since changed; the sections
 > below are kept as history. The setting moon (§4, R1, moon phase) is gone: Sleep's night is
-> carried by the night ring on Home and by each scene darkening over `nightProgress`. Night sky
-> (`StarfieldView`, `Views/Home/Backdrops.swift`) is stars, a Milky Way haze along its star band,
-> and a meteor only while Home's controls show. R4's 60 s hard settle was replaced: once the
-> controls fade the sky settles over 40 s (its own near-black ground replaces Home's brown, the
-> drift halves, the twinkle almost stops), and across the night it slows, dims to a third and its
-> ground goes to black (`NightSkyMotion`). Only about one star in six twinkles. System Reduce
+> carried by the night ring on Home and by each scene darkening over `nightProgress`. Night sky is
+> now a Metal shader (`NightSkyShader.metal`): the sky from a dark field, turning slowly about a
+> pole near the top of the screen, the Milky Way with a dark rift, thin cloud drifting in front, a
+> warm horizon glow, a far ridge and a treeline. It dims and slows over the night. A meteor crosses
+> only while Home's controls show. Nothing twinkles except a faint shimmer low down. System Reduce
 > Motion deliberately doesn't still the scenes (SCREENSAVER-LIBRARY-SPEC §5); the in-app Moving
 > scenes setting does.
 
