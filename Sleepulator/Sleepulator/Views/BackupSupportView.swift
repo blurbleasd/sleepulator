@@ -71,8 +71,8 @@ struct BackupSupportView: View {
         .miniPlayerClearance()
         .navigationTitle("Backup & support")
         .navigationBarTitleDisplayMode(.inline)
-        .onAppear { backup.pageVisible = true; backup.refresh() }
-        .onDisappear { backup.pageVisible = false }
+        .onAppear { backup.pageAppeared() }
+        .onDisappear { backup.pageDisappeared() }
         .fileImporter(isPresented: $backup.isImporting, allowedContentTypes: [.json],
                       allowsMultipleSelection: false) { backup.picked($0) }
         .fileExporter(isPresented: $backup.isExporting, document: backup.exportDocument,
@@ -106,9 +106,16 @@ struct BackupSupportView: View {
                               defaultFilename: logName) { result in
                     if case .failure(let error) = result {
                         Log.storage.error("Log export failed: \(error.localizedDescription, privacy: .public)")
-                        logExportFailed = true
+                        // Raised while the exporter animates out, the alert was dropped; it waits
+                        // as BackupController's do.
+                        Task {
+                            try? await Task.sleep(for: .seconds(BackupController.alertDelay))
+                            logExportFailed = true
+                        }
                     }
                 }
+                // Up to 12 hours of log lines; nothing reads them once the exporter has closed.
+                .onChange(of: isExportingLog) { if !isExportingLog { logDocument = nil } }
         }
         .alert("Couldn't save the log", isPresented: $logExportFailed) {
             Button("OK", role: .cancel) {}

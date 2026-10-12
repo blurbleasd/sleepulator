@@ -4,8 +4,9 @@ import AVFoundation
 
 /// Centralized loggers. Replaces scattered `print()` calls so diagnostics are categorized,
 /// queryable in Console.app, and dropped from release output by the unified logging system
-/// (instead of printing on the audio/network paths all night).
-enum Log {
+/// (instead of printing on the audio/network paths all night). Nonisolated: loggers are written
+/// to from every thread (the storage queue, the audio threads).
+nonisolated enum Log {
     /// Internal (not private) so `LogExport` can filter the store to just this app's entries.
     static let subsystem = "app.sleepulator"
     static let audio   = Logger(subsystem: subsystem, category: "audio")

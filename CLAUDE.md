@@ -50,7 +50,9 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   overlay finish fading in before tapping it (a tap on the veil as it arrives doesn't reach it).
   They launch with Moving scenes off (`-ambientMotion <false/>`): an app redrawing every frame
   never idles, and XCUITest's wait for idle before each tap outlasted Home's control fade. Never
-  race Sleep's 3 s fade with two taps; CI loses it. The target is made by `Sleepulator/setup_ui_tests.rb`
+  race Sleep's 3 s fade with two taps; CI loses it. Nor with a look: one CI answer took 3.7 s, so
+  NightVeilUITests reads the wake off the "Show controls" layer alone and goes round again when no
+  look came inside the fade (`lookAfterTheWake`). The target is made by `Sleepulator/setup_ui_tests.rb`
   (idempotent; re-run it after adding a file there). It runs in the same app the unit tests are
   hosted in, so a UI test must leave persisted state (mode, night length) as it found it.
 - **Tests** — `SleepulatorTests/` (XCTest). Six files, many suites: `AudioMathTests.swift`;
@@ -64,7 +66,8 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   reload (`RestoreReloadTests`), the real-AVPlayer suites (`PodcastPlayerRebuildTests`,
   `PodcastLoadHoldTests`, `PodcastItemEndTests`), and more);
   `PersistenceTests.swift` (`PersistenceMigrator` / `MixStore`); `BackupRoundTripTests.swift`
-  (export, read, restore and Undo, the `Backup.kinds` checks, a restore never switching mode);
+  (export, read, restore and Undo, the `Backup.kinds` checks, a restore never switching mode;
+  `BackupControllerTests` for the Backup page's controller);
   `FocusDriversTests.swift`; `GenerativeAudioEngineTests.swift` (`GenerativeMediaResetTests`).
 
 ## Services (the core)
@@ -85,8 +88,27 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   week so Undo can put it back exactly; if that snapshot can't be saved, nothing is replaced.
   `Backup.kinds` is the restore allowlist with each setting's type and range (a JSON null raised
   an uncatchable exception in UserDefaults): keep new persisted settings in sync there. A restore
-  never changes the mode (`exportOnlyKeys`); a backup from the other mode lands its sounds in the
-  per-mode picks instead.
+  never changes the mode (`Backup.modeKey`); a backup from the other mode lands its sounds in the
+  per-mode picks instead. A restore stores what decoded (encoded again, trimmed to what the engine
+  plays, clamped), never the file's own JSON: the decoder ignores unknown keys, so a hand-edited
+  backup could carry megabytes into the preferences plist. The engine's queued writes land first
+  (`AudioEngine.flushPendingWrites`, handed to `Backup.restore`/`undo` as `settle`): before the
+  Undo copy and again just before the writes. A new background write in the engine belongs in that
+  flush. An export writes only settings a restore takes back, reads a file's `.bak` when the
+  primary won't parse (`StorageManager.rawData`), and fits under the 50 MB a restore reads.
+  Undo trusts its own copy, which is built differently (`undoCopy`): every setting as stored,
+  even one the restore's bounds refuse (a played list with a long episode id), file sections
+  written back as they were (even ones today's types can't decode), and what it couldn't hold
+  (`undoLeftOutKey`) left alone rather than removed or emptied. Files are written with an error
+  check (`writeRawNow`); an Undo that couldn't save one keeps its copy (`UndoResult.incomplete`),
+  and its week starts again (`undoKeptAtKey`). Restored episodes and shows are held to Backup's
+  own 16 KB bound (`maxFeedFieldBytes`, room for the feed parser's 4,000-character guid or
+  title): the app copies an episode's id and address into the plist. So are saved places' keys,
+  and a restore takes no more places than the player keeps (`maxPlaces`). Anything a restore
+  leaves out for a text too long is counted and said, in the confirm and the result
+  (`Contents.tooLong`). The reload after a restore reads files as launch does: a queue or library
+  today's types can't decode shows empty and stays on disk: the reload doesn't save over it (the
+  next edit does, as at launch).
 
 ## Audio + state invariants (the hard-won stuff — change with care)
 - **Never block the render thread.** It reads params lock-free; hand-offs are atomic. No locks,

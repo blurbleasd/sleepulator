@@ -583,21 +583,13 @@ final class PomodoroService: ObservableObject {
     }
 
     init() {
-        let lengths = Self.storedLengths()
-        workMinutes = lengths.work
-        restMinutes = lengths.rest
-        longRestMinutes = lengths.longRest
-        cyclesBeforeLongBreak = lengths.cycles
+        (workMinutes, restMinutes, longRestMinutes, cyclesBeforeLongBreak) = Self.storedLengths()
     }
 
     /// Re-read the lengths after a Backup restore or its Undo. They're otherwise read once, at
     /// launch: Settings showed the restored 50 min while the next session still ran 25.
     func reloadLengths() {
-        let lengths = Self.storedLengths()
-        workMinutes = lengths.work
-        restMinutes = lengths.rest
-        longRestMinutes = lengths.longRest
-        cyclesBeforeLongBreak = lengths.cycles
+        (workMinutes, restMinutes, longRestMinutes, cyclesBeforeLongBreak) = Self.storedLengths()
     }
 
     deinit { timer?.cancel() }

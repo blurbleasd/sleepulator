@@ -175,7 +175,7 @@ final class AudioEngine: ObservableObject {
         }
     }
     /// Cap on *extra* stacked noise layers (the primary `noiseType` is always layer 0).
-    static let maxExtraLayers = kMaxNoiseLayers - 1
+    nonisolated static let maxExtraLayers = kMaxNoiseLayers - 1
     /// Additional simultaneous noise generators stacked on the primary noise (rain + brown, …).
     /// Gated by `noiseOn` like the primary; persisted as JSON; capped at `maxExtraLayers`.
     @Published var extraLayers: [ExtraNoiseLayer] = [] {
@@ -1275,6 +1275,19 @@ final class AudioEngine: ObservableObject {
         sleepTimer.cancelTimer()
     }
 
+    /// Land every write the engine has queued, before a backup reads the store or a restore
+    /// writes over it: the saved places (otherwise written every ~30 s while playing), the queue
+    /// and the played list, the volumes and sounds, and the deferred mixes.json. A write still
+    /// queued when a restore landed put the old value back over the restored one, and the Undo
+    /// copy taken before it missed it.
+    func flushPendingWrites() {
+        podPlayer.flushPositionsNow()
+        queueManager.flushPendingWrites()
+        mixStore.flushPendingWrites()
+        storageQueue.sync {}                  // the volumes' and sounds' UserDefaults writes
+        StorageManager.shared.flush()         // the file writes those queues handed on
+    }
+
     /// Reload all persisted state after a Backup restore so the new data takes effect WITHOUT an
     /// app relaunch. Flushes pending writes first (the import writes are async) so reads can't
     /// race them, re-seeds the persisted @Published settings from UserDefaults, reloads the
@@ -1302,7 +1315,7 @@ final class AudioEngine: ObservableObject {
         // sleepEQIntensity live on the settings child; reload re-reads + re-applies them.
         settings.reload()
         pomodoro.reloadLengths()
-        // focusMode isn't re-read: a restore never changes the mode (Backup.exportOnlyKeys), and
+        // focusMode isn't re-read: a restore never changes the mode (Backup.modeKey), and
         // reassigning it ran its didSet's timer-stopping branch for nothing. The palette and the
         // limiter are reconciled below.
 

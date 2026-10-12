@@ -6,6 +6,7 @@ import os
 final class PodcastQueueManager: ObservableObject {
     @Published var queue: [Episode] = [] {
         didSet {
+            guard persistsQueue else { return }
             let q = queue
             storageQueue.async {
                 StorageManager.shared.save(q, to: "queue.json")
@@ -37,6 +38,14 @@ final class PodcastQueueManager: ObservableObject {
     }
     
     private let storageQueue = DispatchQueue(label: "app.sleepulator.queueStorage", qos: .utility)
+    /// Off only while a reload shows an empty queue for a queue.json it can't decode (see
+    /// `reloadFromDisk`).
+    private var persistsQueue = true
+
+    /// Wait for the queue and played-list writes already queued (`AudioEngine.flushPendingWrites`).
+    func flushPendingWrites() {
+        storageQueue.sync {}
+    }
 
     // Recency order (newest last) that bounds `finishedEpisodes` — without it the set grew
     // forever in UserDefaults as every episode you ever finished accumulated.
@@ -90,17 +99,36 @@ final class PodcastQueueManager: ObservableObject {
             finishedEpisodes = []
         }
 
-        queue = StorageManager.shared.load(from: "queue.json") ?? []
+        // As at launch: a queue.json today's types can't decode (an update's schema change, or the
+        // one an Undo just put back as it was) is left on disk. Assigning [] saved [] over it.
+        if let saved: [Episode] = StorageManager.shared.load(from: "queue.json") {
+            queue = saved
+        } else {
+            persistsQueue = false
+            queue = []
+            persistsQueue = true
+        }
     }
 
     /// Mark an episode finished, keeping the set bounded by recency. Replaces a raw
     /// `finishedEpisodes.insert`, which had no upper limit.
     func markFinished(_ id: String) {
+        // Held to what a backup takes (Backup's list limits), in bytes as well as count: a
+        // restored id may be 16 KB, and a thousand of them came to 16 MB in the preferences
+        // plist, which loads at every launch. An id over the item limit isn't recorded.
+        guard id.utf8.count <= Backup.maxListItemBytes else { return }
         finishedOrder.removeAll { $0 == id }
         finishedOrder.append(id)
         if finishedOrder.count > finishedCap {
             finishedOrder.removeFirst(finishedOrder.count - finishedCap)
         }
+        var total = finishedOrder.reduce(0) { $0 + $1.utf8.count }
+        var oldest = 0
+        while total > Backup.maxListBytes, oldest < finishedOrder.count - 1 {
+            total -= finishedOrder[oldest].utf8.count
+            oldest += 1
+        }
+        finishedOrder.removeFirst(oldest)
         finishedEpisodes = Set(finishedOrder)   // triggers the persist in didSet
     }
 
