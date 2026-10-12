@@ -8,6 +8,15 @@ import Foundation
 /// linked and installed — is what actually distinguishes builds, which is the whole point of the
 /// footer: glance at Settings and confirm the phone is running the build you just made.
 enum AppInfo {
+    /// Where "Send feedback" mails and the support page points. Open input (set before the first
+    /// TestFlight build; docs/designs/APP-STORE-LAUNCH-1.0.md, Launch sequence). While nil, Send
+    /// feedback opens the share sheet with no address.
+    static let supportEmail: String? = nil
+
+    /// The app's numeric App Store ID, from creating its App Store Connect record. Open input;
+    /// while nil the "Rate Sleepulator" row stays hidden (design D8).
+    static let appStoreID: String? = nil
+
     /// `CFBundleShortVersionString` (from `MARKETING_VERSION`), e.g. "1.0".
     static var version: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"

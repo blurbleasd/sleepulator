@@ -117,6 +117,49 @@ final class HomeLayoutUITests: XCTestCase {
     /// And Home's controls must all take a tap: the night ring's accessibility shape once became
     /// Home's whole frame, and XCUITest called everything outside the ring unhittable.
     @MainActor
+    /// The tip card (TS-2; design D3, D13, D16). DEBUG-only seams (EV-2) supply three test products
+    /// and make the card due, so the test never waits on StoreKit or the clock. It sits in the
+    /// coachmark band above Build mix, its two answers are separate buttons, Home's controls stay
+    /// hittable, and "No thanks" takes it out of the hierarchy.
+    /// Value: protects=the card fits the band without blocking Home; fails_when=the card leaves the
+    /// band or covers a control, or "No thanks" only hides it; why_new=no UI test shows the card;
+    /// seam=uiTestTipProducts + uiTestTipCardDue (DEBUG-only); no_claim=real product loading (TS-1, §T)
+    func testTipCardSitsInTheBandAndLeavesOnNoThanks() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-ambientMotion", "<false/>",
+                               "-uiTestTipProducts", "<true/>", "-uiTestTipCardDue", "<true/>",
+                               "-hasCompletedFirstRun", "<true/>", "-hasSeenNightRingTip", "<true/>",
+                               "-tipCardSpent", "<false/>", "-tippedOnThisPhone", "<false/>"]
+        app.launch()
+
+        let sleepMode = app.buttons["Sleep mode"]
+        XCTAssertTrue(sleepMode.waitForExistence(timeout: 15), "No mode switcher on Home")
+        sleepMode.tap()
+
+        let leaveTip = app.buttons["Leave a tip"]
+        let noThanks = app.buttons["No thanks"]
+        let buildMix = app.buttons["Build mix"]
+        XCTAssertTrue(leaveTip.waitForExistence(timeout: 10), "The tip card didn't show on Sleep Home")
+        XCTAssertTrue(noThanks.exists, "\"No thanks\" isn't its own button")
+        XCTAssertTrue(buildMix.waitForExistence(timeout: 5), "No Build mix button")
+        XCTAssertTrue(buildMix.isHittable, "The tip card covers Build mix")
+        XCTAssertTrue(sleepMode.isHittable, "The tip card clipped the mode switcher out of the hit test")
+        XCTAssertTrue(leaveTip.isHittable && noThanks.isHittable, "The card's answers aren't hittable")
+        XCTAssertLessThanOrEqual(leaveTip.frame.maxY, buildMix.frame.minY,
+                                 "The card isn't in the band above Build mix: \(leaveTip.frame) vs \(buildMix.frame)")
+
+        // CI's simulators sometimes drop a synthesized tap: check the effect and go round again.
+        for _ in 0..<3 where leaveTip.exists {
+            noThanks.tap()
+            if leaveTip.waitForNonExistence(timeout: 3) { break }
+        }
+        XCTAssertTrue(leaveTip.waitForNonExistence(timeout: 5),
+                      "The tip card stayed in the hierarchy after \"No thanks\"")
+        XCTAssertTrue(buildMix.isHittable, "Build mix is covered after the card left")
+    }
+
+    @MainActor
     func testSleepHomeAtRestHasNoMiniPlayer() {
         continueAfterFailure = false
         let app = XCUIApplication()

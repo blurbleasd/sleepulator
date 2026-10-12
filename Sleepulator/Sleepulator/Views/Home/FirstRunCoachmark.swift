@@ -37,20 +37,40 @@ struct CoachmarkContent: Equatable {
         briefMessage: "Drag the ring around the orb to set the timer.",
         pointsDown: false)
 
+    /// The one-time tip card (docs/designs/APP-STORE-LAUNCH-1.0.md, TJ-1; design D3, D13, D14,
+    /// D18): after the fifth clean night, in this same band, with two answers instead of "Got it".
+    static let tip = CoachmarkContent(
+        icon: "moon.stars",
+        title: "Sleeping well?",
+        message: "Sleepulator is free, with no ads or account. If it's helping, a tip keeps it going.",
+        briefMessage: "",
+        pointsDown: false)
+
+    /// The line under the tip card's answers: saying no still leaves the way to tip (design D13).
+    static let tipFootnote = "Tips stay in Settings ▸ Backup & support."
+
     /// Which tip Home shows, if any: never in Focus; the first-run card until it's retired; then
     /// the night-ring note once for upgraders (retiring the first-run card retires it too, since
-    /// that copy already covers the ring).
-    static func current(focusMode: Bool, hasCompletedFirstRun: Bool, hasSeenNightRingTip: Bool) -> CoachmarkContent? {
+    /// that copy already covers the ring); then the tip card when it's due, never over a playing
+    /// session (it waits for the next suitable open, design D6).
+    static func current(focusMode: Bool, hasCompletedFirstRun: Bool, hasSeenNightRingTip: Bool,
+                        tipCardDue: Bool = false, sessionActive: Bool = false) -> CoachmarkContent? {
         if focusMode { return nil }
         if !hasCompletedFirstRun { return .firstRun }
-        return hasSeenNightRingTip ? nil : .nightRing
+        if !hasSeenNightRingTip { return .nightRing }
+        return tipCardDue && !sessionActive ? .tip : nil
     }
 }
 
 struct FirstRunCoachmark: View {
     let pal: Palette
     var content: CoachmarkContent = .firstRun
+    /// "Got it" on the first-run and night-ring tips; "No thanks" on the tip card.
     let dismiss: () -> Void
+    /// "Leave a tip" on the tip card (opens the tip sheet).
+    var leaveTip: () -> Void = {}
+
+    private var isTip: Bool { content == .tip }
 
     /// Text sizes the brief card steps down through, largest first, when it can't fit as-is.
     private static let textSizeCaps: [DynamicTypeSize] = [.xxxLarge, .xxLarge, .xLarge, .large]
@@ -75,17 +95,24 @@ struct FirstRunCoachmark: View {
     /// room (e.g. a 6.1" 16e), it drops the pointer first — it still sits right on the row it names.
     private func full(pointer: Bool) -> some View {
         VStack(spacing: 10) {
-            HStack(spacing: 8) {
-                icon
-                titleText
-                Spacer(minLength: 0)
+            VStack(spacing: 10) {
+                HStack(spacing: 8) {
+                    icon
+                    titleText
+                    Spacer(minLength: 0)
+                }
+                messageText
             }
-            messageText
+            // The tip card's words are one stop, footnote included; its answers follow (D16).
+            .modifier(TipTextStop(active: isTip, label: content.title + ". " + content.message + " "
+                                  + CoachmarkContent.tipFootnote))
 
             HStack {
                 Spacer()
-                gotIt
+                if isTip { tipAnswers } else { gotIt }
             }
+
+            if isTip { tipFootnote }
 
             if pointer {
                 // A small pointer toward the Build mix control below.
@@ -95,25 +122,37 @@ struct FirstRunCoachmark: View {
             }
         }
         .padding(UI.lg)
-        .modifier(CoachmarkCard(pal: pal))
+        .modifier(CoachmarkCard(pal: pal, grouping: isTip ? .contain : .combine))
     }
 
-    /// SE-class room: title and one short line beside "Got it".
-    private var brief: some View {
-        HStack(spacing: UI.md) {
-            VStack(alignment: .leading, spacing: UI.xs) {
-                titleText
-                Text(content.briefMessage)
-                    .font(.caption)
-                    .foregroundColor(pal.dim)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityLabel(content.message)
+    /// SE-class room: title and one short line beside "Got it". The tip card's brief form is its
+    /// title and both answers; the body and the footnote drop first (design D14).
+    @ViewBuilder private var brief: some View {
+        if isTip {
+            VStack(alignment: .leading, spacing: UI.sm) {
+                HStack(spacing: 8) { icon; titleText; Spacer(minLength: 0) }
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel(content.title + " " + content.message)
+                HStack { Spacer(); tipAnswers }
             }
-            Spacer(minLength: 0)
-            gotIt
+            .padding(UI.md)
+            .modifier(CoachmarkCard(pal: pal, fill: CoachmarkCard.tightFill, grouping: .contain))
+        } else {
+            HStack(spacing: UI.md) {
+                VStack(alignment: .leading, spacing: UI.xs) {
+                    titleText
+                    Text(content.briefMessage)
+                        .font(.caption)
+                        .foregroundColor(pal.dim)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityLabel(content.message)
+                }
+                Spacer(minLength: 0)
+                gotIt
+            }
+            .padding(UI.md)
+            .modifier(CoachmarkCard(pal: pal, fill: CoachmarkCard.tightFill))
         }
-        .padding(UI.md)
-        .modifier(CoachmarkCard(pal: pal, fill: CoachmarkCard.tightFill))
     }
 
     private var icon: some View {
@@ -136,16 +175,47 @@ struct FirstRunCoachmark: View {
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    /// The night surfaces' ember capsule, not a solid accent slab: Home is a 2am screen, and
+    /// the first launch is often at bedtime (design D15).
     private var gotIt: some View {
-        Button(action: dismiss) {
-            Text("Got it")
-                .font(.caption.weight(.bold))
-                .foregroundColor(pal.bg)
-                .padding(.horizontal, 16).padding(.vertical, 7)
-                .background(Capsule().fill(pal.accent))
+        Button("Got it", action: dismiss)
+            .buttonStyle(EmberButtonStyle(pal: pal))
+    }
+
+    /// The tip card's two answers, each its own VoiceOver stop (design D16).
+    private var tipAnswers: some View {
+        HStack(spacing: UI.sm) {
+            Button("No thanks", action: dismiss)
+                .buttonStyle(EmberButtonStyle(pal: pal, quiet: true))
+            Button("Leave a tip", action: leaveTip)
+                .buttonStyle(EmberButtonStyle(pal: pal))
+                .accessibilitySortPriority(1)       // read before "No thanks"
         }
-        .frame(minHeight: 44)
-        .contentShape(Rectangle())
+    }
+
+    private var tipFootnote: some View {
+        Text(CoachmarkContent.tipFootnote)
+            .font(.caption2)
+            .foregroundColor(pal.dim)
+            .frame(maxWidth: .infinity, alignment: .trailing)
+            .accessibilityHidden(true)               // read with the card's words
+    }
+}
+
+/// On the tip card, the title and message read as one VoiceOver stop ahead of the answers.
+private struct TipTextStop: ViewModifier {
+    let active: Bool
+    let label: String
+
+    func body(content: Content) -> some View {
+        if active {
+            content
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(label)
+                .accessibilitySortPriority(2)
+        } else {
+            content
+        }
     }
 }
 
@@ -157,6 +227,9 @@ private struct CoachmarkCard: ViewModifier {
 
     let pal: Palette
     var fill = 0.92
+    /// `.combine` reads a one-button tip as one stop; the tip card's two answers need `.contain`,
+    /// or VoiceOver merges them and one can't be reached (design D16).
+    var grouping: AccessibilityChildBehavior = .combine
 
     func body(content: Content) -> some View {
         content
@@ -167,7 +240,7 @@ private struct CoachmarkCard: ViewModifier {
                         .stroke(pal.accent.opacity(0.3), lineWidth: 0.5))
                     .shadow(color: .black.opacity(0.4), radius: 16, y: 6)
             )
-            .accessibilityElement(children: .combine)
+            .accessibilityElement(children: grouping)
     }
 }
 

@@ -1,7 +1,20 @@
 import SwiftUI
+import StoreKit
+import os
 
 struct ContentView: View {
     @StateObject private var audio = AudioEngine()
+    /// The tip jar's store, started in SleepulatorApp.
+    @EnvironmentObject private var tips: TipStore
+    @Environment(\.requestReview) private var requestReview
+    // The asks' memory (docs/designs/APP-STORE-LAUNCH-1.0.md: RP-1, TJ-1; design D6, D10–D12).
+    // Device-only: none of these is in Backup.kinds, so a backup never carries or replaces them.
+    @AppStorage("tipCardSpent") private var tipCardSpent = false
+    @AppStorage("ratingAskedVersion") private var ratingAskedVersion = ""
+    @AppStorage("ratingAskedOn") private var ratingAskedOn: Double = 0
+    @AppStorage("tipCardShownOn") private var tipCardShownOn: Double = 0
+    @State private var tipCardDue = false
+    @State private var showTipSheet = false
     @Environment(\.scenePhase) private var scenePhase
     @State private var selectedTab = 0
     @AppStorage("autoNightDim") private var autoNightDim = true
@@ -171,7 +184,9 @@ struct ContentView: View {
             TabView(selection: $selectedTab) {
                 HomeView(audio: audio, mixStore: audio.mixStore, selectedTab: $selectedTab,
                          nowPlayingPresented: showNowPlaying, miniPlayerTouches: miniPlayerTouches,
-                         orbCenter: $orbCenter)
+                         orbCenter: $orbCenter, tipCardDue: tipCardDue,
+                         onLeaveTip: { showTipSheet = true },
+                         onTipCardDeclined: { tipCardSpent = true; refreshAsks() })
                     // Home reserves the bar's room only when the bar shows on Home (not on Sleep
                     // Home at rest). The screensaver fade doesn't count: HomeView freezes it.
                     .environment(\.miniPlayerTop, miniPlayerShownOnHome ? miniPlayerTop : nil)
@@ -269,7 +284,7 @@ struct ContentView: View {
         }
         // The mini-player's full player. Presented here, not from the bar, so it never depends on
         // the bar being rendered.
-        .sheet(isPresented: $showNowPlaying) {
+        .sheet(isPresented: $showNowPlaying, onDismiss: naturalBreak) {
             NowPlayingSheet(audio: audio, queue: audio.queueManager, progress: audio.playbackProgress,
                             isPresented: $showNowPlaying, pal: pal,
                             onInteraction: { if !nightDimmed { scheduleDim() } })
@@ -277,6 +292,19 @@ struct ContentView: View {
                 .presentationDragIndicator(.visible)
                 .presentationBackground(pal.bg)
         }
+        // The tip card's sheet. Closing it any way spends the card (design D6) and is a natural
+        // break; leaving it ends the visit's "Waiting for approval" (design D7).
+        .sheet(isPresented: $showTipSheet, onDismiss: {
+            tips.screenClosed()
+            tipCardSpent = true
+            naturalBreak()
+        }) {
+            TipSheet(tips: tips, pal: pal)
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+                .presentationBackground(pal.bg)
+        }
+        .environment(\.naturalBreak, naturalBreak)
         // Force dark mode for bedtime aesthetic
         .preferredColorScheme(.dark)
         // No lit clock, battery or home indicator over the veil or the Sleep screensaver.
@@ -291,7 +319,10 @@ struct ContentView: View {
         // Pausing drops the pending dim (never forces the screen bright); resuming re-arms it.
         .onChange(of: audio.isAnythingPlaying) { _, playing in
             if playing { if !nightDimmed { scheduleDim() } } else { cancelDim() }
+            refreshAsks()
         }
+        .onReceive(tips.$products) { _ in refreshAsks() }
+        .onReceive(tips.$hasTipped) { _ in refreshAsks() }
         // A timer starting or ending changes where the veil may drop (everywhere vs Home only).
         .onReceive(audio.sleepTimer.$timerRemaining) { remaining in
             let active = remaining > 0
@@ -304,16 +335,19 @@ struct ContentView: View {
         .onChange(of: showNowPlaying) { _, up in
             if up, !nightDimmed { scheduleDim() }
         }
+        .onChange(of: audio.focusMode) { _, _ in refreshAsks() }
         .onChange(of: audio.focusMode) { _, focus in
             if focus { cancelDim(); withAnimation(.easeInOut(duration: 0.4)) { nightDimmed = false } }
             // Into Sleep with the sound still going: that's a night starting, so arm the veil.
             else if !nightDimmed { scheduleDim() }
         }
-        .onChange(of: selectedTab) { _, _ in
+        .onChange(of: selectedTab) { old, _ in
             // Navigating is interaction — reset the dim countdown and drop the screensaver
             // so it can never hide another tab's tab bar.
             if audio.ambientScreensaver { audio.ambientScreensaver = false }
             if nightDimmed { wake() } else { scheduleDim() }
+            // Leaving Settings is the one tab switch that counts as a natural break (design D12).
+            if old == 2 { naturalBreak() }
         }
         .onChange(of: nightDimmed) { _, dimmed in
             // Freeze the backdrop scene only when the veil actually occludes the screen —
@@ -325,7 +359,10 @@ struct ContentView: View {
             // Fail-safe: if iOS suspended us through a duration timer's deadline, the in-process
             // tick never fired. Reconcile the instant we're foregrounded so audio can't keep
             // playing past the timer. No-op when nothing expired.
-            if phase == .active { audio.sleepTimer.reconcileIfExpired() }
+            if phase == .active {
+                audio.sleepTimer.reconcileIfExpired()
+                refreshAsks()
+            }
         }
         // The resume widget's deep link (sleepulator://resume). Routed through the same
         // notification the "Start Sleepulator Mix" Siri intent posts (SleepulatorIntents.swift),
@@ -335,6 +372,53 @@ struct ContentView: View {
                 NotificationCenter.default.post(name: Notification.Name("StartSleepulatorMix"), object: nil)
             }
         }
+    }
+
+    // MARK: The asks (eng run 2, R1)
+
+    /// When the last night ended: the open night's pause, else the newest closed night.
+    private var lastNightEnd: Date? {
+        audio.nightJournal.open?.pausedAt ?? audio.nightJournal.verdicts.last?.end
+    }
+
+    private func sameDay(_ stamp: Double, _ now: Date) -> Bool {
+        stamp > 0 && Calendar.current.isDate(Date(timeIntervalSince1970: stamp), inSameDayAs: now)
+    }
+
+    /// Whether the tip card is due, re-read at scene activation, natural breaks and when the
+    /// store, the mode or the session changes. A plain value to Home, never @Published on
+    /// AudioEngine (eng run 2, Section 1 #2).
+    private func refreshAsks() {
+        let now = Date()
+        var due = SessionGuards.tipCardDue(
+            cleanNights: audio.nightJournal.cleanNightCount, tipped: tips.hasTipped, spent: tipCardSpent,
+            productsReady: !tips.products.isEmpty && tips.canMakePayments, focusMode: audio.focusMode,
+            playing: audio.isAnythingPlaying, ratingAskedToday: sameDay(ratingAskedOn, now), now: now,
+            lastNightEnd: lastNightEnd)
+        #if DEBUG
+        // The card's UI test (TS-2, EV-2): due regardless of nights and the clock, with the
+        // DEBUG-only test products. Compiled out of release builds.
+        if UserDefaults.standard.bool(forKey: "uiTestTipCardDue") {
+            due = !tipCardSpent && !tips.hasTipped && !tips.products.isEmpty && !audio.focusMode
+        }
+        #endif
+        if due, !sameDay(tipCardShownOn, now) { tipCardShownOn = now.timeIntervalSince1970 }
+        if due != tipCardDue { tipCardDue = due }
+    }
+
+    /// A sheet just closed or the person just left Settings: maybe Apple's rating prompt
+    /// (design D10–D12). Once per version; Apple decides whether it actually shows.
+    private func naturalBreak() {
+        refreshAsks()
+        let now = Date()
+        guard SessionGuards.mayAskForRating(
+            cleanNights: audio.nightJournal.cleanNightCount, askedThisVersion: ratingAskedVersion == AppInfo.version,
+            tipCardShownToday: sameDay(tipCardShownOn, now), playing: audio.isAnythingPlaying,
+            veilDown: nightDimmed, now: now, lastNightEnd: lastNightEnd) else { return }
+        ratingAskedVersion = AppInfo.version
+        ratingAskedOn = now.timeIntervalSince1970
+        Log.storage.notice("asked for a rating (\(audio.nightJournal.cleanNightCount, privacy: .public) clean nights)")
+        requestReview()
     }
 }
 

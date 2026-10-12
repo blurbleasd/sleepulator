@@ -77,6 +77,8 @@ final class TipStore: ObservableObject {
 
     @Published private(set) var products: [TipProduct] = []
     @Published private(set) var phase: TipPhase = .loading
+    /// The tip last tried, for "Try again" after a failure.
+    @Published private(set) var lastAttempt: String?
     /// Set by a verified tip on this phone; drives Settings' lasting thank-you (design D17) and
     /// keeps the card from showing. Device-only (outside Backup.kinds).
     @Published private(set) var hasTipped: Bool
@@ -138,6 +140,7 @@ final class TipStore: ObservableObject {
 
     func purchase(_ id: String) async {
         guard let product = storeProducts[id] else { phase = .unavailable; return }
+        lastAttempt = id
         phase = .purchasing(id)
         let outcome: TipOutcome
         do {

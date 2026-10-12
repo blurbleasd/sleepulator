@@ -4076,3 +4076,128 @@ final class NightJournalWiringTests: XCTestCase {
         svc.cancelTimer()
     }
 }
+
+// MARK: - The asks, the tip card, the Rate row and the feedback message (E4, DT1–DT4, R1–R5)
+
+/// SessionGuards' ask rules: the window, the waits, and what never lets an ask through.
+@MainActor
+final class AskRulesTests: XCTestCase {
+    private var calendar: Calendar = {
+        var c = Calendar(identifier: .gregorian)
+        c.timeZone = TimeZone(identifier: "UTC")!
+        return c
+    }()
+
+    private func at(_ hour: Int, _ minute: Int = 0) -> Date {
+        calendar.date(from: DateComponents(year: 2026, month: 10, day: 12, hour: hour, minute: minute))!
+    }
+
+    func testTheWindowIsNineToEightLocal() {
+        XCTAssertFalse(SessionGuards.askWindowOpen(now: at(8, 59), lastNightEnd: nil, calendar: calendar))
+        XCTAssertTrue(SessionGuards.askWindowOpen(now: at(9), lastNightEnd: nil, calendar: calendar))
+        XCTAssertTrue(SessionGuards.askWindowOpen(now: at(19, 59), lastNightEnd: nil, calendar: calendar))
+        XCTAssertFalse(SessionGuards.askWindowOpen(now: at(20), lastNightEnd: nil, calendar: calendar))
+    }
+
+    func testTheAsksWaitTwoHoursAfterTheNight() {
+        let end = at(8)
+        XCTAssertFalse(SessionGuards.askWindowOpen(now: at(9, 59), lastNightEnd: end, calendar: calendar))
+        XCTAssertTrue(SessionGuards.askWindowOpen(now: at(10), lastNightEnd: end, calendar: calendar))
+    }
+
+    private func rating(clean: Int = 3, asked: Bool = false, cardToday: Bool = false, playing: Bool = false,
+                        veil: Bool = false, hour: Int = 12) -> Bool {
+        SessionGuards.mayAskForRating(cleanNights: clean, askedThisVersion: asked, tipCardShownToday: cardToday,
+                                      playing: playing, veilDown: veil, now: at(hour), lastNightEnd: nil,
+                                      calendar: calendar)
+    }
+
+    func testTheRatingAskNeedsThreeCleanNightsAndADaytimeBreak() {
+        XCTAssertTrue(rating())
+        XCTAssertFalse(rating(clean: 2))
+        XCTAssertFalse(rating(asked: true))                   // once per version
+        XCTAssertFalse(rating(cardToday: true))               // never the tip card's day
+        XCTAssertFalse(rating(playing: true))
+        XCTAssertFalse(rating(veil: true))
+        XCTAssertFalse(rating(hour: 21))
+    }
+
+    private func card(clean: Int = 5, tipped: Bool = false, spent: Bool = false, ready: Bool = true,
+                      focus: Bool = false, playing: Bool = false, ratedToday: Bool = false, hour: Int = 12) -> Bool {
+        SessionGuards.tipCardDue(cleanNights: clean, tipped: tipped, spent: spent, productsReady: ready,
+                                 focusMode: focus, playing: playing, ratingAskedToday: ratedToday,
+                                 now: at(hour), lastNightEnd: nil, calendar: calendar)
+    }
+
+    func testTheTipCardWaitsForEverythingAndEndsOnlyOnAnAnswer() {
+        XCTAssertTrue(card())
+        XCTAssertFalse(card(clean: 4))
+        XCTAssertFalse(card(tipped: true))
+        XCTAssertFalse(card(spent: true))
+        XCTAssertFalse(card(ready: false))                    // can't offer what can't be bought
+        XCTAssertFalse(card(focus: true))                     // Sleep Home only (design D10)
+        XCTAssertFalse(card(playing: true))
+        XCTAssertFalse(card(ratedToday: true))
+        XCTAssertFalse(card(hour: 7))
+    }
+}
+
+/// The coachmark band's order: first-run, the night-ring note, then the tip card; never in Focus,
+/// and the tip card never over a playing session.
+@MainActor
+final class CoachmarkTipCardTests: XCTestCase {
+    func testTheTipCardComesAfterTheOtherTipsAndOnlyAtRest() {
+        XCTAssertEqual(CoachmarkContent.current(focusMode: false, hasCompletedFirstRun: false,
+                                                hasSeenNightRingTip: false, tipCardDue: true), .firstRun)
+        XCTAssertEqual(CoachmarkContent.current(focusMode: false, hasCompletedFirstRun: true,
+                                                hasSeenNightRingTip: false, tipCardDue: true), .nightRing)
+        XCTAssertEqual(CoachmarkContent.current(focusMode: false, hasCompletedFirstRun: true,
+                                                hasSeenNightRingTip: true, tipCardDue: true), .tip)
+        XCTAssertNil(CoachmarkContent.current(focusMode: false, hasCompletedFirstRun: true,
+                                              hasSeenNightRingTip: true, tipCardDue: true, sessionActive: true))
+        XCTAssertNil(CoachmarkContent.current(focusMode: true, hasCompletedFirstRun: true,
+                                              hasSeenNightRingTip: true, tipCardDue: true))
+        XCTAssertNil(CoachmarkContent.current(focusMode: false, hasCompletedFirstRun: true,
+                                              hasSeenNightRingTip: true, tipCardDue: false))
+    }
+}
+
+/// The Rate row shows only where it works (design D8).
+@MainActor
+final class RateRowRuleTests: XCTestCase {
+    func testOnlyWithAnAppStoreIDOnAnAppStoreBuild() {
+        XCTAssertFalse(RateRowRule.visible(appStoreID: nil, environment: .production))
+        XCTAssertFalse(RateRowRule.visible(appStoreID: "", environment: .production))
+        XCTAssertFalse(RateRowRule.visible(appStoreID: "123", environment: .other))   // Xcode, TestFlight
+        XCTAssertTrue(RateRowRule.visible(appStoreID: "123", environment: .production))
+        XCTAssertEqual(RateRowRule.writeReviewURL(appStoreID: "123")?.absoluteString,
+                       "https://apps.apple.com/app/id123?action=write-review")
+    }
+}
+
+/// The feedback message says what's attached and where it goes, in plain words (design D9).
+@MainActor
+final class FeedbackMessageTests: XCTestCase {
+    func testTheBodyListsWhatsAttachedWithoutLinks() {
+        let body = FeedbackMessage.body(nightSummary: "Last 2 nights: 1 clean.", nightFiles: 2,
+                                        reportsSince: Date(timeIntervalSince1970: 1_800_000_000),
+                                        version: "1.0", build: "7", iOS: "26.3", device: "iPhone")
+        XCTAssertTrue(body.contains("Attached: the last 2 nights' playback events (no web addresses) and iOS reports since"))
+        XCTAssertTrue(body.contains("Last 2 nights: 1 clean."))
+        XCTAssertTrue(body.contains("Sleepulator 1.0 (7) · iOS 26.3 · iPhone"))
+        XCTAssertFalse(body.contains("://"))
+        XCTAssertTrue(body.hasPrefix("\n"))                    // room for the person's own words first
+    }
+
+    func testNothingAttachedYet() {
+        let body = FeedbackMessage.body(nightSummary: "No night recorded yet.", nightFiles: 0, reportsSince: nil,
+                                        version: "1.0", build: "1", iOS: "26", device: "iPhone")
+        XCTAssertTrue(body.contains("Attached: nothing yet."))
+        XCTAssertTrue(body.contains("No night recorded yet."))
+    }
+
+    func testTheShareTextCarriesTheAddress() {
+        XCTAssertTrue(FeedbackMessage.shareText(address: "help@example.com", body: "x").hasPrefix("Please send this to help@example.com"))
+        XCTAssertEqual(FeedbackMessage.shareText(address: nil, body: "x"), "x")
+    }
+}

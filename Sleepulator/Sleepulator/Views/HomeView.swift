@@ -21,6 +21,16 @@ struct HomeView: View {
     /// The night ring's centre (global), measured here and owned by ContentView: Breathe centres
     /// its glow on it, and the veil's glance draws the ember there.
     @Binding var orbCenter: CGPoint?
+    /// The one-time tip card is due (ContentView's ask rules; design D3, D6, D10). It shows in
+    /// the coachmark band, after any first-run or night-ring tip, never over a playing session.
+    var tipCardDue: Bool = false
+    /// "Leave a tip" on the card: ContentView opens the tip sheet.
+    var onLeaveTip: () -> Void = {}
+    /// "No thanks" on the card: spent for good (design D6).
+    var onTipCardDeclined: () -> Void = {}
+    /// Closing Build mix or the timer sheet is a natural break, where a rating may be asked
+    /// (design D12).
+    @Environment(\.naturalBreak) private var naturalBreak
     /// One-time first-run coachmark: points at "Build mix" so a new user discovers that the app
     /// layers noise + binaural + podcasts. Set once the user dismisses it (or builds a mix).
     @AppStorage("hasCompletedFirstRun") private var hasCompletedFirstRun = false
@@ -184,8 +194,14 @@ struct HomeView: View {
 
     /// A first-run or "the timer moved" card is up: the fade waits longer, so it can be read.
     private var tipShowing: Bool {
+        currentTip != nil
+    }
+
+    /// The tip in the coachmark band, if any: one rule for the band and the fade delay above.
+    private var currentTip: CoachmarkContent? {
         CoachmarkContent.current(focusMode: audio.focusMode, hasCompletedFirstRun: hasCompletedFirstRun,
-                                 hasSeenNightRingTip: hasSeenNightRingTip) != nil
+                                 hasSeenNightRingTip: hasSeenNightRingTip,
+                                 tipCardDue: tipCardDue, sessionActive: sessionActive)
     }
 
     private var chromeLift: EdgeInsets {
@@ -594,9 +610,7 @@ struct HomeView: View {
             // and picks a layout that fits it — so it never covers the orb its copy says to tap,
             // nor the row it points at. Inside the chrome stack, so it rides the chrome's fade.
             .overlayPreferenceValue(CoachmarkAnchorKey.self) { anchors in
-                if let tip = CoachmarkContent.current(focusMode: audio.focusMode,
-                                                      hasCompletedFirstRun: hasCompletedFirstRun,
-                                                      hasSeenNightRingTip: hasSeenNightRingTip),
+                if let tip = currentTip,
                    let orb = anchors[.orb], let mixRow = anchors[.mixRow] {
                     GeometryReader { proxy in
                         // Below the night line: the tip talks about the ring and its line, so both
@@ -605,11 +619,15 @@ struct HomeView: View {
                             CoachmarkLayout.room(belowY: proxy[$0].maxY, mixRowTop: proxy[mixRow].minY)
                         } ?? CoachmarkLayout.room(orb: proxy[orb], mixRowTop: proxy[mixRow].minY,
                                                   clearRadius: NightRing.ringSize / 2 + 4)
-                        FirstRunCoachmark(pal: pal, content: tip) {
+                        FirstRunCoachmark(pal: pal, content: tip, dismiss: {
                             withAnimation(.easeInOut(duration: 0.3)) {
-                                if tip == .firstRun { retireFirstRunTip() } else { hasSeenNightRingTip = true }
+                                // Each tip retires its own way: the tip card's "No thanks" spends
+                                // the card, never the night-ring note (eng run 2, Scope #1).
+                                if tip == .firstRun { retireFirstRunTip() }
+                                else if tip == .nightRing { hasSeenNightRingTip = true }
+                                else { onTipCardDeclined() }
                             }
-                        }
+                        }, leaveTip: onLeaveTip)
                         .padding(.horizontal, 28)
                         .frame(width: proxy.size.width, height: room.height, alignment: .bottom)
                         .offset(y: room.top)
@@ -773,6 +791,7 @@ struct HomeView: View {
             let next = afterTimerSheet
             afterTimerSheet = nil
             next?()
+            naturalBreak()
         }) {
             TimerSelectionSheet(audio: audio, isPresented: $showTimerActionSheet, pal: pal,
                                 playAndStart: playAndStartTimer)
@@ -786,6 +805,7 @@ struct HomeView: View {
             let next = afterMixSheet
             afterMixSheet = nil
             next?()
+            naturalBreak()
         }) {
             MixDrawer(audio: audio, mixStore: mixStore, pal: pal, onPickEpisode: {
                 showMix = false
