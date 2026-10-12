@@ -77,7 +77,7 @@ These are in scope without a question: the user asked for a free App Store relea
 | RP-1 rating prompt (owner: user) | No `requestReview` anywhere | **A: Add to 1.0.** Apple's own prompt on the first open after the 3rd clean night (NT-1), through TJ-1's may-ask rule, at most once per app version, never the same day as the tip card; a "Rate Sleepulator" row in Settings | — | approved | D5 answer "Add to 1.0 (recommended)", 2026-10-11; scope: the prompt timing + the Settings row |
 | FB-1 feedback with the log (owner: user) | `SettingsView.swift:415` ShareLink exists; `LogExport` (`Services/Log.swift:42`); manual export at `BackupSupportView.swift:38` | **A: Add to 1.0.** "Send feedback" row in Settings ▸ Backup & support: mail draft to the support address with version, build, iOS, device + last night's playback log attached; share-sheet fallback without Mail; person sees the attachment first | — | approved (attachment superseded by D9: the persisted night trail + MetricKit, not the process log) | D6 answer "Add to 1.0 (recommended)", 2026-10-11; scope: the row + mail/share sheet + a support address |
 | IC-1 app icon (owner: user) | `AppIcon.png` 1024² RGB, white baked into the corners (pixel (40,40) = 254,254,254; (60,60) = navy); EarPod-like earbuds (guideline 5.2.5 risk) | **A: Repair this icon.** Full-bleed re-export (no baked rounding), earbuds removed or clearly generic, iOS 18 dark + tinted variants, checked on a real home screen before the beta; art direction unchanged | — | approved | D7 answer "Repair this icon (recommended)", 2026-10-11; scope: repair of the existing art only |
-| NT-1 what counts as a clean night (owner: code) | Spec review F1/L1/L2: no persisted night signal | **A: Night record.** Opened at a Sleep session's start, closed at its end; clean = played to its timer's end or 3+ h on All night, ended by a person, the timer or an episode end, no AVPlayer rebuild, no failure streak; an unclosed record (app died) isn't clean. Asks come on the first open after a clean night ended, nothing playing, no sheet, no veil. Pure rule, unit-tested; device-only storage | — | approved (round 3: clarified, not changed — live audio only, force-quit closes the record, pauses < 30 min keep the night; asks at a natural break, 09:00–21:00, 2+ h after) | D8 answer "Night record (recommended)", 2026-10-11; scope: the night record + the may-ask timing for TJ-1 and RP-1 |
+| NT-1 what counts as a clean night (owner: code) | Spec review F1/L1/L2: no persisted night signal | **A: Night record.** Opened at a Sleep session's start, closed at its end; clean = played to its timer's end or 3+ h on All night, ended by a person, the timer or an episode end, no AVPlayer rebuild, no failure streak; an unclosed record (app died) isn't clean. Asks come on the first open after a clean night ended, nothing playing, no sheet, no veil. Pure rule, unit-tested; device-only storage | — | approved (round 3: clarified, not changed — live audio only, force-quit closes the record, pauses < 30 min keep the night; asks at a natural break, 09:00–20:00, 2+ h after; design D11/D12) | D8 answer "Night record (recommended)", 2026-10-11; scope: the night record + the may-ask timing for TJ-1 and RP-1 |
 | FB-1 reopened: last night's log after a crash (owner: code) | Spec review F2: `Log.swift:50` current process only | **A: Persist a night trail.** Night key events (start/stop, interruptions, routes, player rebuilds, failures, terminal stop) also written to a small file in App Support, excluded from backup, last 2 nights, ~256 KB cap, off main, never from the render block; "Send feedback" attaches it + MetricKit diagnostics delivered since | — | approved | D9 answer "Persist a night trail (recommended)", 2026-10-11; scope: the trail file + its attachment in FB-1 |
 | LG-1 reopened: add §3P to the gate (owner: user) | Spec review K1: `TESTING.md:658` | **A: Add §3P.** Gating device sections are now §3A, §3B, §3C, §3E and §3P | — | approved | D10 answer "Add §3P to the gate (recommended)", 2026-10-11; scope: adds §3P to LG-1's gate; the rest of LG-1 unchanged |
 | AR-1 podcast content and the age rating (owner: user) | Spec review C3: `ITunesSearchManager.swift:22` no explicit filter; feeds can be pasted | **A: Rate for open podcast access.** The questionnaire says the app plays third-party podcasts that can include mature content; accept the tier Apple computes; no filter, no code | — | approved | D11 answer "Rate for open podcast access (recommended)", 2026-10-11; scope: the B3 age-rating answers |
@@ -308,7 +308,7 @@ Reviewer: one independent subagent, both inputs in full, claims checked against 
 | K4 | "Morning" vs "daytime" | Folded into NT-1's "when may it ask" |
 | L1, L2 | "Clean night" and "daytime" undefined | **Decision NT-1** (D8) |
 | L3 | B1–B5 have no owner or done condition | Repaired: owner + done columns. Open inputs for the user: B2's host and the support address (see "Launch sequence": needed before build 1) |
-| L4 | Card location, its tap, RP-1 repeats | Repaired: the card shows on the tab the app opens to, above the measured mini-player clearance; a tap opens the tip sheet; "Not now" ends it for good. RP-1 asks at most once per app version (Apple's 3-a-year cap still applies) |
+| L4 | Card location, its tap, RP-1 repeats | Repaired (later superseded by design D3/D6/D13): the card shows on the tab the app opens to, above the measured mini-player clearance; a tap opens the tip sheet; "Not now" ends it for good. RP-1 asks at most once per app version (Apple's 3-a-year cap still applies) |
 | L5 | DF-1 cited Debug lines only | Repaired: ledger cites every target's lines |
 | F1 | No clean-night signal exists | **Decision NT-1** (D8) |
 | F2 | FB-1 can't attach last night's log after a 3am death | **Decision FB-1 reopened** (D9) |
@@ -442,7 +442,7 @@ Re-checked: `TESTING.md:142-144` (§3E is "mix + timer"), `AudioDownloader.swift
 | C4 | No done-when for NT-1, the trail, the card, RP-1 | Repaired: "Work items" table |
 | C5 | The card could offer tips that can't be bought | Repaired: the card shows only once products have loaded and `canMakePayments` is true; otherwise it waits, and the one-time ask isn't used up |
 | C6 | An unsuitable first open | Repaired: the ask waits for the next suitable open; it's never used up by an open where it couldn't show |
-| K1 | "First open after a clean night" can be 3am or the next bedtime | Repaired to keep the 2am rule both D4 ("on a daytime open", "never at night") and this plan state: the may-ask rule also requires local time 09:00–21:00 and 2+ hours since the night ended. D4 and D8 both hold |
+| K1 | "First open after a clean night" can be 3am or the next bedtime | Repaired to keep the 2am rule both D4 ("on a daytime open", "never at night") and this plan state: the may-ask rule also requires local time 09:00–21:00 (moved to 20:00 by design D11) and 2+ hours since the night ended. D4 and D8 both hold |
 | K2 | Stale text (B1–B5, "six above", "0I", FB-1's attachment) | Repaired |
 | K3 | Round-1 counts | Corrected: 19 rows; 11 repaired, 7 settled by decisions D8–D11 (C3, K1, K4, L1, L2, F1, F2), 1 kept with rationale (K2) |
 | L1 | Ledger "owner" ≠ implementer | Repaired: ledger owner = who decides; "Work items" names the implementer and done-when |
@@ -463,7 +463,7 @@ Re-checked `SleepTimerService.swift:337-342` (the reconcile fires the terminal s
 | 4 | Round-2's NT-1 repair contradicted D8 and let a 3am death count | **Reverted to D8's approved rule**, plus two clarifications that don't change it: a force-quit closes the record as "ended by a person"; pauses under 30 min keep the night. The sub-30-minute nap limit (round 2) is dropped: never approved |
 | 5 | The gate's build defined two ways | Repaired: one build rule in "Work items" |
 | 6 | §T isn't a submit condition | Repaired: in the one build rule and the submit line |
-| 7 | RP-1 "on the first open" isn't a natural break | Repaired: asks at a natural break (closing a sheet, leaving a tab), never at launch (Apple HIG, ratings and reviews) |
+| 7 | RP-1 "on the first open" isn't a natural break | Repaired (narrowed by design D12 to closing a sheet or leaving Settings): asks at a natural break (closing a sheet, leaving a tab), never at launch (Apple HIG, ratings and reviews) |
 | 8 | MetricKit sends no diagnostic for a background kill by iOS | Repaired: FB-1 also attaches the metric payloads delivered since the night started |
 | 9 | The window + 2 h wait + defer may mean the asks rarely fire | Kept, with the beta measuring it: the check-in asks whether testers saw the tip card. Reach is unknown until then [estimated: low for bedtime-only users]; widening the window is a later call |
 
@@ -501,7 +501,7 @@ Baseline (the ask + submission): B1 tip jar (StoreKit 2 consumables, with its ed
 Added or settled by decision:
 - LG-1 (D1, D10, D12): TestFlight beta first. Device pass §3A, §3B, §3C, §3E (incl. a night on All night with podcasts) and §3P logged on the submitted build; 10–20 external testers for ~2 weeks; submit after 7 days with no app-caused stop and ≥ 30 reported tester-nights from ≥ 8 testers (one-line morning check-ins outside the app).
 - DF-1 (D2): iPhone only, portrait only, on the app and widget targets; opt out of Mac and Vision Pro; smoke-test iPad compatibility mode.
-- NT-1 (D8, with round-3 clarifications): a persisted night record. Clean = sound actually played (live ticks with audio, never a deadline reconciled on the morning foreground, `SleepTimerService.swift:337-342`) to its timer's end, or 3+ h on All night; ended by a person, the timer or an episode end; no AVPlayer rebuild and no failure streak across the whole night; a record left open (the app died) isn't clean. A force-quit while playing closes the record as "ended by a person" (the terminate notification a running background-audio app receives; device-checked in §T). Pauses under 30 min keep the night (UntimedNight's rule). Asks come at a natural break (the person closes a sheet or leaves a tab, never at launch) during a suitable open: nothing playing, no sheet, no veil, 09:00–21:00 local, 2+ h after the night ended; an unsuitable open defers the ask, never uses it up.
+- NT-1 (D8, with round-3 clarifications): a persisted night record. Clean = sound actually played (live ticks with audio, never a deadline reconciled on the morning foreground, `SleepTimerService.swift:337-342`) to its timer's end, or 3+ h on All night; ended by a person, the timer or an episode end; no AVPlayer rebuild and no failure streak across the whole night; a record left open (the app died) isn't clean. A force-quit while playing closes the record as "ended by a person" (the terminate notification a running background-audio app receives; device-checked in §T). Pauses under 30 min keep the night (UntimedNight's rule). Asks come at a natural break (right after a sheet closes or the person leaves Settings, never at launch or on a tab switch; design D12) during a suitable open: nothing playing, no sheet, no veil, 09:00–20:00 local (design D11), 2+ h after the night ended; an unsuitable open defers the ask, never uses it up.
 - TJ-1 (D4): tip jar in Settings ▸ Backup & support + one card after the 5th clean night; never after a tip; never twice.
 - RP-1 (D5): Apple's rating prompt after the 3rd clean night, at most once per version, never the tip card's day + a "Rate Sleepulator" row.
 - FB-1 (D6, D9): "Send feedback" with version/device + the persisted night trail + MetricKit diagnostics.
@@ -670,7 +670,7 @@ Mechanism: every event carries the night id captured when it was raised. The rec
 | Tip button | double tap | Yes | Disabled while purchasing |
 | Tip button | leave Settings mid-purchase | Yes | `Transaction.updates` finishes it; thanks on next open |
 | Tip card | tap, then cancel the purchase | Yes | The card counts as used (D4: never twice) |
-| Tip card | VoiceOver on | Yes | A labeled container with a reachable "Not now" (Section 11) |
+| Tip card | VoiceOver on | Yes | Separate stops: text, "Leave a tip", "No thanks" (design D16) |
 | Rate row | before the App Store app ID exists | **Gap → repaired** | The row needs the app's numeric App Store ID (`…/id<ID>?action=write-review`), known only after the App Store Connect record is created. Added to the open inputs |
 | Send feedback | no night recorded yet | Yes | The mail says "no night recorded yet" and attaches what exists |
 | Send feedback | tapped twice | Yes | One sheet at a time |
@@ -697,7 +697,7 @@ Mechanism: every event carries the night id captured when it was raised. The rec
  TipStore with StoreKit (TS-1)     | unit (SKTest)| success → thanked             | failure / cancel / interrupted        | Ask to Buy pending → approved later via updates
  NightTrail                        | unit        | append + read newest-first    | write fails → dropped                 | cap + rotate; partial last line; no "://"
  FeedbackComposer attachments      | unit        | trail + payloads + summary    | no Mail → share list                  | over cap → newest-first + note
- Card on Home (TS-2)               | UI (XCUITest)| card shows; controls hittable | "Not now" → gone (waitForNonExistence)| mini-player shown; state restored after
+ Card on Home (TS-2)               | UI (XCUITest)| card shows; controls hittable | "No thanks" → gone (waitForNonExistence)| mini-player shown; state restored after
  Device §T                         | device      | sandbox tip; dev-build rating | killed night → open record + trail    | force-quit closes record; locked-phone writes
 ```
 
@@ -829,7 +829,7 @@ Retrospective (SELECTIVE): the accepted cherry-picks hold up: FB-1 and NT-1 turn
 ```
  night 1–2: nothing new ─> night 3 ends clean ─> next suitable daytime open ─> natural break ─> Apple's rating prompt (maybe)
  night 5 ends clean ─> next suitable daytime open (not the rating's day) ─> Tip card on the opening tab
-        ├─ "Not now" ─> gone for good
+        ├─ "No thanks" ─> gone for good (design D13)
         └─ tap ─> tip sheet ─> pick a tip ─> (cancel → card used) / (pending → "Waiting for approval") / (success → thank-you)
  any time: Settings ▸ Backup & support ─> Support Sleepulator (tips · Rate · Send feedback)
 ```
@@ -837,7 +837,7 @@ Retrospective (SELECTIVE): the accepted cherry-picks hold up: FB-1 and NT-1 turn
 | Feature | Loading | Empty | Error | Success | Partial |
 |---|---|---|---|---|---|
 | Tip rows | "Loading…" row, never forever | "Tips aren't available right now" | "That didn't go through" | thank-you line | "Waiting for approval" (Ask to Buy) |
-| Tip card | not shown until products load | not shown | card stays, sheet shows the error | card gone, thank-you | card gone, pending note in Settings |
+| Tip card | not shown until products load | not shown | (superseded by design Pass 2: errors live in the sheet) | card gone, thank-you | card gone, pending note in Settings |
 | Send feedback | gathering (progress in the row) | "no night recorded yet" in the mail | share sheet if no Mail | mail sent (system) | attachments trimmed + a note |
 | Rate row | — | — | opens the App Store page | — | — |
 
@@ -850,7 +850,7 @@ Recommendation: run `/plan-design-review` on the card and the Support group befo
 |---|---|---|
 | DF-1 build settings | code | Device family 1 and portrait-only on the app and widget, Debug and Release; HomeLayoutUITests pass |
 | AM-1 hide | code | The Apple Music entry in the Focus mixer (`MixPanel.swift:130-137`) is gone in 1.0; nothing else changes |
-| NT-1 night record + may-ask rule | code | Pure, unit-tested: a night's classification (threshold reached on live audio, the reconcile-on-foreground path never counting, pauses under 30 min, rebuild, failure streak, app death anywhere in the night, force-quit closing the record) and the may-ask rule (nothing playing, no sheet, no veil, 09:00–21:00 local, 2+ h since the night ended, a natural break, waits rather than lapses). Device: one night killed mid-sleep leaves an unclosed record and a trail up to the kill (TESTING.md §T) |
+| NT-1 night record + may-ask rule | code | Pure, unit-tested: a night's classification (threshold reached on live audio, the reconcile-on-foreground path never counting, pauses under 30 min, rebuild, failure streak, app death anywhere in the night, force-quit closing the record) and the may-ask rule (nothing playing, no sheet, no veil, 09:00–20:00 local, 2+ h since the night ended, a natural break after a sheet closes or Settings is left, waits rather than lapses; design D11/D12). Device: one night killed mid-sleep leaves an unclosed record and a trail up to the kill (TESTING.md §T) |
 | FB-1 night trail + Send feedback | code (support address from user) | Trail capped and pruned, never writes a URL (unit-tested: no `://` in output); on device, "Send feedback" after a killed night attaches that night's trail plus any MetricKit diagnostic and metric payloads delivered since the night started (a background kill by iOS shows up only as exit counts in the metric payload) (§T) |
 | TJ-1 tip jar + card | code (products from user) | B1's list; the card's rule is unit-tested (5th clean night, products loaded, never after a tip on this install, never twice; per install by design, since the flags are device-only); a sandbox purchase on device (§T) |
 | TS-1 / TS-2 tests | code | StoreKitTest file covers the six purchase outcomes; the card's XCUITest passes on both CI legs and restores persisted state |
@@ -1045,7 +1045,7 @@ Premise table:
 
 unverified=7
 
-Numbers: 1 device-pass row [measured: TESTING.md:660-664]; pixel values [measured: AppIcon.png]; 3 h threshold, 3rd/5th clean night [user-approved: D8, D4, D5]; 10–20 testers, 7 days, ≥ 30 nights, ≥ 8 testers [user-approved: D1, D12]; 256 KB, 2 nights, ~30 records, 09:00–21:00, 2 h [estimated]; effort and calendar figures [estimated]; ~1 day Beta App Review [estimated].
+Numbers: 1 device-pass row [measured: TESTING.md:660-664]; pixel values [measured: AppIcon.png]; 3 h threshold, 3rd/5th clean night [user-approved: D8, D4, D5]; 10–20 testers, 7 days, ≥ 30 nights, ≥ 8 testers [user-approved: D1, D12]; 256 KB, 2 nights, ~30 records, 09:00–21:00 (now 20:00, design D11), 2 h [estimated]; effort and calendar figures [estimated]; ~1 day Beta App Review [estimated].
 
 REALITY: premise-table finding 18 premises, unverified=7 (Apple-policy claims from docs knowledge or secondary sources) docs/designs/APP-STORE-LAUNCH-1.0.md:1
 REALITY: already-done pass git log origin/main --since=2026-09-01 shows no StoreKit, tip, privacy-policy or iPad work; origin/main = 0843f65 TESTING.md:660
@@ -1161,7 +1161,7 @@ Search: [Layer 1] start `Transaction.updates` at app launch, verify, finish, and
 Findings:
 1. `[P1] (confidence: 8/10) Sleepulator/Sleepulator/Services/AudioEngine.swift:922`: the CEO plan files late events "by the night id captured when it was raised". But the code that raises them knows nothing about nights. Quote: `func handlePodcastFailure(episodeId: String?) {` and `private func rebuildPlayer(at position: Double?) {` (`PodcastPlayer.swift:868`). Passing a night id down couples `PodcastPlayer` to the journal. **EV-1, approved in eng D2: file by occurrence time.**
 2. `[P2] (confidence: 8/10) Sleepulator/Sleepulator/Services/SleepTimerService.swift:175`: the journal needs to know why a night ended, but the terminal stop only logs it. Quote: `private func fireTerminalStop(_ reason: String, endedAt: Date? = nil) {`. The reconcile path passes `endedAt` (`:341-342`). Remedy: one `onTerminalStop: ((reason, endedAt) -> Void)?` closure next to `stopAllFn`, set by AudioEngine. That's needed plumbing for D8's "ended by the timer", so D8 covers it. "Played to its timer's end" compares live-audio time with the timer's length, with a tolerance for the fade. A deadline reconciled on the morning foreground adds no live time.
-3. `[P2] (confidence: 9/10) Sleepulator/Sleepulator/Views/ContentView.swift:6`: `@State private var selectedTab = 0`. A cold launch always opens Home, so the card lives in `HomeView` above `homeClearance`. On a warm return to another tab the card waits (CEO Section 4/C6: an ask is deferred, never used up).
+3. `[P2] (confidence: 9/10) Sleepulator/Sleepulator/Views/ContentView.swift:6`: `@State private var selectedTab = 0`. A cold launch always opens Home, so the card lives in `HomeView`'s coachmark band (design D3; an earlier draft said above `homeClearance`). On a warm return to another tab the card waits (CEO Section 4/C6: an ask is deferred, never used up).
 4. `[P3] (confidence: 8/10) plan Section 2`: a hard kill (not a force-quit) loses only writes still in the process's buffer. `FileHandle.write` calls are unbuffered syscalls, so lines already written survive app death. Power loss isn't a concern for this (a dead phone is a not-clean night anyway).
 
 Dispositions (Section 1): #1 accepted (EV-1, D2 → A); #2 accepted inside D8 (the `onTerminalStop` closure is needed plumbing for "ended by the timer"); #3 accepted inside TJ-1/C6 (the card is on Home, deferred elsewhere); #4 noted, no change.
@@ -1362,7 +1362,7 @@ Effort ratios assumed: features ~30x, tests ~50x, plumbing ~20x (human ÷ CC).
   - Surfaced by: CEO B1/D14; eng Scope #2/#3; Section 2 #5
   - Files: new `Sleepulator/Sleepulator/Services/TipStore.swift`, `Sleepulator/SleepulatorTests/TipStoreTests.swift`, `Tips.storekit`; `Sleepulator/Sleepulator/SleepulatorApp.swift`; `Sleepulator/setup_tests.rb` run
   - Verify: TipStoreTests green on iOS 26.2 and 26.5; sandbox tip on device (§T), a second one on iOS 27 is a new transaction
-- [ ] **E4 (P1, human: ~2.5d / CC: ~1.5h)** — asks + Support UI — `SessionGuards` ask rules; `TipJar.swift` (Support rows, card, mail/share sheet with a 2 MB cap); card overlay in `HomeView`; `requestReview`; Rate row; card test in HomeLayoutUITests
+- [ ] **E4 (P1, human: ~2.5d / CC: ~1.5h)** — asks + Support UI — `SessionGuards` ask rules; `TipJar.swift` (Support rows, card, mail/share sheet with a 2 MB cap); card in `HomeView`'s coachmark band; `requestReview`; Rate row; card test in HomeLayoutUITests. Build to the design review's decisions (design D3–D18, "Design review" below)
   - Surfaced by: CEO D4/D5/D6/D15; eng Section 1 #3; Section 2 #4; Section 4 #2
   - Files: `Sleepulator/Sleepulator/Views/Home/SessionGuards.swift`, new `Sleepulator/Sleepulator/Views/TipJar.swift`, `Sleepulator/Sleepulator/Views/HomeView.swift`, `Sleepulator/Sleepulator/Views/BackupSupportView.swift`, `Sleepulator/SleepulatorTests/AudioStateTests.swift`, `Sleepulator/SleepulatorUITests/HomeLayoutUITests.swift`
   - Verify: SessionGuardsTests additions; the card UI test on both legs; dev build shows the rating prompt
@@ -1424,6 +1424,293 @@ None.
 #### Suppressed findings
 None (no finding scored below 5).
 
+## Design review (`/plan-design-review`, 2026-10-11)
+
+Target: the tip card, the tip sheet, the Support section in Settings ▸ Backup & support, and the rating prompt's timing (CEO TJ-1, RP-1, FB-1; eng E4). Focus: all 7 dimensions (design D1). Mockups: none. The gstack designer has no OpenAI API key (0 of 3 images saved, none charged), so this review is text-only. Independent read: one Claude design reviewer (design D2); Codex disabled by config.
+No DESIGN.md exists. Calibrated against `Views/Theme.swift` (Palette, `UI` grid, `cardRadius` 18, copper, `actionFill`) and CLAUDE.md's UI conventions (the 2am rules). Design questions are numbered D1–D16 for this review.
+
+Step 0: **5/10.** The intent is right (2am rules, a state table, 44 pt targets), but the plan has no copy, no tip-sheet layout, and puts the card in the wrong place.
+
+### Pass 1: Information architecture — 4/10 → 9/10
+
+Decisions (one question each):
+- **1A (design D3): the card lives in the coachmark band.** It renders in `CoachmarkLayout`'s band between the orb and Build mix (`HomeView.swift:596-616`) and uses the same full → brief → hidden ladder (`ViewThatFits`, `FirstRunCoachmark.swift:59-71`). A first-run or night-ring tip goes first. The card counts as shown only once it has rendered with a height above zero. With no room, the ask stays pending. This replaces "above the measured mini-player clearance" (CEO L4).
+- **2A (design D4): split help and giving.** Backup & support, in order:
+  1. **Backup** (unchanged).
+  2. **Troubleshooting**: Send feedback first, then Reports from iOS, then Export the playback log.
+  3. **Support Sleepulator** (new, last): the tip rows, then Rate Sleepulator. The build footer moves to the end of this section.
+- **3A (design D5): one shared tip list.** One `TipRows` view serves both the sheet and Settings.
+  - **Sheet:** medium detent, a Close button top right, a one-line header.
+  - **Rows:** three tips, tier name left and StoreKit's `displayPrice` right, in `SettingActionRow`'s tones.
+  - **Footer:** a dim line, "Tips unlock nothing. Everything is already free."
+  - **On success:** the rows give way to an in-place thank-you; the sheet stays open until it's closed.
+
+```
+ HOME (Sleep, at rest, suitable open)            TIP SHEET (medium detent)              SETTINGS ▸ BACKUP & SUPPORT
+ ┌──────────────────────────────┐                ┌──────────────────────────────┐       Backup
+ │ night line                   │                │ [header line]          Close │       Troubleshooting
+ │            ( orb )           │                │ ───────────────────────────  │         Send feedback        ← first
+ │          ring + handle       │                │ [tier 1]           $x.xx  ›  │         Reports from iOS
+ │ ┌──────────────────────────┐ │  tap card      │ [tier 2]           $x.xx  ›  │         Export the playback log
+ │ │ TIP CARD (coachmark band)│ │ ─────────────> │ [tier 3]           $x.xx  ›  │       Support Sleepulator   ← last
+ │ │ title · line · 2 actions │ │                │ ───────────────────────────  │         [TipRows, same as sheet]
+ │ └──────────────────────────┘ │                │ Tips unlock nothing. …       │         Rate Sleepulator
+ │ Build mix                    │                └──────────────────────────────┘         Sleepulator 1.0 (n) · Built …
+ │ [mini-player when shown]     │                   success → thank-you replaces rows
+ │ Home · Podcasts · Settings   │
+ └──────────────────────────────┘
+ Seen first → third: the orb (unchanged), the card's title, its primary action.
+```
+
+Re-rated 9/10: the structure and order are set. The words go to Pass 4.
+
+### Pass 2: Interaction states — 5/10 → 9/10
+
+Decisions:
+- **4A (design D6): the card is spent only by an answer.** That means its decline button, or opening the tip sheet and closing it any way (tip, cancel, swipe down, Close). Ignored, it stays pending and returns on the next suitable open. It hides while something plays, a sheet is up or the veil is down. A failed purchase shows Try again in the sheet, never on the card. Rendering (1A) only means the card was seen; it doesn't spend it. Replaces the CEO Section 11 cell "card stays, sheet shows the error" and the Section 4 row "cancel → card used".
+- **5A (design D7): "Waiting for approval" lasts only for the current visit.** It shows in the sheet and the rows until the person leaves that screen, and nothing is stored. A later approval still finishes and thanks on the next visit.
+- **6A (design D8): the Rate row hides until it works.** It renders only when the build has an App Store ID and isn't a TestFlight build. Otherwise it's not in the hierarchy. It's checked once after release, on the App Store build.
+- **7A (design D9): the feedback message explains itself.**
+  - The mail body opens with an empty space for the person's words, then a dim summary: "Attached: the last 2 nights' playback events (no web addresses) and iOS reports since <date>." Then version, build, iOS and device.
+  - The share-sheet fallback puts the support address in the shared text, and the row offers "Copy address".
+
+```
+  FEATURE          | LOADING                         | EMPTY / UNAVAILABLE                      | ERROR                                   | SUCCESS                                  | PARTIAL
+  -----------------|---------------------------------|------------------------------------------|-----------------------------------------|------------------------------------------|-------------------------------------------
+  Tip card (Home)  | not rendered until products load | not rendered (no products / can't pay /  | n/a (errors live in the sheet)          | the sheet's thank-you; card spent        | pending: hidden while playing, a sheet or
+                   |                                 | no room in the band); ask stays pending  |                                         |                                          | the veil; returns on the next suitable open
+  Tip sheet        | rows show a quiet "Loading…"    | "Tips aren't available right now." + Close| "That didn't go through." + Try again   | rows give way to the thank-you; stays    | "Waiting for approval" for this visit only
+  TipRows (Settings)| same as the sheet              | the same line, no rows                    | same as the sheet                       | thank-you in place, then a lasting line under the header (15A) | same as the sheet
+  Rate row         | —                               | not rendered (no App ID / TestFlight)     | —                                       | opens the App Store's write-review page  | —
+  Send feedback    | progress in the row             | "No night recorded yet." in the summary   | no Mail → share sheet with the address  | Mail's own sent state                    | attachments trimmed at 2 MB + a note naming what's left out
+```
+
+Re-rated 9/10: every surface has every state, in words a person sees. The exact copy goes to Pass 4.
+
+### Pass 3: User journey — 4/10 → 9/10
+
+Decisions:
+- **8A (design D10): the rating prompt may appear in either mode; the card only on Sleep Home.** Apple's rating prompt may come in Sleep or Focus. The tip card shows only on Sleep Home, in the coachmark band, and otherwise waits.
+- **9A (design D11): the ask window is 09:00–20:00 local.** It was 21:00 (the CEO round-2 repair). It still requires 2+ hours since the night ended, and an ask is deferred, never lost.
+- **10A (design D12): the rating prompt's natural break.** It may appear only right after a sheet closes (Build mix, Now Playing, the timer sheet, the tip sheet) or the person leaves Settings, with nothing playing and inside the window. Never on launch or a tab switch. This replaces the CEO round-3 "closing a sheet or leaving a tab".
+- **11A (design D13): the decline button reads "No thanks".** One dim line under the buttons says "Tips stay in Settings ▸ Backup & support." The brief layout drops that line first.
+
+Storyboard:
+```
+  STEP | USER DOES                                        | USER FEELS                       | PLAN SPECIFIES?
+  -----|--------------------------------------------------|----------------------------------|------------------------------------------
+  1    | Nights 1–2: sleeps with it                        | it just works; nothing asks      | yes: no asks before night 3 (RP-1)
+  2    | Night 3 ends clean; the next day, closes Build mix | "this is a good app"             | yes: rating prompt at a natural break (10A),
+       | or leaves Settings between 09:00 and 20:00        |                                  | either mode (8A), once per version
+  3    | Nights 4–5                                        | habit forming                    | yes: still nothing visible
+  4    | After the 5th clean night, opens Sleep Home by day | noticed, not chased              | yes: the card in the coachmark band (1A);
+       |                                                  |                                  | copy carries "why now" (Pass 4)
+  5a   | Taps "Leave a tip" → sheet → picks a tip          | generous, appreciated            | yes: in-place thank-you; sheet stays (3A)
+  5b   | Taps "No thanks"                                  | respected; door left open        | yes: card spent; line points to Settings (11A)
+  5c   | Ignores it, starts a session                      | undisturbed                      | yes: card hides, returns next suitable open (4A)
+  6    | Months later, opens Settings ▸ Backup & support    | knows where giving lives         | yes: Support section last (2A); a quiet
+       |                                                  |                                  | lasting thank-you if they tipped (15A)
+```
+Time horizons:
+- **5 seconds:** the card reads as part of Home, not as an ad.
+- **5 minutes:** one tap from the card to a tip, one tap back.
+- **5 years:** the app asked once, and kindly.
+
+Re-rated 9/10: the arc holds end to end. The card's exact words go to Pass 4.
+
+### Pass 4: Specificity and AI slop — 3/10 → 9/10
+
+Classification: the Settings rows and the sheet are app UI; the card is one ask inside that surface.
+- **Hard rejections:** none.
+- **Litmus:**
+  - Brand unmistakable: yes, via the app's own voice and palette.
+  - One visual anchor: yes, the orb stays first.
+  - Scannable by headings: yes, after 2A.
+  - One job per section: yes, after 2A.
+  - Card necessary: yes, the card is the interaction.
+  - Motion improves hierarchy: n/a, a fade only (Pass 6).
+  - Premium without decorative shadows: yes, the coachmark's shadow has a real offset (y 6).
+- **Slop blacklist:** none of the 11 patterns apply.
+
+Decision **12A (design D14): the copy deck is plain and warm.**
+
+| Surface | Words |
+|---|---|
+| Card title | Sleeping well? |
+| Card body | Sleepulator is free, with no ads or account. If it's helping, a tip keeps it going. |
+| Card actions | Leave a tip · No thanks |
+| Card line (11A) | Tips stay in Settings ▸ Backup & support. |
+| Brief card | the title and both actions; the body and the line drop first |
+| Sheet header | Leave a tip |
+| Tiers | Small tip · Kind tip · Generous tip (prices from StoreKit's `displayPrice`) |
+| Sheet footer | Tips unlock nothing. Everything is already free. |
+| Thank-you | Thank you. Sleep well. |
+| Unavailable | Tips aren't available right now. |
+| Failed | That didn't go through. · Try again |
+| Pending (5A) | Waiting for approval. |
+| Section header | Support Sleepulator |
+| Send feedback | title "Send feedback", note "Email with the last 2 nights' playback log." |
+| Rate | title "Rate Sleepulator", note "On the App Store." |
+| No night yet (7A) | No night recorded yet. |
+
+Pass 4 had one issue, the copy, and it's settled. Re-rated 9/10; component styling goes to Pass 5.
+
+### Pass 5: Design-system alignment — 6/10 → 9/10
+
+There is no DESIGN.md, so `Theme.swift` and CLAUDE.md's UI conventions are the design system. Recommendation: run `/design-consultation` sometime to write DESIGN.md (NOT in scope here).
+
+Decision **13A (design D15): Ember buttons for both cards in the slot.**
+- The tip card uses `EmberButtonStyle(pal:)` for "Leave a tip" and `EmberButtonStyle(pal:, quiet: true)` for "No thanks".
+- The first-run and night-ring tips' "Got it" moves from the solid amber capsule (`FirstRunCoachmark.swift:143-145`) to `EmberButtonStyle`, so the slot has one button style and no solid accent slab.
+
+Token map:
+
+| Element | Component / token |
+|---|---|
+| Card surface | `CoachmarkCard` (`pal.bg` at 0.92, the brief card at 0.97; `UI.cardRadius` 18; `pal.accent` stroke at 0.3, 0.5 pt; shadow black 0.4, radius 16, y 6) |
+| Card title | `.system(.subheadline, design: .rounded).weight(.semibold)`, `pal.text` |
+| Card body, line | `.caption`, `pal.dim` |
+| Card icon | SF Symbol `moon.stars`, `pal.accent`, in the coachmark's icon spot (16A) |
+| Spacing | `UI.lg` padding (`UI.md` in the brief card); 10 pt stack spacing as in the coachmark |
+| Sheet and Settings rows | `SettingActionRow` / `SettingLabel` tones; prices in `pal.dim`, tabular figures |
+| Palette | `Palette(focusMode: false)` for the card (Sleep only, 8A); `Palette(focusMode:)` in the sheet and Settings |
+| Buttons | `EmberButtonStyle` (primary), `quiet: true` (secondary); 44 pt min height built in |
+
+Re-rated 9/10: every element maps to an existing token or component (the icon was settled in Pass 7, 16A).
+
+### Pass 6: Responsive and accessibility — 5/10 → 9/10
+
+Decision **14A (design D16): separate VoiceOver stops on the tip card.**
+- **Grouping:** the card's container uses `.contain`, not the coachmark's `.combine` (`FirstRunCoachmark.swift:170`). VoiceOver reads the title, body and dim line as one stop, then "Leave a tip, button", then "No thanks, button". The first-run tip keeps `.combine`, since it has one button.
+- **Motion:** the card appears with a fade only, no slide (Reduce Motion is honored).
+- **Veil:** like the rest of Home, the card is hidden from accessibility under the veil. It can't show then anyway; see 4A.
+
+Viewports. iPhone portrait only (CEO D2):
+
+| Phone / text size | Card | Sheet | Settings rows |
+|---|---|---|---|
+| Standard and Pro Max, default text | full card: title, body, line, two buttons | medium detent | as `SettingActionRow` |
+| SE-class, or large text | brief card: title + both buttons (body and line drop) | the large detent if the rows don't fit the medium one | notes wrap |
+| No room in the band (largest text on SE) | not rendered; the ask stays pending (1A) | — | — |
+
+Contrast:
+- `pal.dim` (#B89975) on `pal.bg` (#120D09) is about 7.5:1 [estimated from the sRGB values], and `pal.text` on `pal.bg` is higher.
+- Captions are 12 pt at default size but scale with Dynamic Type, as the coachmark's do. That's the iOS convention for secondary text; it isn't body copy.
+- Touch targets are 44 pt minimum through `EmberButtonStyle` and list rows.
+
+Re-rated 9/10: the remaining 1 is on-device verification of the brief ladder at the largest text (TESTING.md §T).
+
+### Pass 7: Unresolved design decisions — 2 resolved, 0 deferred
+
+- **15A (design D17): a quiet lasting thank-you.** After a verified tip, Settings shows "Thank you for supporting Sleepulator." in `pal.dim` under the Support header, from then on, on this phone. The tip rows stay available. It's stored as the device-only "tipped" flag that also keeps the card from showing again (never backed up).
+- **16A (design D18): the card icon is `moon.stars`** (SF Symbol) in `pal.accent`, in the coachmark's icon spot.
+
+```
+  DECISION NEEDED                         | IF DEFERRED, WHAT HAPPENS
+  ----------------------------------------|----------------------------------------------
+  (none left)                             | —
+```
+Checked and not raised:
+- **Tier prices** are the user's call in App Store Connect (CEO B1).
+- **Mail subject:** implementation detail; use "Sleepulator feedback (version, build)".
+- **Localization:** not in 1.0 (CEO "candidates not raised").
+
+### Design outputs
+
+#### Outside voice (design)
+CLAUDE SUBAGENT (design completeness), single model, in-host; Codex disabled by `codex_reviews`. It found 11 issues: 2 critical, 5 high, 4 medium.
+
+| # | Finding | Disposition |
+|---|---|---|
+| 1 | Card position undefined, may not fit | Fixed: 1A (D3) |
+| 2 | What spends the card | Fixed: 4A (D6) |
+| 3 | "Not now" breaks a promise | Fixed: 11A (D13) |
+| 4 | No copy | Fixed: 12A (D14) |
+| 5 | Tip sheet unspecified | Fixed: 3A (D5) |
+| 6 | Pending can stick forever | Fixed: 5A (D7) |
+| 7 | Settings hierarchy | Fixed: 2A (D4) |
+| 8 | Timing (21:00, tab switch, Focus) | Fixed: 9A (D11), 10A (D12), 8A (D10) |
+| 9 | `.combine` merges buttons; solid amber | Fixed: 14A (D16), 13A (D15) |
+| 10 | Rate / feedback states | Fixed: 6A (D8), 7A (D9) |
+| 11 | Arc gap | Fixed: the card copy carries "why now" (12A) |
+
+Litmus scorecard (Claude only, Codex disabled): brand unmistakable YES · one visual anchor YES (the orb) · scannable YES after 2A · one job per section YES after 2A · cards necessary YES · motion n/a (fade only) · premium without decorative shadows YES. Hard rejections: none.
+
+#### NOT in scope (design)
+- **DESIGN.md:** not written here. Run `/design-consultation` when convenient; this review calibrated against `Theme.swift` and CLAUDE.md.
+- **Mockups:** none. The gstack designer has no OpenAI API key. Run `~/.claude/skills/gstack/design/dist/design setup` to enable them, then `/design-review` on device after E4.
+- **A tip card on Focus Home:** not in 1.0 (8A).
+- **The first-run tip's `.combine`:** unchanged; it has one button (14A).
+
+#### What already exists (design)
+Reused:
+- `FirstRunCoachmark` / `CoachmarkCard` / `CoachmarkLayout` (the slot, the surface and the fit ladder)
+- `SettingActionRow` / `SettingLabel` (rows)
+- `EmberButtonStyle` (buttons)
+- `Palette` and the `UI` grid (tokens)
+- CLAUDE.md's "hidden means not rendered" and 2am rules
+
+New: `TipRows` (shared by the sheet and Settings) and the card content.
+
+#### TODOS.md updates
+None proposed: the repo doesn't use TODOS.md, and no design debt was deferred.
+
+#### Approval reconciliation
+Each design fix has its own answer: D3 (1A), D4 (2A), D5 (3A), D6 (4A), D7 (5A), D8 (6A), D9 (7A), D10 (8A), D11 (9A), D12 (10A), D13 (11A), D14 (12A), D15 (13A), D16 (14A), D17 (15A), D18 (16A). D1 (focus) and D2 (outside voice) were routing and approve nothing. Decisions made: 16. Pending: none.
+
+### Implementation Tasks (design)
+Synthesized from this review's findings. These refine eng task E4 and add two small pieces. Ratios assumed: features ~30x, tests ~50x.
+
+- [ ] **DT1 (P1, human: ~4h / CC: ~15min)** — tip card — Render the card in the coachmark band with the full → brief → hidden ladder, after any first-run or night-ring tip, and spend it only on an answer
+  - Surfaced by: Pass 1 (1A), Pass 2 (4A), Pass 6 (14A)
+  - Files: `Sleepulator/Sleepulator/Views/Home/FirstRunCoachmark.swift`, `Sleepulator/Sleepulator/Views/HomeView.swift`, new `Sleepulator/Sleepulator/Views/TipJar.swift`
+  - Verify: TS-2's UI test also asserts the card is in the band (between the orb and Build mix) and has two separate VoiceOver stops; SE simulator at the largest text shows the brief card or nothing
+- [ ] **DT2 (P1, human: ~3h / CC: ~15min)** — `TipRows` — One view for the sheet (medium detent, Close, footer, in-place thank-you) and Settings, with every Pass 2 state and the 12A copy
+  - Surfaced by: Pass 1 (3A), Pass 2 (5A), Pass 4 (12A), Pass 7 (15A)
+  - Files: new `Sleepulator/Sleepulator/Views/TipJar.swift`
+  - Verify: TS-1 states map to the copy; a sandbox tip shows the in-place thank-you and then the lasting Settings line
+- [ ] **DT3 (P1, human: ~2h / CC: ~10min)** — Backup & support page — Reorder per 2A, add Send feedback to Troubleshooting first with the 7A message, Rate row only when it works (6A)
+  - Surfaced by: Pass 1 (2A), Pass 2 (6A, 7A)
+  - Files: `Sleepulator/Sleepulator/Views/BackupSupportView.swift`
+  - Verify: in TestFlight, no Rate row; the share fallback includes the support address
+- [ ] **DT4 (P1, human: ~1h / CC: ~10min)** — ask rules — 09:00–20:00 window, the natural break after a sheet closes or Settings is left, rating in either mode, card on Sleep only
+  - Surfaced by: Pass 3 (8A, 9A, 10A)
+  - Files: `Sleepulator/Sleepulator/Views/Home/SessionGuards.swift`, `Sleepulator/SleepulatorTests/AudioStateTests.swift`
+  - Verify: SessionGuardsTests cover 19:59/20:00, a tab switch (no ask), a sheet close (ask), Focus (rating yes, card no)
+- [ ] **DT5 (P2, human: ~30min / CC: ~5min)** — coachmark — "Got it" moves to `EmberButtonStyle`
+  - Surfaced by: Pass 5 (13A)
+  - Files: `Sleepulator/Sleepulator/Views/Home/FirstRunCoachmark.swift`
+  - Verify: HomeLayoutUITests unchanged and green; no solid amber capsule on Home
+
+#### Completion Summary (design)
+```
+  +====================================================================+
+  |         DESIGN PLAN REVIEW — COMPLETION SUMMARY                    |
+  +====================================================================+
+  | System Audit         | no DESIGN.md; UI scope: card, sheet, Support |
+  | Step 0               | 5/10; all 7 dimensions                      |
+  | Pass 1  (Info Arch)  | 4/10 → 9/10 after fixes                     |
+  | Pass 2  (States)     | 5/10 → 9/10 after fixes                     |
+  | Pass 3  (Journey)    | 4/10 → 9/10 after fixes                     |
+  | Pass 4  (AI Slop)    | 3/10 → 9/10 after fixes                     |
+  | Pass 5  (Design Sys) | 6/10 → 9/10 after fixes                     |
+  | Pass 6  (Responsive) | 5/10 → 9/10 after fixes                     |
+  | Pass 7  (Decisions)  | 2 resolved, 0 deferred                      |
+  +--------------------------------------------------------------------+
+  | NOT in scope         | written (4 items)                           |
+  | What already exists  | written                                     |
+  | TODOS.md updates     | 0 items proposed                            |
+  | Approved Mockups     | 0 generated, 0 approved (no API key)        |
+  | Decisions made       | 16 added to plan                            |
+  | Decisions deferred   | 0                                           |
+  | Overall design score | 3/10 → 9/10                                 |
+  +====================================================================+
+```
+Every rated pass is 8+ after fixes. The remaining point on each is on-device checking (no mockups were possible); run `/design-review` after E4.
+
+#### Unresolved Decisions (design)
+None.
+
 ## GSTACK REVIEW REPORT
 
 | Review | Trigger | Why | Runs | Status | Findings |
@@ -1431,10 +1718,10 @@ None (no finding scored below 5).
 | CEO Review | `/plan-ceo-review` | Scope & strategy | 1 | CLEAR | 8 proposals, 7 accepted, 1 deferred |
 | Outside Review | codex via `/plan-ceo-review` and `/plan-eng-review` outside voice | Independent 2nd opinion | 2 | disabled | disabled by config (`codex_reviews`); no completed external review |
 | Eng Review | `/plan-eng-review` | Architecture & tests (required) | 1 | ISSUES OPEN | 12 issues, 0 critical gaps |
-| Design Review | `/plan-design-review` | UI/UX gaps | 0 | — | — |
+| Design Review | `/plan-design-review` | UI/UX gaps | 1 | CLEAR | score: 3/10 → 9/10, 16 decisions |
 | DX Review | `/plan-devex-review` | Developer experience gaps | 0 | — | — |
 
-- **OUTSIDE COVERAGE:** codex, plan-review phase, disabled by `codex_reviews` for both the CEO and eng runs (recorded as skipped); no external findings. The CEO run's three spec reviews were native subagents and don't count as outside coverage.
-- **VERDICT:** CEO CLEARED. Eng Review ISSUES OPEN: its 12 findings are all dispositioned and mapped to tasks E1–E5, with 0 unresolved and 0 critical gaps. Eng review required.
+- **OUTSIDE COVERAGE:** codex, plan-review phase, disabled by `codex_reviews` for the CEO and eng runs (recorded as skipped). Design phase: codex disabled; one in-host Claude design reviewer completed with 11 findings, all fixed. That is native coverage, not outside coverage. No completed external review exists.
+- **VERDICT:** CEO + DESIGN CLEARED. Eng Review ISSUES OPEN: its 12 findings are mapped to tasks E1–E5, with 0 unresolved and 0 critical gaps. Eng review required.
 
 NO UNRESOLVED DECISIONS
