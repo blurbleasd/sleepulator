@@ -69,10 +69,24 @@ final class NightVeilUITests: XCTestCase {
         // A sleepy tap anywhere on the black.
         let tapPoint = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.25))
 
-        // First tap: the glance. The veil stays (the glance itself is hidden from accessibility).
-        // Held past the veil's 1.6 s fade-out, so a wake in progress can't pass for a glance.
+        // First tap: the glance. The veil stays (the glance itself is hidden from accessibility, so
+        // the test reads it off the screen: its dim line, brighter than the caption). A loaded simulator sometimes
+        // drops a synthesized tap (CLAUDE.md); then nothing lights, and the later "wake" tap only
+        // glanced, so the test failed on the wake (once with two simulators running). Go round
+        // once more only when nothing lit. A "first tap wakes" regression lights the whole scene,
+        // skips the retry and still fails the veil check below.
+        XCTAssertFalse(screenIsLit(), "Something brighter than the caption shows on the veil before the first tap")
         tapPoint.tap()
-        let firstTap = Date()
+        var firstTap = Date()
+        if !waitUntil(timeout: 2, { self.screenIsLit() }) {
+            // Let any glance that did start run out first (it shows 6 s and fades 2 s), so the
+            // retry reads as a fresh glance, never as the wake a slow-to-light glance would make it.
+            RunLoop.current.run(until: firstTap.addingTimeInterval(8.5))
+            tapPoint.tap()
+            firstTap = Date()
+            XCTAssertTrue(waitUntil(timeout: 2) { self.screenIsLit() }, "The first tap showed no glance, twice")
+        }
+        // Held past the veil's 1.6 s fade-out, so a wake in progress can't pass for a glance.
         XCTAssertTrue(holds(for: 2) { veil.exists }, "The first tap woke the screen instead of a glance")
 
         // Second tap, while the glance shows or fades (8 s, SessionGuards.veilTap): the veil lifts
@@ -224,6 +238,33 @@ final class NightVeilUITests: XCTestCase {
             if play.waitForExistence(timeout: 1.5) { return }
         }
         XCTFail("Couldn't pause the session from the orb")
+    }
+
+    /// Whether the glance is lit: its night line is the dim tone at 55% (about 100 of 255) on the
+    /// veil's black. The veil's "Tap to wake" caption (white at 16%, about 41) stays under the
+    /// threshold, and so does the ember (8%). The tenths at each end are skipped: a touch can bring
+    /// the home indicator back for a moment.
+    @MainActor
+    private func screenIsLit() -> Bool {
+        guard let image = XCUIScreen.main.screenshot().image.cgImage else { return false }
+        let w = image.width, h = image.height
+        var pixels = [UInt8](repeating: 0, count: w * h * 4)
+        let drawn = pixels.withUnsafeMutableBytes { buffer -> Bool in
+            guard let ctx = CGContext(data: buffer.baseAddress, width: w, height: h, bitsPerComponent: 8,
+                                      bytesPerRow: w * 4, space: CGColorSpaceCreateDeviceRGB(),
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
+            ctx.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
+            return true
+        }
+        guard drawn else { return false }
+        var lit = 0
+        for y in stride(from: h / 10, to: h - h / 10, by: 3) {
+            for x in stride(from: 0, to: w, by: 3) {
+                let i = (y * w + x) * 4
+                if max(pixels[i], pixels[i + 1], pixels[i + 2]) > 60 { lit += 1 }
+            }
+        }
+        return lit >= 60
     }
 
     /// Polls `condition` on the main run loop until it holds or `timeout` passes.

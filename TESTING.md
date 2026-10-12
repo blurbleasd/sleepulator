@@ -30,13 +30,18 @@ Suites in `SleepulatorTests/` (six files, many suites):
   sleep-timer suites (backstop, cancel, end-of-episode), layering, mode reconciliation, and the
   Podcasts-tab rules (`PodcastTextTests`, `ShowNotesPreviewTests`, `ShowNotesEdgeTests`,
   `TonightShelfTests`, `QueueMoveToHeadTests`), the player rules (`NowPlayingStateTests`,
-  `NightLineCopyTests`, `PlayerQueueActionTests`, `PodcastFailureStreakTests`), and three suites
+  `NightLineCopyTests`, `PlayerQueueActionTests`, `PodcastFailureStreakTests`), Settings' rules
+  (`SettingsRulesTests`: the limiter choice, stereo stops, section order), a restore's engine
+  reload (`RestoreReloadTests`: Pomodoro lengths applied, the night's timer kept), and three suites
   on a real `AVPlayer` in the simulator: `PodcastPlayerRebuildTests` (dead-pipeline rebuilds),
   `PodcastLoadHoldTests` (a pause, stop or call during a load sticks) and `PodcastItemEndTests`
   (an episode's end is filed under its own item).
 - `PersistenceTests.swift` — legacy `SavedMix` → `SoundPreset` migration, library seeding,
   position-map coercion, `MixStore` reloads.
-- `BackupRoundTripTests.swift` — settings Export → Import round-trip and its key allowlist.
+- `BackupRoundTripTests.swift` — the backup's export → restore round-trip, its typed allowlist
+  (`Backup.kinds`: a null, wrong type or out-of-range value is skipped), the confirm's counts,
+  restore → Undo end to end, refusing when the Undo copy can't be saved, and a restore never
+  switching mode.
 - `FocusDriversTests.swift` — the Pomodoro → Focus-scene look mapping.
 - `GenerativeAudioEngineTests.swift` — generative-bed rebuild after a media-services reset.
 
@@ -125,12 +130,14 @@ Install via Xcode onto the device (not the simulator). Then:
 
 ### D. Night Limiter (acceptance for enabling by default)
 `AppConfig.nightLimiterEnabled` ships `false` until this passes and is logged below.
-1. Enable the limiter in Settings. Play a podcast episode with a known loud spot
-   (dynamic ad read, intro sting), phone locked, at a low comfortable volume.
+1. Turn the limiter on (Settings ▸ Podcasts at night ▸ Soften loud moments ▸ **Always**). Play a
+   podcast episode with a known loud spot (dynamic ad read, intro sting), phone locked, at a low
+   comfortable volume.
    ✅ The spike is audibly tamed; speech stays intelligible; no pumping/distortion.
 2. Let it run ≥ 1 hour locked. ✅ No glitches, dropouts, or battery anomalies
    (the tap must never block the real-time thread).
-3. Toggle "limiter follows mode": ✅ on in Sleep, off in Focus, mid-playback switch is clean.
+3. Settings ▸ Podcasts at night ▸ Soften loud moments ▸ **While sleeping**: ✅ on in Sleep, off in
+   Focus, mid-playback switch is clean. **Always** stays on in Focus; **Off** stays off in Sleep.
 
 ### E. All-night soak
 1. Full night (or ≥ 4 h): mix + timer, screen locked. ✅ Still behaving at the end —
@@ -181,8 +188,9 @@ the brightness you actually use at night, in **both** Sleep and Focus.
 
 1. **VolumeBar relative drag + fader tiers.** In the Build-mix drawer, grab a layer fader. ✅ It
    moves by the drag *delta* from where you grabbed (not jump-to-touch); a light tap does NOT
-   change volume; drifting the finger up/down off the track fine-trims. Then check Settings
-   (stereo width, Sleep EQ): a *tap* there DOES jump to that position (tapToSet). VoiceOver
+   change volume; drifting the finger up/down off the track fine-trims. Then check Settings'
+   "How much" softening bar (Podcasts at night; stereo width is now four named stops, §S7): a
+   *tap* there DOES jump to that position (tapToSet). VoiceOver
    reports the real value. Gain-staging reads at a glance: the master fader (bottom bar) is
    visibly the thickest, layer faders next, Settings params slimmest.
 1b. **Now-playing rim.** Apply a saved mix. ✅ Its card wears a brighter accent rim + fill and a
@@ -222,7 +230,7 @@ the brightness you actually use at night, in **both** Sleep and Focus.
    second). Force-quit from the app switcher. Relaunch. ✅ The saved mix is still there (the
    deferred write is flushed synchronously on background). Repeat with audio NOT playing.
 3. **Overnight log export.** After a night (or any session with a timer + a call/route change),
-   Settings ▸ Advanced ▸ Diagnostics ▸ "Export last night's log". ✅ The share sheet produces a
+   Settings ▸ Backup & support ▸ "Export the playback log". ✅ The share sheet produces a
    readable text timeline — sleep-timer start/bump/tail/terminal-stop, interruption began/ended
    (with the resume decision), route changes, limiter-attach outcome — not a wall of `<private>`
    (verify on a release build) and not slow to generate.
@@ -239,7 +247,7 @@ the brightness you actually use at night, in **both** Sleep and Focus.
    within ~30–60s resumes with no skip (ride out a real network dip); a genuinely dead stream is
    dropped after the bounded wait with an honest note, and the generative bed keeps playing. A
    404 / failed episode advances too — and is NOT recorded as "played" (doesn't vanish under
-   "hide finished episodes"). During a sleep timer with hold-queue on, a lost stream just leaves
+   "Hide played episodes"). During a sleep timer with hold-queue on, a lost stream just leaves
    the bed running (no jarring next episode at 2am).
 3. **Queue removes the right episode.** With delete-on-completion on, reorder the queue (or play a
    non-head episode) and let it finish. ✅ The episode that finished is the one removed/deleted —
@@ -279,7 +287,7 @@ this section is where you do it. Do it in a dark room at your real bedtime brigh
    clear the power budget without cutting drop count / fps / DoF below where the "whoa" survives, cut
    back to the flat scene.
 6. **Measured, not eyeballed — read the F3 diagnostics log (P1 power budget).** After a 30–60 min run per
-   scene, Settings ▸ Advanced ▸ Diagnostics ▸ "Export last night's log". ✅ It carries
+   scene, Settings ▸ Backup & support ▸ "Export the playback log". ✅ It carries
    `scene=… fps=… thermal=… battery=…` lines (category `scene`). Confirm: fps holds ≈ 30 on the depth
    scenes; `thermal` stays `nominal`/`fair` (never `serious`); per-scene battery drain is ≤ the flat
    baseline (measure the shipping rain / still-water first as the baseline). Confirm an 8 h locked run's
@@ -292,7 +300,7 @@ this section is where you do it. Do it in a dark room at your real bedtime brigh
    known shaders present`. If a lens ever fails to compile, its backdrop shows the bare far world
    (bokeh / sky), never a black pane, plus a `not in the default library` line. (To exercise on purpose,
    a dev can rename a stitchable function and rebuild — optional.)
-9. **Ambient-motion toggle (P6a).** Settings ▸ Display ▸ **Ambient motion → OFF**. ✅ The backdrop
+9. **Ambient-motion toggle (P6a).** Settings ▸ Display ▸ **Moving scenes → Off**. ✅ The backdrop
    immediately holds a single still frame (try rain-depth, ocean, and a `.colorEffect` scene like Aurora
    — all still), CoreMotion stops (Energy Log: no motion updates), tilt parallax gone. Back ON → the
    scene resumes from its frozen pose, no pop. The toggle survives Backup → Restore.
@@ -395,10 +403,11 @@ this section is where you do it. Do it in a dark room at your real bedtime brigh
      - ✅ The empty state is centred on the screen, not stuck in its bottom half.
      - ✅ At the largest text size it scrolls instead of clipping.
    - **Settings:**
-     - ✅ It opens on Sleep, then Podcasts at night, Focus, Sound, Display, Podcasts, Backup and
-       Diagnostics, in sentence case.
+     - ✅ In Sleep it opens on Sleep, then Podcasts at night, Podcasts, Sound and Display, with the
+       Pomodoro folded under "Focus settings" and Backup & support one level down (§S6), in
+       sentence case.
      - ✅ The Focus steppers change the next Pomodoro phase.
-     - ✅ Backup export, restore and "Export last night's log" still work.
+     - ✅ Backup export, restore and "Export the playback log" still work (§S).
 
 ### N. Podcasts tab: Tonight shelf + hardening (added 2026-10-09, simulator-checked only)
 1. **Resume where you drifted off.** Play an episode for 20+ min, set the ring to 45, pause, kill
@@ -482,9 +491,9 @@ changes are the ones a simulator can't settle.
    night".
 6. **The Night Limiter line, only with the limiter on.** Limiter off (the default): play a stream
    the tap can't attach to (HLS). ✅ No limiter wording anywhere. Turn the limiter on in Settings
-   and load it again. ✅ One dim line in the full player, "Night Limiter can't soften this
-   stream"; no amber banner on Home, and the mini-player keeps its normal status. A regular MP3
-   episode with the limiter on → no line.
+   (Soften loud moments ▸ Always) and load it again. ✅ One dim line in the full player, "Can't
+   soften loud moments on this stream"; no amber banner on Home, and the mini-player keeps its
+   normal status. A regular MP3 episode with the limiter on → no line.
 7. **Build mix clears the loaded bar on a small phone.** On the smallest supported iPhone (SE /
    mini), Sleep Home with an episode loaded. ✅ Build mix sits fully above the mini-player and
    takes taps; in Focus, so does Focus session. Check with the tab bar showing, after the
@@ -526,8 +535,9 @@ longest, so the window is widest). Export logs after each.
    (downloaded plays, streams fail as in 5). The lost episode is still in Up Next, and tapping it
    continues near where the stream was lost (unless Auto-Play reached it again overnight, which
    starts it over, as any auto-advance does).
-7. **Next right at an episode's end.** Settings → Delete Played Episodes ON, three downloaded
-   episodes queued. Scrub the first to its last 2 s, tap Next just as it ends (try a few times).
+7. **Next right at an episode's end.** Settings ▸ Podcasts ▸ Delete downloads once played ON,
+   three downloaded episodes queued. Scrub the first to its last 2 s, tap Next just as it ends
+   (try a few times).
    ✅ The second plays from where you left it (or its start), stays unplayed, and keeps its
    download (its row still shows the Downloaded tick); the third is still queued. If the end won the race, the
    log shows `ignoring the end of a podcast item that's since been replaced`, and nothing else
@@ -600,6 +610,37 @@ also pauses while its controls are faded to the screensaver, as the Sleep orb al
    with the countdown (never stuck, never wrong). Turn it back on. ✅ Smooth again. Lock the
    phone for 30 s mid-session and unlock. ✅ The ring shows the true time left, not where it
    stopped.
+
+### S. Settings: restore with a confirm and Undo, the night section, mode order (added 2026-10-11, simulator-checked only)
+1. **Restore asks first.** Settings ▸ Backup & support ▸ Export a backup (✅ the file is named
+   `sleepulator-backup-<date>`). Change a mix and a setting, then Restore from a backup and pick
+   that file. ✅ As the picker closes, an alert asks "Replace with the backup from <date>?" and
+   names what's in it ("… 4 mixes, 12 shows …"). Cancel. ✅ Nothing changed.
+2. **Restore, then Undo.** Restore again and tap Replace. ✅ "Backup restored" names what came back
+   and offers Undo. Tap Undo. ✅ "Restore undone"; the mix and setting you changed are back.
+   Restore once more and tap OK. ✅ The Backup rows show "Undo the restore from <day, time>", and it
+   still works after the app is killed and relaunched.
+3. **A wrong file.** Pick any other JSON file. ✅ "That isn't a Sleepulator backup." and nothing
+   changed. A backup with a section hand-edited to a plain string ("savedPodcasts": "x"). ✅ No
+   crash; the rest restores and the result says a few parts weren't recognised.
+4. **One limiter choice.** Podcasts at night ▸ Soften loud moments: the whole row opens Off / While
+   sleeping / Always. Then §3D step 3.
+5. **The hold.** Play the next episode automatically OFF. ✅ "Don't start the next episode during a
+   sleep timer" is dim, title and switch, and says it only applies with Auto-Play. Turn Auto-Play on
+   and the hold on, start a 15 min timer on a short episode, lock. ✅ The episode ends, the next one
+   doesn't start, your sounds carry on.
+6. **Mode order.** In Sleep, ✅ the list opens on Sleep and Podcasts at night; the Pomodoro is folded
+   under "Focus settings". Switch to Focus. ✅ It opens on Focus; the night is under "Sleep settings".
+7. **Stereo width.** Pink, headphones in. Step Mono → Narrow → Natural → Wide. ✅ Each stop sounds
+   wider than the last (Wide used to sound the same as most of the slider below it).
+8. **A restore never switches mode.** In Sleep with a 45 min timer running, restore a backup
+   made in Focus. ✅ Still Sleep, the timer still counts down, the sound is the backup's Sleep
+   pick; switch to Focus and ✅ its sound is the backup's Focus sound. Restore a backup with
+   different Pomodoro lengths. ✅ The next Focus session uses them (no relaunch).
+9. **Undo puts the shows back too.** On a phone with no podcasts, restore a backup with shows,
+   open Podcasts, then Undo. ✅ The shows are gone and stay gone after adding one and relaunching.
+10. **At 2am.** Sleep, room dark, brightness low. ✅ No amber switch tracks (copper), and the brightest
+   things are the switch knobs, not rows of accent text.
 
 ---
 

@@ -3572,3 +3572,109 @@ final class PodcastItemEndTests: XCTestCase {
         XCTAssertNil(p.savedPositions[id], "a finished episode keeps no resume point")
     }
 }
+
+// MARK: - Settings' pure rules
+
+final class SettingsRulesTests: XCTestCase {
+
+    func testLimiterChoiceReadsTheStoredFlags() {
+        XCTAssertEqual(LimiterChoice.from(nightLimiter: false, byMode: false), .off)
+        XCTAssertEqual(LimiterChoice.from(nightLimiter: true, byMode: false), .always)
+        // Following the mode wins whatever the mode last set the limiter to.
+        XCTAssertEqual(LimiterChoice.from(nightLimiter: true, byMode: true), .whileSleeping)
+        XCTAssertEqual(LimiterChoice.from(nightLimiter: false, byMode: true), .whileSleeping)
+    }
+
+    func testLimiterChoiceRoundTripsThroughItsFlags() {
+        for choice in LimiterChoice.allCases {
+            let flags = choice.flags
+            // While sleeping leaves the limiter to the mode; either mode's value reads back the same.
+            for modeSet in [true, false] {
+                let stored = flags.nightLimiter ?? modeSet
+                XCTAssertEqual(LimiterChoice.from(nightLimiter: stored, byMode: flags.byMode), choice)
+            }
+        }
+    }
+
+    func testMinutesAreSingularForOne() {
+        XCTAssertEqual(SettingsCopy.minutes(1), "1 minute")
+        XCTAssertEqual(SettingsCopy.minutes(5), "5 minutes")
+    }
+
+    func testEachModeLeadsWithItsOwnSettings() {
+        XCTAssertEqual(SettingsOrder.shown(focus: false).first, .sleep)
+        XCTAssertEqual(SettingsOrder.shown(focus: true).first, .focus)
+        XCTAssertFalse(SettingsOrder.shown(focus: false).contains(.focus), "the Pomodoro is folded in Sleep")
+        XCTAssertFalse(SettingsOrder.shown(focus: true).contains(.nightPodcasts), "the night is folded in Focus")
+    }
+
+    func testEverySectionAppearsExactlyOnceInEachMode() {
+        for focus in [false, true] {
+            let all = SettingsOrder.shown(focus: focus) + SettingsOrder.folded(focus: focus)
+            XCTAssertEqual(all.count, SettingsSection.allCases.count)
+            XCTAssertEqual(Set(all), Set(SettingsSection.allCases))
+        }
+    }
+
+    func testSleepKeepsItsPodcastSectionsTogether() throws {
+        let order = SettingsOrder.shown(focus: false)
+        let night = try XCTUnwrap(order.firstIndex(of: .nightPodcasts))
+        XCTAssertEqual(order[night + 1], .podcasts)
+    }
+
+    func testStereoWidthShowsTheNearestStop() {
+        XCTAssertEqual(StereoWidth.nearest(1.0), .natural, "the default reads Natural, not 66%")
+        XCTAssertEqual(StereoWidth.nearest(0.8), .natural)
+        XCTAssertEqual(StereoWidth.nearest(0.2), .mono)
+        XCTAssertEqual(StereoWidth.nearest(0.3), .narrow)
+        XCTAssertEqual(StereoWidth.nearest(1.3), .wide)
+        XCTAssertEqual(StereoWidth.nearest(9), .wide)
+    }
+
+    func testEveryStereoStopSoundsDifferentForEveryNoise() {
+        // The engine's width: min(base * width, 1), base 0.85 for Pink and Rain, 0.6 otherwise.
+        for base in [0.85, 0.6] {
+            let widths = StereoWidth.allCases.map { min(base * $0.rawValue, 1) }
+            XCTAssertEqual(Set(widths).count, StereoWidth.allCases.count, "base \(base)")
+        }
+    }
+
+    func testBeatsNoteFollowsTheRouting() {
+        XCTAssertTrue(SettingsCopy.beatsNote("headphones").contains("Needs headphones"))
+        XCTAssertTrue(SettingsCopy.beatsNote("speaker").contains("speaker"))
+        XCTAssertEqual(SettingsCopy.beatsNote("auto"), SettingsCopy.beatsNote("anything else"))
+    }
+
+    func testSofteningNeverSaysOffAboveTheFloor() {
+        XCTAssertEqual(SettingsCopy.softening(SettingsCopy.eqFloor), "Light")
+        XCTAssertEqual(SettingsCopy.softening(0), "Off", "the old slider's zero: the EQ does nothing there")
+        XCTAssertEqual(SettingsCopy.softening(1.0), "Medium")
+        XCTAssertEqual(SettingsCopy.softening(2.0), "Strong")
+    }
+}
+
+// MARK: - A restore's engine reload
+
+@MainActor
+final class RestoreReloadTests: XCTestCase {
+
+    // Value: protects=a restore's reload applies the Pomodoro lengths and never cancels a running sleep timer; fails_when=reloadAfterRestore drops reloadLengths, or focusMode's didSet starts cancelling on a same-value assignment; why_new=no test called reloadAfterRestore; seam=none; no_claim=the stores' disk reloads
+    func testARestoreReloadAppliesPomodoroLengthsAndKeepsTheNightsTimer() {
+        let d = UserDefaults.standard
+        let keys = ["pomoWork", "pomoRest", "pomoLongRest", "pomoCycles"]
+        let saved = keys.map { d.object(forKey: $0) }
+        defer { for (key, value) in zip(keys, saved) { if let value { d.set(value, forKey: key) } else { d.removeObject(forKey: key) } } }
+        let engine = AudioEngine()
+        engine.focusMode = false
+        engine.sleepTimer.startSleepTimer(minutes: 45)
+        defer { engine.sleepTimer.cancelTimer() }
+        for (key, value) in zip(keys, [50, 7, 20, 6]) { d.set(value, forKey: key) }
+        engine.reloadAfterRestore()
+        XCTAssertEqual(engine.pomodoro.workMinutes, 50, "the next session runs the restored length")
+        XCTAssertEqual(engine.pomodoro.restMinutes, 7)
+        XCTAssertEqual(engine.pomodoro.longRestMinutes, 20)
+        XCTAssertEqual(engine.pomodoro.cyclesBeforeLongBreak, 6)
+        XCTAssertGreaterThan(engine.sleepTimer.timerRemaining, 0, "a restore never cancels a running sleep timer")
+    }
+}
+

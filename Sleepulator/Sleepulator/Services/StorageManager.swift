@@ -111,6 +111,13 @@ final class StorageManager {
         return try? Data(contentsOf: backupURL(for: filename))
     }
 
+    /// `writeRaw`, but synchronous and throwing: the write is atomic (a temp file renamed over
+    /// the old one), so when it throws the previous file is still there, untouched. The restore
+    /// writes its Undo copy this way, and refuses to go ahead when it fails.
+    func writeRawNow(_ data: Data, to filename: String) throws {
+        try ioQueue.sync { try writeBoth(data, filename: filename) }
+    }
+
     /// Atomically write raw JSON bytes to a file (Backup/Restore import path), keeping the
     /// `.bak` sibling in sync.
     func writeRaw(_ data: Data, to filename: String) {

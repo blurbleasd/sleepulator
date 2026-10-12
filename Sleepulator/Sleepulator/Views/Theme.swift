@@ -58,6 +58,9 @@ enum Theme {
     // White on the accent itself was 2.18:1 (Sleep) / 1.85:1 (Focus); these keep the hue at AA.
     static let emberDeep = Color(red: 0.52, green: 0.32, blue: 0.13) // white label 6.5:1
     static let focusDeep = Color(red: 0.06, green: 0.36, blue: 0.52) // white label 7.2:1
+    /// Settings' switches and bars in Sleep: amber at about half its luminance, 4:1 on the row.
+    /// A column of full-amber switch tracks was the brightest thing on the 2am Settings list.
+    static let copper    = Color(red: 0.66, green: 0.42, blue: 0.19)
 }
 
 struct Palette {
@@ -82,6 +85,8 @@ struct Palette {
 
     /// Fill for swipe actions and other system controls with a fixed white label.
     var actionFill: Color { warm ? Theme.emberDeep : Theme.focusDeep }
+    /// Tint for Settings' switches and bars: copper in Sleep (`Theme.copper`), the accent in Focus.
+    var controlTint: Color { warm ? Theme.copper : accent }
     /// Cover art opacity: dimmed in Sleep (artwork is the brightest block on a 2am list), full in
     /// Focus.
     var artOpacity: Double { warm ? 0.78 : 1 }

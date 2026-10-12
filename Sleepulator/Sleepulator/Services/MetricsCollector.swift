@@ -9,7 +9,7 @@ import os
 /// iOS delivers `MXMetricPayload` roughly once a day (battery, GPU time, hang rate, launch
 /// times…) and `MXDiagnosticPayload` on the next launch after a crash/hang/disk-write spike.
 /// Payloads are written as JSON to Application Support/Sleepulator/metrics/ (not iCloud-backed,
-/// pruned to the newest `cap`) and surfaced in Settings ▸ Diagnostics for AirDrop/share.
+/// pruned to the newest `cap`) and surfaced in Settings ▸ Backup & support ▸ Reports from iOS for AirDrop/share.
 ///
 /// Registration is `start()` from the app entry — MetricKit only accumulates while a
 /// subscriber exists, so register early and exactly once.
@@ -67,7 +67,7 @@ final class MetricsCollector: NSObject, MXMetricManagerSubscriber {
         }
     }
 
-    /// Stored payload files, newest first. Read by the Settings ▸ Diagnostics list.
+    /// Stored payload files, newest first. Read by Settings ▸ Backup & support ▸ Reports from iOS (DiagnosticsListView).
     func payloadFiles() -> [URL] {
         let fm = FileManager.default
         let urls = (try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.creationDateKey],

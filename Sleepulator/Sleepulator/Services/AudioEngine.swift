@@ -1301,7 +1301,10 @@ final class AudioEngine: ObservableObject {
         // skipInterval / stereoWidth / beatRouting / nightLimiter / limiterByMode / sleepEQ /
         // sleepEQIntensity live on the settings child; reload re-reads + re-applies them.
         settings.reload()
-        focusMode = d.object(forKey: "focusMode") as? Bool ?? false   // didSet reconciles palette
+        pomodoro.reloadLengths()
+        // focusMode isn't re-read: a restore never changes the mode (Backup.exportOnlyKeys), and
+        // reassigning it ran its didSet's timer-stopping branch for nothing. The palette and the
+        // limiter are reconciled below.
 
         mixStore.reloadFromDisk()
         queueManager.reloadFromDisk()

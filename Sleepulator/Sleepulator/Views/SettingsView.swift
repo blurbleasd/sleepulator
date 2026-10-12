@@ -1,11 +1,10 @@
 import SwiftUI
 import UniformTypeIdentifiers
-import os
 
 struct SettingsView: View {
-    /// Held unobserved (a plain `let`): used only for the Backup restore call. All reactive state is
-    /// observed via the narrow children below, so unrelated engine publishes (podTitle, transport,
-    /// chrome) no longer re-render SettingsView.
+    /// Held unobserved (a plain `let`): used for the restore's reload and the Pomodoro writes. All
+    /// reactive state is observed via the narrow children below, so unrelated engine publishes
+    /// (podTitle, transport, chrome) no longer re-render SettingsView.
     let audio: AudioEngine
     /// Observed directly so the Auto-Play / Shuffle toggles still refresh after Phase 3 dropped
     /// the queueManager objectWillChange forward into AudioEngine.
@@ -16,74 +15,60 @@ struct SettingsView: View {
     @AppStorage("breathingOnRamp") private var breathingOnRamp = false
     @AppStorage("ambientMotion") private var ambientMotion = true
 
-    /// Scalar UserDefaults keys included in Backup/Restore. Single source of truth for both the
-    /// export and the restore whitelist: restore writes nothing outside this set plus the
-    /// file-backed collections below, so a malformed or hostile backup can't inject arbitrary
-    /// defaults. Keep new persisted settings in sync here.
-    // `nonisolated` so the off-main backup export/import (Task.detached) can read these without a
-    // cross-actor hop — the View is @MainActor by default (SWIFT_DEFAULT_ACTOR_ISOLATION), which
-    // would otherwise make this access an error under Swift 6 mode. Plain Sendable data.
-    private nonisolated static let backupScalarKeys: [String] = [
-        "noiseVolume", "noiseType", "binVolume", "binauralPreset", "podVolume", "stereoWidth",
-        "masterVolume", "autoPlay", "shuffleQueue", "deleteOnCompletion", "hideFinishedEpisodes",
-        "nightLimiterEnabled", "sleepEQEnabled", "sleepEQIntensity", "limiterByMode",
-        "beatRouting", "skipInterval", "playbackSpeed", "focusMode", "sceneSleep", "sceneFocus",
-        "bedtimeMode", "autoNightDim", "breathingOnRamp", "ambientMotion", "timerMinutes",
-        "nightLengthMinutes", "ambientTailMinutes",
-        "pomoWork", "pomoRest", "pomoLongRest", "pomoCycles"
-    ]
+    /// Export, Restore and Undo. Owned here, not by the Backup & support page, so a restore still
+    /// finishes and reloads if that page is closed mid-way (see `BackupController`). A
+    /// @StateObject, whose autoclosure builds it once: @State's initial value was built on every
+    /// init, and ContentView re-inits this view on each engine publish (a mixer drag's every
+    /// frame). Its own publishes only fire during a backup action.
+    @StateObject private var backup: BackupController
 
-    /// Backup keys that map to StorageManager files (not UserDefaults), with the Codable type each
-    /// must decode into before restore will write it.
-    private nonisolated static let backupFileBacked: [String: String] = [
-        "savedPlaylists": "mixes.json",
-        "savedPodcasts": "library.json",
-        "upNextQueue": "queue.json",
-        "episodePositions": "positions.json"
-    ]
-    
+    init(audio: AudioEngine, queue: PodcastQueueManager, settings: PlaybackSettings) {
+        self.audio = audio
+        self.queue = queue
+        self.settings = settings
+        _backup = StateObject(wrappedValue: BackupController(reload: { audio.reloadAfterRestore() }))
+    }
+
     /// Mode-aware like Home: Focus is cool everywhere, not just on Home. Read from the persisted
     /// "focusMode" key (AudioEngine writes it) so this view needn't observe the whole engine.
     @AppStorage("focusMode") private var focusMode = false
     var pal: Palette { Palette(focusMode: focusMode) }
 
-    private var eqAmountLabel: String {
-        switch settings.sleepEQIntensity {
-        case ..<0.05: return "Off"
-        case ..<0.8:  return "Light"
-        case ..<1.3:  return "Medium"
-        default:      return "Strong"
-        }
-    }
-    
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
-    
-    /// UserDefaults-backed binding for the sleep-aware queue hold (read at advance time by
-    /// AudioEngine, so no live plumbing is needed).
-    private var holdQueueBinding: Binding<Bool> {
+    /// Whether the other mode's settings are unfolded. Folds again when the mode changes.
+    @State private var showOtherMode = false
+
+    /// The sleep-aware queue hold, read by AudioEngine when an episode ends (no live plumbing).
+    @AppStorage("holdQueueDuringSleepTimer") private var holdQueue = false
+
+    /// "Soften loud moments" as one choice over the two stored flags (`LimiterChoice`).
+    private var limiterChoice: Binding<LimiterChoice> {
         Binding(
-            get: { UserDefaults.standard.bool(forKey: "holdQueueDuringSleepTimer") },
-            set: { UserDefaults.standard.set($0, forKey: "holdQueueDuringSleepTimer") }
+            get: { LimiterChoice.from(nightLimiter: settings.nightLimiter, byMode: settings.limiterByMode) },
+            set: { choice in
+                let flags = choice.flags
+                // Following the mode sets the limiter itself (onLimiterByMode → applyLimiterForMode).
+                settings.limiterByMode = flags.byMode
+                if let on = flags.nightLimiter { settings.nightLimiter = on }
+            }
         )
     }
 
     // Pomodoro lengths: shown from the persisted keys, written through the service (its didSet
-    // persists them, and it reads them at the start of each phase).
-    @AppStorage("pomoWork") private var pomoWork = 25
-    @AppStorage("pomoRest") private var pomoRest = 5
-    @AppStorage("pomoLongRest") private var pomoLongRest = 15
-    @AppStorage("pomoCycles") private var pomoCycles = 4
+    // persists them; the next phase uses them). A restore reloads them (`reloadLengths`).
+    @AppStorage("pomoWork") private var pomoWork = PomodoroService.defaultLengths.work
+    @AppStorage("pomoRest") private var pomoRest = PomodoroService.defaultLengths.rest
+    @AppStorage("pomoLongRest") private var pomoLongRest = PomodoroService.defaultLengths.longRest
+    @AppStorage("pomoCycles") private var pomoCycles = PomodoroService.defaultLengths.cycles
 
     private func pomodoroBinding(_ value: Int, _ write: @escaping (Int) -> Void) -> Binding<Int> {
         Binding(get: { value }, set: { write($0) })
     }
 
-    /// One settings row: the label in the text tone (dim labels read as disabled), the value or
-    /// control trailing.
-    private func label(_ title: String) -> some View {
-        Text(title)
-            .foregroundStyle(pal.text)
-            .fixedSize(horizontal: false, vertical: true)
+    /// One settings row's label, with an optional note under it (`SettingLabel`).
+    private func label(_ title: String, note: String? = nil) -> SettingLabel {
+        SettingLabel(title: title, note: note, pal: pal)
     }
 
     private func header(_ title: String) -> some View {
@@ -94,171 +79,94 @@ struct SettingsView: View {
         Text(text).foregroundStyle(pal.dim)
     }
 
-    private func minutesStepper(_ title: String, value: Int, range: ClosedRange<Int>, step: Int,
-                                write: @escaping (Int) -> Void) -> some View {
+    /// A Pomodoro stepper: the value shown on the right, and spoken once.
+    private func stepperRow(_ title: String, value: Int, range: ClosedRange<Int>, step: Int = 1,
+                            shown: String, spoken: String, write: @escaping (Int) -> Void) -> some View {
         Stepper(value: pomodoroBinding(value, write), in: range, step: step) {
             HStack {
                 label(title)
                 Spacer()
-                Text("\(value) min").foregroundStyle(pal.dim).monospacedDigit()
+                // Held on one line: at the largest text sizes "15 min" split into "15 / min".
+                Text(shown).foregroundStyle(pal.dim).monospacedDigit().fixedSize()
             }
         }
-        .accessibilityValue("\(value) minutes")
+        // Named once: the label row also holds the value, which VoiceOver read twice.
+        .accessibilityLabel(title)
+        .accessibilityValue(spoken)
     }
 
-    // Order is the app's: Sleep first (the bedside case), then Focus, then what both share, then
-    // podcasts, then the rarely touched. It used to open on the podcast queue and storage, with
-    // the sleep controls below the fold.
+    private func minutesStepper(_ title: String, value: Int, range: ClosedRange<Int>, step: Int,
+                                write: @escaping (Int) -> Void) -> some View {
+        stepperRow(title, value: value, range: range, step: step, shown: "\(value) min",
+                   spoken: SettingsCopy.minutes(value), write: write)
+    }
+
+    /// A switch whose spoken name is its title alone, with the note as the hint. With the note in
+    /// the label, Voice Control needed the whole sentence to tap it, and VoiceOver read it even
+    /// with hints off (choiceRow does the same).
+    private func settingToggle(_ title: String, note: String? = nil, isOn: Binding<Bool>) -> some View {
+        Toggle(isOn: isOn) { label(title, note: note) }
+            .accessibilityLabel(title)
+            .accessibilityHint(note ?? "")
+    }
+
+    /// A row that picks one of a few values: the label (and note) on the left, the value on the
+    /// right, and the whole row opens the menu. A Picker with a two-line label dropped its value
+    /// onto a line of its own under the note, indented, like a stray control.
+    private func choiceRow<T: Hashable>(_ title: String, note: String? = nil, selection: Binding<T>,
+                                        options: [T], name: @escaping (T) -> String) -> some View {
+        Menu {
+            Picker(title, selection: selection) {
+                ForEach(options, id: \.self) { Text(name($0)).tag($0) }
+            }
+        } label: {
+            // At the accessibility text sizes the value goes under the label: beside it, the
+            // label was squeezed into a hyphenated column ("for- / ward").
+            let stacked = dynamicTypeSize.isAccessibilitySize
+            let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: UI.xs))
+                                 : AnyLayout(HStackLayout(spacing: UI.sm))
+            layout {
+                label(title, note: note)
+                if !stacked { Spacer(minLength: UI.sm) }
+                HStack(spacing: UI.xs) {
+                    Text(name(selection.wrappedValue))
+                    Image(systemName: "chevron.up.chevron.down").font(.caption.weight(.semibold))
+                }
+                .foregroundStyle(pal.dim)
+                .fixedSize()
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .accessibilityLabel(title)
+        .accessibilityValue(name(selection.wrappedValue))
+        .accessibilityHint(note ?? "")
+    }
+
+    /// Stereo width by named stop (`StereoWidth`).
+    private var stereoWidth: Binding<StereoWidth> {
+        Binding(get: { StereoWidth.nearest(settings.stereoWidth) },
+                set: { settings.stereoWidth = $0.rawValue })
+    }
+
+    // The current mode's settings lead, then what both modes share, then the other mode's folded
+    // under one row, then Backup & support. The list used to run in one order for both modes:
+    // Focus opened on Sleep's darkening and podcasts-at-night, Sleep had four Pomodoro steppers
+    // mid-list, and it ended on backup, diagnostics and a build timestamp.
     var body: some View {
         NavigationStack {
             List {
                 Group {
-                    Section {
-                        Toggle(isOn: $autoNightDim) { label("Darken the screen at night") }
-                        Toggle(isOn: $breathingOnRamp) { label("Start with a minute of breathing") }
-                    } header: {
-                        header("Sleep")
-                    } footer: {
-                        footer("While Sleep plays on the Sleep screen or the player, or anywhere with a sleep timer running, the screen goes black a minute after your last touch; tap to wake. Breathing leads into your mix, then it starts on its own.")
+                    ForEach(SettingsOrder.shown(focus: focusMode)) { section($0) }
+                    otherModeRow
+                    if showOtherMode {
+                        ForEach(SettingsOrder.folded(focus: focusMode)) { section($0) }
                     }
-
                     Section {
-                        Toggle(isOn: $settings.nightLimiter) {
-                            label(settings.limiterByMode ? "Soften loud moments (follows the mode)" : "Soften loud moments")
-                        }
-                        .disabled(settings.limiterByMode)
-                        Toggle(isOn: $settings.limiterByMode) { label("On while sleeping, off while focusing") }
-                        Toggle(isOn: $settings.sleepEQ) { label("Soften harsh highs and boomy lows") }
-                        if settings.sleepEQ {
-                            VStack(alignment: .leading, spacing: 8) {
-                                HStack {
-                                    label("How much")
-                                    Spacer()
-                                    Text(eqAmountLabel).foregroundStyle(pal.dim)
-                                }
-                                VolumeBar(value: $settings.sleepEQIntensity, accent: pal.accent, range: 0...2, style: .parameter, tapToSet: true)
-                                    .accessibilityLabel("Softening amount")
-                                    .accessibilityValue(eqAmountLabel)
-                            }
-                            .padding(.vertical, 4)
-                        }
-                    } header: {
-                        header("Podcasts at night")
-                    } footer: {
-                        footer("Keeps a sudden loud moment in a podcast from waking you, and gentles voices at low volume. Podcasts only; your sounds are already steady.")
-                    }
-
-                    Section {
-                        minutesStepper("Focus", value: pomoWork, range: 5...90, step: 5) { audio.pomodoro.workMinutes = $0 }
-                        minutesStepper("Short break", value: pomoRest, range: 1...30, step: 1) { audio.pomodoro.restMinutes = $0 }
-                        minutesStepper("Long break", value: pomoLongRest, range: 5...60, step: 5) { audio.pomodoro.longRestMinutes = $0 }
-                        Stepper(value: pomodoroBinding(pomoCycles) { audio.pomodoro.cyclesBeforeLongBreak = $0 }, in: 2...8) {
-                            HStack {
-                                label("Rounds before a long break")
-                                Spacer()
-                                Text("\(pomoCycles)").foregroundStyle(pal.dim).monospacedDigit()
-                            }
-                        }
-                        .accessibilityValue("\(pomoCycles) rounds")
-                    } header: {
-                        header("Focus")
-                    } footer: {
-                        footer("Changes apply from the next round.")
-                    }
-
-                    Section {
-                        VStack(alignment: .leading, spacing: 8) {
-                            HStack {
-                                label("Stereo width")
-                                Spacer()
-                                Text(settings.stereoWidth < 0.05 ? "Mono" : "\(Int((settings.stereoWidth / 1.5) * 100))%")
-                                    .foregroundStyle(pal.dim).monospacedDigit()
-                            }
-                            VolumeBar(value: $settings.stereoWidth, accent: pal.accent, range: 0...1.5, style: .parameter, tapToSet: true)
-                                .accessibilityLabel("Stereo width")
-                                .accessibilityValue(settings.stereoWidth < 0.05 ? "Mono" : "\(Int((settings.stereoWidth / 1.5) * 100)) percent")
-                        }
-                        .padding(.vertical, 4)
-                        // A true binaural beat needs one tone per ear; on a speaker the two sum in the
-                        // air and the beat vanishes, so a speaker gets a pulsed (isochronic) tone.
-                        Picker(selection: $settings.beatRouting) {
-                            Text("Auto").tag("auto")
-                            Text("Headphones").tag("headphones")
-                            Text("Speaker").tag("speaker")
+                        NavigationLink {
+                            BackupSupportView(backup: backup, pal: pal)
                         } label: {
-                            label("Beats for")
-                        }
-                    } header: {
-                        header("Sound")
-                    } footer: {
-                        footer(settings.beatRouting == "headphones" ? "Beats made for headphones, one tone in each ear. Lower width keeps the bass centred on a phone speaker."
-                               : settings.beatRouting == "speaker" ? "A gentle pulse that works on a speaker. Lower width keeps the bass centred on a phone speaker."
-                               : "Headphone beats with headphones in, a speaker-friendly pulse without. Lower width keeps the bass centred on a phone speaker.")
-                    }
-
-                    Section {
-                        Toggle(isOn: $ambientMotion) { label("Moving scenes") }
-                    } header: {
-                        header("Display")
-                    } footer: {
-                        footer("Off holds the backdrop on one still frame: calmer, and easier on the battery. The system's Reduce Motion already stops the tilt.")
-                    }
-
-                    Section {
-                        Toggle(isOn: $queue.autoPlay) { label("Play the next episode automatically") }
-                        Toggle(isOn: holdQueueBinding) { label("During a sleep timer, stop after this episode") }
-                        Toggle(isOn: $queue.shuffleQueue) { label("Shuffle the queue") }
-                        Picker(selection: Binding(get: { Int(settings.skipInterval) }, set: { settings.skipInterval = Double($0) })) {
-                            ForEach([10, 15, 30, 45], id: \.self) { Text("\($0) seconds").tag($0) }
-                        } label: {
-                            label("Skip back and forward")
-                        }
-                        Toggle(isOn: $queue.deleteOnCompletion) { label("Delete downloads once played") }
-                        Toggle(isOn: $queue.hideFinishedEpisodes) { label("Hide played episodes") }
-                    } header: {
-                        header("Podcasts")
-                    } footer: {
-                        footer("With a sleep timer running, the current episode finishes and only your sounds carry on, so you don't sleep through the next one.")
-                    }
-
-                    Section {
-                        Button { exportData() } label: {
-                            Label("Export a backup", systemImage: "square.and.arrow.up")
-                        }
-                        Button { isImporting = true } label: {
-                            Label("Restore from a backup", systemImage: "square.and.arrow.down")
-                        }
-                    } header: {
-                        header("Backup")
-                    } footer: {
-                        footer("Your mixes, podcasts, queue and settings, as one file.")
-                    }
-
-                    Section {
-                        NavigationLink { DiagnosticsListView(pal: pal) } label: { label("Reports from iOS") }
-                        Button {
-                            Task {
-                                let text = await LogExport.collect()
-                                logDocument = TextDocument(text: text)
-                                isExportingLog = true
-                            }
-                        } label: {
-                            Label("Export last night's log", systemImage: "doc.text")
-                        }
-                    } header: {
-                        header("Diagnostics")
-                    } footer: {
-                        // Build identity: the build time is the line that tells manual builds apart.
-                        VStack(alignment: .leading, spacing: 6) {
-                            footer("Battery, hang and crash reports iOS delivers about once a day. Stored on this device only.")
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Sleepulator \(AppInfo.versionBuild)")
-                                if let built = AppInfo.builtAtLabel { Text("Built \(built)") }
-                            }
-                            .foregroundStyle(pal.dim)
-                            .padding(.top, 10)
-                            .accessibilityElement(children: .combine)
-                            .accessibilityLabel(AppInfo.accessibilitySummary)
+                            label("Backup & support")
                         }
                     }
                 }
@@ -268,251 +176,156 @@ struct SettingsView: View {
             .listStyle(.insetGrouped)
             .scrollContentBackground(.hidden)
             .background(pal.bg.ignoresSafeArea())
-            .tint(pal.accent)
+            .tint(pal.controlTint)
             // Room for the floating mini-player, measured.
             .miniPlayerClearance()
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.large)
+            .onChange(of: focusMode) { showOtherMode = false }
         }
-        .fileImporter(
-            isPresented: $isImporting,
-            allowedContentTypes: [.json],
-            allowsMultipleSelection: false
-        ) { result in
-            let selectedFile: URL
-            do {
-                guard let file = try result.get().first else { return }
-                selectedFile = file
-            } catch {
-                alertTitle = "Import Failed"
-                alertMessage = error.localizedDescription
-                showAlert = true
-                return
+    }
+
+    /// The fold for the other mode's settings: a row that opens them below it.
+    private var otherModeRow: some View {
+        Section {
+            Button {
+                withAnimation(.easeOut(duration: 0.25)) { showOtherMode.toggle() }
+            } label: {
+                HStack {
+                    label(focusMode ? "Sleep settings" : "Focus settings",
+                          note: focusMode ? "Darkening, breathing and podcasts at night" : "Session and break lengths")
+                    Spacer()
+                    Image(systemName: "chevron.down")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(pal.dim)
+                        .rotationEffect(.degrees(showOtherMode ? 180 : 0))
+                        .accessibilityHidden(true)
+                }
+                .contentShape(Rectangle())
             }
-            // Read + parse + validate + write off the main thread; a large backup would
-            // otherwise freeze the UI. Return only the user-facing outcome, then apply the
-            // in-process reload and surface the alert back on the main actor.
-            Task {
-                let outcome = await Self.performImport(url: selectedFile)
-                if outcome.didRestore { audio.reloadAfterRestore() }
-                alertTitle = outcome.title
-                alertMessage = outcome.message
-                showAlert = true
-            }
+            .accessibilityLabel(focusMode ? "Sleep settings" : "Focus settings")
+            .accessibilityHint(focusMode ? "Darkening, breathing and podcasts at night" : "Session and break lengths")
+            .accessibilityValue(showOtherMode ? "Expanded" : "Collapsed")
         }
-        .fileExporter(isPresented: $isExporting, document: exportDocument, contentType: .json, defaultFilename: "sleepulator-backup") { result in
-            switch result {
-            case .success(let url):
-                Log.storage.info("Exported backup to \(url.lastPathComponent, privacy: .public)")
-            case .failure(let error):
-                alertTitle = "Export Failed"
-                alertMessage = error.localizedDescription
-                showAlert = true
-            }
+    }
+
+    @ViewBuilder
+    private func section(_ section: SettingsSection) -> some View {
+        switch section {
+        case .sleep:         sleepSection
+        case .nightPodcasts: nightPodcastsSection
+        case .focus:         focusSection
+        case .sound:         soundSection
+        case .display:       displaySection
+        case .podcasts:      podcastsSection
         }
-        // The log exporter must live on its OWN node: two .fileExporter modifiers chained on the
-        // same view shadow each other (only the last presents — a long-standing SwiftUI defect),
-        // which silently broke "Export Data" when this second exporter was added for the
-        // overnight log trail. A clear background anchor gives it a separate attachment point.
-        .background {
-            Color.clear
-                .fileExporter(isPresented: $isExportingLog, document: logDocument, contentType: .plainText, defaultFilename: "sleepulator-log") { result in
-                    if case .failure(let error) = result {
-                        alertTitle = "Log Export Failed"
-                        alertMessage = error.localizedDescription
-                        showAlert = true
+    }
+
+    private var sleepSection: some View {
+        Section {
+            // A short note per control. One 41-word footer covered both switches, ran to ten
+            // lines at large text sizes, and still said "tap to wake" after the veil's glance
+            // made it two taps.
+            settingToggle("Darken the screen at night",
+                          note: "While Sleep plays, the screen goes black a minute after your last touch. Tap once to glance, twice to wake.",
+                          isOn: $autoNightDim)
+            settingToggle("Start with a minute of breathing", note: "Then your mix starts on its own.", isOn: $breathingOnRamp)
+        } header: {
+            header("Sleep")
+        }
+    }
+
+    private var nightPodcastsSection: some View {
+        Section {
+            // What happens to a podcast at night, in one place: how loud it can get, how it
+            // sounds, and whether the next one starts. The hold used to sit in the daytime
+            // Podcasts section, worded like the timer's one-off "Stop after this episode", which
+            // stops everything.
+            choiceRow("Soften loud moments", note: "Keeps a sudden loud moment from waking you.",
+                      selection: limiterChoice, options: LimiterChoice.allCases) { $0.title }
+            settingToggle("Soften harsh highs and boomy lows", note: "Gentler voices at low volume.", isOn: $settings.sleepEQ)
+            if settings.sleepEQ {
+                VStack(alignment: .leading, spacing: UI.sm) {
+                    HStack {
+                        label("How much")
+                        Spacer()
+                        Text(SettingsCopy.softening(settings.sleepEQIntensity)).foregroundStyle(pal.dim)
                     }
+                    // The thumb in the mode's text tone (the default cream sat warm on Focus's
+                    // cyan), on a channel that shows against the flat row.
+                    VolumeBar(value: $settings.sleepEQIntensity, accent: pal.controlTint,
+                              range: SettingsCopy.eqFloor...2, thumbColor: pal.text,
+                              trackColor: pal.text.opacity(0.16), style: .parameter, tapToSet: true)
+                        // The visible label, so Voice Control's "How much" finds it.
+                        .accessibilityLabel("How much softening")
+                        .accessibilityValue(SettingsCopy.softening(settings.sleepEQIntensity))
                 }
-        }
-        .alert(alertTitle, isPresented: $showAlert) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(alertMessage)
-        }
-    }
-    
-    @State private var isImporting = false
-    @State private var isExporting = false
-    @State private var exportDocument: JSONDocument?
-    @State private var isExportingLog = false
-    @State private var logDocument: TextDocument?
-    @State private var alertTitle = ""
-    @State private var alertMessage = ""
-    @State private var showAlert = false
-    
-    /// Re-encode a backup section and confirm it decodes into the Codable type the target file
-    /// expects. Returns the JSON bytes to write, or nil if the section is malformed/unexpected.
-    /// `internal` (not private) so `BackupRoundTripTests` can exercise the validation gate.
-    nonisolated static func validatedFileData(key: String, value: Any) -> Data? {
-        guard let data = try? JSONSerialization.data(withJSONObject: value, options: []) else { return nil }
-        let decoder = JSONDecoder()
-        let valid: Bool
-        switch key {
-        case "savedPlaylists":   // current schema is [SoundPreset]; older backups are [SavedMix]
-            valid = (try? decoder.decode([SoundPreset].self, from: data)) != nil
-                 || (try? decoder.decode([SavedMix].self, from: data)) != nil
-        case "savedPodcasts":
-            valid = (try? decoder.decode([Podcast].self, from: data)) != nil
-        case "upNextQueue":
-            valid = (try? decoder.decode([Episode].self, from: data)) != nil
-        case "episodePositions":
-            valid = (try? decoder.decode([String: Double].self, from: data)) != nil
-        default:
-            valid = false
-        }
-        return valid ? data : nil
-    }
-
-    /// Keys whose UserDefaults value is a Data-encoded Codable blob, not a plain scalar. Data can't
-    /// go through JSON, so these expand to a nested JSON object on export and are re-encoded on
-    /// import. `extraLayers` was in NEITHER backup list until 2026-07 — the user's extra mixer noise
-    /// layers were silently dropped from every backup and lost on restore.
-    private nonisolated static let backupEncodedKeys: [String] = ["lastMix", "extraLayers"]
-
-    /// The UserDefaults side of an export: scalar settings + the Data-encoded blobs, ready to merge
-    /// into the backup dictionary. Pure + parameterized on `defaults` so it's unit-tested (the
-    /// shipping export calls this too, so the test covers the real path).
-    nonisolated static func backupUserDefaults(from defaults: UserDefaults) -> [String: Any] {
-        var out: [String: Any] = [:]
-        for key in backupScalarKeys {
-            if let v = defaults.object(forKey: key) { out[key] = v }
-        }
-        for key in backupEncodedKeys {
-            if let data = defaults.data(forKey: key),
-               let obj = try? JSONSerialization.jsonObject(with: data, options: .allowFragments) {
-                out[key] = obj
+                .padding(.vertical, UI.xs)
             }
-        }
-        return out
-    }
-
-    /// The UserDefaults side of a restore: writes allowlisted scalars and re-encodes the Data blobs,
-    /// never writing anything outside the allowlist (a malformed or hostile section is skipped, not
-    /// written). File-backed keys are handled by the caller against StorageManager, so they're passed
-    /// over here without counting. Returns (restored, skipped) for the UserDefaults keys only.
-    nonisolated static func restoreUserDefaults(from dict: [String: Any], into defaults: UserDefaults) -> (restored: Int, skipped: Int) {
-        let allowed = Set(backupScalarKeys)
-        var restored = 0, skipped = 0
-        for (key, value) in dict {
-            if backupFileBacked[key] != nil {
-                continue                                       // handled against StorageManager by the caller
-            } else if backupEncodedKeys.contains(key) {
-                if let encoded = try? JSONSerialization.data(withJSONObject: value, options: []),
-                   decodesForRestore(key: key, data: encoded) {
-                    defaults.set(encoded, forKey: key); restored += 1
-                } else { skipped += 1 }
-            } else if allowed.contains(key) {
-                defaults.set(value, forKey: key); restored += 1
-            } else {
-                skipped += 1                                   // unknown key — never blind-write
-            }
-        }
-        return (restored, skipped)
-    }
-
-    /// Validate that a Data-encoded backup blob decodes into its expected type before restore.
-    private nonisolated static func decodesForRestore(key: String, data: Data) -> Bool {
-        let dec = JSONDecoder()
-        switch key {
-        case "lastMix":     return (try? dec.decode(SavedMix.self, from: data)) != nil
-        case "extraLayers": return (try? dec.decode([ExtraNoiseLayer].self, from: data)) != nil
-        default:            return false
+            settingToggle("Don't start the next episode during a sleep timer",
+                          note: queue.autoPlay ? "The one playing finishes; your sounds carry on."
+                                               : "Only applies when the next episode plays automatically.",
+                          isOn: $holdQueue)
+            // With Auto-Play off the next episode never starts on its own anyway.
+            .disabled(!queue.autoPlay)
+        } header: {
+            header("Podcasts at night")
+        } footer: {
+            footer("Softening is for podcasts only; your sounds are already steady.")
         }
     }
 
-    /// User-facing result of a backup import, produced off the main thread.
-    private struct ImportOutcome {
-        let title: String
-        let message: String
-        let didRestore: Bool
-    }
-
-    /// Read, parse, validate, and write a backup file on a background executor. Touches only
-    /// UserDefaults / StorageManager (both safe off-main); returns the outcome for the caller
-    /// to apply on the main actor.
-    private static func performImport(url: URL) async -> ImportOutcome {
-        await Task.detached(priority: .userInitiated) { () -> ImportOutcome in
-            guard url.startAccessingSecurityScopedResource() else {
-                return ImportOutcome(title: "Import Failed",
-                                     message: "Couldn't access the selected file.",
-                                     didRestore: false)
-            }
-            defer { url.stopAccessingSecurityScopedResource() }
-            do {
-                let data = try Data(contentsOf: url)
-                guard let dict = try JSONSerialization.jsonObject(with: data, options: []) as? [String: Any] else {
-                    return ImportOutcome(title: "Import Failed",
-                                         message: "That file isn't a valid Sleepulator backup.",
-                                         didRestore: false)
-                }
-
-                var restored = 0
-                var skipped = 0
-
-                // File-backed collections → StorageManager, each validated against its expected
-                // Codable type (a malformed section is skipped, never written as garbage).
-                for (key, file) in Self.backupFileBacked {
-                    guard let value = dict[key] else { continue }
-                    if let validated = Self.validatedFileData(key: key, value: value) {
-                        await StorageManager.shared.writeRaw(validated, to: file)
-                        restored += 1
-                    } else { skipped += 1 }
-                }
-                // Scalars + Data-encoded blobs (lastMix, extraLayers) → UserDefaults (allowlisted).
-                let ud = Self.restoreUserDefaults(from: dict, into: .standard)
-                restored += ud.restored
-                skipped += ud.skipped
-
-                let message = skipped > 0
-                    ? "Imported \(restored) item(s); skipped \(skipped) unrecognized."
-                    : "Your data was imported."
-                return ImportOutcome(title: "Restore Complete", message: message, didRestore: true)
-            } catch {
-                return ImportOutcome(title: "Import Failed",
-                                     message: error.localizedDescription,
-                                     didRestore: false)
-            }
-        }.value
-    }
-
-    func exportData() {
-        // Gather + serialize the backup off the main thread; only flip the @State that drives
-        // the exporter/alert back on the main actor.
-        Task {
-            let result = await Self.buildExportDocument()
-            switch result {
-            case .success(let document):
-                exportDocument = document
-                isExporting = true
-            case .failure(let error):
-                alertTitle = "Export Failed"
-                alertMessage = error.localizedDescription
-                showAlert = true
-            }
+    private var focusSection: some View {
+        Section {
+            minutesStepper("Focus length", value: pomoWork, range: 5...90, step: 5) { audio.pomodoro.workMinutes = $0 }
+            minutesStepper("Short break", value: pomoRest, range: 1...30, step: 1) { audio.pomodoro.restMinutes = $0 }
+            minutesStepper("Long break", value: pomoLongRest, range: 5...60, step: 5) { audio.pomodoro.longRestMinutes = $0 }
+            stepperRow("Rounds before a long break", value: pomoCycles, range: 2...8,
+                       shown: "\(pomoCycles)", spoken: "\(pomoCycles) rounds") { audio.pomodoro.cyclesBeforeLongBreak = $0 }
+        } header: {
+            header("Focus")
+        } footer: {
+            footer("Changes apply from the next round.")
         }
     }
 
-    private static func buildExportDocument() async -> Result<JSONDocument, Error> {
-        await Task.detached(priority: .userInitiated) { () -> Result<JSONDocument, Error> in
-            // Scalar settings + the Data-encoded blobs (lastMix, extraLayers) live in UserDefaults.
-            var backupDict = Self.backupUserDefaults(from: .standard)
-
-            // Mixes, library, queue, and positions were migrated off UserDefaults into
-            // StorageManager files — pull their raw JSON so the backup is actually complete.
-            for (key, file) in Self.backupFileBacked {
-                if let data = await StorageManager.shared.rawData(for: file),
-                   let obj = try? JSONSerialization.jsonObject(with: data, options: .allowFragments) {
-                    backupDict[key] = obj
-                }
+    private var soundSection: some View {
+        Section {
+            choiceRow("Stereo width", note: "How far the noise spreads, left to right. Narrow suits a phone speaker.",
+                      selection: stereoWidth, options: StereoWidth.allCases) { $0.title }
+            // A true binaural beat needs one tone per ear; on a speaker the two sum in the
+            // air and the beat vanishes, so a speaker gets a pulsed (isochronic) tone.
+            choiceRow("Binaural beats for", note: SettingsCopy.beatsNote(settings.beatRouting),
+                      selection: $settings.beatRouting, options: ["auto", "headphones", "speaker"]) {
+                ["headphones": "Headphones", "speaker": "Speaker"][$0] ?? "Auto"
             }
+        } header: {
+            header("Sound")
+        }
+    }
 
-            do {
-                let data = try JSONSerialization.data(withJSONObject: backupDict, options: .prettyPrinted)
-                return .success(JSONDocument(data: data))
-            } catch {
-                return .failure(error)
-            }
-        }.value
+    private var displaySection: some View {
+        Section {
+            settingToggle("Moving scenes", note: "Off holds the scene still: calmer, and easier on the battery.",
+                          isOn: $ambientMotion)
+        } header: {
+            header("Display")
+        }
+    }
+
+    private var podcastsSection: some View {
+        Section {
+            Toggle(isOn: $queue.autoPlay) { label("Play the next episode automatically") }
+            settingToggle("Shuffle the queue", note: "The next episode comes from anywhere in Up Next.", isOn: $queue.shuffleQueue)
+            choiceRow("Skip back and forward",
+                      selection: Binding(get: { Int(settings.skipInterval) }, set: { settings.skipInterval = Double($0) }),
+                      options: [10, 15, 30, 45]) { "\($0) seconds" }
+            settingToggle("Delete downloads once played", note: "Only finished episodes; a skipped one keeps its download.",
+                          isOn: $queue.deleteOnCompletion)
+            Toggle(isOn: $queue.hideFinishedEpisodes) { label("Hide played episodes") }
+        } header: {
+            header("Podcasts")
+        }
     }
 }
 
@@ -533,7 +346,7 @@ struct JSONDocument: FileDocument {
     }
 }
 
-/// Plain-text wrapper for the "Export logs" share sheet (the overnight LogExport trail).
+/// Plain-text wrapper for "Export the playback log" (LogExport).
 struct TextDocument: FileDocument {
     static var readableContentTypes: [UTType] { [.plainText] }
     var text: String
@@ -551,62 +364,100 @@ struct TextDocument: FileDocument {
     }
 }
 
-/// Settings ▸ Advanced ▸ Diagnostics: the MetricKit payloads MetricsCollector has stored,
-/// newest first, each shareable (AirDrop the JSON to a Mac for analysis). Payloads arrive
-/// on iOS's schedule (~daily), so an empty list on a fresh install is expected.
+/// Settings ▸ Backup & support ▸ Reports from iOS: the MetricKit payloads MetricsCollector has
+/// stored, newest first, each shareable (AirDrop the JSON to a Mac for analysis). Payloads
+/// arrive on iOS's schedule (~daily), so an empty list on a fresh install is expected.
 struct DiagnosticsListView: View {
     let pal: Palette
-    @State private var files: [URL] = []
+    @State private var reports: [Report] = []
+
+    /// One stored payload, named for a person: what kind it is and when it came.
+    struct Report: Identifiable {
+        let url: URL
+        let isCrash: Bool
+        let date: Date?
+        var id: URL { url }
+        var kind: String { isCrash ? "Crash or hang report" : "Battery and performance report" }
+        var when: String { date?.formatted(date: .abbreviated, time: .shortened) ?? "Date unknown" }
+    }
 
     var body: some View {
-        ZStack {
-            pal.bg.ignoresSafeArea()
-            if files.isEmpty {
-                VStack(spacing: 8) {
+        Group {
+            if reports.isEmpty {
+                VStack(spacing: UI.sm) {
                     Image(systemName: "waveform.path.ecg.rectangle")
                         .font(.largeTitle)
-                        .foregroundColor(pal.dim)
+                        .foregroundStyle(pal.dim)
+                        .accessibilityHidden(true)
                     Text("No reports yet")
                         .font(.headline)
-                        .foregroundColor(pal.text)
-                    Text("iOS delivers battery and stability reports about once a day. Check back after a night's use.")
-                        .font(.caption)
-                        .foregroundColor(pal.dim)
+                        .foregroundStyle(pal.text)
+                    Text("iOS sends battery and crash reports about once a day. Check back after a night's use.")
+                        .font(.footnote)
+                        .foregroundStyle(pal.dim)
                         .multilineTextAlignment(.center)
-                        .padding(.horizontal, 40)
+                        .padding(.horizontal, UI.xxl)
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(pal.bg.ignoresSafeArea())
             } else {
-                ScrollView {
-                    VStack(spacing: 10) {
-                        ForEach(files, id: \.self) { url in
-                            HStack {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(url.lastPathComponent.hasPrefix("diagnostic") ? "Crash / hang report" : "Daily metrics")
-                                        .font(.system(.subheadline, design: .rounded).weight(.semibold))
-                                        .foregroundColor(pal.text)
-                                    Text(url.lastPathComponent)
-                                        .font(.caption2)
-                                        .foregroundColor(pal.dim)
-                                        .lineLimit(1)
-                                }
-                                Spacer()
-                                ShareLink(item: url) {
-                                    Image(systemName: "square.and.arrow.up")
-                                        .foregroundColor(pal.accent)
-                                        .frame(width: 44, height: 44)
-                                }
-                                .accessibilityLabel("Share report")
+                // The list style of the pages around it; it used to be glass cards in a ScrollView
+                // with each report named by its raw filename.
+                List {
+                    ForEach(reports) { report in
+                        HStack(spacing: UI.md) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(report.kind).foregroundStyle(pal.text)
+                                Text(report.when).font(.footnote).foregroundStyle(pal.dim)
                             }
-                            .glassPanel()
+                            .accessibilityElement(children: .combine)
+                            Spacer(minLength: 0)
+                            ShareLink(item: report.url) {
+                                Image(systemName: "square.and.arrow.up")
+                                    .foregroundStyle(pal.dim)
+                                    .frame(width: 44, height: 44)
+                            }
+                            .accessibilityLabel("Share the \(report.kind.lowercased()) from \(report.when)")
                         }
                     }
-                    .padding(.horizontal, 20)
-                    .padding(.top, 12)
+                    .listRowBackground(pal.text.opacity(0.05))
                 }
+                .listStyle(.insetGrouped)
+                .scrollContentBackground(.hidden)
+                .background(pal.bg.ignoresSafeArea())
             }
         }
-        .navigationTitle("Diagnostics")
+        // Room for the floating mini-player, measured (a pushed page ends at the bottom edge).
+        .miniPlayerClearance()
+        .navigationTitle("Reports from iOS")
         .navigationBarTitleDisplayMode(.inline)
-        .onAppear { files = MetricsCollector.shared.payloadFiles() }
+        .onAppear {
+            reports = MetricsCollector.shared.payloadFiles().map { url in
+                Report(url: url, isCrash: url.lastPathComponent.hasPrefix("diagnostic"),
+                       date: (try? url.resourceValues(forKeys: [.creationDateKey]))?.creationDate)
+            }
+        }
+    }
+}
+
+/// A settings row's label: the title in the text tone, and an optional short note under it in
+/// the dim tone. A disabled row dims its title too: at full cream it read as live, with only the
+/// switch's knob greyed.
+struct SettingLabel: View {
+    let title: String
+    var note: String?
+    let pal: Palette
+    @Environment(\.isEnabled) private var isEnabled
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title).foregroundStyle(isEnabled ? pal.text : pal.dim)
+            if let note {
+                Text(note).font(.footnote).foregroundStyle(pal.dim)
+            }
+        }
+        // Leading even inside a Menu's label, which centres multi-line text.
+        .multilineTextAlignment(.leading)
+        .fixedSize(horizontal: false, vertical: true)
     }
 }

@@ -24,7 +24,12 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
     is the Podcasts tab's "Tonight" (Focus: "Continue") shelf. `Views/NowPlayingState.swift` holds
     the player views' pure, unit-tested rules: `NowPlayingState` (hero, Up Next, phase),
     `PlayerClock` (times, speeds, lengths, clamped) and `NightLineCopy` (the Sleep player's
-    night line).
+    night line). `Views/SettingsRules.swift` holds Settings' pure, unit-tested rules:
+    `LimiterChoice` (Soften loud moments: Off / While sleeping / Always, over the two stored limiter
+    flags), `StereoWidth` (four named stops) and `SettingsOrder` (the current mode's sections
+    first, the other mode's folded). `Views/BackupSupportView.swift` is Settings ▸ Backup & support
+    (Backup, Reports from iOS, the playback log); its `BackupController` (`Views/BackupControls.swift`)
+    is owned by `SettingsView`, so a restore still finishes if that page is closed mid-way.
   - `Services/` — the engine + plumbing (below).
   - `Models/Models.swift` — `Podcast`, `Episode`, `SavedMix`, `NoiseType`. `Models/PodcastText.swift`
     (show-notes HTML → plain text, counts, durations, placeholder names) and
@@ -40,7 +45,8 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   night (~80 s), glances, wakes, and checks Focus's readout; it passes settings as launch
   arguments (plist literals, the argument domain) so persisted mode and night length stay put.
   CI's simulators are slow and sometimes drop a synthesized tap, so a tap that matters checks its
-  effect and goes round again (the noise switch, Focus's Stop, `pauseAudio`), and a test lets an
+  effect and goes round again (the noise switch, Focus's Stop, `pauseAudio`, the veil's first tap,
+  whose glance is read off a screenshot since it's hidden from accessibility), and a test lets an
   overlay finish fading in before tapping it (a tap on the veil as it arrives doesn't reach it).
   They launch with Moving scenes off (`-ambientMotion <false/>`): an app redrawing every frame
   never idles, and XCUITest's wait for idle before each tap outlasted Home's control fade. Never
@@ -54,9 +60,11 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   `HomeScreensaverPolicyTests`), the podcast rules (`PodcastTextTests`, `ShowNotesPreviewTests`,
   `ShowNotesEdgeTests`, `TonightShelfTests`, `QueueMoveToHeadTests`), the player rules
   (`NowPlayingStateTests`, `NightLineCopyTests`, `PlayerQueueActionTests`,
-  `PodcastFailureStreakTests`), the real-AVPlayer suites (`PodcastPlayerRebuildTests`,
+  `PodcastFailureStreakTests`), Settings' rules (`SettingsRulesTests`) and a restore's engine
+  reload (`RestoreReloadTests`), the real-AVPlayer suites (`PodcastPlayerRebuildTests`,
   `PodcastLoadHoldTests`, `PodcastItemEndTests`), and more);
-  `PersistenceTests.swift` (`PersistenceMigrator` / `MixStore`); `BackupRoundTripTests.swift`;
+  `PersistenceTests.swift` (`PersistenceMigrator` / `MixStore`); `BackupRoundTripTests.swift`
+  (export, read, restore and Undo, the `Backup.kinds` checks, a restore never switching mode);
   `FocusDriversTests.swift`; `GenerativeAudioEngineTests.swift` (`GenerativeMediaResetTests`).
 
 ## Services (the core)
@@ -72,6 +80,13 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   Focus Pomodoro. `AudioMath` holds the fade curve.
 - `PodcastQueueManager`, `MixStore`, `PersistenceMigrator`, `StorageManager` (JSON file store),
   `AudioDownloader` (offline cache), `PodcastParser` / `OPMLParser` / `ITunesSearchManager`.
+- `Backup`: the backup file's export and restore. A restore reads and validates first, the person
+  confirms in plain counts ("4 mixes, 12 shows"), and a snapshot of what was here is kept for a
+  week so Undo can put it back exactly; if that snapshot can't be saved, nothing is replaced.
+  `Backup.kinds` is the restore allowlist with each setting's type and range (a JSON null raised
+  an uncatchable exception in UserDefaults): keep new persisted settings in sync there. A restore
+  never changes the mode (`exportOnlyKeys`); a backup from the other mode lands its sounds in the
+  per-mode picks instead.
 
 ## Audio + state invariants (the hard-won stuff — change with care)
 - **Never block the render thread.** It reads params lock-free; hand-offs are atomic. No locks,
@@ -124,8 +139,10 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
 - **Sound palettes are mode-scoped.** Sleep and Focus share no sounds except Pink noise
   (`AudioEngine.reconcileSoundsToMode`). Each mode remembers its own last noise and binaural pick
   (`lastPick.*` keys), and a mode switch restores that pick. Without it, Sleep's Brown came back
-  from Focus as Pink: Focus snapped it to Pink, which Sleep also has. Launch and restore don't
-  apply the memory; there, the current sound is already that mode's latest pick.
+  from Focus as Pink: Focus snapped it to Pink, which Sleep also has. Launch doesn't apply the
+  memory; there, the current sound is already that mode's latest pick. A restore never switches
+  mode: a backup from the other mode puts its current sounds in that mode's picks and takes this
+  mode's sounds from its picks (`Backup.restorePlan`).
 - **The sleep timer starts from the Home orb's night ring.** `NightRing` sets
   `nightLengthMinutes` (0 = All night, the default, so an update never starts timing anyone out).
   Any Sleep session starting from rest starts the timer at that length: `AudioEngine.noteSessionEdge`

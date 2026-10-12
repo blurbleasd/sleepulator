@@ -194,6 +194,9 @@ struct VolumeBar: View {
     var range: ClosedRange<Double> = 0...1
     /// Warm cream by default (Theme.text) so every slider loses the one cold hard-white element.
     var thumbColor: Color = Color(red: 0.95, green: 0.89, blue: 0.82)
+    /// The unfilled channel. The default carved black reads on the mixer's glass; on a flat dark
+    /// row (Settings) it measured 1.06:1 and the track vanished, so that caller passes a lighter one.
+    var trackColor: Color = Color.black.opacity(0.25)
     /// Gain-staging tier — sets the track/thumb sizes (see `VolumeBarStyle`).
     var style: VolumeBarStyle = .channel
     /// When true a tap (no drag) jumps the value to the tapped position. Off for the mixer (a
@@ -242,7 +245,7 @@ struct VolumeBar: View {
             let fill = max(trackH, min(w, w * CGFloat(frac)))
             ZStack(alignment: .leading) {
                 // Carved channel: a dark inset with a darker top hairline (lit from above).
-                Capsule().fill(Color.black.opacity(0.25)).frame(height: trackH)
+                Capsule().fill(trackColor).frame(height: trackH)
                     .overlay(alignment: .top) {
                         Capsule().fill(Color.black.opacity(0.35)).frame(height: 0.5)
                     }

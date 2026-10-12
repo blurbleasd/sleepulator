@@ -13,7 +13,7 @@ enum Log {
     static let network = Logger(subsystem: subsystem, category: "network")
     /// The overnight trail: sleep-timer start/bump/fade/terminal-stop plus the session events
     /// (interruption, route change, limiter attach) that explain a silent bed at 3 a.m. Kept in
-    /// its own category so "export last night's log" reads as a coherent timeline.
+    /// its own category so "Export the playback log" reads as a coherent timeline.
     static let timer   = Logger(subsystem: subsystem, category: "timer")
     /// Ambient scene / Metal shader diagnostics — e.g. a stitchable shader missing from the
     /// compiled metallib (which would otherwise render a silent black backdrop). See `MetalShaders`.
