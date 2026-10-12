@@ -1522,6 +1522,9 @@ final class AudioEngine: ObservableObject {
             let podActive = podcastIsPlayingOrStarting
             Log.timer.notice("interruption began (podWasPlaying=\(podActive, privacy: .public))")
             nightJournal.note("interruption began")
+            // The bed's switches stay on through it, so no session edge reports this stop: the
+            // night pauses here (a podcast alone also pauses through its edge, below).
+            nightJournal.sessionStopped()
             podWasPlayingBeforeInterruption = podWasPlayingBeforeInterruption || podActive
             genEngine.handleInterruption(shouldResume: false)
             if podActive { podPlayer.pause() }
@@ -1552,6 +1555,10 @@ final class AudioEngine: ObservableObject {
                 podPlayer.resume()
             }
             podWasPlayingBeforeInterruption = false
+            // The bed came back: the night carries on (within the resume window, the same one).
+            // After the podcast's resume, so a rebuild it makes is filed while still paused. A
+            // podcast alone carries the night on through its playing edge.
+            if !focusMode, noiseOn || binauralOn { nightJournal.sessionStarted() }
         }
     }
     

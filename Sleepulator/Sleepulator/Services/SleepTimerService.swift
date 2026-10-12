@@ -176,10 +176,11 @@ final class SleepTimerService: ObservableObject {
         if timerRemaining != 0 { timerRemaining = 0 }
         didFire = true
         Log.timer.notice("terminal stop: \(reason, privacy: .public)")
-        recordNightEnd(at: endedAt ?? now())
+        let end = endedAt ?? now()
+        recordNightEnd(at: end)
         // Before stopAllFn: stopping everything reports a pause on the session edge, and the
         // night journal must hear "ended by the timer" first, or it closes the night as a pause.
-        onTerminalStop?(kind == .endOfEpisode, reconciled, endedAt ?? Date())
+        onTerminalStop?(kind == .endOfEpisode, reconciled, end)
         stopAllFn?()
         cancelTimer()
     }

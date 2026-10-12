@@ -15,6 +15,10 @@ struct ContentView: View {
     @AppStorage("tipCardShownOn") private var tipCardShownOn: Double = 0
     @State private var tipCardDue = false
     @State private var showTipSheet = false
+    #if DEBUG
+    /// The card's UI test answers it in memory only (see `spendTipCard`).
+    @State private var uiTestCardSpent = false
+    #endif
     @Environment(\.scenePhase) private var scenePhase
     @State private var selectedTab = 0
     @AppStorage("autoNightDim") private var autoNightDim = true
@@ -186,7 +190,8 @@ struct ContentView: View {
                          nowPlayingPresented: showNowPlaying, miniPlayerTouches: miniPlayerTouches,
                          orbCenter: $orbCenter, tipCardDue: tipCardDue,
                          onLeaveTip: { showTipSheet = true },
-                         onTipCardDeclined: { tipCardSpent = true; refreshAsks() })
+                         onTipCardDeclined: { spendTipCard(); refreshAsks() },
+                         onTipCardShown: markTipCardShown)
                     // Home reserves the bar's room only when the bar shows on Home (not on Sleep
                     // Home at rest). The screensaver fade doesn't count: HomeView freezes it.
                     .environment(\.miniPlayerTop, miniPlayerShownOnHome ? miniPlayerTop : nil)
@@ -296,7 +301,7 @@ struct ContentView: View {
         // break; leaving it ends the visit's "Waiting for approval" (design D7).
         .sheet(isPresented: $showTipSheet, onDismiss: {
             tips.screenClosed()
-            tipCardSpent = true
+            spendTipCard()
             naturalBreak()
         }) {
             TipSheet(tips: tips, pal: pal)
@@ -321,8 +326,10 @@ struct ContentView: View {
             if playing { if !nightDimmed { scheduleDim() } } else { cancelDim() }
             refreshAsks()
         }
-        .onReceive(tips.$products) { _ in refreshAsks() }
-        .onReceive(tips.$hasTipped) { _ in refreshAsks() }
+        // onChange, not onReceive: a @Published publisher fires in willSet, so refreshAsks would
+        // read the store's old value (no products yet) and the card would wait a whole visit.
+        .onChange(of: tips.products.isEmpty) { _, _ in refreshAsks() }
+        .onChange(of: tips.hasTipped) { _, _ in refreshAsks() }
         // A timer starting or ending changes where the veil may drop (everywhere vs Home only).
         .onReceive(audio.sleepTimer.$timerRemaining) { remaining in
             let active = remaining > 0
@@ -335,11 +342,11 @@ struct ContentView: View {
         .onChange(of: showNowPlaying) { _, up in
             if up, !nightDimmed { scheduleDim() }
         }
-        .onChange(of: audio.focusMode) { _, _ in refreshAsks() }
         .onChange(of: audio.focusMode) { _, focus in
             if focus { cancelDim(); withAnimation(.easeInOut(duration: 0.4)) { nightDimmed = false } }
             // Into Sleep with the sound still going: that's a night starting, so arm the veil.
             else if !nightDimmed { scheduleDim() }
+            refreshAsks()
         }
         .onChange(of: selectedTab) { old, _ in
             // Navigating is interaction — reset the dim countdown and drop the screensaver
@@ -362,6 +369,9 @@ struct ContentView: View {
             if phase == .active {
                 audio.sleepTimer.reconcileIfExpired()
                 tips.refreshPurchasesAllowed()
+                // A launch offline (bedtime in Airplane mode) left no tips: try again, or the card
+                // could wait for days of suspend and resume.
+                if tips.products.isEmpty, tips.phase != .loading { Task { await tips.loadProducts() } }
                 refreshAsks()
             }
         }
@@ -386,24 +396,53 @@ struct ContentView: View {
         stamp > 0 && Calendar.current.isDate(Date(timeIntervalSince1970: stamp), inSameDayAs: now)
     }
 
+    /// Something is playing or about to: an episode still loading, Apple Music, a Pomodoro
+    /// running in silence (Home's own notion of a session, plus the load). No ask over any of it.
+    private var sessionBusy: Bool {
+        audio.isAnythingPlaying || audio.podcastIsPlayingOrStarting || audio.appleMusicOn
+            || audio.pomodoro.isRunning
+    }
+
+    /// The card rendered today: no rating ask today. Not under the UI test's seam, for the same
+    /// reason as `spendTipCard`.
+    private func markTipCardShown() {
+        #if DEBUG
+        if UserDefaults.standard.bool(forKey: "uiTestTipCardDue") { return }
+        #endif
+        let now = Date()
+        if !sameDay(tipCardShownOn, now) { tipCardShownOn = now.timeIntervalSince1970 }
+    }
+
+    /// The card is answered for good. Under the UI test's seam only for this run: a UI test must
+    /// leave the simulator's persisted state as it found it (CLAUDE.md).
+    private func spendTipCard() {
+        #if DEBUG
+        if UserDefaults.standard.bool(forKey: "uiTestTipCardDue") { uiTestCardSpent = true; return }
+        #endif
+        tipCardSpent = true
+    }
+
     /// Whether the tip card is due, re-read at scene activation, natural breaks and when the
     /// store, the mode or the session changes. A plain value to Home, never @Published on
     /// AudioEngine (eng run 2, Section 1 #2).
     private func refreshAsks() {
+        audio.nightJournal.closeLapsedPause()
         let now = Date()
         var due = SessionGuards.tipCardDue(
             cleanNights: audio.nightJournal.cleanNightCount, tipped: tips.hasTipped, spent: tipCardSpent,
             productsReady: !tips.products.isEmpty && tips.purchasesAllowed, focusMode: audio.focusMode,
-            playing: audio.isAnythingPlaying, ratingAskedToday: sameDay(ratingAskedOn, now), now: now,
+            playing: sessionBusy, ratingAskedToday: sameDay(ratingAskedOn, now), now: now,
             lastNightEnd: lastNightEnd)
         #if DEBUG
         // The card's UI test (TS-2, EV-2): due regardless of nights and the clock, with the
         // DEBUG-only test products. Compiled out of release builds.
         if UserDefaults.standard.bool(forKey: "uiTestTipCardDue") {
-            due = !tipCardSpent && !tips.hasTipped && !tips.products.isEmpty && !audio.focusMode
+            due = !tipCardSpent && !uiTestCardSpent && !tips.hasTipped && !tips.products.isEmpty
+                && !audio.focusMode
         }
         #endif
-        if due, !sameDay(tipCardShownOn, now) { tipCardShownOn = now.timeIntervalSince1970 }
+        // "Shown today" is stamped when the card renders (HomeView's onTipCardShown), not here:
+        // due on another tab, or behind another card, it was never seen.
         if due != tipCardDue { tipCardDue = due }
     }
 
@@ -414,7 +453,7 @@ struct ContentView: View {
         let now = Date()
         guard SessionGuards.mayAskForRating(
             cleanNights: audio.nightJournal.cleanNightCount, askedThisVersion: ratingAskedVersion == AppInfo.version,
-            tipCardShownToday: sameDay(tipCardShownOn, now), playing: audio.isAnythingPlaying,
+            tipCardShownToday: sameDay(tipCardShownOn, now), playing: sessionBusy,
             veilDown: nightDimmed, now: now, lastNightEnd: lastNightEnd) else { return }
         ratingAskedVersion = AppInfo.version
         ratingAskedOn = now.timeIntervalSince1970

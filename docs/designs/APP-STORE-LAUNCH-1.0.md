@@ -1932,6 +1932,14 @@ Calls made during the build, for the record:
   ("[SKTestSession] Error saving configuration file … SKInternalErrorDomain Code=3") and load no
   products, so the six StoreKitTest cases `XCTSkip` with that reason; they run from Xcode. CI
   therefore never exercises TS-1. Open for the user: keep the skip, or drop the suite from CI.
+- **Pre-landing review (2026-10-12)** fixed: a stale read that hid a due tip card after products
+  loaded; a paused night now ends once its 30 minutes pass and news during a pause (an alarm's
+  pipeline death) is a note, not a taint, and an interruption pauses the night (user D2); a
+  force-quit's verdict is flushed and recovered; verdicts moved into the backup-excluded nights
+  folder; the soft cap keeps pauses; "shown today" is stamped when the card renders; an
+  unverified tip says "Couldn't confirm this tip." with no Try again, instead of the design
+  table's "didn't go through" (user D3, so no second charge); one purchase at a time; the
+  Settings tip rows no longer clear their own thank-you. The StoreKitTest skip stays (user D1).
 - **Open inputs the code waits on:** `AppInfo.supportEmail` (Send feedback falls back to the share
   sheet without it), `AppInfo.appStoreID` (the Rate row stays hidden without it), and the three
   products in App Store Connect under the IDs `app.sleepulator.Sleepulator.tip.small` / `.kind` /

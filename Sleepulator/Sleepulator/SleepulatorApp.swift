@@ -5,7 +5,10 @@ struct SleepulatorApp: App {
     @Environment(\.scenePhase) private var scenePhase
     /// The tip jar's store, alive for the whole app: it listens for transactions from launch
     /// (an Ask to Buy approved while the app was closed lands here) and finishes any left over.
-    @StateObject private var tips = TipStore()
+    /// Not inside a unit-test host: TipStoreTests' StoreKitTest transactions would reach this
+    /// listener too and mark the simulator's app as tipped (NightJournal.makeDefault, likewise).
+    @StateObject private var tips = TipStore(
+        startStoreKit: ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil)
 
     init() {
         // MetricKit only accumulates while a subscriber is registered — register at launch,

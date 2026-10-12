@@ -13,8 +13,9 @@ import os
 // Every StoreKit outcome maps to one phase through `TipFlow`, which the unit tests drive without
 // StoreKit; TipStoreTests drives the real flow with StoreKitTest. One tip per transaction id: a
 // transaction delivered twice (the iOS 27 sandbox has been reported replaying finished ones)
-// finishes again and never thanks twice. "Tipped" is a device-only flag: never backed up, so a
-// new phone forgets it (design D17).
+// finishes again and never thanks twice. "Tipped" is a device-only flag: never in the app's Backup
+// file (outside Backup.kinds), so a phone set up from that file forgets it (design D17). A
+// device restore from iCloud carries it, as it does any app's preferences.
 
 /// A tip as the views show it.
 nonisolated struct TipProduct: Identifiable, Equatable {
@@ -35,6 +36,9 @@ nonisolated enum TipPhase: Equatable {
     case thanked
     /// "That didn't go through." with Try again.
     case failed
+    /// The App Store finished it but it couldn't be verified: it may have been charged, so no
+    /// Try again, and it's never thanked or counted.
+    case unconfirmed
 }
 
 /// What a purchase came back with, StoreKit-free so the mapping is unit-tested.
@@ -56,7 +60,7 @@ nonisolated enum TipFlow {
         case .verified(let id):
             return (.thanked, handled.contains(id) ? nil : id)
         case .unverified:
-            return (.failed, nil)          // never thanked, never counted as tipped
+            return (.unconfirmed, nil)     // never thanked, never counted, never "try again"
         case .userCancelled:
             return (.ready, nil)
         case .pending:
@@ -135,7 +139,7 @@ final class TipStore: ObservableObject {
         refreshPurchasesAllowed()
         do {
             let loaded = try await Product.products(for: Self.productIDs)
-            storeProducts = Dictionary(uniqueKeysWithValues: loaded.map { ($0.id, $0) })
+            storeProducts = Dictionary(loaded.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
             products = Self.productIDs.enumerated().compactMap { index, id in
                 storeProducts[id].map { TipProduct(id: id, name: Self.names[index], displayPrice: $0.displayPrice) }
             }
@@ -154,6 +158,9 @@ final class TipStore: ObservableObject {
     }
 
     func purchase(_ id: String) async {
+        // One purchase at a time: a second tap before the rows re-render would open a second
+        // payment sheet for a consumable.
+        if case .purchasing = phase { return }
         guard let product = storeProducts[id] else { phase = .unavailable; return }
         lastAttempt = id
         phase = .purchasing(id)
@@ -184,7 +191,7 @@ final class TipStore: ObservableObject {
     /// the visit (design D7); a later approval arrives through `Transaction.updates`.
     func screenClosed() {
         switch phase {
-        case .pending, .thanked, .failed: phase = products.isEmpty ? .unavailable : .ready
+        case .pending, .thanked, .failed, .unconfirmed: phase = products.isEmpty ? .unavailable : .ready
         default: break
         }
     }

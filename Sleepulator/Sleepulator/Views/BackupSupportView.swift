@@ -71,7 +71,11 @@ struct BackupSupportView: View {
         .navigationTitle("Backup & support")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { backup.pageAppeared() }
-        .onDisappear { backup.pageDisappeared() }
+        .onDisappear {
+            backup.pageDisappeared()
+            // Leaving the page ends the tips' visit: no lingering "Waiting for approval" (design D7).
+            tips.screenClosed()
+        }
         .fileImporter(isPresented: $backup.isImporting, allowedContentTypes: [.json],
                       allowsMultipleSelection: false) { backup.picked($0) }
         .fileExporter(isPresented: $backup.isExporting, document: backup.exportDocument,

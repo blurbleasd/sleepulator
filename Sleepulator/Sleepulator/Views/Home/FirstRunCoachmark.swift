@@ -69,6 +69,9 @@ struct FirstRunCoachmark: View {
     let dismiss: () -> Void
     /// "Leave a tip" on the tip card (opens the tip sheet).
     var leaveTip: () -> Void = {}
+    /// A real layout appeared (never the empty fallback): the tip card's "shown today" is when the
+    /// person could see it, not when it fell due.
+    var onShown: () -> Void = {}
 
     private var isTip: Bool { content == .tip }
 
@@ -77,13 +80,13 @@ struct FirstRunCoachmark: View {
 
     var body: some View {
         ViewThatFits(in: .vertical) {
-            if content.pointsDown { full(pointer: true) }
-            full(pointer: false)
-            brief
+            if content.pointsDown { full(pointer: true).onAppear(perform: onShown) }
+            full(pointer: false).onAppear(perform: onShown)
+            brief.onAppear(perform: onShown)
             // Out of room at a large text size: the tip stops growing at the largest size that
             // still clears the orb, rather than covering it.
             ForEach(Self.textSizeCaps, id: \.self) { cap in
-                brief.dynamicTypeSize(...cap)
+                brief.dynamicTypeSize(...cap).onAppear(perform: onShown)
             }
             // No room at all: show nothing. The orb and Build mix are labelled on their own, and
             // opening the mixer still retires the tip.

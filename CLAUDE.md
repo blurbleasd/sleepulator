@@ -34,10 +34,11 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
     flags), `StereoWidth` (four named stops) and `SettingsOrder` (the current mode's sections
     first, the other mode's folded). `Views/BackupSupportView.swift` is Settings ▸ Backup & support
     (Backup; Troubleshooting: Send feedback, Reports from iOS, the playback log; Support
-    Sleepulator last: tips, Rate, the build line). `Views/TipJar.swift` holds the tip rows (one
-    view for Settings and the card's sheet), Send feedback, and the pure `RateRowRule` and
-    `FeedbackMessage`; the tip card itself is `CoachmarkContent.tip` in `FirstRunCoachmark`. Its `BackupController` (`Views/BackupControls.swift`)
-    is owned by `SettingsView`, so a restore still finishes if that page is closed mid-way.
+    Sleepulator last: tips, Rate, the build line). Its `BackupController`
+    (`Views/BackupControls.swift`) is owned by `SettingsView`, so a restore still finishes if that
+    page is closed mid-way. `Views/TipJar.swift` holds the tip rows (one view for Settings and the
+    card's sheet), Send feedback, and the pure `RateRowRule` and `FeedbackMessage`; the tip card
+    itself is `CoachmarkContent.tip` in `FirstRunCoachmark`.
   - `Services/` — the engine + plumbing (below).
   - `Models/Models.swift` — `Podcast`, `Episode`, `SavedMix`, `NoiseType`. `Models/PodcastText.swift`
     (show-notes HTML → plain text, counts, durations, placeholder names) and
@@ -223,10 +224,14 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   `episodeEnded()` (the tail if set, else the stop). In the tail an ended episode tidies the queue
   and never auto-plays the next; only a person's pick lifts the tail.
 - **The night journal only observes.** `NightJournal` never changes playback; it takes the
-  engine's edges (`noteSessionEdge`, `beginSleepNight`, the Focus switch), live-audio ticks (the
-  RMS tap and the podcast clock, gaps over 2 s not counted) and taints. A night is clean only on
-  sound that really played: to its timer's end while playing, or 3+ hours ended by a person, with
-  no player rebuild, pipeline death or podcast failure anywhere in it (any failure, by design).
+  engine's edges (`noteSessionEdge`, `beginSleepNight`, the Focus switch, an interruption's begin
+  and, with the bed back, its end), live-audio ticks (the RMS tap and the podcast clock, gaps over
+  2 s not counted) and taints. A night is clean only on sound that really played: to its timer's
+  end while playing, or 3+ hours ended by a person, with no player rebuild, pipeline death or
+  podcast failure while it played (any failure, by design). News while the night is paused (an
+  alarm killing the player, the rebuild when play resumes) is a note, not a taint. A pause over
+  30 minutes ends the night where it paused, as soon as the asks look or news arrives
+  (`closeLapsedPause`), not when play is next pressed.
   A deadline reconciled on the morning foreground never counts, so `SleepTimerService.onTerminalStop`
   fires before `stopAllFn` (the stop would otherwise read as a person's). Late news is filed by
   when it happened (an off-main failure carries its time), into the night whose span holds it,

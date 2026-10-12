@@ -28,6 +28,8 @@ struct HomeView: View {
     var onLeaveTip: () -> Void = {}
     /// "No thanks" on the card: spent for good (design D6).
     var onTipCardDeclined: () -> Void = {}
+    /// The card actually rendered: the day it counts as shown (no rating ask that day).
+    var onTipCardShown: () -> Void = {}
     /// Closing Build mix or the timer sheet is a natural break, where a rating may be asked
     /// (design D12).
     @Environment(\.naturalBreak) private var naturalBreak
@@ -192,7 +194,8 @@ struct HomeView: View {
                                       presenting: presentingFromHome)
     }
 
-    /// A first-run or "the timer moved" card is up: the fade waits longer, so it can be read.
+    /// A card is up in the coachmark band (first-run, "the timer moved" or the tip card): the
+    /// fade waits longer, so it can be read.
     private var tipShowing: Bool {
         currentTip != nil
     }
@@ -627,7 +630,8 @@ struct HomeView: View {
                                 else if tip == .nightRing { hasSeenNightRingTip = true }
                                 else { onTipCardDeclined() }
                             }
-                        }, leaveTip: onLeaveTip)
+                        }, leaveTip: onLeaveTip,
+                           onShown: { if tip == .tip { onTipCardShown() } })
                         .padding(.horizontal, 28)
                         .frame(width: proxy.size.width, height: room.height, alignment: .bottom)
                         .offset(y: room.top)
@@ -790,8 +794,8 @@ struct HomeView: View {
         .sheet(isPresented: $showTimerActionSheet, onDismiss: {
             let next = afterTimerSheet
             afterTimerSheet = nil
-            next?()
-            naturalBreak()
+            // A follow-up (a cover, a confirm, Play) is the person carrying on, not a break.
+            if let next { next() } else { naturalBreak() }
         }) {
             TimerSelectionSheet(audio: audio, isPresented: $showTimerActionSheet, pal: pal,
                                 playAndStart: playAndStartTimer)
@@ -804,8 +808,7 @@ struct HomeView: View {
         .sheet(isPresented: $showMix, onDismiss: {
             let next = afterMixSheet
             afterMixSheet = nil
-            next?()
-            naturalBreak()
+            if let next { next() } else { naturalBreak() }
         }) {
             MixDrawer(audio: audio, mixStore: mixStore, pal: pal, onPickEpisode: {
                 showMix = false

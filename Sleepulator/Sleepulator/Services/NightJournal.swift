@@ -2,18 +2,21 @@ import Foundation
 import UIKit
 import os
 
-// The night journal: one record per Sleep night, kept on this phone, never backed up.
+// The night journal: one record per Sleep night, kept on this phone. Its folder (the night files
+// and the verdicts) is excluded from iCloud and computer backups, and the app's Backup file never
+// carries it.
 //
 //   AudioEngine.noteSessionEdge ──── opened / paused / resumed ───┐
 //   RMS tap + player clock (main) ── live audio, counted ──────────┤
 //   SleepTimerService.onTerminalStop  closed by the timer ─────────┼──> NightJournal (main) ──> nights/<id>.jsonl  (one event per line,
 //   PodcastPlayer.onPipelineEvent ── taints, filed by time ────────┤        │                   last 2 nights, no URLs)
-//   failure streak · interruptions · routes · terminate · Focus ───┘        └──> verdicts.json (last 30, via StorageManager)
+//   podcast failures · interruptions · routes · terminate · Focus ─┘        └──> nights/night-verdicts.json (last 30)
 //
 // A night is clean (NightRules.isClean) when sound really played through it: to its timer's end
 // while playing (never a deadline reconciled on the morning foreground), or 3+ hours on All night
-// ended by a person; with no player rebuild, no pipeline death and no podcast failure anywhere in
-// it. A record left open while playing means the app died: not clean. The rating and tip asks
+// ended by a person; with no player rebuild, no pipeline death and no podcast failure while it
+// played (news during a pause, like an alarm's, is a note). A pause over 30 minutes ends the night
+// where it paused. A record left open while playing means the app died: not clean. The rating and tip asks
 // count clean nights (docs/designs/APP-STORE-LAUNCH-1.0.md, NT-1, EV-1), and "Send feedback"
 // attaches the files, which is why nothing written here may carry a URL (private podcast feeds
 // keep their subscriber's secret in it).
@@ -125,9 +128,11 @@ nonisolated extension NightSummary {
     mutating func apply(_ e: NightEvent) {
         lastEventAt = max(lastEventAt, e.at)
         switch e.kind {
-        case "paused": pausedAt = e.at
+        case "paused":
+            pausedAt = e.at
+            live = max(live, Double(e.detail ?? "") ?? live)
         case "resumed": pausedAt = nil
-        case "live": live = max(live, Double(e.detail ?? "") ?? live)
+        case "live", "threshold": live = max(live, Double(e.detail ?? "") ?? live)
         case "taint": if let d = e.detail { taints.append(d) }
         case "closed":
             let parts = (e.detail ?? "").split(separator: " ").map(String.init)
@@ -160,9 +165,10 @@ final class NightJournal {
     private static let verdictsFile = "night-verdicts.json"
 
     /// `directory` defaults to Application Support/Sleepulator/nights (excluded from iCloud
-    /// backup, default file protection so a locked phone can still write at 3am). Tests pass a
+    /// backup, default file protection so a locked phone can still write at 3am). The verdicts
+    /// live there too, through a store of their own, so they're excluded with it. Tests pass a
     /// temp dir and their own StorageManager.
-    init(directory: URL? = nil, storage: StorageManager = .shared, observeTermination: Bool = true) {
+    init(directory: URL? = nil, storage: StorageManager? = nil, observeTermination: Bool = true) {
         let fm = FileManager.default
         let dir = directory ?? {
             let base = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
@@ -175,8 +181,8 @@ final class NightJournal {
         values.isExcludedFromBackup = true
         try? excluded.setResourceValues(values)
         self.directory = dir
-        self.storage = storage
-        verdicts = storage.load(from: Self.verdictsFile) ?? []
+        self.storage = storage ?? StorageManager(directory: dir)
+        verdicts = self.storage.load(from: Self.verdictsFile) ?? []
         recoverUnclosedNight()
         if observeTermination {
             // A force-quit of a playing (so running, not suspended) app delivers this: the night
@@ -201,10 +207,18 @@ final class NightJournal {
         guard ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil else {
             return NightJournal()
         }
-        let tmp = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
-            .appendingPathComponent("sleepulator-test-nights-\(UUID().uuidString)", isDirectory: true)
+        // One root per test host, emptied on first use, so the engines tests make don't leave a
+        // folder each behind run after run.
+        let root = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+            .appendingPathComponent("sleepulator-test-nights", isDirectory: true)
+        if !testRootCleared {
+            testRootCleared = true
+            try? FileManager.default.removeItem(at: root)
+        }
+        let tmp = root.appendingPathComponent(UUID().uuidString, isDirectory: true)
         return NightJournal(directory: tmp, storage: StorageManager(directory: tmp), observeTermination: false)
     }
+    private static var testRootCleared = false
 
     /// A force-quit of a running app: the night ends by a person, where it paused if it had.
     func appWillTerminate() {
@@ -221,7 +235,7 @@ final class NightJournal {
             if t.timeIntervalSince(pausedAt) < UntimedNight.resumeWindow {
                 night.pausedAt = nil
                 open = night
-                write(NightEvent(at: t, kind: "resumed"))
+                write(NightEvent(at: t, kind: "resumed"), essential: true)
                 return
             }
             // The pause outlasted the window: that night ended when it paused.
@@ -246,7 +260,7 @@ final class NightJournal {
         night.pausedAt = t
         open = night
         lastTick = nil
-        write(NightEvent(at: t, kind: "paused", detail: liveText(night.live)))
+        write(NightEvent(at: t, kind: "paused", detail: liveText(night.live)), essential: true)
     }
 
     /// Live audio: the RMS tap and the player clock, both on main, ~20 Hz while sound renders.
@@ -282,6 +296,15 @@ final class NightJournal {
         }
     }
 
+    /// A pause that outlasted `UntimedNight.resumeWindow` ended its night where it paused. Run
+    /// before filing news and when the asks look, so a night counts the morning it ends (not when
+    /// play is next pressed) and nothing from later lands in it.
+    func closeLapsedPause() {
+        guard let night = open, let pausedAt = night.pausedAt,
+              now().timeIntervalSince(pausedAt) >= UntimedNight.resumeWindow else { return }
+        close(.person, at: pausedAt)
+    }
+
     /// Leaving Sleep ends the night.
     func switchedToFocus() {
         guard let night = open else { return }
@@ -291,9 +314,16 @@ final class NightJournal {
     // MARK: Taints and notes (filed by the time they happened, EV-1)
 
     /// Something that spoils a night: filed into the night whose span contains `at`, the open
-    /// one or a recent closed one (whose verdict is then recomputed); dropped if none.
+    /// one or a recent closed one (whose verdict is then recomputed); dropped if none. While the
+    /// night is paused (an alarm, a call, the person's pause) nothing is meant to play: a player
+    /// that dies then, and its rebuild when play resumes, go in the trail but don't spoil it.
     func taint(_ kind: String, at: Date) {
         let kind = NightRules.scrub(kind)
+        closeLapsedPause()
+        if let night = open, let pausedAt = night.pausedAt, at >= pausedAt {
+            write(NightEvent(at: at, kind: "note", detail: kind + " while paused"))
+            return
+        }
         if var night = open, at >= night.start {
             night.taints.append(kind)
             open = night
@@ -311,9 +341,9 @@ final class NightJournal {
         append(NightEvent(at: at, kind: "taint", detail: kind), toNight: old.id)
     }
 
-    /// Context for the trail that doesn't spoil the night: an interruption, a route change, a
-    /// single failed episode Auto-Play moved past.
+    /// Context for the trail that doesn't spoil the night: an interruption, a route change.
     func note(_ text: String) {
+        closeLapsedPause()
         guard open != nil else { return }
         write(NightEvent(at: now(), kind: "note", detail: NightRules.scrub(text)))
     }
@@ -355,32 +385,47 @@ final class NightJournal {
         append(NightEvent(at: end, kind: "closed", detail: detail), toNight: night.id, flush: flush)
         open = nil
         lastTick = nil
-        if let v = NightRules.verdict(night) {
-            verdicts.append(v)
-            if verdicts.count > NightRules.keptVerdicts {
-                verdicts.removeFirst(verdicts.count - NightRules.keptVerdicts)
-            }
-            storage.save(verdicts, to: Self.verdictsFile)
+        if let v = NightRules.verdict(night) { record(v) }
+        // The terminate path: the verdict must land before the process goes, or the night is
+        // closed on disk with no verdict (recovery then rebuilds it from the file).
+        if flush { storage.flush() }
+    }
+
+    /// Keep one verdict per night (a recovery can meet a night already recorded), the newest 30.
+    private func record(_ v: NightVerdict) {
+        verdicts.removeAll { $0.id == v.id }
+        verdicts.append(v)
+        if verdicts.count > NightRules.keptVerdicts {
+            verdicts.removeFirst(verdicts.count - NightRules.keptVerdicts)
         }
+        storage.save(verdicts, to: Self.verdictsFile)
     }
 
     /// At launch: a night file without a "closed" line ends now, by its last known state. Paused
-    /// → it ended when it paused (a person's stop). Playing → the app died.
+    /// → it ended when it paused (a person's stop). Playing → the app died. A closed file whose
+    /// verdict never landed (the process went between the two writes) is recorded from the file.
     private func recoverUnclosedNight() {
-        guard let newest = nightFiles().first,
+        guard let newest = nightFiles().first else { return }
+        let id = newest.deletingPathExtension().lastPathComponent
+        // Already recorded, the usual case: nothing to read on the launch path.
+        guard !verdicts.contains(where: { $0.id == id }),
               let data = try? Data(contentsOf: newest),
               let text = String(data: data, encoding: .utf8) else { return }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         // A kill mid-write can leave a partial last line: skip anything that doesn't decode.
         let events = text.split(separator: "\n").compactMap { try? decoder.decode(NightEvent.self, from: Data($0.utf8)) }
-        guard let first = events.first, first.kind == "opened",
-              !events.contains(where: { $0.kind == "closed" }) else { return }
-        var night = NightSummary(id: newest.deletingPathExtension().lastPathComponent,
-                                 start: first.at, lastEventAt: first.at)
+        guard let first = events.first, first.kind == "opened" else { return }
+        var night = NightSummary(id: id, start: first.at, lastEventAt: first.at)
         events.forEach { night.apply($0) }
+        if night.end != nil {
+            if let v = NightRules.verdict(night) { record(v) }
+            return
+        }
         open = night
         bytesWritten = data.count
+        // A partial last line: end it, so the closing line isn't glued to it and lost.
+        if data.last != 0x0A { try? Self.appendLine(Data([0x0A]), to: newest) }
         if let pausedAt = night.pausedAt {
             close(.person, at: pausedAt)
         } else {
@@ -405,7 +450,9 @@ final class NightJournal {
         encoder.dateEncodingStrategy = .iso8601
         guard var line = try? encoder.encode(event) else { return }
         line.append(0x0A)
-        bytesWritten += line.count
+        // Only the open night's own file counts toward its soft cap (a late taint can land in an
+        // older night's file).
+        if id == open?.id { bytesWritten += line.count }
         let url = directory.appendingPathComponent(id).appendingPathExtension("jsonl")
         if flush {
             // The terminate path: write before the process goes.
@@ -450,6 +497,10 @@ final class NightJournal {
         fileQueue.async { old.forEach { try? FileManager.default.removeItem(at: $0) } }
     }
 
-    /// Wait for queued writes (tests, and "Send feedback" before it reads the files).
-    func drain() { fileQueue.sync {} }
+    /// Wait for queued writes, the night files' and the verdicts' (tests, and "Send feedback"
+    /// before it reads the files).
+    func drain() {
+        fileQueue.sync {}
+        storage.flush()
+    }
 }

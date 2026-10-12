@@ -12,9 +12,11 @@ final class TipFlowTests: XCTestCase {
         XCTAssertNil(TipFlow.apply(.verified(transactionID: 7), handled: [7]).newTip)
     }
 
-    func testAnUnverifiedTransactionIsNeverATip() {
+    /// The App Store may have charged an unverified purchase: never "didn't go through" with Try
+    /// again (a second charge), never thanked or counted.
+    func testAnUnverifiedTransactionIsNeverATipAndNeverInvitesASecondCharge() {
         let step = TipFlow.apply(.unverified(transactionID: 9), handled: [])
-        XCTAssertEqual(step.phase, .failed)
+        XCTAssertEqual(step.phase, .unconfirmed)
         XCTAssertNil(step.newTip)
     }
 

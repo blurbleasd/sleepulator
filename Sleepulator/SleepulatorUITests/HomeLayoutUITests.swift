@@ -112,11 +112,6 @@ final class HomeLayoutUITests: XCTestCase {
         XCTAssertTrue(buildMix.isHittable, "Build mix is covered where the mini-player was")
     }
 
-    /// Sleep Home at rest (nothing loaded) hides the mini-player, and hidden must mean gone from
-    /// the accessibility tree: faded to opacity 0 it stayed there on iOS 26, over Build mix.
-    /// And Home's controls must all take a tap: the night ring's accessibility shape once became
-    /// Home's whole frame, and XCUITest called everything outside the ring unhittable.
-    @MainActor
     /// The tip card (TS-2; design D3, D13, D16). DEBUG-only seams (EV-2) supply three test products
     /// and make the card due, so the test never waits on StoreKit or the clock. It sits in the
     /// coachmark band above Build mix, its two answers are separate buttons, Home's controls stay
@@ -124,6 +119,7 @@ final class HomeLayoutUITests: XCTestCase {
     /// Value: protects=the card fits the band without blocking Home; fails_when=the card leaves the
     /// band or covers a control, or "No thanks" only hides it; why_new=no UI test shows the card;
     /// seam=uiTestTipProducts + uiTestTipCardDue (DEBUG-only); no_claim=real product loading (TS-1, §T)
+    @MainActor
     func testTipCardSitsInTheBandAndLeavesOnNoThanks() {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -159,6 +155,10 @@ final class HomeLayoutUITests: XCTestCase {
         XCTAssertTrue(buildMix.isHittable, "Build mix is covered after the card left")
     }
 
+    /// Sleep Home at rest (nothing loaded) hides the mini-player, and hidden must mean gone from
+    /// the accessibility tree: faded to opacity 0 it stayed there on iOS 26, over Build mix.
+    /// And Home's controls must all take a tap: the night ring's accessibility shape once became
+    /// Home's whole frame, and XCUITest called everything outside the ring unhittable.
     @MainActor
     func testSleepHomeAtRestHasNoMiniPlayer() {
         continueAfterFailure = false

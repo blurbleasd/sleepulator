@@ -34,6 +34,7 @@ enum TipCopy {
     static let lastingThanks = "Thank you for supporting Sleepulator."
     static let unavailable = "Tips aren't available right now."
     static let failed = "That didn't go through."
+    static let unconfirmed = "Couldn't confirm this tip."
     static let tryAgain = "Try again"
     static let pending = "Waiting for approval."
     static let loading = "Loading…"
@@ -64,6 +65,8 @@ struct TipRows: View {
                 .accessibilityAddTraits(.isStaticText)
         case .pending:
             Text(TipCopy.pending).foregroundStyle(pal.dim)
+        case .unconfirmed:
+            Text(TipCopy.unconfirmed).foregroundStyle(pal.dim)
         case .failed:
             Text(TipCopy.failed).foregroundStyle(pal.dim)
             if let id = tips.lastAttempt {
@@ -194,7 +197,6 @@ enum FeedbackMessage {
 /// within a 2 MB total (eng Section 4 #2), noting anything left out.
 struct FeedbackBundle {
     let files: [URL]
-    let leftOut: Int
     let body: String
 
     static let byteCap = 2 * 1024 * 1024
@@ -212,14 +214,17 @@ struct FeedbackBundle {
             total += size
             files.append(url)
         }
-        let since = reports.last.flatMap { try? $0.resourceValues(forKeys: [.creationDateKey]).creationDate }
+        // "Since" names the oldest report actually attached (reports are newest first), not the
+        // oldest on disk, which the cap may have left out.
+        let attachedReports = files.filter { reports.contains($0) }
+        let since = attachedReports.last.flatMap { try? $0.resourceValues(forKeys: [.creationDateKey]).creationDate }
         var body = FeedbackMessage.body(nightSummary: journal.summaryLine(),
                                         nightFiles: files.filter { nights.contains($0) }.count,
-                                        reportsSince: reports.isEmpty ? nil : since,
+                                        reportsSince: attachedReports.isEmpty ? nil : since,
                                         version: AppInfo.version, build: AppInfo.build,
                                         iOS: UIDevice.current.systemVersion, device: UIDevice.current.model)
         if leftOut > 0 { body += "\n\(leftOut) older file\(leftOut == 1 ? "" : "s") left out to keep this under 2 MB." }
-        return FeedbackBundle(files: files, leftOut: leftOut, body: body)
+        return FeedbackBundle(files: files, body: body)
     }
 }
 
@@ -264,27 +269,23 @@ struct FeedbackComposer: UIViewControllerRepresentable {
     }
 }
 
-/// Troubleshooting's first row (design D4, D9).
+/// Troubleshooting's first row (design D4, D9). Gathering is a few small local files (2 MB at
+/// most), read in the tap.
 struct SendFeedbackRow: View {
     let journal: NightJournal
     let pal: Palette
     @State private var bundle: FeedbackBundle?
-    @State private var gathering = false
+
+    private static let note = "Email with the last \(NightRules.keptNightFiles) nights' playback log."
 
     var body: some View {
         Button {
-            gathering = true
             bundle = FeedbackBundle.gather(journal: journal)
-            gathering = false
         } label: {
-            SettingActionRow(title: "Send feedback", systemImage: "envelope",
-                             note: "Email with the last 2 nights' playback log.", pal: pal) {
-                if gathering { ProgressView() }
-            }
+            SettingActionRow(title: "Send feedback", systemImage: "envelope", note: Self.note, pal: pal)
         }
         .accessibilityLabel("Send feedback")
-        .accessibilityHint("Email with the last 2 nights' playback log.")
-        .disabled(gathering)
+        .accessibilityHint(Self.note)
         .contextMenu {
             if let address = AppInfo.supportEmail {
                 Button("Copy address") { UIPasteboard.general.string = address }
@@ -336,12 +337,16 @@ struct SupportSection: View {
             .padding(.top, UI.sm)
             .accessibilityElement(children: .combine)
             .accessibilityLabel(AppInfo.accessibilitySummary)
+            // On the footer, one view: a Section's modifiers land on each of its rows, so a task
+            // there ran once per row, and an onDisappear fired whenever the tip rows gave way to
+            // "Thank you" (clearing it at once). Leaving the page is BackupSupportView's.
+            .task {
+                if tips.products.isEmpty, tips.phase != .loading { await tips.loadProducts() }
+                // No App ID, no row: don't ask the App Store for this build's environment.
+                guard AppInfo.appStoreID != nil else { return }
+                rateVisible = RateRowRule.visible(appStoreID: AppInfo.appStoreID,
+                                                  environment: await RateRowRule.currentEnvironment())
+            }
         }
-        .task {
-            if tips.products.isEmpty, tips.phase != .loading { await tips.loadProducts() }
-            rateVisible = RateRowRule.visible(appStoreID: AppInfo.appStoreID,
-                                              environment: await RateRowRule.currentEnvironment())
-        }
-        .onDisappear { tips.screenClosed() }
     }
 }
