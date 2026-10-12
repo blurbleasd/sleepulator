@@ -361,6 +361,7 @@ struct ContentView: View {
             // playing past the timer. No-op when nothing expired.
             if phase == .active {
                 audio.sleepTimer.reconcileIfExpired()
+                tips.refreshPurchasesAllowed()
                 refreshAsks()
             }
         }

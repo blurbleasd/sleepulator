@@ -89,7 +89,7 @@ final class TipStore: ObservableObject {
 
     /// False when this phone can't buy (Screen Time's In-app Purchases off, a managed device):
     /// Settings hides the tip rows and the card waits (the plan's rescue map). Re-read on every
-    /// load, since it can change while the app runs.
+    /// load and each time the app comes to the front, since Screen Time can change meanwhile.
     @Published private(set) var purchasesAllowed = true
 
     private var storeProducts: [String: Product] = [:]
@@ -111,7 +111,7 @@ final class TipStore: ObservableObject {
             return
         }
         #endif
-        purchasesAllowed = AppStore.canMakePayments
+        refreshPurchasesAllowed()
         guard startStoreKit else { return }
         listener = Task { [weak self] in
             for await update in Transaction.updates {
@@ -132,7 +132,7 @@ final class TipStore: ObservableObject {
     /// Load (or retry) the three products. An empty answer is "unavailable", never a spinner.
     func loadProducts() async {
         if products.isEmpty { phase = .loading }
-        purchasesAllowed = AppStore.canMakePayments
+        refreshPurchasesAllowed()
         do {
             let loaded = try await Product.products(for: Self.productIDs)
             storeProducts = Dictionary(uniqueKeysWithValues: loaded.map { ($0.id, $0) })
@@ -145,6 +145,12 @@ final class TipStore: ObservableObject {
         }
         if case .purchasing = phase { return }
         phase = products.isEmpty ? .unavailable : .ready
+    }
+
+    /// Re-read whether this phone can buy. ContentView calls it on every return to the front.
+    func refreshPurchasesAllowed() {
+        let allowed = AppStore.canMakePayments
+        if allowed != purchasesAllowed { purchasesAllowed = allowed }
     }
 
     func purchase(_ id: String) async {
