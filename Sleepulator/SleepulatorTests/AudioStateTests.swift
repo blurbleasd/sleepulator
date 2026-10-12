@@ -2833,6 +2833,16 @@ final class VeilTimeoutNowPlayingTests: XCTestCase {
     }
 }
 
+final class VeilDelayTests: XCTestCase {
+    func testTheVeilWaitsTheMinuteUnlessADebugLaunchShortensIt() {
+        XCTAssertEqual(SessionGuards.veilDelay(override: 0), 60, "no override: the real minute")
+        // The tests run a Debug build, where the argument-domain override applies, held to 5…60 s.
+        XCTAssertEqual(SessionGuards.veilDelay(override: 15), 15)
+        XCTAssertEqual(SessionGuards.veilDelay(override: 1), 5, "never a veil that drops mid-touch")
+        XCTAssertEqual(SessionGuards.veilDelay(override: 600), 60, "never longer than the minute")
+    }
+}
+
 final class NightEmberMathTests: XCTestCase {
     func testTheEmberWandersWithinItsRadiusAndNeverJumps() {
         // Burn-in: it must keep moving over the hours, but only ever imperceptibly.

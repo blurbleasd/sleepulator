@@ -84,6 +84,19 @@ enum SessionGuards {
         return t < glanceSettle ? .ignore : .wake
     }
 
+    /// Seconds from the last touch to the veil.
+    static let veilDelay: TimeInterval = 60
+
+    /// The veil's delay for this launch. A Debug build takes a shorter one from the argument domain
+    /// (`-veilDelaySeconds <real>15</real>`) so NightVeilUITests needn't wait out the real minute;
+    /// held to 5…60 s. Never a setting, and Release always waits the minute.
+    static func veilDelay(override: Double) -> TimeInterval {
+        #if DEBUG
+        if override > 0 { return max(5, min(veilDelay, override)) }
+        #endif
+        return veilDelay
+    }
+
     /// What the veil's countdown does when it runs out (~60 s after the last touch). The veil is
     /// part of the root view, so a sheet, dialog or full-screen cover sits above it: dropping it
     /// then left that presentation lit on a black screen (a red "Switch to Focus?" at 2am). It

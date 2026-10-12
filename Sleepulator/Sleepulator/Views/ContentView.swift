@@ -98,7 +98,8 @@ struct ContentView: View {
             }
         }
         windowActivity.pendingDim = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 60, execute: work)
+        let delay = SessionGuards.veilDelay(override: UserDefaults.standard.double(forKey: "veilDelaySeconds"))
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
     }
 
     private func wake() {

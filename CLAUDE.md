@@ -44,8 +44,9 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   `HomeLayoutUITests` checks Focus's Build mix / Focus session row clears the mini-player and
   that a tap starts the Pomodoro; that a tap on the shown bar reaches it, and on Podcasts it sits
   above the tab bar; and that on Sleep Home at rest the bar is gone from the accessibility tree and
-  Home's controls stay hittable. `NightVeilUITests` waits out the veil's minute on an untimed
-  night (~80 s), glances, wakes, and checks Focus's readout; it passes settings as launch
+  Home's controls stay hittable. `NightVeilUITests` drops the veil on an untimed night (shortened
+  to 15 s by the Debug-only `-veilDelaySeconds` launch argument, `SessionGuards.veilDelay`; the real
+  minute made it the slowest test), glances, wakes, and checks Focus's readout; it passes settings as launch
   arguments (plist literals, the argument domain) so persisted mode and night length stay put.
   CI's simulators are slow and sometimes drop a synthesized tap, so a tap that matters checks its
   effect and goes round again (the noise switch, Focus's Stop, `pauseAudio`, the veil's first tap,
