@@ -18,8 +18,11 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   - `Views/` — SwiftUI screens + components (HomeView, LibraryView, PodcastDetailView,
     NowPlayingSheet, MiniPlayerView, SettingsView, BreathingView, the `AmbientScene` backdrop
     library, Components, Theme, `MiniPlayerClearance`, `SoundNames`). `Views/Home/` holds Home's
-    pieces: the orb + `NightRing`, `NightEmber` (the faint time-left arc left in the ring's place
-    under the Sleep screensaver), `ModeSwitcher`, `MixDrawer`, `TimerSelectionSheet`, and the
+    pieces: the orb + `NightRing`, `NightEmber` (the faint time-left arc the veil's glance shows
+    in the ring's place; nothing is left over the screensaver, which is the scene alone),
+    `ModeSwitcher`, `MixDrawer`, `TimerSelectionSheet`, `Backdrops` (Night sky: `StarfieldView`,
+    `ShootingStarView`, and its pure, unit-tested `NightSkyMotion` rules for the settle under
+    the screensaver, the night's slowing and when a meteor may cross), and the
     pure, unit-tested rules `SessionGuards` and `HomeScreensaverPolicy`. `Views/TonightShelfView.swift`
     is the Podcasts tab's "Tonight" (Focus: "Continue") shelf. `Views/NowPlayingState.swift` holds
     the player views' pure, unit-tested rules: `NowPlayingState` (hero, Up Next, phase),
@@ -41,8 +44,9 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   `HomeLayoutUITests` checks Focus's Build mix / Focus session row clears the mini-player and
   that a tap starts the Pomodoro; that a tap on the shown bar reaches it, and on Podcasts it sits
   above the tab bar; and that on Sleep Home at rest the bar is gone from the accessibility tree and
-  Home's controls stay hittable. `NightVeilUITests` waits out the veil's minute on an untimed
-  night (~80 s), glances, wakes, and checks Focus's readout; it passes settings as launch
+  Home's controls stay hittable. `NightVeilUITests` drops the veil on an untimed night (shortened
+  to 15 s by the Debug-only `-veilDelaySeconds` launch argument, `SessionGuards.veilDelay`; the real
+  minute made it the slowest test), glances, wakes, and checks Focus's readout; it passes settings as launch
   arguments (plist literals, the argument domain) so persisted mode and night length stay put.
   CI's simulators are slow and sometimes drop a synthesized tap, so a tap that matters checks its
   effect and goes round again (the noise switch, Focus's Stop, `pauseAudio`, the veil's first tap,
@@ -59,7 +63,7 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   `AudioStateTests.swift` (also holds `PodcastParserTests`, `OPMLParserTests`,
   `StorageManagerTests`, `NetRetryTests`, `CacheEvictionTests`, the sleep-timer suites, Home's
   pure UI rules (`SessionGuardsTests`, `NightRingMathTests`, `MiniPlayerClearanceTests`,
-  `HomeScreensaverPolicyTests`), the podcast rules (`PodcastTextTests`, `ShowNotesPreviewTests`,
+  `HomeScreensaverPolicyTests`, `NightSkyMotionTests`), the podcast rules (`PodcastTextTests`, `ShowNotesPreviewTests`,
   `ShowNotesEdgeTests`, `TonightShelfTests`, `QueueMoveToHeadTests`), the player rules
   (`NowPlayingStateTests`, `NightLineCopyTests`, `PlayerQueueActionTests`,
   `PodcastFailureStreakTests`), Settings' rules (`SettingsRulesTests`) and a restore's engine
