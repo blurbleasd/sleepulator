@@ -223,7 +223,9 @@ struct FeedbackBundle {
                                         reportsSince: attachedReports.isEmpty ? nil : since,
                                         version: AppInfo.version, build: AppInfo.build,
                                         iOS: UIDevice.current.systemVersion, device: UIDevice.current.model)
-        if leftOut > 0 { body += "\n\(leftOut) older file\(leftOut == 1 ? "" : "s") left out to keep this under 2 MB." }
+        if leftOut > 0 {
+            body += "\n\(leftOut) older file\(leftOut == 1 ? "" : "s") left out to keep this under \(byteCap / 1_048_576) MB."
+        }
         return FeedbackBundle(files: files, body: body)
     }
 }
@@ -276,7 +278,8 @@ struct SendFeedbackRow: View {
     let pal: Palette
     @State private var bundle: FeedbackBundle?
 
-    private static let note = "Email with the last \(NightRules.keptNightFiles) nights' playback log."
+    // "Playback events", as the mail says: the page's "Export the playback log" is another file.
+    private static let note = "Email with the last \(NightRules.keptNightFiles) nights' playback events."
 
     var body: some View {
         Button {

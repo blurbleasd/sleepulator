@@ -198,8 +198,10 @@ final class SleepTimerService: ObservableObject {
     #endif
     
     var stopAllFn: (() -> Void)?
-    /// The terminal stop, reported before `stopAllFn`: whether it followed an episode, whether it
-    /// was a deadline found passed on the morning foreground, and when the night really ended.
+    /// The terminal stop, reported before `stopAllFn`: whether it ended on the episode's own clock
+    /// (a stop-after-episode timer that handed off to the tail or the wall clock ends as a
+    /// duration), whether it was a deadline found passed on the morning foreground, and when the
+    /// night really ended.
     var onTerminalStop: ((_ episode: Bool, _ reconciled: Bool, _ endedAt: Date) -> Void)?
     var updateFadeMultFn: ((Double) -> Void)?
 

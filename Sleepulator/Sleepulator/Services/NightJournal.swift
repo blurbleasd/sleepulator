@@ -71,6 +71,12 @@ nonisolated struct NightVerdict: Codable, Equatable {
 nonisolated enum NightRules {
     /// All night counts as clean from this much live audio on.
     static let allNightThreshold: TimeInterval = 3 * 3600
+    /// A timed night needs this much live audio to count: a deadline that passed while the app
+    /// slept, fired by a lock-screen Play in the morning, ends a night that hardly played.
+    static let timedNightMinimumLive: TimeInterval = 60
+    /// News this soon after a night resumes from a pause is the pause's aftermath (a player the
+    /// pause killed, rebuilt by the resume or found by the watchdog a few seconds later).
+    static let graceAfterResume: TimeInterval = 10
     /// A checkpoint line every this much live audio, so a death keeps most of the count.
     static let checkpointEvery: TimeInterval = 5 * 60
     /// A tick further apart than this from the last one isn't live time (the app was suspended,
@@ -87,7 +93,7 @@ nonisolated enum NightRules {
         guard let endedBy = s.endedBy, s.taints.isEmpty else { return false }
         switch endedBy {
         case .died: return false
-        case .timer, .episodeEnd: return !s.reconciled
+        case .timer, .episodeEnd: return !s.reconciled && s.live >= timedNightMinimumLive
         case .person, .focusSwitch: return s.live >= allNightThreshold
         }
     }
@@ -157,6 +163,8 @@ final class NightJournal {
     private let storage: StorageManager
     private let fileQueue = DispatchQueue(label: "app.sleepulator.nights", qos: .utility)
     private var lastTick: Date?
+    /// When the open night last resumed from a pause (`NightRules.graceAfterResume`).
+    private var resumedAt: Date?
     private var liveAtCheckpoint: TimeInterval = 0
     private var thresholdWritten = false
     private var bytesWritten = 0
@@ -168,7 +176,10 @@ final class NightJournal {
     /// backup, default file protection so a locked phone can still write at 3am). The verdicts
     /// live there too, through a store of their own, so they're excluded with it. Tests pass a
     /// temp dir and their own StorageManager.
-    init(directory: URL? = nil, storage: StorageManager? = nil, observeTermination: Bool = true) {
+    /// `now` is the journal's clock, read by the launch recovery too (tests inject theirs here).
+    init(directory: URL? = nil, storage: StorageManager? = nil, observeTermination: Bool = true,
+         now: @escaping () -> Date = Date.init) {
+        self.now = now
         let fm = FileManager.default
         let dir = directory ?? {
             let base = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
@@ -204,7 +215,7 @@ final class NightJournal {
     /// the real store would reach the UI tests that run in the same app container (enough
     /// timer-ended nights and a rating prompt would pop up over a UI test).
     static func makeDefault() -> NightJournal {
-        guard ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil else {
+        guard AppInfo.isUnitTestHost || AppInfo.isUITestRun else {
             return NightJournal()
         }
         // One root per test host, emptied on first use, so the engines tests make don't leave a
@@ -235,6 +246,7 @@ final class NightJournal {
             if t.timeIntervalSince(pausedAt) < UntimedNight.resumeWindow {
                 night.pausedAt = nil
                 open = night
+                resumedAt = t
                 write(NightEvent(at: t, kind: "resumed"), essential: true)
                 return
             }
@@ -246,6 +258,7 @@ final class NightJournal {
         let id = NightRules.id(for: t)
         open = NightSummary(id: id, start: t, lastEventAt: t)
         lastTick = nil
+        resumedAt = nil
         liveAtCheckpoint = 0
         thresholdWritten = false
         bytesWritten = 0
@@ -324,6 +337,11 @@ final class NightJournal {
             write(NightEvent(at: at, kind: "note", detail: kind + " while paused"))
             return
         }
+        if open != nil, let resumedAt, at >= resumedAt,
+           at.timeIntervalSince(resumedAt) <= NightRules.graceAfterResume {
+            write(NightEvent(at: at, kind: "note", detail: kind + " after resuming"))
+            return
+        }
         if var night = open, at >= night.start {
             night.taints.append(kind)
             open = night
@@ -352,7 +370,7 @@ final class NightJournal {
 
     var cleanNightCount: Int { verdicts.filter(\.clean).count }
 
-    /// One line for the feedback mail: "Last 7 nights: 5 clean, 1 ended early, 1 left open."
+    /// One line for the feedback mail: "Last 7 nights: 5 clean, 1 ended early or spoiled, 1 left open."
     func summaryLine(last n: Int = 7) -> String {
         let recent = verdicts.suffix(n)
         guard !recent.isEmpty else { return "No night recorded yet." }
@@ -385,6 +403,7 @@ final class NightJournal {
         append(NightEvent(at: end, kind: "closed", detail: detail), toNight: night.id, flush: flush)
         open = nil
         lastTick = nil
+        resumedAt = nil
         if let v = NightRules.verdict(night) { record(v) }
         // The terminate path: the verdict must land before the process goes, or the night is
         // closed on disk with no verdict (recovery then rebuilds it from the file).
@@ -427,6 +446,14 @@ final class NightJournal {
         // A partial last line: end it, so the closing line isn't glued to it and lost.
         if data.last != 0x0A { try? Self.appendLine(Data([0x0A]), to: newest) }
         if let pausedAt = night.pausedAt {
+            // Still inside its resume window (the app was ended while paused, as iOS does to a
+            // suspended app): the night carries on if play comes back in time, and
+            // closeLapsedPause ends it where it paused otherwise.
+            if now().timeIntervalSince(pausedAt) < UntimedNight.resumeWindow {
+                liveAtCheckpoint = night.live
+                thresholdWritten = night.live >= NightRules.allNightThreshold
+                return
+            }
             close(.person, at: pausedAt)
         } else {
             close(.died, at: night.lastEventAt)

@@ -637,7 +637,12 @@ final class AudioEngine: ObservableObject {
         }
 
         genEngine.onEngineError = { [weak self] msg in
-            DispatchQueue.main.async { self?.playbackNote = msg }
+            let at = Date()   // when it failed, before the hop (EV-1)
+            DispatchQueue.main.async {
+                self?.playbackNote = msg
+                // The bed is most nights' sound: a night it failed in isn't clean.
+                self?.nightJournal.taint("sound engine error", at: at)
+            }
         }
 
         podPlayer.onPlaybackStateChanged = { [weak self] isPlaying in

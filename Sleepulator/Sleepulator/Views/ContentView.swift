@@ -451,6 +451,8 @@ struct ContentView: View {
     /// (design D10–D12). Once per version; Apple decides whether it actually shows.
     private func naturalBreak() {
         refreshAsks()
+        // A UI test never meets Apple's prompt (it would cover the screen and persist the stamps).
+        if AppInfo.isUITestRun { return }
         let now = Date()
         guard SessionGuards.mayAskForRating(
             cleanNights: audio.nightJournal.cleanNightCount, askedThisVersion: ratingAskedVersion == AppInfo.version,
@@ -458,6 +460,8 @@ struct ContentView: View {
             veilDown: nightDimmed, now: now, lastNightEnd: lastNightEnd) else { return }
         ratingAskedVersion = AppInfo.version
         ratingAskedOn = now.timeIntervalSince1970
+        // One ask a day: a card that fell due at this same break now waits for another day.
+        refreshAsks()
         Log.storage.notice("asked for a rating (\(audio.nightJournal.cleanNightCount, privacy: .public) clean nights)")
         requestReview()
     }

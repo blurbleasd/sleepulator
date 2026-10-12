@@ -75,11 +75,14 @@ nonisolated enum TipFlow {
 
 final class TipStore: ObservableObject {
     /// The three tips, smallest first. Created in App Store Connect as consumables; the local
-    /// `Tips.storekit` (SleepulatorTests) mirrors them for tests and simulator runs.
-    static let productIDs = ["app.sleepulator.Sleepulator.tip.small",
-                             "app.sleepulator.Sleepulator.tip.kind",
-                             "app.sleepulator.Sleepulator.tip.generous"]
-    static let names = ["Small tip", "Kind tip", "Generous tip"]
+    /// `Tips.storekit` (SleepulatorTests) mirrors them for StoreKitTest only: it isn't in the
+    /// scheme's Run action, so a simulator run loads no products (check tips with the sandbox).
+    static let tips: [(id: String, name: String)] = [
+        ("app.sleepulator.Sleepulator.tip.small", "Small tip"),
+        ("app.sleepulator.Sleepulator.tip.kind", "Kind tip"),
+        ("app.sleepulator.Sleepulator.tip.generous", "Generous tip"),
+    ]
+    static var productIDs: [String] { tips.map(\.id) }
     static let tippedKey = "tippedOnThisPhone"
     private static let handledKey = "tipTransactionsHandled"
 
@@ -110,7 +113,7 @@ final class TipStore: ObservableObject {
         // The card's UI test (TS-2, EV-2): three fixed products without StoreKit, which a CLI
         // test run on the iOS 26.5 simulator may never load. Compiled out of release builds.
         if defaults.bool(forKey: "uiTestTipProducts") {
-            products = zip(Self.productIDs, Self.names).map { TipProduct(id: $0, name: $1, displayPrice: "$0.99") }
+            products = Self.tips.map { TipProduct(id: $0.id, name: $0.name, displayPrice: "$0.99") }
             phase = .ready
             return
         }
@@ -140,8 +143,8 @@ final class TipStore: ObservableObject {
         do {
             let loaded = try await Product.products(for: Self.productIDs)
             storeProducts = Dictionary(loaded.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-            products = Self.productIDs.enumerated().compactMap { index, id in
-                storeProducts[id].map { TipProduct(id: id, name: Self.names[index], displayPrice: $0.displayPrice) }
+            products = Self.tips.compactMap { tip in
+                storeProducts[tip.id].map { TipProduct(id: tip.id, name: tip.name, displayPrice: $0.displayPrice) }
             }
         } catch {
             Log.storage.error("tip products failed to load: \(error.localizedDescription, privacy: .public)")

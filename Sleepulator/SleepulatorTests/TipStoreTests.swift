@@ -41,7 +41,7 @@ final class TipFlowTests: XCTestCase {
 /// products (seen here on 26.3; reported on 26.5, Apple forum 826971). These tests then SKIP with
 /// that reason, visibly, instead of failing; they run from Xcode (⌘U). The purchase mapping is
 /// covered either way by TipFlowTests, and a real purchase by the TESTING.md §3U sandbox step.
-/// Whether to keep this skip is an open decision (eng run 2, Scope #5).
+/// The skip stays: the user's decision at the pre-landing review (D1, 2026-10-12).
 @MainActor
 final class TipStoreTests: XCTestCase {
     private var session: SKTestSession!

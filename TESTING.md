@@ -21,7 +21,7 @@ xcodebuild test -project Sleepulator/Sleepulator.xcodeproj \
   -scheme Sleepulator -destination 'platform=iOS Simulator,name=iPhone 16'
 ```
 
-Suites in `SleepulatorTests/` (six files, many suites):
+Suites in `SleepulatorTests/` (seven files, many suites):
 
 - `AudioMathTests.swift` — fade curve, carrier/beat math, scrub targets.
 - `AudioStateTests.swift` — engine state/policy plus `PodcastParserTests` (CDATA, durations,
@@ -39,7 +39,11 @@ Suites in `SleepulatorTests/` (six files, many suites):
   held to the backup's limits), and three suites
   on a real `AVPlayer` in the simulator: `PodcastPlayerRebuildTests` (dead-pipeline rebuilds),
   `PodcastLoadHoldTests` (a pause, stop or call during a load sticks) and `PodcastItemEndTests`
-  (an episode's end is filed under its own item).
+  (an episode's end is filed under its own item). The night journal and the asks:
+  `NightRulesTests`, `NightJournalTests` (pauses, lapsed windows, late news filed by time,
+  recovery after a kill, the soft cap, force-quit), `NightJournalWiringTests` (session edges,
+  interruptions, the timer's stop, a podcast failure), `AskRulesTests`, `CoachmarkTipCardTests`,
+  `RateRowRuleTests`, `FeedbackMessageTests`.
 - `PersistenceTests.swift` — legacy `SavedMix` → `SoundPreset` migration, library seeding,
   position-map coercion, `MixStore` reloads.
 - `BackupRoundTripTests.swift` — the backup's export → restore round-trip, its typed allowlist
@@ -52,6 +56,10 @@ Suites in `SleepulatorTests/` (six files, many suites):
   Undo, and the queued writes landing first.
 - `FocusDriversTests.swift` — the Pomodoro → Focus-scene look mapping.
 - `GenerativeAudioEngineTests.swift` — generative-bed rebuild after a media-services reset.
+- `TipStoreTests.swift` — `TipFlowTests` (every StoreKit outcome to what the tip rows show) and
+  `TipStoreTests` (StoreKitTest against `Tips.storekit`). On iOS 26 simulators a command-line run
+  hits Apple's SKTestSession bug and loads no products, so those six skip there; run them from
+  Xcode (⌘U).
 
 These catch parsing/logic regressions cheaply; they do **not** exercise audio or iOS behavior.
 
@@ -752,9 +760,10 @@ to Files: each night is a `.jsonl` file, one event per line.
    support.") where there's room, the title and answers where there isn't. ✅ Never in Focus,
    never with sound playing, never under the veil (and, without the argument, only 09:00–20:00,
    2+ hours after a night, never on the day the rating was asked). Leave a tip → the sheet with
-   the three tips; Close → the card is gone, and stays gone after a relaunch (remove the arguments
-   first). No thanks does the same. With VoiceOver: ✅ one stop reads the title and the message, then No
-   thanks, then Leave a tip.
+   the three tips; Close → the card is gone. No thanks does the same. Under the seam the answer
+   lasts this run only (nothing is saved), so a relaunch with the arguments shows the card again;
+   that the answer is saved for good is checked on a phone whose card fell due on its own. With VoiceOver: ✅ one stop reads the title and the message, then Leave
+   a tip, then No thanks.
 10. **The rating ask (dev build only).** Apple shows the review prompt every time in a build run
    from Xcode, and never in TestFlight, so run this from Xcode once the journal has 3 clean nights
    (steps 3, 4 and §3E count). Between 09:00 and 20:00, 2+ hours after the last night ended, nothing

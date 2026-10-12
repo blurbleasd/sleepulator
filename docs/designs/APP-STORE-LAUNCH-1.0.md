@@ -1919,12 +1919,12 @@ Built in the plan's lane order, one local commit per step, nothing pushed:
 | E3 (T5's store) | `3dcf5e7` | `TipStore` (StoreKit 2, listener at launch, `.unfinished`, one tip per transaction id), `TipFlow`, `Tips.storekit`, TipStoreTests |
 | E4 + DT1–DT5 + R1–R5 (T4's feedback, T5's UI) | `05fd682` | Ask rules in `SessionGuards`, the tip card in the coachmark band, `TipJar.swift` (tip rows, sheet, Support section, Send feedback, Rate row), `naturalBreak`, TS-2 |
 | Fix | `91aac57`, `af1afda` | B1's "row hidden" when this phone can't buy: Settings hid nothing before; `purchaseNotAllowed` now maps to unavailable, and the flag is re-read on each return to the front |
-| E5 (T6) | the docs commit after `af1afda` | TESTING.md §3E step 2 and §3T, the release checklist; CLAUDE.md; B2/B4 drafts in `docs/launch/STORE-TEXT-1.0.md` |
+| E5 (T6) | the docs commit after `af1afda` | TESTING.md §3E step 2 and §3U, the release checklist; CLAUDE.md; B2/B4 drafts in `docs/launch/STORE-TEXT-1.0.md` |
 
 Verified: 458 unit tests and 5 UI tests on an iPhone 17 Pro simulator, iOS 26.3, after E4 (the
 6 StoreKitTest cases skip, below); the tip suites and TS-2 again after the fix. The card, the
 sheet and the Support section were checked on simulator screenshots. Nothing here is verified on
-a device yet: that's §3T and the gate (T8).
+a device yet: that's §3U and the gate (T8).
 
 Calls made during the build, for the record:
 - **NT-1's "failure streak" taint is any podcast failure.** `AudioEngine.handlePodcastFailure`

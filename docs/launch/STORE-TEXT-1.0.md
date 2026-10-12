@@ -44,8 +44,9 @@ backups. Your library and settings are part of your iPhone's own backup, like an
 - **Tips** are handled entirely by Apple through the App Store. The developer never sees your
   payment details or your Apple Account, only the totals in Apple's sales reports.
 - **Send feedback** (Settings ▸ Backup & support) opens an email, or the share sheet, that you
-  read and choose to send. It holds your message, the last two nights' playback events (no web
-  addresses), any iOS reports on the phone, and the app version, iOS version and device type. It
+  read and choose to send. It holds your message, a one-line count of how your recent nights
+  went, the last two nights' playback events (no web addresses), any iOS reports on the phone,
+  and the app version, iOS version and device type. It
   goes to [OPEN: support address] and is used only to answer you and fix the problem.
 
 ## Children
@@ -72,7 +73,7 @@ with a sleep timer that fades everything out.
 **Contact:** [OPEN: support address]
 
 **Reporting a problem.** In the app, Settings ▸ Backup & support ▸ Send feedback. It attaches the
-last two nights' playback record (no web addresses), which shows where a night went wrong. Send it
+last two nights' playback events (no web addresses), which shows where a night went wrong. Send it
 the morning after, before the next night: only the last two nights are kept in detail.
 
 **Setting a sleep timer.** On the Sleep screen, drag the ring around the play button. With the

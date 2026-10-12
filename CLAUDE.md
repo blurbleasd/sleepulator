@@ -53,9 +53,11 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   `HomeLayoutUITests` checks Focus's Build mix / Focus session row clears the mini-player and
   that a tap starts the Pomodoro; that a tap on the shown bar reaches it, and on Podcasts it sits
   above the tab bar; and that on Sleep Home at rest the bar is gone from the accessibility tree and
-  Home's controls stay hittable; and that the tip card sits in the band above Build mix and leaves
-  on No thanks (DEBUG-only seams `-uiTestTipProducts` and `-uiTestTipCardDue`: fixed products
-  with no StoreKit, and the card due now; compiled out of release). `NightVeilUITests` drops the
+  Home's controls stay hittable; and that the tip card sits in the band above Build mix, leaves
+  on No thanks, and on Leave a tip opens the three tips with Close spending it (DEBUG-only seams `-uiTestTipProducts` and `-uiTestTipCardDue`: fixed products
+  with no StoreKit, and the card due now; compiled out of release). Every UI test also passes
+  `-uiTestIsolated <true/>` (`AppInfo.isUITestRun`, DEBUG-only): a throwaway night journal and no
+  rating prompt, so a dev simulator's own nights can't reach a run, nor the run's reach them. `NightVeilUITests` drops the
   veil on an untimed night (shortened to 15 s by the Debug-only `-veilDelaySeconds` launch
   argument, `SessionGuards.veilDelay`; the real minute made it the slowest test), glances, wakes,
   and checks Focus's readout; it passes settings as launch
@@ -233,8 +235,12 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   and, with the bed back, its end), live-audio ticks (the RMS tap and the podcast clock, gaps over
   2 s not counted) and taints. A night is clean only on sound that really played: to its timer's
   end while playing, or 3+ hours ended by a person, with no player rebuild, pipeline death or
-  podcast failure while it played (any failure, by design). News while the night is paused (an
-  alarm killing the player, the rebuild when play resumes) is a note, not a taint. A pause over
+  podcast failure while it played (any failure, by design; a stream the stall watchdog gives up
+  on and the noise engine's start error count too). A timed night needs a minute of live audio
+  (`timedNightMinimumLive`: a deadline that passed while the app slept, fired by a morning
+  lock-screen Play, ends a night that hardly played). News while the night is paused (an alarm
+  killing the player, the rebuild when play resumes) is a note, not a taint, and so is news in
+  the first 10 s after it resumes (`graceAfterResume`: the watchdog finds a dead player ~4 s in). A pause over
   30 minutes ends the night where it paused, as soon as the asks look or news arrives
   (`closeLapsedPause`), not when play is next pressed.
   A deadline reconciled on the morning foreground never counts, so `SleepTimerService.onTerminalStop`

@@ -13,7 +13,7 @@ final class HomeLayoutUITests: XCTestCase {
         // Moving scenes off, for this launch only (the argument domain): with the scene, orb and
         // ring redrawing every frame the app never idles, and on a loaded CI runner XCUITest
         // waited up to 4 s before each tap, so Stop kept landing after the controls had faded.
-        app.launchArguments = ["-ambientMotion", "<false/>"]
+        app.launchArguments = ["-ambientMotion", "<false/>", "-uiTestIsolated", "<true/>"]
         app.launch()
         // Back to Sleep even when an assertion stops the test mid-way in Focus.
         addTeardownBlock { @MainActor in Self.leaveInSleep(app) }
@@ -123,7 +123,7 @@ final class HomeLayoutUITests: XCTestCase {
     func testTipCardSitsInTheBandAndLeavesOnNoThanks() {
         continueAfterFailure = false
         let app = XCUIApplication()
-        app.launchArguments = ["-ambientMotion", "<false/>",
+        app.launchArguments = ["-ambientMotion", "<false/>", "-uiTestIsolated", "<true/>",
                                "-uiTestTipProducts", "<true/>", "-uiTestTipCardDue", "<true/>",
                                "-hasCompletedFirstRun", "<true/>", "-hasSeenNightRingTip", "<true/>",
                                "-tipCardSpent", "<false/>", "-tippedOnThisPhone", "<false/>"]
@@ -155,6 +155,61 @@ final class HomeLayoutUITests: XCTestCase {
         XCTAssertTrue(buildMix.isHittable, "Build mix is covered after the card left")
     }
 
+    /// The card's main answer (design D5, D6): "Leave a tip" opens the sheet with the three tips,
+    /// and closing the sheet spends the card, so it leaves the hierarchy and Build mix takes taps
+    /// again. The same DEBUG-only seams as the test above; under them the spend stays in memory for
+    /// this run, so nothing persists.
+    /// Value: protects=the card's main answer opens the three tips and closing the sheet spends
+    /// the card; fails_when=onLeaveTip is unwired, the sheet's onDismiss stops spending the card,
+    /// or TipRows render nothing for ready products; why_new=the only UI test taps No thanks;
+    /// seam=uiTestTipProducts + uiTestTipCardDue (DEBUG-only); no_claim=a real purchase (TESTING
+    /// §3U.6), and the persisted tipCardSpent write (the seam spends in memory)
+    @MainActor
+    func testLeaveATipOpensTheTipsAndClosingSpendsTheCard() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-ambientMotion", "<false/>", "-uiTestIsolated", "<true/>",
+                               "-uiTestTipProducts", "<true/>", "-uiTestTipCardDue", "<true/>",
+                               "-hasCompletedFirstRun", "<true/>", "-hasSeenNightRingTip", "<true/>",
+                               "-tipCardSpent", "<false/>", "-tippedOnThisPhone", "<false/>"]
+        app.launch()
+
+        let sleepMode = app.buttons["Sleep mode"]
+        XCTAssertTrue(sleepMode.waitForExistence(timeout: 15), "No mode switcher on Home")
+        sleepMode.tap()
+
+        let leaveTip = app.buttons["Leave a tip"]
+        let buildMix = app.buttons["Build mix"]
+        XCTAssertTrue(leaveTip.waitForExistence(timeout: 10), "The tip card didn't show on Sleep Home")
+        XCTAssertTrue(buildMix.waitForExistence(timeout: 5), "No Build mix button")
+
+        // A tip row's label is its name and price ("Small tip, $0.99").
+        func tipRow(_ name: String) -> XCUIElement {
+            app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", name)).firstMatch
+        }
+        let smallTip = tipRow("Small tip")
+        // CI's simulators sometimes drop a synthesized tap: check the effect and go round again. The
+        // effect is re-read before each tap, so a late one isn't doubled.
+        for _ in 0..<3 where !smallTip.exists {
+            if leaveTip.exists { leaveTip.tap() }
+            if smallTip.waitForExistence(timeout: 3) { break }
+        }
+        XCTAssertTrue(smallTip.waitForExistence(timeout: 5), "\"Leave a tip\" didn't open the tips")
+        XCTAssertTrue(tipRow("Kind tip").exists && tipRow("Generous tip").exists,
+                      "The tip sheet doesn't offer all three tips")
+
+        let close = app.buttons["Close"]
+        XCTAssertTrue(close.waitForExistence(timeout: 5), "The tip sheet has no Close")
+        for _ in 0..<3 where close.exists {
+            close.tap()
+            if close.waitForNonExistence(timeout: 3) { break }
+        }
+        XCTAssertTrue(smallTip.waitForNonExistence(timeout: 5), "Close didn't close the tip sheet")
+        XCTAssertTrue(leaveTip.waitForNonExistence(timeout: 5),
+                      "The tip card stayed in the hierarchy after its sheet closed")
+        XCTAssertTrue(buildMix.isHittable, "Build mix is covered after the sheet closed")
+    }
+
     /// Sleep Home at rest (nothing loaded) hides the mini-player, and hidden must mean gone from
     /// the accessibility tree: faded to opacity 0 it stayed there on iOS 26, over Build mix.
     /// And Home's controls must all take a tap: the night ring's accessibility shape once became
@@ -165,7 +220,7 @@ final class HomeLayoutUITests: XCTestCase {
         let app = XCUIApplication()
         // Moving scenes off, for this launch only: like the Focus test, so the app idles between
         // taps on a loaded runner (Sleep Home's orb and scene otherwise redraw every frame).
-        app.launchArguments = ["-ambientMotion", "<false/>"]
+        app.launchArguments = ["-ambientMotion", "<false/>", "-uiTestIsolated", "<true/>"]
         app.launch()
 
         // Sleep from either start state. A fresh launch has no episode loaded.

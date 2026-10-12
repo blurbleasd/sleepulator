@@ -799,6 +799,8 @@ final class PodcastPlayer: NSObject {
                 return
             }
             Log.audio.error("podcast stream lost (stalled ~\((attempt + 1) * 30, privacy: .public)s) — advancing")
+            // A failure like the others (they report through onPlaybackFailed): the night hears it.
+            self.onPipelineEvent?("stream lost", Date())
             self.onPlaybackNote?("Podcast stream lost — the ambient sounds continue")
             self.onQueueAdvance?(lostId, false)   // advance, but do NOT mark it played
         }
