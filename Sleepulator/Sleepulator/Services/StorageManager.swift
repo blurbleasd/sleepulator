@@ -2,7 +2,9 @@ import Foundation
 import os
 
 final class StorageManager {
-    static let shared = StorageManager()
+    // Nonisolated, like the inits: they touch only the file system and an immutable URL, so
+    // default arguments (`storage: StorageManager = .shared`) can name it without a warning.
+    nonisolated static let shared = StorageManager()
     private let appSupportURL: URL
     private let ioQueue = DispatchQueue(label: "app.sleepulator.storage.ioQueue", qos: .utility)
 
@@ -10,13 +12,13 @@ final class StorageManager {
     /// write lands the same bytes in both `<name>` and `<name>.bak`, so a primary truncated by a
     /// crash mid-replace (or corrupted at rest) can be recovered from the backup on the next load
     /// instead of silently decoding to `nil` and wiping the user's library/presets.
-    private static let backupSuffix = ".bak"
+    nonisolated private static let backupSuffix = ".bak"
 
     /// How `loadResult` resolved — lets callers/tests tell a benign first-run miss from a
     /// corruption that was (or wasn't) recovered from the backup.
     enum LoadOutcome: Equatable { case missing, loaded, recovered, failed }
 
-    convenience init() {
+    nonisolated convenience init() {
         let fm = FileManager.default
         // Same rationale as AudioDownloader: never launch-crash on a missing Application Support
         // URL — fall back to the temp dir (persistence degrades for the session, app still runs).
@@ -29,7 +31,7 @@ final class StorageManager {
     /// Seam initializer: point the store at an arbitrary directory. Production uses `init()`
     /// (Application Support); unit tests pass a temp dir so they're hermetic and never touch — or
     /// race — the real on-disk store.
-    init(directory: URL) {
+    nonisolated init(directory: URL) {
         let fm = FileManager.default
         if !fm.fileExists(atPath: directory.path) {
             try? fm.createDirectory(at: directory, withIntermediateDirectories: true, attributes: nil)
@@ -41,11 +43,11 @@ final class StorageManager {
     // runtimes (CLAUDE.md, "Isolated deinits"). Only releases stored properties.
     nonisolated deinit {}
 
-    private func fileURL(for filename: String) -> URL {
+    nonisolated private func fileURL(for filename: String) -> URL {
         return appSupportURL.appendingPathComponent(filename)
     }
 
-    private func backupURL(for filename: String) -> URL {
+    nonisolated private func backupURL(for filename: String) -> URL {
         return appSupportURL.appendingPathComponent(filename + Self.backupSuffix)
     }
 
@@ -102,24 +104,41 @@ final class StorageManager {
         return (nil, .failed)
     }
 
-    /// Raw JSON bytes for a file, or nil if it doesn't exist. Lets Backup/Restore
-    /// round-trip the file-backed collections (mixes/library/queue/positions)
-    /// without coupling to their Codable types.
-    func rawData(for filename: String) -> Data? {
-        if let data = try? Data(contentsOf: fileURL(for: filename)) { return data }
-        // Fall back to the backup so an export still captures recoverable data.
-        return try? Data(contentsOf: backupURL(for: filename))
+    /// Raw JSON bytes for a file: the primary if it parses as JSON, else the `.bak` if that does,
+    /// else nil. Lets Backup/Restore round-trip the file-backed collections (mixes/library/queue/
+    /// positions) without coupling to their Codable types. An unparseable primary used to be
+    /// returned as it was: the export then left that section out without a word, and Undo,
+    /// finding it missing from its copy, wrote [] over both files, the good `.bak` included.
+    /// Parses the file, so a big one is read off the main thread (Backup does). Nonisolated:
+    /// it touches only the immutable directory URL and the file system.
+    nonisolated func rawData(for filename: String) -> Data? {
+        for url in [fileURL(for: filename), backupURL(for: filename)] {
+            if let data = try? Data(contentsOf: url),
+               (try? JSONSerialization.jsonObject(with: data, options: .fragmentsAllowed)) != nil {
+                return data
+            }
+        }
+        return nil
+    }
+
+    /// Whether the file or its `.bak` is on disk, readable or not. Cheap: no read, no parse.
+    nonisolated func exists(_ filename: String) -> Bool {
+        let fm = FileManager.default
+        return fm.fileExists(atPath: fileURL(for: filename).path) || fm.fileExists(atPath: backupURL(for: filename).path)
     }
 
     /// `writeRaw`, but synchronous and throwing: the write is atomic (a temp file renamed over
     /// the old one), so when it throws the previous file is still there, untouched. The restore
-    /// writes its Undo copy this way, and refuses to go ahead when it fails.
-    func writeRawNow(_ data: Data, to filename: String) throws {
+    /// writes its Undo copy this way, and refuses to go ahead when it fails; a restore and its
+    /// Undo write their files this way too, so a file that didn't land is known. Nonisolated, so
+    /// the library-sized Undo copy can be written off the main thread.
+    nonisolated func writeRawNow(_ data: Data, to filename: String) throws {
         try ioQueue.sync { try writeBoth(data, filename: filename) }
     }
 
-    /// Atomically write raw JSON bytes to a file (Backup/Restore import path), keeping the
-    /// `.bak` sibling in sync.
+    /// Atomically write raw JSON bytes to a file, keeping the `.bak` sibling in sync, without
+    /// waiting (the self-heal in `loadResult`; tests). A restore and its Undo use `writeRawNow`,
+    /// so they know when a file didn't land.
     func writeRaw(_ data: Data, to filename: String) {
         ioQueue.async { [weak self] in
             guard let self = self else { return }
@@ -134,7 +153,7 @@ final class StorageManager {
     /// Write `data` to the primary atomically, then mirror it to the backup. Sequenced so a crash
     /// between the two leaves at least one complete, valid file (primary new + backup old, or both
     /// new). MUST run on `ioQueue`.
-    private func writeBoth(_ data: Data, filename: String) throws {
+    nonisolated private func writeBoth(_ data: Data, filename: String) throws {
         try data.write(to: fileURL(for: filename), options: .atomic)
         do {
             try data.write(to: backupURL(for: filename), options: .atomic)
@@ -143,8 +162,8 @@ final class StorageManager {
         }
     }
 
-    /// Block until all queued writes have flushed to disk. Used by the in-process Restore so a
-    /// reload can't read a file before its just-written bytes have landed (the writes are async).
+    /// Block until all queued writes have flushed to disk: before a backup reads the store, and
+    /// after a restore, so the reload can't read a file another queued write is still landing on.
     func flush() {
         ioQueue.sync { }
     }

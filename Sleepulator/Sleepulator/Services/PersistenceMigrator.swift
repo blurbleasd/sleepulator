@@ -62,7 +62,7 @@ struct PersistenceMigrator {
             let presets = oldMixes.map(toPreset)
             storage.save(presets, to: "mixes.json")   // rewrite in the new schema
             result.savedPresets = presets
-        } else if storage.rawData(for: "mixes.json") != nil {
+        } else if storage.exists("mixes.json") {
             // The file exists but decodes as neither schema. Without this branch that's silent
             // preset loss (StorageManager logs "corrupt", but the real cause is usually a schema
             // change — see the evolution rule on SoundPreset in Models.swift). Don't overwrite:
@@ -73,7 +73,7 @@ struct PersistenceMigrator {
         // One-time library.json seed from the legacy savedPodcasts key. Only seed if the
         // canonical file doesn't exist yet; always clear the legacy key so a stray legacy
         // write can never clobber a newer library on a later launch.
-        if storage.rawData(for: "library.json") == nil,
+        if !storage.exists("library.json"),
            let data = defaults.data(forKey: "savedPodcasts"),
            let podcasts = try? JSONDecoder().decode([Podcast].self, from: data) {
             storage.save(podcasts, to: "library.json")

@@ -31,8 +31,10 @@ Suites in `SleepulatorTests/` (six files, many suites):
   Podcasts-tab rules (`PodcastTextTests`, `ShowNotesPreviewTests`, `ShowNotesEdgeTests`,
   `TonightShelfTests`, `QueueMoveToHeadTests`), the player rules (`NowPlayingStateTests`,
   `NightLineCopyTests`, `PlayerQueueActionTests`, `PodcastFailureStreakTests`), Settings' rules
-  (`SettingsRulesTests`: the limiter choice, stereo stops, section order), a restore's engine
-  reload (`RestoreReloadTests`: Pomodoro lengths applied, the night's timer kept), and three suites
+  (`SettingsRulesTests`: the limiter choice, stereo stops, section order, the hold's spoken
+  value), a restore's engine reload (`RestoreReloadTests`: Pomodoro lengths applied, the night's
+  timer kept, the queued writes flushed first, an undecodable queue left on disk, the played list
+  held to the backup's limits), and three suites
   on a real `AVPlayer` in the simulator: `PodcastPlayerRebuildTests` (dead-pipeline rebuilds),
   `PodcastLoadHoldTests` (a pause, stop or call during a load sticks) and `PodcastItemEndTests`
   (an episode's end is filed under its own item).
@@ -40,8 +42,12 @@ Suites in `SleepulatorTests/` (six files, many suites):
   position-map coercion, `MixStore` reloads.
 - `BackupRoundTripTests.swift` — the backup's export → restore round-trip, its typed allowlist
   (`Backup.kinds`: a null, wrong type or out-of-range value is skipped), the confirm's counts,
-  restore → Undo end to end, refusing when the Undo copy can't be saved, and a restore never
-  switching mode.
+  restore → Undo end to end, refusing when the Undo copy can't be saved, what a restore stores
+  (decoded and bounded, never the file's own JSON), Undo putting back its own copy exactly (and
+  keeping it when a file can't be saved), an export's `.bak` fallback and 50 MB cap, and a
+  restore never switching mode. `BackupControllerTests` covers the Backup page's controller:
+  results that land after the page closed, the export letting go of its document, an incomplete
+  Undo, and the queued writes landing first.
 - `FocusDriversTests.swift` — the Pomodoro → Focus-scene look mapping.
 - `GenerativeAudioEngineTests.swift` — generative-bed rebuild after a media-services reset.
 
@@ -189,10 +195,10 @@ the brightness you actually use at night, in **both** Sleep and Focus.
 1. **VolumeBar relative drag + fader tiers.** In the Build-mix drawer, grab a layer fader. ✅ It
    moves by the drag *delta* from where you grabbed (not jump-to-touch); a light tap does NOT
    change volume; drifting the finger up/down off the track fine-trims. Then check Settings'
-   "How much" softening bar (Podcasts at night; stereo width is now four named stops, §S7): a
-   *tap* there DOES jump to that position (tapToSet). VoiceOver
-   reports the real value. Gain-staging reads at a glance: the master fader (bottom bar) is
-   visibly the thickest, layer faders next, Settings params slimmest.
+   "How much" softening bar (Podcasts at night, under "Soften harsh highs and boomy lows"; it's
+   Settings' only bar, since stereo width is a four-stop menu, §S7): a *tap* there DOES jump to
+   that position (tapToSet). VoiceOver reports the real value. Gain-staging reads at a glance: the
+   master fader (bottom bar) is visibly the thickest, layer faders next, the "How much" bar slimmest.
 1b. **Now-playing rim.** Apply a saved mix. ✅ Its card wears a brighter accent rim + fill and a
    bright (legible) summary line; the rim clears when you swap a sound or toggle a layer; exactly
    one card is lit (a "Brown" and a "Brown + Rain" preset don't both light); an idle/silent
@@ -613,20 +619,24 @@ also pauses while its controls are faded to the screensaver, as the Sleep orb al
 
 ### S. Settings: restore with a confirm and Undo, the night section, mode order (added 2026-10-11, simulator-checked only)
 1. **Restore asks first.** Settings ▸ Backup & support ▸ Export a backup (✅ the file is named
-   `sleepulator-backup-<date>`). Change a mix and a setting, then Restore from a backup and pick
+   `sleepulator-backup-<date>`, in Gregorian years even with Settings ▸ General ▸ Language &
+   Region ▸ Calendar set to Japanese). Change a mix and a setting, then Restore from a backup and pick
    that file. ✅ As the picker closes, an alert asks "Replace with the backup from <date>?" and
    names what's in it ("… 4 mixes, 12 shows …"). Cancel. ✅ Nothing changed.
 2. **Restore, then Undo.** Restore again and tap Replace. ✅ "Backup restored" names what came back
    and offers Undo. Tap Undo. ✅ "Restore undone"; the mix and setting you changed are back.
    Restore once more and tap OK. ✅ The Backup rows show "Undo the restore from <day, time>", and it
-   still works after the app is killed and relaunched.
+   still works after the app is killed and relaunched. With VoiceOver, ✅ the row reads "Undo the
+   restore, <day, time>"; with Voice Control, ✅ "Tap Undo the restore" opens the confirm.
 3. **A wrong file.** Pick any other JSON file. ✅ "That isn't a Sleepulator backup." and nothing
    changed. A backup with a section hand-edited to a plain string ("savedPodcasts": "x"). ✅ No
    crash; the rest restores and the result says a few parts weren't recognised.
 4. **One limiter choice.** Podcasts at night ▸ Soften loud moments: the whole row opens Off / While
    sleeping / Always. Then §3D step 3.
 5. **The hold.** Play the next episode automatically OFF. ✅ "Don't start the next episode during a
-   sleep timer" is dim, title and switch, and says it only applies with Auto-Play. Turn Auto-Play on
+   sleep timer" is dim, title and switch, and says it only applies with Auto-Play. With VoiceOver on
+   and hints off (VoiceOver ▸ Verbosity ▸ Speak Hints), ✅ it reads "Off. Only applies when the next
+   episode plays automatically." Turn Auto-Play on
    and the hold on, start a 15 min timer on a short episode, lock. ✅ The episode ends, the next one
    doesn't start, your sounds carry on.
 6. **Mode order.** In Sleep, ✅ the list opens on Sleep and Podcasts at night; the Pomodoro is folded
@@ -638,7 +648,8 @@ also pauses while its controls are faded to the screensaver, as the Sleep orb al
    pick; switch to Focus and ✅ its sound is the backup's Focus sound. Restore a backup with
    different Pomodoro lengths. ✅ The next Focus session uses them (no relaunch).
 9. **Undo puts the shows back too.** On a phone with no podcasts, restore a backup with shows,
-   open Podcasts, then Undo. ✅ The shows are gone and stay gone after adding one and relaunching.
+   open Podcasts, then Undo. ✅ The shows are gone at once (the list re-reads the library as at
+   launch) and stay gone after adding one and relaunching.
 10. **At 2am.** Sleep, room dark, brightness low. ✅ No amber switch tracks (copper), and the brightest
    things are the switch knobs, not rows of accent text.
 

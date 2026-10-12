@@ -56,6 +56,30 @@ final class NightVeilUITests: XCTestCase {
         // (the screensaver only engages over one) and that the query below can see it.
         XCTAssertTrue(wake.waitForExistence(timeout: 10), "No screensaver over the session")
 
+        // A slow runner's looks after the wake tap can all come too late to tell (see
+        // lookAfterTheWake): then go round once more. The veil drops again a minute after that tap.
+        var look = veilGlanceThenWake(app, veil: veil, wake: wake)
+        if look == .tooLateToTell { look = veilGlanceThenWake(app, veil: veil, wake: wake) }
+        XCTAssertNotEqual(look, .tooLateToTell,
+                          "Runner too slow: twice, no look after the wake tap came before the controls' 3 s fade")
+        XCTAssertEqual(look, .woke, "The second tap left the screensaver's \"Show controls\" layer over Home's controls")
+        XCTAssertTrue(pause.exists, "The orb stopped offering Pause after the wake")
+
+        // And the controls' idle fade restarted: they settle back to the scene 3 s later.
+        XCTAssertTrue(wake.waitForExistence(timeout: 8), "Home's idle fade didn't restart after the wake")
+        // Left playing: the next test's launch ends the session, and nothing it leaves persists.
+        // Pausing here meant a wake tap then Pause inside Sleep's 3 s fade, and a slow CI runner
+        // took longer than that between the two taps every round, so the test failed after
+        // checking everything it's for. (Focus's test pauses inside its 10 s fade, and asserts it.)
+    }
+
+    /// What the looks after the veil's wake tap saw (`lookAfterTheWake`).
+    private enum WakeLook { case woke, screensaverStayed, tooLateToTell }
+
+    /// One round of the night veil: it drops ~60 s after the last touch, the first tap glances and
+    /// the second wakes. Returns what the looks after the wake tap saw, once the veil has lifted.
+    @MainActor
+    private func veilGlanceThenWake(_ app: XCUIApplication, veil: XCUIElement, wake: XCUIElement) -> WakeLook {
         // No timer runs (All night), yet the veil still drops ~60 s after the last touch.
         XCTAssertTrue(veil.waitForExistence(timeout: 80), "No veil over an untimed night")
         // XCUITest lists the veil the moment it's inserted, at the start of its 0.8 s fade-in, when
@@ -90,23 +114,36 @@ final class NightVeilUITests: XCTestCase {
         XCTAssertTrue(holds(for: 2) { veil.exists }, "The first tap woke the screen instead of a glance")
 
         // Second tap, while the glance shows or fades (8 s, SessionGuards.veilTap): the veil lifts
-        // and Home's controls are back and take taps (the orb, still offering Pause), not a bare
-        // scene behind the screensaver's "Show controls" layer that needs a third tap.
+        // and Home's controls are back and take taps, not a bare scene behind the screensaver's
+        // "Show controls" layer that needs a third tap.
         let gap = Date().timeIntervalSince(firstTap)
         XCTAssertLessThan(gap, 7.5, "Runner too slow: the second tap would land after the glance (\(gap) s)")
+        let tapped = Date()
         tapPoint.tap()
-        let woke = waitUntil(timeout: 5) {
-            !veil.exists && !wake.exists && pause.exists && pause.isHittable
-        }
-        XCTAssertTrue(woke, "The second tap didn't bring Home's controls back (veil \(veil.exists), "
-                      + "wake layer \(wake.exists), orb \(pause.exists))")
+        let look = lookAfterTheWake(wake, tapped: tapped, tapReturned: Date())
+        // The veil goes for good (its minute restarts from the tap), so it's checked after the look.
+        XCTAssertTrue(waitUntil(timeout: 5) { !veil.exists }, "The second tap didn't lift the veil")
+        return look
+    }
 
-        // And the controls' idle fade restarted: they settle back to the scene 3 s later.
-        XCTAssertTrue(wake.waitForExistence(timeout: 8), "Home's idle fade didn't restart after the wake")
-        // Left playing: the next test's launch ends the session, and nothing it leaves persists.
-        // Pausing here meant a wake tap then Pause inside Sleep's 3 s fade, and a slow CI runner
-        // took longer than that between the two taps every round, so the test failed after
-        // checking everything it's for. (Focus's test pauses inside its 10 s fade, and asserts it.)
+    /// Whether the wake tap brought Home's controls back, read off the screensaver's "Show controls"
+    /// layer: the one thing over them that would need a third tap. It leaves in a 1 s fade after the
+    /// tap and comes back with the controls' idle fade 3 s after it (Sleep's
+    /// `HomeScreensaverPolicy.idleDelay`), so only a look inside that window can say it stayed.
+    /// Asked alongside the veil and the orb, CI's simulator once took 3.7 s over the first answer,
+    /// and by then the layer was back over controls that had come and gone.
+    @MainActor
+    private func lookAfterTheWake(_ wake: XCUIElement, tapped: Date, tapReturned: Date) -> WakeLook {
+        // The touch landed between `tapped` and `tapReturned`, so this window is inside the real one.
+        let opens = tapReturned.addingTimeInterval(1), closes = tapped.addingTimeInterval(3)
+        var lookedInside = false
+        while Date() < closes {
+            let asked = Date()
+            if !wake.exists { return .woke }
+            if asked >= opens && Date() <= closes { lookedInside = true }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        }
+        return lookedInside ? .screensaverStayed : .tooLateToTell
     }
 
     // Value: protects=Focus's readout says what Play resumes at rest and, while sound plays, names the sounds once in the pills with no status line under the orb; fails_when=the readout shows the status line again while playing ("Pink" over a "Pink" pill), or drops the at-rest "Tap to begin"/"Resume" line; why_new=FocusSessionReadout's branches are view code with no pure seam, and HomeLayoutUITests never plays sound in Focus; seam=none

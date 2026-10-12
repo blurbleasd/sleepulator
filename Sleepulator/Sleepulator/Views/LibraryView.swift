@@ -470,10 +470,11 @@ struct LibraryView: View {
     private func loadPositions() {
         positions = audio.savedEpisodePositions
     }
+    /// As at launch: a library.json that's missing or that today's types can't decode shows no
+    /// shows. Keeping the list on screen after a restore's Undo put back such a file showed the
+    /// restored shows, and the next save wrote them over it.
     private func loadPodcasts() {
-        if let decoded: [Podcast] = StorageManager.shared.load(from: "library.json") {
-            self.podcasts = decoded
-        }
+        self.podcasts = StorageManager.shared.load(from: "library.json") ?? []
     }
 }
 

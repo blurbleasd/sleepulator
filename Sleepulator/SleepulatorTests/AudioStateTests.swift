@@ -3642,7 +3642,19 @@ final class SettingsRulesTests: XCTestCase {
     func testBeatsNoteFollowsTheRouting() {
         XCTAssertTrue(SettingsCopy.beatsNote("headphones").contains("Needs headphones"))
         XCTAssertTrue(SettingsCopy.beatsNote("speaker").contains("speaker"))
+        // The default note also says "speaker", so the check above can't tell them apart.
+        XCTAssertNotEqual(SettingsCopy.beatsNote("speaker"), SettingsCopy.beatsNote("auto"))
         XCTAssertEqual(SettingsCopy.beatsNote("auto"), SettingsCopy.beatsNote("anything else"))
+    }
+
+    // Value: protects=with Auto-Play off the hold switch says why it's off in its value, not only its hint; fails_when=holdSpokenValue returns nil while the switch is disabled, or drops its state; why_new=with hints off VoiceOver gave a dimmed switch and no reason; seam=none; no_claim=that VoiceOver reads it (TESTING.md §S5)
+    func testTheHoldSaysWhyItsOffInItsValue() {
+        XCTAssertNil(SettingsCopy.holdSpokenValue(isOn: true, autoPlay: true), "enabled, the switch says On or Off itself")
+        XCTAssertEqual(SettingsCopy.holdSpokenValue(isOn: false, autoPlay: false),
+                       "Off. Only applies when the next episode plays automatically.")
+        XCTAssertEqual(SettingsCopy.holdSpokenValue(isOn: true, autoPlay: false),
+                       "On. Only applies when the next episode plays automatically.")
+        XCTAssertNotEqual(SettingsCopy.holdNote(autoPlay: true), SettingsCopy.holdNote(autoPlay: false))
     }
 
     func testSofteningNeverSaysOffAboveTheFloor() {
@@ -3675,6 +3687,96 @@ final class RestoreReloadTests: XCTestCase {
         XCTAssertEqual(engine.pomodoro.longRestMinutes, 20)
         XCTAssertEqual(engine.pomodoro.cyclesBeforeLongBreak, 6)
         XCTAssertGreaterThan(engine.sleepTimer.timerRemaining, 0, "a restore never cancels a running sleep timer")
+    }
+
+    // Value: protects=flushPendingWrites lands the engine's deferred mixes.json write before it returns; fails_when=AudioEngine.flushPendingWrites stops calling mixStore.flushPendingWrites; why_new=a restore didn't flush the engine's queues, so a queued write could land on top of it; seam=none; no_claim=the queue and volume barriers and the store's flush (MixStore flushes it too); places: the next test
+    func testFlushPendingWritesLandsTheDeferredMixesWrite() throws {
+        let storage = StorageManager.shared
+        storage.flush()
+        let before = storage.rawData(for: "mixes.json")
+        defer {
+            if let before { try? storage.writeRawNow(before, to: "mixes.json") } else { storage.delete(filename: "mixes.json") }
+            storage.flush()
+        }
+        let engine = AudioEngine()
+        let name = "Flush test \(UUID().uuidString)"
+        engine.savePreset(named: name)                     // written 0.5 s later, unless flushed
+        engine.flushPendingWrites()
+        let presets: [SoundPreset] = try XCTUnwrap(storage.load(from: "mixes.json"))
+        XCTAssertTrue(presets.contains { $0.name == name }, "the deferred write landed before flushPendingWrites returned")
+    }
+
+    // Value: protects=a queue.json today's types can't decode survives the reload after a restore or Undo, as at launch; fails_when=reloadFromDisk assigns [] through the persisting didSet; why_new=the reload saved [] over the queue an Undo had just put back; seam=none; no_claim=LibraryView's matching reload (view state)
+    func testAQueueReloadLeavesAnUndecodableQueueOnDisk() throws {
+        let storage = StorageManager.shared
+        storage.flush()
+        let before = storage.rawData(for: "queue.json")
+        defer {
+            if let before { try? storage.writeRawNow(before, to: "queue.json") } else { storage.delete(filename: "queue.json") }
+            storage.flush()
+        }
+        let drift = Data(#"[{"fromAnOlderBuild":true}]"#.utf8)
+        try storage.writeRawNow(drift, to: "queue.json")
+        let manager = PodcastQueueManager()
+        manager.reloadFromDisk()
+        manager.flushPendingWrites()
+        storage.flush()
+        XCTAssertEqual(manager.queue, [])
+        XCTAssertEqual(storage.rawData(for: "queue.json"), drift, "left on disk, not saved over with []")
+
+        // Value: protects=after that, the next queue edit still saves, and a readable queue is loaded on reload; fails_when=persistsQueue isn't turned back on, or the decodable branch stops assigning; why_new=the test stopped at the reload; seam=none; no_claim=which mutators
+        let ep = Episode(id: "e", title: "E", audioUrl: "u", duration: nil, pubDate: nil, description: nil)
+        manager.queue.append(ep)
+        manager.flushPendingWrites()
+        storage.flush()
+        XCTAssertEqual(storage.load(from: "queue.json") as [Episode]?, [ep], "the next edit is saved")
+        let other = Episode(id: "f", title: "F", audioUrl: "v", duration: nil, pubDate: nil, description: nil)
+        try storage.writeRawNow(JSONEncoder().encode([other]), to: "queue.json")
+        manager.reloadFromDisk()
+        XCTAssertEqual(manager.queue, [other], "a readable queue is loaded")
+    }
+
+    // Value: protects=the played list is held to a backup's byte limits at runtime too; fails_when=markFinished trims by count only, or records an id over the item limit; why_new=a thousand 16 KB ids came to 16 MB in the plist; seam=none; no_claim=the 1,000-item cap (unchanged)
+    func testThePlayedListIsHeldToTheBackupLimitsAtRuntime() {
+        let defaults = UserDefaults.standard
+        let saved = defaults.object(forKey: "finishedEpisodes")
+        let manager = PodcastQueueManager()
+        defer {
+            manager.flushPendingWrites()
+            if let saved { defaults.set(saved, forKey: "finishedEpisodes") } else { defaults.removeObject(forKey: "finishedEpisodes") }
+        }
+        let ids = (0..<70).map { String(format: "%03d", $0) + String(repeating: "x", count: Backup.maxListItemBytes - 3) }
+        ids.forEach(manager.markFinished)
+        let stored = manager.finishedEpisodes
+        XCTAssertLessThanOrEqual(stored.reduce(0) { $0 + $1.utf8.count }, Backup.maxListBytes)
+        XCTAssertTrue(stored.contains(ids.last!), "the newest is kept")
+        XCTAssertFalse(stored.contains(ids.first!), "the oldest went to make room")
+        manager.markFinished(String(repeating: "y", count: Backup.maxListItemBytes + 1))
+        XCTAssertEqual(manager.finishedEpisodes, stored, "an id over the item limit isn't recorded")
+    }
+
+    // Value: protects=flushPositionsNow writes the player's in-memory saved places to positions.json before it returns; fails_when=flushPositionsNow skips the in-memory map (e.g. reduced to a queue barrier) or returns before the store writes it; why_new=this suite covered only mixes.json, and places held in memory reach disk only every ~30 s or on a pause; seam=none; no_claim=that AudioEngine.flushPendingWrites calls it (podPlayer is private to AudioEngine)
+    func testFlushPositionsNowWritesThePlacesHeldInMemory() throws {
+        let storage = StorageManager.shared
+        storage.flush()
+        let before = storage.rawData(for: "positions.json")
+        defer {
+            if let before { try? storage.writeRawNow(before, to: "positions.json") } else { storage.delete(filename: "positions.json") }
+            storage.flush()
+        }
+        let player = PodcastPlayer()
+        let loaded = player.savedPositions
+        // Runs before the restore above. The player writes its map again as it goes (its deinit
+        // flushes), so it's handed back what it loaded: the test's place can't land after the restore.
+        defer {
+            player.setPositions(loaded)
+            player.flushPositionsNow()
+        }
+        let key = "flush-test-\(UUID().uuidString)"
+        player.setPositions([key: 42])                     // held in memory, as between the 30 s flushes
+        player.flushPositionsNow()                         // no store flush here: it must have landed
+        let places: [String: Double] = try XCTUnwrap(storage.load(from: "positions.json"))
+        XCTAssertEqual(places[key], 42, "the place held in memory was on disk when flushPositionsNow returned")
     }
 }
 
