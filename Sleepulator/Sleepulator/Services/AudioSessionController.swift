@@ -38,7 +38,8 @@ enum AudioSessionConfig {
 /// each forward below hops to the main queue before invoking the handler — the handlers mutate
 /// @Published state and reach the generative engine's updateParams (main-queue + single-writer).
 final class AudioSessionController {
-    var onInterruption: ((Notification) -> Void)?
+    /// The interruption, and when it reached the app (stamped before the hop to main).
+    var onInterruption: ((Notification, Date) -> Void)?
     var onRouteChange: ((Notification) -> Void)?
     var onAppBackground: (() -> Void)?
     var onOnlineChanged: ((Bool) -> Void)?
@@ -72,7 +73,8 @@ final class AudioSessionController {
     }
 
     @objc private func forwardInterruption(_ note: Notification) {
-        DispatchQueue.main.async { [weak self] in self?.onInterruption?(note) }
+        let at = Date()
+        DispatchQueue.main.async { [weak self] in self?.onInterruption?(note, at) }
     }
     @objc private func forwardRouteChange(_ note: Notification) {
         DispatchQueue.main.async { [weak self] in self?.onRouteChange?(note) }
