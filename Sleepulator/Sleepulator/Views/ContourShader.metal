@@ -32,7 +32,7 @@ using namespace metal;
 // isn't running.
 //
 // Motion: the contour lines drift steadily downhill, out from the summit (their
-// rate is the Pomodoro's `driveSpeed`), and the FBM terrain pans and slowly
+// rate is the Pomodoro look's `speed`), and the FBM terrain pans and slowly
 // re-forms over the fixed cone, so a 25-minute block never shows the same map
 // twice. The light's edge is pinned to a height, not to the drifting lines, so
 // it holds still while they pass through it.
@@ -44,6 +44,7 @@ using namespace metal;
 // Swift owns the live values (shared FocusDrivers mapping + ContourLight):
 //   flow  — SceneClock phase at the Pomodoro's speed (frozen by `paused`)
 //   driveOp — overall brightness · light — the reading · edge — its radius
+//   reach — the summit's distance to the farthest corner (the cone's base)
 //   summit — the cone's peak, unit screen coordinates · tint — work/rest/idle
 // ============================================================================
 
@@ -142,7 +143,8 @@ inline float stroke(float d, float hw) {
 [[ stitchable ]]
 half4 contourField(float2 pos, half4 color,
                    float flow, float2 size,
-                   float driveOp, float light, float edge, float2 summit, float3 tint) {
+                   float driveOp, float light, float edge, float reach, float2 summit,
+                   float3 tint) {
     using namespace ctr;
 
     float2 uv = pos / size;
@@ -152,7 +154,8 @@ half4 contourField(float2 pos, half4 color,
     float  pt     = 1.0 / size.y;                       // one point, in screen heights
     float2 p      = pos * pt;
     float2 peak   = summit * float2(aspect, 1.0);
-    float  reach  = length(max(summit, 1.0 - summit) * float2(aspect, 1.0));
+    // `reach` comes from Swift (ContourLight.reach), the same value that turned the share into
+    // `edge`, so the cone and the reading can't drift apart.
     float2 drift  = float2(0.62, -0.38) * flow * PAN;
     float  morph  = flow * MORPH;
 
@@ -187,7 +190,10 @@ half4 contourField(float2 pos, half4 color,
     float gv  = gl / STEP;                              // contour intervals per point
     float fv  = fract(v);
     float dpt = min(fv, 1.0 - fv) / gv;                 // points to the nearest line
-    bool  idx = fmod(floor(v + 0.5), INDEX) < 0.5;
+    // A non-negative modulo: Metal's fmod keeps x's sign, so on ground below height 0 every line
+    // read as an index contour, and they flickered bold each time the phase wrapped.
+    float k   = floor(v + 0.5);
+    bool  idx = k - INDEX * floor(k / INDEX) < 0.5;
     // Lines closer than ~3 pt bead into moiré on a steep slope: fade them out by ~6 pt apart.
     float legible = smoothstep(2.5, 6.0, 1.0 / gv);
 

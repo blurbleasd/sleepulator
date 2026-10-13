@@ -10,15 +10,15 @@ import SwiftUI
 /// trigger the `@Published` re-render storm CLAUDE.md warns about).
 ///
 /// Flow uses its OWN `SceneClock` rather than `ShaderBackdrop`, because Current's rate is the
-/// Pomodoro's `driveSpeed` (momentum), not the night-slowdown `ShaderBackdrop` integrates. Reduce
-/// Motion feeds rate 0 → `flow` freezes → a static field (no advection). `paused` (occlusion)
-/// freezes the schedule to one static frame at the frozen pose.
+/// Pomodoro look's `speed` (momentum), not the night-slowdown `ShaderBackdrop` integrates. Reduce
+/// Motion doesn't touch the rate (see the note in `field`). `paused` (occlusion, or "Moving
+/// scenes" off) freezes the schedule to one static frame at the frozen pose.
 struct CurrentMetalView: View {
     var paused: Bool = false
     /// Read live (not observed) so phase/progress drive the look.
     let pomodoro: PomodoroService
 
-    /// Integrates `driveSpeed` into a flow phase (rate, not absolute-time × speed — see
+    /// Integrates the look's `speed` into a flow phase (rate, not absolute-time × speed — see
     /// `SceneClock`). Random start so the streams open at a fresh pose each appearance.
     @State private var clock = SceneClock(start: .random(in: 0...2048))
 

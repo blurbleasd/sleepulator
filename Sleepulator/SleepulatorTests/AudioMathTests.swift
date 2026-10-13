@@ -1,4 +1,5 @@
 import XCTest
+import Metal
 @testable import Sleepulator
 
 class AudioMathTests: XCTestCase {
@@ -247,6 +248,23 @@ class MetalShadersTests: XCTestCase {
         XCTAssertTrue(MetalShaders.isAvailable("rainGlassLens", in: ["someVertexFn"], known: known))
         XCTAssertTrue(MetalShaders.isAvailable("stillWaterLens", in: [], known: known))
     }
+
+    // Value: protects=the launch preflight names every shader the app compiles, so a scene whose
+    //   shader drops out of the metallib is logged, not silently black; fails_when=a new scene's
+    //   [[stitchable]] isn't added to MetalShaders.known (or a listed one is renamed); why_new=the
+    //   tests above use a fixed set, never the app's real library; seam=none; no_claim=a device
+    //   runtime's enumeration (the simulator's library; skipped where none is listed)
+    func testThePreflightKnowsEveryCompiledShader() throws {
+        guard let library = MTLCreateSystemDefaultDevice()?.makeDefaultLibrary() else {
+            throw XCTSkip("no Metal device or default library here")
+        }
+        let compiled = Set(library.functionNames)
+        guard !compiled.isDisjoint(with: MetalShaders.known) else {
+            throw XCTSkip("this runtime doesn't list stitchable functions")
+        }
+        XCTAssertEqual(compiled.subtracting(MetalShaders.known).sorted(), [], "compiled but not preflighted")
+        XCTAssertEqual(MetalShaders.known.subtracting(compiled).sorted(), [], "preflighted but not compiled")
+    }
 }
 
 /// Home's swipe (`HomeView.cycleScene`) runs through `SceneRegistry.swipeLoop`: every shipping
@@ -272,6 +290,19 @@ final class SceneSwipeLoopTests: XCTestCase {
             let loop = SceneRegistry.swipeLoop(for: mood).map(\.id)
             XCTAssertEqual(loop, registered.filter { $0 != depthSibling }, "\(mood)")
             XCTAssertGreaterThanOrEqual(loop.count, 2, "\(mood): cycleScene needs two to swipe")
+        }
+    }
+
+    // Value: protects=each scene's id is its own, so a chip pick, a swipe or a saved preset/backup
+    //   holding it reopens on that scene; fails_when=a new scene copied from another keeps that id
+    //   (Contour as "sandfall": the chips and the swipe land on Sandfall); why_new=the loop test
+    //   above compares two lists that hold the duplicate alike; seam=none; no_claim=the chip UI
+    //   and the @AppStorage write (registry resolution only)
+    func testEverySceneResolvesFromItsOwnId() {
+        let ids = SceneRegistry.all.map(\.id)
+        XCTAssertEqual(ids.count, Set(ids).count, "duplicate scene ids: \(ids)")
+        for scene in SceneRegistry.all {
+            XCTAssertEqual(SceneRegistry.scene(id: scene.id, mood: scene.mood).title, scene.title, scene.id)
         }
     }
 }
