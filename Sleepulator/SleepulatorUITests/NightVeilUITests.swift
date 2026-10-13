@@ -26,12 +26,20 @@ final class NightVeilUITests: XCTestCase {
 
     private static let veilLabel = "Screen dimmed for sleep. Tap to wake."
 
+    /// How long the glance shows here, a Debug-only launch argument (`-veilGlanceSeconds`): a real
+    /// night's is 6 s, pinned by a unit test. Between this test's two taps CI once spent 5 s on one
+    /// accessibility query, and once XCUITest held the wake tap ~7 s for a system banner; either
+    /// pushed the wake past the real glance, where it's a fresh glance by design.
+    private static let glanceSeconds: TimeInterval = 40
+    /// The glance and its 2 s fade (`SessionGuards.glanceFade`): a tap inside it wakes.
+    private static let glanceWindow = glanceSeconds + 2
+
     /// The noise bed's switch in the mixer is labelled with the noise's name (Sleep's and Focus's
     /// palettes, as `WarmMixerRow` titles them).
     private static let noiseNames = ["Brown", "Rain", "Ocean", "Pink", "Green", "Forest",
                                      "Fan", "White", "Gray"]
 
-    // Value: protects=an All-night Sleep session gets the veil a set delay after the last touch (60 s; 15 s here), tap 1 is a glance, tap 2 brings Home's controls back and restarts their fade; fails_when=the veil only drops under a timer, the 1st tap wakes outright, or the 2nd leaves the "Show controls" layer over hidden controls; why_new=ContentView's scheduleDim/veilTapped wiring had no test (SessionGuardsTests pin the rules, not the overlay or the tap sequence); seam=none
+    // Value: protects=an All-night Sleep session gets the veil a set delay after the last touch (60 s; 15 s here), tap 1 is a glance, tap 2 brings Home's controls back and restarts their fade; fails_when=the veil only drops under a timer, the 1st tap wakes outright, or the 2nd leaves the "Show controls" layer over hidden controls; why_new=ContentView's scheduleDim/veilTapped wiring had no test (SessionGuardsTests pin the rules, not the overlay or the tap sequence); seam=-veilDelaySeconds, -veilGlanceSeconds (Debug-only); no_claim=the real 6 s + 2 s glance (VeilDelayTests pins it)
     @MainActor
     func testAllNightVeilThenGlanceThenWake() {
         continueAfterFailure = false
@@ -44,6 +52,7 @@ final class NightVeilUITests: XCTestCase {
             "-focusMode", "<false/>",
             "-autoNightDim", "<true/>",
             "-veilDelaySeconds", "<real>15</real>",
+            "-veilGlanceSeconds", "<real>\(Self.glanceSeconds)</real>",
         ]
         app.launch()
 
@@ -104,27 +113,31 @@ final class NightVeilUITests: XCTestCase {
         // once more only when nothing lit. A "first tap wakes" regression lights the whole scene,
         // skips the retry and still fails the veil check below.
         XCTAssertFalse(screenIsLit(), "Something brighter than the caption shows on the veil before the first tap")
-        tapPoint.tap()
+        // Taken before the tap: the touch lands after it, so the gap below can only be overstated.
         var firstTap = Date()
+        tapPoint.tap()
         if !waitUntil(timeout: 2, { self.screenIsLit() }) {
-            // Let any glance that did start run out first (it shows 6 s and fades 2 s), so the
-            // retry reads as a fresh glance, never as the wake a slow-to-light glance would make it.
-            RunLoop.current.run(until: firstTap.addingTimeInterval(8.5))
-            tapPoint.tap()
+            // Let any glance that did start run out first, so the retry reads as a fresh glance,
+            // never as the wake a slow-to-light glance would make it.
+            RunLoop.current.run(until: firstTap.addingTimeInterval(Self.glanceWindow + 0.5))
             firstTap = Date()
+            tapPoint.tap()
             XCTAssertTrue(waitUntil(timeout: 2) { self.screenIsLit() }, "The first tap showed no glance, twice")
         }
         // Held past the veil's 1.6 s fade-out, so a wake in progress can't pass for a glance.
         XCTAssertTrue(holds(for: 2) { veil.exists }, "The first tap woke the screen instead of a glance")
 
-        // Second tap, while the glance shows or fades (8 s, SessionGuards.veilTap): the veil lifts
-        // and Home's controls are back and take taps, not a bare scene behind the screensaver's
-        // "Show controls" layer that needs a third tap.
-        let gap = Date().timeIntervalSince(firstTap)
-        XCTAssertLessThan(gap, 7.5, "Runner too slow: the second tap would land after the glance (\(gap) s)")
+        // Second tap, while the glance shows or fades (`glanceWindow`, SessionGuards.veilTap): the
+        // veil lifts and Home's controls are back and take taps, not a bare scene behind the
+        // screensaver's "Show controls" layer that needs a third tap.
         let tapped = Date()
         tapPoint.tap()
-        let look = lookAfterTheWake(wake, tapped: tapped, tapReturned: Date())
+        let tapReturned = Date()
+        let look = lookAfterTheWake(wake, tapped: tapped, tapReturned: tapReturned)
+        // Measured once the tap has returned: XCUITest can hold a tap (the banner did), so a check
+        // before it can't say when the touch landed. Both touches fell inside this span.
+        let gap = tapReturned.timeIntervalSince(firstTap)
+        XCTAssertLessThan(gap, Self.glanceWindow, "Runner too slow: the wake tap may have landed after the glance (\(gap) s)")
         // The veil goes for good (its delay restarts from the tap), so it's checked after the look.
         XCTAssertTrue(waitUntil(timeout: 5) { !veil.exists }, "The second tap didn't lift the veil")
         return look

@@ -2899,6 +2899,22 @@ final class VeilDelayTests: XCTestCase {
         XCTAssertEqual(SessionGuards.veilDelay(override: 1), 5, "never a veil that drops mid-touch")
         XCTAssertEqual(SessionGuards.veilDelay(override: 600), 60, "never longer than the minute")
     }
+
+    // Value: protects=the glance's real 6 s + 2 s, and a Debug launch's longer hold reaching both the glance and the wake rule; fails_when=glanceHold/glanceFade change, the override's clamp goes, or veilTap ignores the hold it's given; why_new=NightVeilUITests now holds the glance 40 s (-veilGlanceSeconds), so it no longer samples the real window; seam=glanceHold(override:); no_claim=ContentView passing the same hold to the glance's fade and to veilTap (view wiring; NightVeilUITests' wake 9+ s after the glance covers it)
+    func testTheGlanceHoldsSixSecondsUnlessADebugLaunchLengthensIt() {
+        XCTAssertEqual(SessionGuards.glanceHold, 6, "the glance shows 6 s")
+        XCTAssertEqual(SessionGuards.glanceFade, 2, "then fades over 2 s")
+        XCTAssertEqual(SessionGuards.glanceHold(override: 0), 6, "no override: the real hold")
+        // The tests run a Debug build, where the argument-domain override applies, held to 6…60 s.
+        XCTAssertEqual(SessionGuards.glanceHold(override: 40), 40)
+        XCTAssertEqual(SessionGuards.glanceHold(override: 1), 6, "never shorter than the real glance")
+        XCTAssertEqual(SessionGuards.glanceHold(override: 600), 60)
+        // The wake rule follows the hold it's given: 9 s after the glance wakes under a 40 s hold,
+        // and is a fresh glance under the real one.
+        XCTAssertEqual(SessionGuards.veilTap(sinceGlance: 9, assistiveTech: false, hold: 40), .wake)
+        XCTAssertEqual(SessionGuards.veilTap(sinceGlance: 9, assistiveTech: false), .glance)
+        XCTAssertEqual(SessionGuards.veilTap(sinceGlance: 42, assistiveTech: false, hold: 40), .glance)
+    }
 }
 
 final class NightEmberMathTests: XCTestCase {
