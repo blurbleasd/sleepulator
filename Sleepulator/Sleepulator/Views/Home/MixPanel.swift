@@ -127,7 +127,8 @@ struct MixPanel: View {
 
             // Apple Music — Focus only. DRM means it can't be a true mixer channel (no volume
             // slider / limiter); it plays alongside via the system player. See APPLE-MUSIC-FOCUS-SPEC.
-            if audio.focusMode {
+            // Hidden for 1.0 (AppConfig.appleMusicEnabled).
+            if audio.focusMode && AppConfig.appleMusicEnabled {
                 AppleMusicMixRow(audio: audio, pal: pal) { showingMusicPicker = true }
                     .glassPanel(pal)
             }

@@ -1,0 +1,68 @@
+{
+  "identifier" : "5C1E7A3B",
+  "nonRenewingSubscriptions" : [
+
+  ],
+  "products" : [
+    {
+      "displayPrice" : "0.99",
+      "familyShareable" : false,
+      "internalID" : "6739000001",
+      "localizations" : [
+        {
+          "description" : "A small tip. Tips unlock nothing; everything is already free.",
+          "displayName" : "Small tip",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "app.sleepulator.Sleepulator.tip.small",
+      "referenceName" : "Small tip",
+      "type" : "Consumable"
+    },
+    {
+      "displayPrice" : "2.99",
+      "familyShareable" : false,
+      "internalID" : "6739000002",
+      "localizations" : [
+        {
+          "description" : "A kind tip. Tips unlock nothing; everything is already free.",
+          "displayName" : "Kind tip",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "app.sleepulator.Sleepulator.tip.kind",
+      "referenceName" : "Kind tip",
+      "type" : "Consumable"
+    },
+    {
+      "displayPrice" : "4.99",
+      "familyShareable" : false,
+      "internalID" : "6739000003",
+      "localizations" : [
+        {
+          "description" : "A generous tip. Tips unlock nothing; everything is already free.",
+          "displayName" : "Generous tip",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "app.sleepulator.Sleepulator.tip.generous",
+      "referenceName" : "Generous tip",
+      "type" : "Consumable"
+    }
+  ],
+  "settings" : {
+    "_failTransactionsEnabled" : false,
+    "_locale" : "en_US",
+    "_storefront" : "USA",
+    "_storeKitErrors" : [
+
+    ]
+  },
+  "subscriptionGroups" : [
+
+  ],
+  "version" : {
+    "major" : 3,
+    "minor" : 0
+  }
+}

@@ -9,6 +9,9 @@ import os
 struct BackupSupportView: View {
     @ObservedObject var backup: BackupController
     let pal: Palette
+    /// "Send feedback" attaches the journal's night files (FB-1).
+    let journal: NightJournal
+    @EnvironmentObject private var tips: TipStore
 
     @State private var isExportingLog = false
     @State private var logDocument: TextDocument?
@@ -28,6 +31,8 @@ struct BackupSupportView: View {
                 }
 
                 Section {
+                    // First: the way to reach a person (design D4), with last night attached.
+                    SendFeedbackRow(journal: journal, pal: pal)
                     NavigationLink { DiagnosticsListView(pal: pal) } label: {
                         SettingActionRow(title: "Reports from iOS", systemImage: "waveform.path.ecg",
                                          note: "Battery and crash reports, about one a day. Kept on this iPhone.", pal: pal)
@@ -50,17 +55,11 @@ struct BackupSupportView: View {
                     .disabled(collectingLog)
                 } header: {
                     Text("Troubleshooting").foregroundStyle(pal.dim)
-                } footer: {
-                    // Build identity: the build time is the line that tells manual builds apart.
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Sleepulator \(AppInfo.versionBuild)")
-                        if let built = AppInfo.builtAtLabel { Text("Built \(built)") }
-                    }
-                    .foregroundStyle(pal.dim)
-                    .padding(.top, UI.sm)
-                    .accessibilityElement(children: .combine)
-                    .accessibilityLabel(AppInfo.accessibilitySummary)
                 }
+
+                // Last: giving back (design D4). Its footer carries the build identity, the line
+                // that tells manual builds apart, so it still closes the page.
+                SupportSection(tips: tips, pal: pal)
             }
             .listRowBackground(pal.text.opacity(0.05))
         }
@@ -72,7 +71,11 @@ struct BackupSupportView: View {
         .navigationTitle("Backup & support")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { backup.pageAppeared() }
-        .onDisappear { backup.pageDisappeared() }
+        .onDisappear {
+            backup.pageDisappeared()
+            // Leaving the page ends the tips' visit: no lingering "Waiting for approval" (design D7).
+            tips.screenClosed()
+        }
         .fileImporter(isPresented: $backup.isImporting, allowedContentTypes: [.json],
                       allowsMultipleSelection: false) { backup.picked($0) }
         .fileExporter(isPresented: $backup.isExporting, document: backup.exportDocument,

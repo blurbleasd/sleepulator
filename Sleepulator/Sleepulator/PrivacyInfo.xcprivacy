@@ -23,10 +23,35 @@
 			<string>NSPrivacyAccessedAPICategoryFileTimestamp</string>
 			<key>NSPrivacyAccessedAPITypeReasons</key>
 			<array>
-				<!-- DDA9.1: metadata of files inside the app's own container. AudioDownloader
-				     reads contentAccessDate/fileSize of cached episodes (App Support) for LRU
-				     eviction — internal, not user-granted files (C617.1 was the wrong code). -->
+				<!-- C617.1: timestamps, size or other metadata of files inside the app's own
+				     container. AudioDownloader reads the cached episodes' access/modification
+				     dates and sizes for its LRU eviction, and MetricsCollector sorts the iOS reports
+				     it stored by creation date. -->
+				<string>C617.1</string>
+				<!-- DDA9.1: file timestamps shown to the person: the Reports from iOS list's dates
+				     and Settings' "Built …" line (AppInfo.builtAt). -->
 				<string>DDA9.1</string>
+			</array>
+		</dict>
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategorySystemBootTime</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<!-- 35F9.1: elapsed time between events in the app. The night veil's glance is
+				     timed on ProcessInfo.systemUptime, the monotonic clock (ContentView). -->
+				<string>35F9.1</string>
+			</array>
+		</dict>
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryDiskSpace</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<!-- E174.1: checking free space before writing files, and freeing space when it
+				     runs low. AudioDownloader reads volumeAvailableCapacityForImportantUsage to
+				     decide whether to evict cached episodes. -->
+				<string>E174.1</string>
 			</array>
 		</dict>
 	</array>

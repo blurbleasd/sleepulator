@@ -8,6 +8,36 @@ import Foundation
 /// linked and installed — is what actually distinguishes builds, which is the whole point of the
 /// footer: glance at Settings and confirm the phone is running the build you just made.
 enum AppInfo {
+    /// Running as a unit-test host: services that would write the real stores (the night
+    /// journal, the tip store's transaction listener) use throwaway ones. Debug builds only, so
+    /// no test path can reach a shipped build.
+    static var isUnitTestHost: Bool {
+        #if DEBUG
+        ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+        #else
+        false
+        #endif
+    }
+
+    /// Launched by a UI test (`-uiTestIsolated <true/>`): a throwaway night journal and no rating
+    /// prompt, so a dev simulator's own nights can't reach the run, nor the run's reach them.
+    static var isUITestRun: Bool {
+        #if DEBUG
+        UserDefaults.standard.bool(forKey: "uiTestIsolated")
+        #else
+        false
+        #endif
+    }
+
+    /// Where "Send feedback" mails and the support page points. Open input (set before the first
+    /// TestFlight build; docs/designs/APP-STORE-LAUNCH-1.0.md, Launch sequence). While nil, Send
+    /// feedback opens the share sheet with no address.
+    static let supportEmail: String? = nil
+
+    /// The app's numeric App Store ID, from creating its App Store Connect record. Open input;
+    /// while nil the "Rate Sleepulator" row stays hidden (design D8).
+    static let appStoreID: String? = nil
+
     /// `CFBundleShortVersionString` (from `MARKETING_VERSION`), e.g. "1.0".
     static var version: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"

@@ -140,3 +140,47 @@ enum SessionGuards {
         return timerActive ? "Restart timer" : "Start timer"
     }
 }
+
+// MARK: - The rating and tip asks (docs/designs/APP-STORE-LAUNCH-1.0.md: RP-1, TJ-1, NT-1;
+// design D6, D10–D13)
+
+extension SessionGuards {
+    /// The asks land only in the day: from 09:00 to 20:00 local, the wind-down hour kept clear
+    /// (design D11), and at least 2 hours after the last night ended.
+    static let askOpensAtHour = 9
+    static let askClosesAtHour = 20
+    static let askAfterNight: TimeInterval = 2 * 3600
+    static let ratingAfterCleanNights = 3
+    static let tipCardAfterCleanNights = 5
+
+    static func askWindowOpen(now: Date, lastNightEnd: Date?, calendar: Calendar = .current) -> Bool {
+        let hour = calendar.component(.hour, from: now)
+        guard hour >= askOpensAtHour, hour < askClosesAtHour else { return false }
+        if let lastNightEnd, now.timeIntervalSince(lastNightEnd) < askAfterNight { return false }
+        return true
+    }
+
+    /// Whether Apple's rating prompt may be requested now, at a natural break (a sheet just
+    /// closed, or the person just left Settings; design D12). Either mode (design D10). Once per
+    /// app version, never on a day the tip card showed, nor while it's showing: due with Sleep
+    /// Home on screen (`tipCardShowing`; leaving Settings for Home would raise both at once). A
+    /// due card elsewhere doesn't hold the rating back: an ignored card would hold it for good.
+    static func mayAskForRating(cleanNights: Int, askedThisVersion: Bool, tipCardShownToday: Bool,
+                                tipCardShowing: Bool, playing: Bool, veilDown: Bool, now: Date,
+                                lastNightEnd: Date?, calendar: Calendar = .current) -> Bool {
+        guard cleanNights >= ratingAfterCleanNights, !askedThisVersion, !tipCardShownToday,
+              !tipCardShowing, !playing, !veilDown else { return false }
+        return askWindowOpen(now: now, lastNightEnd: lastNightEnd, calendar: calendar)
+    }
+
+    /// Whether the tip card is due on Sleep Home. It waits (never lapses) while anything plays,
+    /// outside the window, on a day the rating prompt was asked, until the tips can be bought,
+    /// and in Focus (design D10). It ends only on an answer (`spent`, design D6) or a tip.
+    static func tipCardDue(cleanNights: Int, tipped: Bool, spent: Bool, productsReady: Bool,
+                           focusMode: Bool, playing: Bool, ratingAskedToday: Bool, now: Date,
+                           lastNightEnd: Date?, calendar: Calendar = .current) -> Bool {
+        guard cleanNights >= tipCardAfterCleanNights, !tipped, !spent, productsReady, !focusMode,
+              !playing, !ratingAskedToday else { return false }
+        return askWindowOpen(now: now, lastNightEnd: lastNightEnd, calendar: calendar)
+    }
+}

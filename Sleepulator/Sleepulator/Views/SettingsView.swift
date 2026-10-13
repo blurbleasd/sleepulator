@@ -168,7 +168,7 @@ struct SettingsView: View {
                     }
                     Section {
                         NavigationLink {
-                            BackupSupportView(backup: backup, pal: pal)
+                            BackupSupportView(backup: backup, pal: pal, journal: audio.nightJournal)
                         } label: {
                             label("Backup & support")
                         }

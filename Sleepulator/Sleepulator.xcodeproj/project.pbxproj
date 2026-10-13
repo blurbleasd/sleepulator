@@ -13,12 +13,14 @@
 		896817F92FE6F20900C5DF4D /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 896817F82FE6F20900C5DF4D /* WidgetKit.framework */; };
 		896817FB2FE6F20900C5DF4D /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 896817FA2FE6F20900C5DF4D /* SwiftUI.framework */; };
 		8968180C2FE6F20E00C5DF4D /* SleepulatorWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 896817F72FE6F20900C5DF4D /* SleepulatorWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		94FF5E85081366CBFB32DB23 /* Tips.storekit in Resources */ = {isa = PBXBuildFile; fileRef = 7C9C005C5E0B8BD337C07B80 /* Tips.storekit */; };
 		AA0100000000000000000001 /* FocusDriversTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0200000000000000000001 /* FocusDriversTests.swift */; };
 		AA0100000000000000000002 /* BackupRoundTripTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0200000000000000000002 /* BackupRoundTripTests.swift */; };
 		AA0100000000000000000003 /* GenerativeAudioEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0200000000000000000003 /* GenerativeAudioEngineTests.swift */; };
 		BB02BB02BB02BB02BB02BB02 /* AudioStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA01AA01AA01AA01AA01AA01 /* AudioStateTests.swift */; };
 		BF4075B42E1B49487FA0DF0C /* HomeLayoutUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04989B6E7BC2DC8CBA44D2C0 /* HomeLayoutUITests.swift */; };
 		DD04DD04DD04DD04DD04DD04 /* PersistenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC03CC03CC03CC03CC03CC03 /* PersistenceTests.swift */; };
+		F0A33C1222E84147F6ABF246 /* TipStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 35E281F4329937D2FE4CBC15 /* TipStoreTests.swift */; };
 		FE194EFB101EFDEB44D73448 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = AB899D16B0611E1DE7BE7027 /* Foundation.framework */; };
 /* End PBXBuildFile section */
 
@@ -64,6 +66,8 @@
 		017F902453F66EBD5997209E /* SleepulatorTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SleepulatorTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		04989B6E7BC2DC8CBA44D2C0 /* HomeLayoutUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = HomeLayoutUITests.swift; sourceTree = "<group>"; };
 		18E370CCB927FE199F422346 /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		35E281F4329937D2FE4CBC15 /* TipStoreTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SleepulatorTests/TipStoreTests.swift; sourceTree = "<group>"; };
+		7C9C005C5E0B8BD337C07B80 /* Tips.storekit */ = {isa = PBXFileReference; includeInIndex = 1; path = SleepulatorTests/Tips.storekit; sourceTree = "<group>"; };
 		896815A52FE42DE100C5DF4D /* Sleepulator.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Sleepulator.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		896817F72FE6F20900C5DF4D /* SleepulatorWidgetExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = SleepulatorWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		896817F82FE6F20900C5DF4D /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
@@ -169,6 +173,8 @@
 				BB0200000000000000000003 /* GenerativeAudioEngineTests.swift */,
 				AA01AA01AA01AA01AA01AA01 /* AudioStateTests.swift */,
 				CC03CC03CC03CC03CC03CC03 /* PersistenceTests.swift */,
+				35E281F4329937D2FE4CBC15 /* TipStoreTests.swift */,
+				7C9C005C5E0B8BD337C07B80 /* Tips.storekit */,
 			);
 			name = SleepulatorTests;
 			sourceTree = "<group>";
@@ -377,6 +383,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				94FF5E85081366CBFB32DB23 /* Tips.storekit in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -393,6 +400,7 @@
 				AA0100000000000000000003 /* GenerativeAudioEngineTests.swift in Sources */,
 				BB02BB02BB02BB02BB02BB02 /* AudioStateTests.swift in Sources */,
 				DD04DD04DD04DD04DD04DD04 /* PersistenceTests.swift in Sources */,
+				F0A33C1222E84147F6ABF246 /* TipStoreTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -451,7 +459,7 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
+				TARGETED_DEVICE_FAMILY = 1;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Sleepulator.app/Sleepulator";
 				VALIDATE_PRODUCT = YES;
 			};
@@ -466,7 +474,7 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
+				TARGETED_DEVICE_FAMILY = 1;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Sleepulator.app/Sleepulator";
 			};
 			name = Debug;
@@ -606,8 +614,7 @@
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = NO;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = UIInterfaceOrientationPortrait;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -622,7 +629,7 @@
 				SWIFT_OBJC_BRIDGING_HEADER = "Sleepulator/Sleepulator-Bridging-Header.h";
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
+				TARGETED_DEVICE_FAMILY = 1;
 			};
 			name = Debug;
 		};
@@ -640,8 +647,7 @@
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = NO;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = UIInterfaceOrientationPortrait;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -656,7 +662,7 @@
 				SWIFT_OBJC_BRIDGING_HEADER = "Sleepulator/Sleepulator-Bridging-Header.h";
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
+				TARGETED_DEVICE_FAMILY = 1;
 			};
 			name = Release;
 		};
@@ -687,7 +693,7 @@
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
+				TARGETED_DEVICE_FAMILY = 1;
 			};
 			name = Debug;
 		};
@@ -718,7 +724,7 @@
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
+				TARGETED_DEVICE_FAMILY = 1;
 			};
 			name = Release;
 		};
@@ -734,7 +740,7 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
+				TARGETED_DEVICE_FAMILY = 1;
 				TEST_TARGET_NAME = Sleepulator;
 			};
 			name = Debug;
@@ -751,7 +757,7 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
+				TARGETED_DEVICE_FAMILY = 1;
 				TEST_TARGET_NAME = Sleepulator;
 				VALIDATE_PRODUCT = YES;
 			};
