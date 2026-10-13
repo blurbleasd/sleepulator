@@ -456,7 +456,9 @@ struct ContentView: View {
         let now = Date()
         guard SessionGuards.mayAskForRating(
             cleanNights: audio.nightJournal.cleanNightCount, askedThisVersion: ratingAskedVersion == AppInfo.version,
-            tipCardShownToday: sameDay(tipCardShownOn, now), playing: sessionBusy,
+            // A card that's due counts as today's ask even before it renders (leaving Settings for
+            // Home would otherwise show both).
+            tipCardShownToday: sameDay(tipCardShownOn, now) || tipCardDue, playing: sessionBusy,
             veilDown: nightDimmed, now: now, lastNightEnd: lastNightEnd) else { return }
         ratingAskedVersion = AppInfo.version
         ratingAskedOn = now.timeIntervalSince1970

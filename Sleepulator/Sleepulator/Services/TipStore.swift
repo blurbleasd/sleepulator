@@ -71,6 +71,16 @@ nonisolated enum TipFlow {
             return (.unavailable, nil)
         }
     }
+
+    /// Whether an outcome's phase replaces the rows' current one. A purchase's own outcome always
+    /// does. An update from outside it (an Ask to Buy approved while closed) does only when it's a
+    /// new tip, and never over a purchase in flight: a late approval, or a replay outside the
+    /// remembered ids, would show "Thank you" mid-purchase and lift the one-at-a-time guard.
+    static func showsOutcome(fromPurchase: Bool, newTip: Bool, over current: TipPhase) -> Bool {
+        if fromPurchase { return true }
+        if case .purchasing = current { return false }
+        return newTip
+    }
 }
 
 final class TipStore: ObservableObject {
@@ -221,9 +231,9 @@ final class TipStore: ObservableObject {
 
     private func apply(_ outcome: TipOutcome, fromPurchase: Bool) {
         let step = TipFlow.apply(outcome, handled: Set(handled))
-        // A late update (an Ask to Buy approved while closed) thanks; any other update outside a
-        // purchase leaves the rows as they are.
-        if fromPurchase || step.newTip != nil { phase = step.phase }
+        if TipFlow.showsOutcome(fromPurchase: fromPurchase, newTip: step.newTip != nil, over: phase) {
+            phase = step.phase
+        }
         guard let id = step.newTip else { return }
         handled = Array((handled + [id]).suffix(20))
         defaults.set(handled.map { NSNumber(value: $0) }, forKey: Self.handledKey)

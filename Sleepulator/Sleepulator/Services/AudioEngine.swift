@@ -1528,8 +1528,9 @@ final class AudioEngine: ObservableObject {
             Log.timer.notice("interruption began (podWasPlaying=\(podActive, privacy: .public))")
             nightJournal.note("interruption began")
             // The bed's switches stay on through it, so no session edge reports this stop: the
-            // night pauses here (a podcast alone also pauses through its edge, below).
-            nightJournal.sessionStopped()
+            // night pauses here (a podcast alone also pauses through its edge, below). As an
+            // interruption's pause: sound back without an `.ended` carries the night on.
+            nightJournal.sessionInterrupted()
             podWasPlayingBeforeInterruption = podWasPlayingBeforeInterruption || podActive
             genEngine.handleInterruption(shouldResume: false)
             if podActive { podPlayer.pause() }

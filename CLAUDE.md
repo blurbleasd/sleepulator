@@ -239,18 +239,24 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   on and the noise engine's start error count too). A timed night needs a minute of live audio
   (`timedNightMinimumLive`: a deadline that passed while the app slept, fired by a morning
   lock-screen Play, ends a night that hardly played). News while the night is paused (an alarm
-  killing the player, the rebuild when play resumes) is a note, not a taint, and so is news in
-  the first 10 s after it resumes (`graceAfterResume`: the watchdog finds a dead player ~4 s in). A pause over
-  30 minutes ends the night where it paused, as soon as the asks look or news arrives
-  (`closeLapsedPause`), not when play is next pressed.
+  killing the player, the rebuild when play resumes) is a note, not a taint, and so is a dead or
+  rebuilt player in the first 10 s after the sound starts or resumes (`graceAfterResume`,
+  `isPauseAftermath`: the watchdog finds a dead player ~4 s in); any other failure then still
+  spoils it. A pause over 30 minutes ends the night where it paused, as soon as the asks look or
+  news arrives (`closeLapsedPause`), not when play is next pressed. An interruption's pause
+  (`sessionInterrupted`) also ends when 2 s of unbroken live ticks show the sound back, since iOS
+  doesn't always send `.ended`; a person's pause never does.
   A deadline reconciled on the morning foreground never counts, so `SleepTimerService.onTerminalStop`
-  fires before `stopAllFn` (the stop would otherwise read as a person's). Late news is filed by
+  fires before `stopAllFn` (the stop would otherwise read as a person's). Nor does one a tick finds
+  more than `overdueAfter` (5 s) past, the first tick after a Play over a pause that outlived it:
+  reconciled too, ended at the deadline. Late news is filed by
   when it happened (an off-main failure carries its time), into the night whose span holds it,
   else dropped. A record found open at launch while playing is `died`. Nothing written may carry a
   URL (`NightRules.scrub`): the files go out with Send feedback, and private feeds keep a
   subscriber's secret in theirs. Writes are off main and best-effort; audio never waits on them.
 - **The asks are rare and daytime.** The rating prompt comes after 3 clean nights, the tip card
-  after 5, in either case never at night. Rating: at a natural break (a sheet closed, Settings
+  after 5 (`cleanNightCount`: one a night at most, noon to noon by start, so naps don't add up),
+  in either case never at night. Rating: at a natural break (a sheet closed, Settings
   left; `\.naturalBreak`), 09:00–20:00, 2+ h after the night ended, nothing playing, once per
   version, never on the tip card's day. The card: the same window, Sleep Home at rest only, once
   products loaded and purchases allowed, never on the rating's day, in the coachmark band; only an

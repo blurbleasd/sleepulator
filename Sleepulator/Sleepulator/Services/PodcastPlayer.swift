@@ -124,8 +124,8 @@ final class PodcastPlayer: NSObject {
     /// unprocessed. Its own signal rather than a note, so the views can say it quietly where it
     /// belongs instead of raising a warning banner at night.
     var onLimiterUnavailable: (() -> Void)?
-    /// The audio pipeline died, was rebuilt, or stayed silent after a rebuild, with the time it
-    /// was detected (captured before any hop to main). Observe-only: the night journal files it
+    /// The audio pipeline died, was rebuilt, stayed silent after a rebuild, or a stalled stream
+    /// was given up on, with the time it was detected (captured before any hop to main). Observe-only: the night journal files it
     /// under the night it happened in (EV-1); nothing here changes playback.
     var onPipelineEvent: ((_ kind: String, _ at: Date) -> Void)?
     var onTimeUpdate: ((Double, Double) -> Void)?
@@ -799,7 +799,8 @@ final class PodcastPlayer: NSObject {
                 return
             }
             Log.audio.error("podcast stream lost (stalled ~\((attempt + 1) * 30, privacy: .public)s) — advancing")
-            // A failure like the others (they report through onPlaybackFailed): the night hears it.
+            // The night hears it here, observe-only: this path keeps its own note and advance, not
+            // onPlaybackFailed's failure UI (Try again), so it doesn't go through that channel.
             self.onPipelineEvent?("stream lost", Date())
             self.onPlaybackNote?("Podcast stream lost — the ambient sounds continue")
             self.onQueueAdvance?(lostId, false)   // advance, but do NOT mark it played

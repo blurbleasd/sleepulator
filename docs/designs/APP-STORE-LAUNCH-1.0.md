@@ -1549,7 +1549,7 @@ Decision **12A (design D14): the copy deck is plain and warm.**
 | Failed | That didn't go through. · Try again |
 | Pending (5A) | Waiting for approval. |
 | Section header | Support Sleepulator |
-| Send feedback | title "Send feedback", note "Email with the last 2 nights' playback log." |
+| Send feedback | title "Send feedback", note "Email with the last 2 nights' playback events." (was "playback log"; changed at /ship so it doesn't share a name with the page's "Export the playback log") |
 | Rate | title "Rate Sleepulator", note "On the App Store." |
 | No night yet (7A) | No night recorded yet. |
 
@@ -1934,7 +1934,23 @@ Calls made during the build, for the record:
 - **TS-1 skips in command-line runs.** On iOS 26 simulators, xcodebuild runs hit an Apple bug
   ("[SKTestSession] Error saving configuration file … SKInternalErrorDomain Code=3") and load no
   products, so the six StoreKitTest cases `XCTSkip` with that reason; they run from Xcode. CI
-  therefore never exercises TS-1. Open for the user: keep the skip, or drop the suite from CI.
+  therefore never exercises TS-1. The user kept the skip (review D1, ship D3, 2026-10-12); a real
+  purchase is TESTING §3U.6.
+- **Ship review (2026-10-12, user D3–D6)** changed the clean-night rule. A timed night needs a
+  minute of live audio (`NightRules.timedNightMinimumLive`, 60 s). A dead or rebuilt player in the
+  first 10 s after the sound starts or resumes is a note, not a taint (`graceAfterResume`,
+  `isPauseAftermath`); a failed episode, a lost stream (the stall watchdog's give-up) and the
+  noise engine's start error now taint. A paused night found at launch inside its 30-minute
+  window carries on. So NT-1's "no AVPlayer rebuild across the whole night" now reads "none while
+  it played, outside the first 10 s after a pause". UI tests run isolated (`-uiTestIsolated`), and
+  one ask a day holds even when the card is due but not yet rendered.
+- **Ship review round 2 (2026-10-12, user D7–D8)** tightened the count the asks wait for. Clean
+  nights count one a night at most (noon to noon, by start; naps and repeated short timers count
+  once). A sleep timer whose deadline passed during a pause, fired by the first tick after Play,
+  stops as reconciled, ended at the deadline, so it's never clean (`SleepTimerService.overdueAfter`;
+  device check TESTING §3C.5, §3U.12). An interruption's pause also ends when the sound comes back
+  without iOS's "ended" (2 s of unbroken live audio; §3U.13). The tests the 60 s floor had weakened
+  were lengthened past it, with below-the-minute rows for both timer and episode ends.
 - **Pre-landing review (2026-10-12)** fixed: a stale read that hid a due tip card after products
   loaded; a paused night now ends once its 30 minutes pass and news during a pause (an alarm's
   pipeline death) is a note, not a taint, and an interruption pauses the night (user D2); a
@@ -1946,7 +1962,7 @@ Calls made during the build, for the record:
 - **Open inputs the code waits on:** `AppInfo.supportEmail` (Send feedback falls back to the share
   sheet without it), `AppInfo.appStoreID` (the Rate row stays hidden without it), and the three
   products in App Store Connect under the IDs `app.sleepulator.Sleepulator.tip.small` / `.kind` /
-  `.generous` (or new IDs, changed in `TipStore.productIDs` and `Tips.storekit`).
+  `.generous` (or new IDs, changed in `TipStore.tips` and `Tips.storekit`).
 
 ## GSTACK REVIEW REPORT
 

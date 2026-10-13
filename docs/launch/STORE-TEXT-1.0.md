@@ -24,7 +24,8 @@ data from the app.
 ## What stays on your iPhone
 
 - Your mixes, settings, podcast subscriptions, queue, listening positions and downloaded episodes.
-- A short record of your recent nights: when sound started and stopped, and whether playback ran
+- A short record of your recent nights: when sound started and stopped, when it was interrupted
+  (a call or an alarm) or the audio output changed (headphones out), and whether playback ran
   into a problem. The last two nights are kept in detail and the last 30 as a one-line result.
   It never contains web addresses. The app uses it to decide when to ask for a rating or show
   the tip card, and to attach to feedback you choose to send.

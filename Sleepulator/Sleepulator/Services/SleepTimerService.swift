@@ -95,6 +95,8 @@ enum UntimedNight {
 ///    as audio is actually playing the app isn't suspended, so this is what really carries the
 ///    fade + stop through a locked night.
 /// 3. `reconcileIfExpired()` on foreground — catches a deadline that passed while suspended.
+///    A tick that finds one `overdueAfter` late (the first after a Play) stops the same way:
+///    reconciled, ended at the deadline.
 /// 4. `NotificationBackstopScheduler` — out-of-process, quiet notification; last resort.
 /// The unguarded case: iOS suspends the app *with audio somehow still owed a stop* and the user
 /// never foregrounds it. That requires the audio path to already be dead (no tap ticks), so
@@ -380,45 +382,63 @@ final class SleepTimerService: ObservableObject {
         let now = Date()
 
         DispatchQueue.main.async {
-            // Only the wall-clock duration timer ticks here. The end-of-episode timer is driven by
-            // externalTick() off the playback clock; backgroundTick() still calls this ~20×/sec, so
-            // without this guard the (approximate) wall-clock end would race the real episode end.
-            guard self.kind == .duration, let end = self.sleepTimerEnd else { return }
-            let remaining = end.timeIntervalSince(now)
-            if remaining <= 0 {
-                // Ambient tail (phase 1 → 2): with a tail configured and a podcast still in the
-                // mix, stop only the podcast and extend the deadline — the bed plays on, fading
-                // from its current level over the tail. The final stop fires at the new deadline.
-                if !self.inTail, !self.didFire, self.ambientTailFn() > 0, self.tailEligibleFn() {
-                    self.beginTail()
-                    return
-                }
-                // Publish the terminal value once, then fire exactly once.
-                if self.timerRemaining != 0 { self.timerRemaining = 0 }
-                guard !self.didFire else { return }
-                self.fireTerminalStop("duration timer fade complete")
+            self.handleTick(at: now)
+        }
+    }
+
+    /// A deadline a tick finds further past than this wasn't reached while the sound played: the
+    /// ticks stopped with it (a pause, AirPods out, and the app suspended), and this is the first
+    /// one after Play. Ticks run at 1 Hz and ~20 Hz while anything renders.
+    static let overdueAfter: TimeInterval = 5
+
+    /// The main-queue half of `tick()`, at the wall-clock time the tick fired (tests pass theirs).
+    func handleTick(at now: Date) {
+        // Only the wall-clock duration timer ticks here. The end-of-episode timer is driven by
+        // externalTick() off the playback clock; backgroundTick() still calls this ~20×/sec, so
+        // without this guard the (approximate) wall-clock end would race the real episode end.
+        guard self.kind == .duration, let end = self.sleepTimerEnd else { return }
+        let remaining = end.timeIntervalSince(now)
+        if remaining <= 0 {
+            // Ambient tail (phase 1 → 2): with a tail configured and a podcast still in the
+            // mix, stop only the podcast and extend the deadline — the bed plays on, fading
+            // from its current level over the tail. The final stop fires at the new deadline.
+            if !self.inTail, !self.didFire, self.ambientTailFn() > 0, self.tailEligibleFn() {
+                self.beginTail()
                 return
             }
-
-            // Coalesce the @Published write to ~1Hz. backgroundTick() fires ~20×/sec from the
-            // limiter RMS tap (the all-night keep-alive that drives the fade + terminal stop
-            // even when iOS curtails the GCD timer), but publishing `timerRemaining` 20×/sec
-            // re-rendered every view observing the engine — the podcast-list scroll storm.
-            // Only the SwiftUI publish is throttled to whole-second changes (the display is in
-            // minutes anyway); the fade update + expiry check below still run on every tick.
-            if Int(remaining) != Int(self.timerRemaining) {
-                self.timerRemaining = remaining
+            // Publish the terminal value once, then fire exactly once.
+            if self.timerRemaining != 0 { self.timerRemaining = 0 }
+            guard !self.didFire else { return }
+            if remaining < -Self.overdueAfter {
+                // Found late, as the morning foreground finds one: the night ended at the
+                // deadline (on the scenes' clock), not at this Play, and never counts clean.
+                let ended = self.now().addingTimeInterval(end.timeIntervalSince(Date()))
+                self.fireTerminalStop("duration timer found \(Int(-remaining))s past its deadline",
+                                      endedAt: ended, reconciled: true)
+                return
             }
-            // During the tail, continue DOWN from the level the fade had already reached
-            // (tailStartMult) across the tail span — never back up to full volume.
-            let mult: Double = self.inTail
-                ? self.tailStartMult * Double(AudioMath.getFadeMultiplier(timerRemaining: remaining, fadeDuration: self.tailDuration))
-                : Double(AudioMath.getFadeMultiplier(timerRemaining: remaining))
-            self.lastFadeMult = mult
-            self.updateFadeMultFn?(mult)
-            // Update live activity periodically (e.g., every 15 mins or when a bump occurs)
-            // ActivityKit doesn't recommend updating every second.
+            self.fireTerminalStop("duration timer fade complete")
+            return
         }
+
+        // Coalesce the @Published write to ~1Hz. backgroundTick() fires ~20×/sec from the
+        // limiter RMS tap (the all-night keep-alive that drives the fade + terminal stop
+        // even when iOS curtails the GCD timer), but publishing `timerRemaining` 20×/sec
+        // re-rendered every view observing the engine — the podcast-list scroll storm.
+        // Only the SwiftUI publish is throttled to whole-second changes (the display is in
+        // minutes anyway); the fade update + expiry check below still run on every tick.
+        if Int(remaining) != Int(self.timerRemaining) {
+            self.timerRemaining = remaining
+        }
+        // During the tail, continue DOWN from the level the fade had already reached
+        // (tailStartMult) across the tail span — never back up to full volume.
+        let mult: Double = self.inTail
+            ? self.tailStartMult * Double(AudioMath.getFadeMultiplier(timerRemaining: remaining, fadeDuration: self.tailDuration))
+            : Double(AudioMath.getFadeMultiplier(timerRemaining: remaining))
+        self.lastFadeMult = mult
+        self.updateFadeMultFn?(mult)
+        // Update live activity periodically (e.g., every 15 mins or when a bump occurs)
+        // ActivityKit doesn't recommend updating every second.
     }
 
     func bumpTimer() {

@@ -26,6 +26,15 @@ final class TipFlowTests: XCTestCase {
         XCTAssertEqual(TipFlow.apply(.failed, handled: []).phase, .failed)
     }
 
+    /// An update from outside a purchase (an approval, a replay) thanks only for a new tip and
+    /// never over a purchase in flight; the purchase's own outcome always shows.
+    func testAnUpdateNeverReplacesAPurchaseInFlight() {
+        XCTAssertFalse(TipFlow.showsOutcome(fromPurchase: false, newTip: true, over: .purchasing("t")))
+        XCTAssertTrue(TipFlow.showsOutcome(fromPurchase: false, newTip: true, over: .ready))
+        XCTAssertFalse(TipFlow.showsOutcome(fromPurchase: false, newTip: false, over: .ready))
+        XCTAssertTrue(TipFlow.showsOutcome(fromPurchase: true, newTip: false, over: .purchasing("t")))
+    }
+
     /// A phone that can't buy (Screen Time) gets no Try again and no tip; Settings hides the rows.
     func testAPurchaseNotAllowedIsUnavailableNotATip() {
         let step = TipFlow.apply(.notAllowed, handled: [])

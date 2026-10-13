@@ -143,6 +143,11 @@ Install via Xcode onto the device (not the simulator). Then:
    the Live Activity nor the in-app "Still awake?" capsule offers "+15m" (the LA subtitle
    reads "Winding down — ambient only", no truncation on small screens); a bed-only night
    (no podcast loaded) gets NO tail — the timer stops when set.
+5. **A deadline missed during a pause** (2026-10-12, unverified): a mix only (no tail), a 5 min
+   timer. Pause from the lock screen at 3 minutes, lock, wait 5 minutes, then Play from the lock
+   screen. ✅ The sound stops at once (the timer is spent) and doesn't play on; the playback log
+   reads `terminal stop: duration timer found …s past its deadline`, and the night file closes
+   `timer … reconciled` at the deadline's time (§3U.12).
 
 ### D. Night Limiter (acceptance for enabling by default)
 `AppConfig.nightLimiterEnabled` ships `false` until this passes and is logged below.
@@ -721,7 +726,8 @@ to Files: each night is a `.jsonl` file, one event per line.
 3. **An alarm doesn't spoil the night.** A podcast and a mix on All night for 3+ hours, locked,
    with a Clock alarm set to end it. Dismiss the alarm, then stop the sound. Send feedback later
    that morning. ✅ The night's file has `paused` at the alarm, any `pipeline died …` or `player
-   rebuilt` as a `note` ending `while paused`, and the summary counts the night clean. ✅ Two hours
+   rebuilt` as a `note` ending `while paused` (or, within 10 s of the sound coming back,
+   `after resuming`), and the summary counts the night clean. ✅ Two hours
    after you stopped it (and after 09:00), the night is already counted: you don't have to press
    play again first.
 4. **Locked-phone writes.** Run §3E's night (or a 45 min timer) with a passcode set, locked from
@@ -770,11 +776,20 @@ to Files: each night is a `.jsonl` file, one event per line.
    playing: open Build mix and close it. ✅ The rating prompt, once; the playback log shows
    `asked for a rating (N clean nights)`. Close another sheet, or leave the Settings tab: ✅
    nothing more this version. ✅ Never at launch, never with sound playing, never on the day the tip card showed, never before 09:00 or after 20:00 (those wait;
-   the ask still comes at the next suitable break).
+   the ask still comes at the next suitable break). Clean nights count one a night at most
+   (noon to noon, by start): three naps in a day are one.
 11. **iPad compatibility.** The app is iPhone only, and an iPad runs it in an iPhone-size window
    (App Review may test it there). Install on an iPad, or run on an iPad simulator. ✅ It opens
    portrait in the iPhone window, plays a mix, the timer and the Now Playing sheet work, nothing is
    clipped. Rotate the iPad: ✅ the app stays portrait.
+12. **A missed deadline isn't a clean night.** Run §3C step 5, then Send feedback. ✅ That night's
+   file ends `closed` `timer … reconciled`, timed at the deadline (not at the Play), and the
+   summary counts it under "ended early or spoiled".
+13. **Sound back with no interruption end.** Sleep, All night, a mix playing. Open another app
+   and play a video with sound (it interrupts the mix), stop it, come back to Sleepulator. If the
+   mix comes back (on its own, or when you start it): ✅ the night file shows `resumed`, or a
+   `note` `sound back with no interruption end`, soon after, and `live` lines carry on; never a
+   pause that lasts until the morning while the mix plays. Log which of the two you saw.
 
 ---
 
