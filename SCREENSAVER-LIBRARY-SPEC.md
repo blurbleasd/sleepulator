@@ -62,7 +62,9 @@ Tags: **⚙︎** generative (cheap, recommended) · **✦** time-reactive · **�
 **Focus (calm-alert; the ring stays the hero):**
 - **Energy sweep** ⚙︎ — _current default._ The cool sweep behind the timer.
 - **Flow field** ⚙︎ — particles drifting along a slow vector field.
-- **Contour topography** ⚙︎ — subtle moving contour lines; a "deep work" feel.
+- **Contour topography** ⚙︎✦ — subtle moving contour lines; a "deep work" feel. _Built
+  2026-10-12 as "Contour": a mountain whose summit sits under the ring, lit from the summit
+  outward across a work interval (TESTING.md §U)._
 - **Rain on glass (day)** ⚙︎🔊 — the rain scene in a cool daytime key.
 
 **Quality over quantity.** A "cheap generative scene" is deceptively expensive to make

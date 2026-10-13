@@ -50,7 +50,8 @@ Suites in `SleepulatorTests/` (six files, many suites):
   restore never switching mode. `BackupControllerTests` covers the Backup page's controller:
   results that land after the page closed, the export letting go of its document, an incomplete
   Undo, and the queued writes landing first.
-- `FocusDriversTests.swift` — the Pomodoro → Focus-scene look mapping.
+- `FocusDriversTests.swift` — the Pomodoro → Focus-scene look mapping, and Contour's light
+  (`ContourLightTests`: the radius whose disc covers the interval's share of the screen).
 - `GenerativeAudioEngineTests.swift` — generative-bed rebuild after a media-services reset.
 
 These catch parsing/logic regressions cheaply; they do **not** exercise audio or iOS behavior.
@@ -685,6 +686,35 @@ brightness where you'd leave it at night, Night sky selected.
 6. **ProMotion and battery.** Watch a minute on a 120 Hz phone. ✅ A smooth turn, no stalls. Overnight
    with the veil on: ✅ battery comparable to Deep space (a full-screen shader at 30 fps while the sky
    is in sight; nothing renders under the veil).
+
+### U. Contour: a Focus map lit from the summit (added 2026-10-12, simulator-checked only)
+A new Focus scene (`ContourShader.metal`, `ContourMetalView`): contour lines of a mountain whose
+summit sits under the ring, with light spreading down from it as a work interval goes on. The
+simulator showed the look and the reading at 7/23/50/80% of a 1-minute interval and a quarter into
+a break; motion feel, OLED black, heat and a real 25-minute block need the phone. Focus, Contour
+selected (Build mix → Backdrop), a sound playing, the phone at your desk.
+
+1. **It reads as a map.** Controls up. ✅ A dimmed topographic map, the ring and play button sitting
+   on the summit, contour rings around it bent by the terrain. Every fifth line is bolder (index
+   contours). It reads as a mountain, not a target.
+2. **The light is the interval.** Start a session and let the controls fade. ✅ A quarter in, a disc
+   of light about a quarter of the screen sits around the summit, edged by one bright line; halfway,
+   about half the screen; near the end, nearly all of it. (It tracks the share within about ±7%.)
+   ✅ The bright edge holds still while the lines drift through it. On a break: ✅ the map turns
+   teal and the light pulls back up toward the summit. Stop the session: ✅ every line goes back to
+   one even brightness and the edge is gone.
+3. **The motion is a drift, not a churn.** Watch two minutes. ✅ The lines drift steadily outward
+   from the summit, and the terrain slowly pans and re-forms. ✅ Flat stretches don't boil, steep
+   ones don't shimmer or bead into moiré, and nothing flickers.
+4. **You can work beside it.** A full 25-minute block, controls faded. ✅ It stays at the edge of
+   your attention: alive without pulling your eye off the work.
+5. **ProMotion and heat.** ✅ A smooth drift on a 120 Hz phone (it renders at 30 fps; the lines move
+   a fraction of a pixel per frame). After the full block: ✅ the phone is no warmer than after one
+   on Current, and the exported log's scene line shows a steady frame rate.
+6. **Moving scenes off.** Settings → Moving scenes off. ✅ A still map. Check whether the light
+   still spreads over the interval: a paused Focus scene only redraws when Home does, and Home
+   doesn't redraw on the Pomodoro's progress, so it may hold where it was. That gap, if it shows,
+   is shared by all four Focus scenes.
 
 ---
 
