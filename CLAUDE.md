@@ -16,6 +16,7 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
 > **1.0 ships free with a tip jar**, iPhone only, portrait (`TARGETED_DEVICE_FAMILY = 1`; an iPad
 > runs it in an iPhone window). The launch plan and every review decision behind it are in
 > `docs/designs/APP-STORE-LAUNCH-1.0.md`; its device gate is TESTING.md §3A, §3B, §3C, §3E, §3P, §3U.
+> The privacy-policy, support-page and App Review drafts are in `docs/launch/STORE-TEXT-1.0.md`.
 
 ## Layout (Xcode project at `Sleepulator/Sleepulator.xcodeproj`)
 - **App** — `Sleepulator/Sleepulator/`

@@ -4,6 +4,10 @@ Adding Apple Music as a mixer source in **Focus mode**. Status: **implemented in
 unverified on device** (cannot be compiled or device-tested in the authoring environment; see
 Verification gate). One manual portal step remains — see Entitlements.
 
+**Hidden in 1.0** (2026-10-11): `AppConfig.appleMusicEnabled` is `false`, so the Focus mixer
+doesn't offer the Apple Music row (`Views/Home/MixPanel.swift`); the player code stays. It comes
+back in 1.1 after the portal step and a device pass (`docs/designs/APP-STORE-LAUNCH-1.0.md`, AM-1).
+
 ## Goal
 
 Let a Focus session layer the user's Apple Music alongside generative noise + binaural,

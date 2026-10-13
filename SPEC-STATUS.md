@@ -13,7 +13,7 @@ archived the web-PWA-era `audio-rebuild-design` and the superseded `device-test-
 | SCREENSAVER-LIBRARY-SPEC | ✅ framework (registry + scenes); §5 motion toggle **done** (P6a, branch) | Full live-preview picker UI still deferred. Depth-host + a 2nd depth scene (ocean) landed via the visual-moat arc |
 | docs/shipped/ARCHITECTURE-REFACTOR-PLAN | ✅ shipped 2026-06-21 (all slices A1–A4, B1–B3) | Device verification only |
 | REFACTOR-PLAN-observation-slices | 🔶 Phases 1–3 in code | On-device re-render audit; Phase 4 skipped deliberately |
-| APPLE-MUSIC-FOCUS-SPEC / -HANDOFF | 🔶 code complete | MusicKit on App ID (portal, manual); full device pass |
+| APPLE-MUSIC-FOCUS-SPEC / -HANDOFF | 🔶 code complete | MusicKit on App ID (portal, manual); full device pass. 2026-10-11: hidden in 1.0 (`AppConfig.appleMusicEnabled`), back in 1.1 (APP-STORE-LAUNCH-1.0 AM-1) |
 | PODCAST-RESUME-AUDIT-2026-06 | 🔶 both bug fixes in code | Device verification (auto-advance position race) |
 | FOCUS-MODE-SPEC | 🔶 ~70% (ring, cycles, tab label; 2026-07-04: R5 phase-end notifications, R6 break softening, skip-phase, Pomodoro Live Activity) | R7 history, R8 config sheet |
 | AUDIO-PALETTE-SPEC | 🔶 P1 partial | ~~P0 isochronic beats~~ — **already implemented** (`isochronicActive` + `setBeatMode`, route-aware auto; verify audibly on speaker). Remaining: P2 nature textures / tonal beds |
@@ -22,6 +22,7 @@ archived the web-PWA-era `audio-rebuild-design` and the superseded `device-test-
 | docs/archive/ACCESSIBILITY-AUDIT-2026-07 | 📜 archived audit (2026-07-04); 1 fix applied (breathing VoiceOver) | 4 minor recs open: OrbButton pulse under Reduce Motion (marked intentional), Dynamic Type wrap-vs-scale, dim-caption contrast spot-check (AX Inspector on Bedtime), timer-fade VoiceOver announce. Fold into TESTING.md §L if a11y becomes a release gate |
 | RAIN-ON-GLASS-DEPTH-SPEC | 🔶 implemented via the visual-moat arc (branch, PR #3) | Reactive depth rain on the shared `DepthBackdrop` host (E1/F1/P2); original lens (license clear). Needs the device A/B + tuning round — TESTING.md §L. Superseded as the working plan by docs/designs/VISUAL-MOAT-REACTIVE-SCENES |
 | docs/designs/VISUAL-MOAT-REACTIVE-SCENES | 🔶 built on branch `feat/reactive-scenes-audio-controls` (PR #3), unverified on device | CEO+eng reviewed (2 adversarial rounds 5→8/10). E1 depth-host, F1 reactivity vocab, P2 reactive rain, P4 ocean, F2 shader guard, F3 diagnostics, P6a toggle — all compile-clean + 14 unit tests. Remaining = device-only: P3 shader tuning, P5 idle-freeze verify, P1 gate (TESTING.md §L). Deferred: full picker, wake alarm |
+| docs/designs/APP-STORE-LAUNCH-1.0 | 🔶 1.0 code built on branch `claude/app-store-readiness-391005` (2026-10-12), unverified on device | Device gate TESTING.md §3A, §3B, §3C, §3E, §3P, §3U; the user's App Store Connect inputs (support address, App Store ID, tip products) and icon repair (IC-1); the TestFlight beta (LG-1). Privacy, support and App Review drafts: `docs/launch/STORE-TEXT-1.0.md` |
 
 ## Open work, ranked
 
