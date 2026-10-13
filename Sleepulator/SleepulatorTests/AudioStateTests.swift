@@ -2226,8 +2226,9 @@ final class UntimedNightTests: XCTestCase {
         timer.startSleepTimer(minutes: 0)                         // the deadline is now…
         timer.timerTotal = 30 * 60                                // …of a 30-min night
         Thread.sleep(forTimeInterval: 0.01)
-        timer.backgroundTick()                                    // fade complete → the tail
-        RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+        // Fade complete → the tail. The tick's main-queue half, called directly: a fixed run-loop
+        // pump for backgroundTick's hop to main wasn't always long enough on CI's slow simulators.
+        timer.handleTick(at: Date())
         XCTAssertTrue(timer.inTail)
         XCTAssertEqual(timer.nightProgress, 1, accuracy: 1e-6, "the scene held, not dropped by tail / (total + tail)")
     }
@@ -2248,8 +2249,9 @@ final class UntimedNightTests: XCTestCase {
             Thread.sleep(forTimeInterval: 0.01)
             now = t0 + 30 * 60
             if path == "tick" {
-                e.sleepTimer.backgroundTick()                     // the duration timer's fade-complete stop
-                RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+                // The duration timer's fade-complete stop: the tick's main-queue half, called
+                // directly (a fixed pump for backgroundTick's hop lost the race on a slow CI sim).
+                e.sleepTimer.handleTick(at: Date())
             } else {
                 e.sleepTimer.reconcileIfExpired()                 // a deadline passed while suspended
             }
@@ -4675,8 +4677,9 @@ final class NightJournalWiringTests: XCTestCase {
         engine.sleepTimer.startSleepTimer(minutes: 0)         // deadline == now
         clock += 30 * 60
         Thread.sleep(forTimeInterval: 0.01)
-        engine.sleepTimer.backgroundTick()                    // the fade-complete stop, in the app
-        RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+        // The fade-complete stop, in the app: the tick's main-queue half, called directly (a fixed
+        // pump for backgroundTick's hop to main lost the race on a slow CI simulator).
+        engine.sleepTimer.handleTick(at: Date())
         XCTAssertNil(engine.nightJournal.open, "the timer's stop didn't close the night")
         XCTAssertFalse(engine.isAnythingPlaying)
 
