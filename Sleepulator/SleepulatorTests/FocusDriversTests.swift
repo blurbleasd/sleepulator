@@ -226,6 +226,25 @@ final class ContourLightTests: XCTestCase {
         XCTAssertEqual(ContourLight.Table(aspect: 0).radius(share: 0.5), 0)
     }
 
+    // Value: protects=the light's radius follows the screen's current shape, so a zero-height first
+    //   layout pass or a rotation never pins the edge to a stale table; fails_when=ContourLightCache
+    //   keeps its first table whatever the aspect (after a zero-size first pass, no light all
+    //   session); why_new=the Table tests build a fresh table per aspect, never the cache the view
+    //   reads; seam=none; no_claim=SwiftUI's layout passes and the view's @State lifetime (unit only)
+    func testTheCacheFollowsTheScreensShape() {
+        let cache = ContourLightCache()
+        let upright = 402.0 / 874.0, onItsSide = 874.0 / 402.0
+        // A zero-height first layout pass lights nothing; then the real size arrives, and the app rotates.
+        XCTAssertEqual(cache.radius(share: 0.5, aspect: 0), 0)
+        for aspect in [upright, onItsSide, upright] {
+            for share in [0.1, 0.5, 0.9] {
+                XCTAssertEqual(cache.radius(share: share, aspect: aspect),
+                               ContourLight.radius(share: share, aspect: aspect),
+                               accuracy: 0.001, "aspect \(aspect) at \(share)")
+            }
+        }
+    }
+
     // Value: protects=with no session the shader gets the idle signal (light < 0: even lines, no edge), and a break hands the light back; fails_when=idle maps to 0 (a session at its start: dim lines, no light) or a break reads as work; why_new=FocusDrivers.fill is tested but not the -1 the shader keys idle on; seam=none; no_claim=the shader's idle branch (device, TESTING §U.2)
     func testIdleReadsAsNoSessionAndABreakHandsTheLightBack() {
         for progress in [0.0, 0.5, 1.0] {
