@@ -35,6 +35,19 @@ final class TipFlowTests: XCTestCase {
         XCTAssertTrue(TipFlow.showsOutcome(fromPurchase: true, newTip: false, over: .purchasing("t")))
     }
 
+    /// A products load (the launch's own, or a retry) never replaces a purchase in flight or its
+    /// outcome on screen; it only settles loading and the rows.
+    func testAProductsLoadNeverReplacesAPurchaseOrItsOutcome() {
+        XCTAssertEqual(TipFlow.phaseAfterLoad(.loading, haveProducts: true), .ready)
+        XCTAssertEqual(TipFlow.phaseAfterLoad(.loading, haveProducts: false), .unavailable)
+        XCTAssertEqual(TipFlow.phaseAfterLoad(.unavailable, haveProducts: true), .ready)
+        XCTAssertEqual(TipFlow.phaseAfterLoad(.ready, haveProducts: false), .unavailable)
+        for kept in [TipPhase.purchasing("t"), .pending, .thanked, .failed, .unconfirmed] {
+            XCTAssertEqual(TipFlow.phaseAfterLoad(kept, haveProducts: true), kept)
+            XCTAssertEqual(TipFlow.phaseAfterLoad(kept, haveProducts: false), kept)
+        }
+    }
+
     /// A phone that can't buy (Screen Time) gets no Try again and no tip; Settings hides the rows.
     func testAPurchaseNotAllowedIsUnavailableNotATip() {
         let step = TipFlow.apply(.notAllowed, handled: [])
@@ -48,7 +61,8 @@ final class TipFlowTests: XCTestCase {
 /// Known Apple bug: on iOS 26 simulators, a command-line test run (xcodebuild, as CI runs) logs
 /// "[SKTestSession] Error saving configuration file: SKInternalErrorDomain Code=3" and loads no
 /// products (seen here on 26.3; reported on 26.5, Apple forum 826971). These tests then SKIP with
-/// that reason, visibly, instead of failing; they run from Xcode (⌘U). The purchase mapping is
+/// that reason, visibly, instead of failing; they run from Xcode (⌘U). Not always: on 2026-10-13
+/// one of CI's simulators loaded the products and ran them, slowly (a purchase took 119 s). The purchase mapping is
 /// covered either way by TipFlowTests, and a real purchase by the TESTING.md §3U sandbox step.
 /// The skip stays: the user's decision at the pre-landing review (D1, 2026-10-12).
 @MainActor
@@ -119,7 +133,9 @@ final class TipStoreTests: XCTestCase {
         let pending = try XCTUnwrap(session.allTransactions().first)
         try session.approveAskToBuyTransaction(identifier: pending.identifier)
         // The approval arrives through Transaction.updates, as it would after the app was closed.
-        for _ in 0..<50 where !s.hasTipped { try await Task.sleep(nanoseconds: 100_000_000) }
+        // Up to 30 s: CI's slowest simulator took 119 s for one purchase. The wait ends as soon as
+        // it's thanked, and an approval that never thanks still fails.
+        for _ in 0..<300 where !s.hasTipped { try await Task.sleep(nanoseconds: 100_000_000) }
         XCTAssertTrue(s.hasTipped)
     }
 

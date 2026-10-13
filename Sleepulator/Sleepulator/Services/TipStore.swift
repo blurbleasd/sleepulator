@@ -81,6 +81,17 @@ nonisolated enum TipFlow {
         if case .purchasing = current { return false }
         return newTip
     }
+
+    /// The rows after a products load. Loading, or showing the rows, they show what came back
+    /// (the tips, or "unavailable" with none). A purchase in flight, or its outcome on screen,
+    /// stays until the visit ends (`screenClosed`): a load landing just after an Ask to Buy used
+    /// to turn "Waiting for approval" back into the rows.
+    static func phaseAfterLoad(_ current: TipPhase, haveProducts: Bool) -> TipPhase {
+        switch current {
+        case .loading, .ready, .unavailable: return haveProducts ? .ready : .unavailable
+        case .purchasing, .pending, .thanked, .failed, .unconfirmed: return current
+        }
+    }
 }
 
 final class TipStore: ObservableObject {
@@ -148,7 +159,8 @@ final class TipStore: ObservableObject {
 
     /// Load (or retry) the three products. An empty answer is "unavailable", never a spinner.
     func loadProducts() async {
-        if products.isEmpty { phase = .loading }
+        // A retry after "unavailable" shows the spinner; nothing else is replaced (`phaseAfterLoad`).
+        if products.isEmpty, phase == .unavailable { phase = .loading }
         refreshPurchasesAllowed()
         do {
             let loaded = try await Product.products(for: Self.productIDs)
@@ -160,8 +172,7 @@ final class TipStore: ObservableObject {
             Log.storage.error("tip products failed to load: \(error.localizedDescription, privacy: .public)")
             products = []
         }
-        if case .purchasing = phase { return }
-        phase = products.isEmpty ? .unavailable : .ready
+        phase = TipFlow.phaseAfterLoad(phase, haveProducts: !products.isEmpty)
     }
 
     /// Re-read whether this phone can buy. ContentView calls it on every return to the front.
