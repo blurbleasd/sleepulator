@@ -133,3 +133,48 @@ final class FocusDriversTests: XCTestCase {
     }
 
 }
+
+/// Contour's reading: the light covers the interval's share of the SCREEN. The shader lights the
+/// ground above the cone's height at `ContourLight.radius`, so the radius has to cover exactly
+/// that share of a phone-shaped screen, edges and all.
+final class ContourLightTests: XCTestCase {
+
+    /// iPhone 17 Pro in points (402 × 874).
+    private let aspect = 402.0 / 874.0
+
+    // Value: protects=the lit share of the screen equals the interval's share; fails_when=radius or share ignores the screen's edges or aspect; why_new=the scene is new; seam=none
+    func testTheRadiusCoversThatShareOfTheScreen() {
+        for target in [0.05, 0.25, 0.5, 0.75, 0.95] {
+            let r = ContourLight.radius(share: target, aspect: aspect)
+            XCTAssertEqual(ContourLight.share(radius: r, aspect: aspect), target, accuracy: 0.002, "share \(target)")
+        }
+    }
+
+    // Value: protects=no light before an interval starts and the whole map lit at its end; fails_when=the ends clamp to a radius short of the corners, or a share past 1 overflows; why_new=the scene is new; seam=none
+    func testTheEndsAreNoneAndAll() {
+        let reach = ContourLight.reach(aspect: aspect)
+        XCTAssertEqual(ContourLight.radius(share: 0, aspect: aspect), 0)
+        XCTAssertEqual(ContourLight.radius(share: -1, aspect: aspect), 0)
+        XCTAssertEqual(ContourLight.radius(share: 1, aspect: aspect), reach)
+        XCTAssertEqual(ContourLight.radius(share: 2, aspect: aspect), reach)
+        XCTAssertEqual(ContourLight.share(radius: reach, aspect: aspect), 1, accuracy: 0.001)
+        // The farthest corner from a summit at (0.5, 0.4) is a bottom one.
+        XCTAssertEqual(reach, ((0.5 * aspect) * (0.5 * aspect) + 0.6 * 0.6).squareRoot(), accuracy: 1e-12)
+    }
+
+    // Value: protects=the light only ever spreads through a work interval; fails_when=the bisection or the area integral isn't monotonic; why_new=the scene is new; seam=none
+    func testTheRadiusGrowsWithTheShare() {
+        var last = -1.0
+        for step in 0...20 {
+            let r = ContourLight.radius(share: Double(step) / 20, aspect: aspect)
+            XCTAssertGreaterThan(r, last, "step \(step)")
+            last = r
+        }
+    }
+
+    // Value: protects=a zero-height first layout pass draws the idle map instead of trapping or dividing by zero; fails_when=share/radius divide by a zero aspect; why_new=the scene is new; seam=none
+    func testAZeroSizedScreenGivesNoLight() {
+        XCTAssertEqual(ContourLight.share(radius: 0.5, aspect: 0), 0)
+        XCTAssertEqual(ContourLight.radius(share: 0.5, aspect: 0), 0)
+    }
+}
