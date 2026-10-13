@@ -694,9 +694,12 @@ simulator showed the look and the reading at 7/23/50/80% of a 1-minute interval 
 a break; motion feel, OLED black, heat and a real 25-minute block need the phone. Focus, Contour
 selected (Build mix → Backdrop), a sound playing, the phone at your desk.
 
-1. **It reads as a map.** Controls up. ✅ A dimmed topographic map, the ring and play button sitting
-   on the summit, contour rings around it bent by the terrain. Every fifth line is bolder (index
-   contours). It reads as a mountain, not a target.
+1. **It reads as a map with depth.** Controls up. ✅ A dimmed topographic map, the ring and play
+   button sitting on the summit, contour rings around it bent by the terrain. Every fifth line is
+   bolder (index contours). It reads as a mountain, not a target. Controls faded: ✅ it reads as a
+   layered relief model, not a flat drawing: each band a sheet a step above the one below, higher
+   sheets lighter, a soft shadow at the foot of each step on the lower right, and the edges lit on
+   the upper left. (The first cut, plain hillshading, read "1-dimensional" on the phone.)
 2. **The light is the interval.** Start a session and let the controls fade. ✅ A quarter in, a disc
    of light about a quarter of the screen sits around the summit, edged by one bright line; halfway,
    about half the screen; near the end, nearly all of it. (It tracks the share within about ±7%.)

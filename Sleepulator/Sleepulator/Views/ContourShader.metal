@@ -8,7 +8,8 @@ using namespace metal;
 // ----------------------------------------------------------------------------
 // The one Focus scene built on line work rather than a soft field: thin contour
 // lines at an even height interval, every fifth an index contour (as on a real
-// survey map), over hillshading. The other Focus scenes each move one way
+// survey map), drawn as a layered relief model: each band a sheet one step up,
+// casting a short shadow on the one below. The other Focus scenes each move one way
 // (Current sideways, Tide up, Sandfall down); this one reads by radius.
 //
 // The terrain is a broad cone peaking at `summit` (where the Focus ring sits)
@@ -65,7 +66,8 @@ constant float INDEX    = 5.0;     // every INDEX-th line is an index contour
 constant float FLOW     = 0.15;
 constant float PAN      = 0.010;   // terrain pan per second at speed 1 (in FREQ units)
 constant float MORPH    = 0.016;   // warp evolution per second at speed 1
-constant float RELIEF   = 1.6;     // hillshade slope exaggeration
+constant float RELIEF   = 1.6;     // hillshade slope exaggeration (the mountain's broad form)
+constant float SHADOW_LEN = 14.0;  // how far a sheet's shadow reaches onto the one below, in points
 constant float EXPOSURE = 1.7;     // highlight drive for the exposure tonemap
 
 // The FBM's mean and spread (measured over 60k samples of `height`: 0.475, sd 0.122).
@@ -176,18 +178,12 @@ half4 contourField(float2 pos, half4 color,
         lit = smoothstep(ht - 0.005, ht + 0.005, h);
     }
 
-    // ---- terrain: hillshade + a touch of elevation, revealed by the light ------------
-    float3 n      = normalize(float3(-(g / (pt * FREQ)) * RELIEF, 1.0));
-    float  shade  = dot(n, SUN) - SUN.z;                // 0 on flat ground, + facing the light
-    float  relief = (0.016 + 0.050 * lit) * max(0.0, 1.0 + 2.4 * shade);
-    col += tint * relief * op;
-    col += tint * 0.030 * smoothstep(0.30, 0.95, h / RISE) * (0.35 + 0.65 * lit) * op;
-
-    // ---- contour lines ---------------------------------------------------------------
+    // ---- contour bands ---------------------------------------------------------------
     // + phase: a line's height falls as the phase grows, so the lines drift downhill, out
     // from the summit. The phase wraps every INDEX intervals (not every one) so the index
     // contours keep their identity across the wrap instead of jumping a line.
-    float v   = h / STEP + fmod(flow * FLOW, INDEX);
+    float ph  = fmod(flow * FLOW, INDEX);
+    float v   = h / STEP + ph;
     float gv  = gl / STEP;                              // contour intervals per point
     float fv  = fract(v);
     float dpt = min(fv, 1.0 - fv) / gv;                 // points to the nearest line
@@ -195,14 +191,44 @@ half4 contourField(float2 pos, half4 color,
     // Lines closer than ~3 pt bead into moiré on a steep slope: fade them out by ~6 pt apart.
     float legible = smoothstep(2.5, 6.0, 1.0 / gv);
 
+    // ---- depth: a layered relief model -----------------------------------------------
+    // The plain hillshaded map read flat on the phone ("a mountain map, but 1-dimensional").
+    // Each band between two lines is now a flat sheet one step above the band below, like a
+    // laser-cut paper model, with three cues worked out from values already in hand (no extra
+    // terrain samples):
+    //  · higher sheets are lighter, so the summit sits near and the valleys fall away;
+    //  · each sheet casts a short shadow onto the one below, on the side away from the light;
+    //  · a line is a sheet's cut edge: bright where it faces the light, dim where it doesn't.
+    float2 sunDir = normalize(SUN.xy);                  // on screen, toward the light
+    float  facing = dot(g / gl, sunDir);                // > 0: uphill runs toward the light
+    // Where the ground climbs toward the light, the next sheet up (its edge `(1 - fv) / gv`
+    // points uphill) stands between this point and the light. In shadow within SHADOW_LEN of
+    // that edge, measured along the light; darkest at its foot.
+    float toEdge = (1.0 - fv) / gv / max(facing, 0.05);
+    float shadow = smoothstep(0.0, 1.0, 1.0 - toEdge / SHADOW_LEN);
+    shadow *= smoothstep(0.0, 0.3, facing) * legible;
+
+    // Sheets are flat, so (as on a real paper model) they're all lit about evenly and the shadows
+    // carry the depth. A first cut kept the full hillshade under them: it darkened exactly the
+    // flank the shadows fall on, and they vanished. Only a trace of it is left, for the broad form.
+    float sheet  = saturate((floor(v) - ph) * STEP / RISE);   // this sheet's height, ~0…1
+    float ground = (0.030 + 0.110 * sheet) * (0.40 + 0.60 * lit);
+    float3 n     = normalize(float3(-(g / (pt * FREQ)) * RELIEF, 1.0));
+    float  shade = dot(n, SUN) - SUN.z;                 // 0 on flat ground, + facing the light
+    ground *= max(0.0, 1.0 + 0.5 * shade);
+    col += tint * ground * (1.0 - 0.85 * shadow) * op;
+
+    // ---- contour lines: the sheets' cut edges ----------------------------------------
     // A survey map's hierarchy: index contours carry the structure, the lines between are lighter.
     // In the dark, the index lines are most of what's left, so the map still runs on through it.
+    float rim   = 0.90 - 0.45 * facing;                 // an edge faces downhill: lit when that's the light's way
     float line  = stroke(dpt, idx ? 0.95 : 0.38) * legible;
-    float level = mix(0.075, 0.42, lit) * (idx ? 1.8 : 1.0);
+    float level = mix(0.075, 0.42, lit) * (idx ? 1.8 : 1.0) * rim;
     float3 ink  = mix(tint, float3(1.0), 0.32 + 0.28 * lit);
     col += ink  * line * level * op;
-    // A soft glow hugs the lines the light has reached.
-    col += tint * bump(dpt * dpt, 1.0 / (2.56 * 2.2 * 2.2)) * legible * lit * 0.10 * op;
+    // A soft glow hugs the lines the light has reached, but not over a shadow's dark foot.
+    col += tint * bump(dpt * dpt, 1.0 / (2.56 * 2.2 * 2.2)) * legible * lit * 0.10 * rim
+         * (1.0 - shadow) * op;
 
     // ---- the light's edge: one still, bright contour ---------------------------------
     if (session && light > 0.0 && light < 1.0) {
