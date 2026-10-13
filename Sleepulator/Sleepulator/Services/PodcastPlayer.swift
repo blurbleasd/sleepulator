@@ -124,6 +124,10 @@ final class PodcastPlayer: NSObject {
     /// unprocessed. Its own signal rather than a note, so the views can say it quietly where it
     /// belongs instead of raising a warning banner at night.
     var onLimiterUnavailable: (() -> Void)?
+    /// The audio pipeline died, was rebuilt, stayed silent after a rebuild, or a stalled stream
+    /// was given up on, with the time it was detected (captured before any hop to main). Observe-only: the night journal files it
+    /// under the night it happened in (EV-1); nothing here changes playback.
+    var onPipelineEvent: ((_ kind: String, _ at: Date) -> Void)?
     var onTimeUpdate: ((Double, Double) -> Void)?
     var backgroundTick: (() -> Void)?
     /// Fired when playback resumes (in-app tap, lock-screen play, or post-interruption). Lets the
@@ -795,6 +799,9 @@ final class PodcastPlayer: NSObject {
                 return
             }
             Log.audio.error("podcast stream lost (stalled ~\((attempt + 1) * 30, privacy: .public)s) — advancing")
+            // The night hears it here, observe-only: this path keeps its own note and advance, not
+            // onPlaybackFailed's failure UI (Try again), so it doesn't go through that channel.
+            self.onPipelineEvent?("stream lost", Date())
             self.onPlaybackNote?("Podcast stream lost — the ambient sounds continue")
             self.onQueueAdvance?(lostId, false)   // advance, but do NOT mark it played
         }
@@ -832,11 +839,12 @@ final class PodcastPlayer: NSObject {
     @objc private func itemFailedToPlayToEnd(_ note: Notification) {
         let reason = (note.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? Error)?.localizedDescription ?? "unknown error"
         let failedItem = (note.object as AnyObject?).map(ObjectIdentifier.init)
+        let detectedAt = Date()
         DispatchQueue.main.async { [weak self] in
             guard let self, let current = self.currentItem,
                   failedItem == ObjectIdentifier(current) else { return }   // a stale item's news
             Log.audio.error("podcast failed to play to end (\(reason, privacy: .public)) — AVPlayer will be rebuilt on next play")
-            self.markPipelineDead()
+            self.markPipelineDead(NightRules.pipelineDied + " (item failed)", at: detectedAt)
         }
     }
 
@@ -846,14 +854,15 @@ final class PodcastPlayer: NSObject {
         guard player != nil else { return }
         let wasPlaying = pausedAt == nil && !didPlayToEnd
         Log.audio.error("media services reset — podcast AVPlayer will be rebuilt (wasPlaying=\(wasPlaying, privacy: .public))")
-        markPipelineDead()
+        markPipelineDead(NightRules.pipelineDied + " (media services reset)", at: Date())
         if wasPlaying { resume() }
     }
 
     /// Flag the AVPlayer as dead and stop pretending it's playing: the transport, the mini-player
     /// and the lock screen all go to "paused" — the next play rebuilds. Showing paused beats the
     /// old behavior of a clock that runs in silence.
-    private func markPipelineDead() {
+    private func markPipelineDead(_ kind: String, at: Date) {
+        onPipelineEvent?(kind, at)
         needsRebuild = true
         heartbeatMonitor.reset()
         cancelStallWatchdog()
@@ -867,6 +876,7 @@ final class PodcastPlayer: NSObject {
     /// Falls back to the saved-position map when the dead player can't say where it was.
     private func rebuildPlayer(at position: Double?) {
         guard let url = currentUrl, let id = currentId else { return }
+        onPipelineEvent?(NightRules.playerRebuilt, Date())
         needsRebuild = true                // play() discards the dead player before loading
         play(url: url, id: id, title: currentTitle, resume: true, startAt: position)
     }
@@ -917,6 +927,7 @@ final class PodcastPlayer: NSObject {
                 rebuildPlayer(at: currentPositionSeconds)
             } else {
                 Log.audio.error("podcast still silent after a rebuild — watchdog standing down; next pause/play rebuilds")
+                onPipelineEvent?("silent after a rebuild", Date())
                 needsRebuild = true          // also idles the watchdog (see `eligible`)
                 onPlaybackNote?("No podcast audio? Pause and play to restart it")
             }

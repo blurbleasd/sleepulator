@@ -64,7 +64,7 @@ Tags: **⚙︎** generative (cheap, recommended) · **✦** time-reactive · **�
 - **Flow field** ⚙︎ — particles drifting along a slow vector field.
 - **Contour topography** ⚙︎✦ — subtle moving contour lines; a "deep work" feel. _Built
   2026-10-12 as "Contour": a mountain whose summit sits under the ring, lit from the summit
-  outward across a work interval (TESTING.md §U)._
+  outward across a work interval (TESTING.md §V)._
 - **Rain on glass (day)** ⚙︎🔊 — the rain scene in a cool daytime key.
 
 **Quality over quantity.** A "cheap generative scene" is deceptively expensive to make

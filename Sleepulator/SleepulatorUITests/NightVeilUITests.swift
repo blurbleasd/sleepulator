@@ -16,6 +16,7 @@ final class NightVeilUITests: XCTestCase {
     /// idles, and on a loaded CI runner XCUITest waited up to 4 s for it before each tap, long
     /// enough for Home's controls to fade under it. Nothing here tests motion.
     private static let quietHome = [
+        "-uiTestIsolated", "<true/>",                       // throwaway night store, no rating ask
         "-hasCompletedFirstRun", "<true/>",
         "-hasSeenNightRingTip", "<true/>",
         "-hasStartedFirstSession", "<true/>",

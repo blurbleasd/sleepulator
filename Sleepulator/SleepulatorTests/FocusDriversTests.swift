@@ -182,7 +182,7 @@ final class ContourLightTests: XCTestCase {
     //   and on its side; fails_when=share stops clipping the disc at a screen edge, or mis-scales
     //   the summit by the aspect; why_new=the round trip above inverts whatever share computes, so a
     //   wrong share still passes it; seam=none; no_claim=the shader's noise-bent edge (±0.07,
-    //   device-checked in TESTING §U.2); a summit-centred disc only
+    //   device-checked in TESTING §V.2); a summit-centred disc only
     func testTheLitDiscCoversThatShareOfTheScreensPoints() {
         // An independent count: every point whose centre is within the radius of the summit.
         func litShare(radius r: Double, width: Int, height: Int) -> Double {
@@ -245,7 +245,7 @@ final class ContourLightTests: XCTestCase {
         }
     }
 
-    // Value: protects=with no session the shader gets the idle signal (light < 0: even lines, no edge), and a break hands the light back; fails_when=idle maps to 0 (a session at its start: dim lines, no light) or a break reads as work; why_new=FocusDrivers.fill is tested but not the -1 the shader keys idle on; seam=none; no_claim=the shader's idle branch (device, TESTING §U.2)
+    // Value: protects=with no session the shader gets the idle signal (light < 0: even lines, no edge), and a break hands the light back; fails_when=idle maps to 0 (a session at its start: dim lines, no light) or a break reads as work; why_new=FocusDrivers.fill is tested but not the -1 the shader keys idle on; seam=none; no_claim=the shader's idle branch (device, TESTING §V.2)
     func testIdleReadsAsNoSessionAndABreakHandsTheLightBack() {
         for progress in [0.0, 0.5, 1.0] {
             XCTAssertLessThan(ContourLight.light(isRunning: false, isWork: true, progress: progress), 0)

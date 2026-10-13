@@ -44,5 +44,10 @@
 		<key>NSAllowsArbitraryLoadsInMedia</key>
 		<true/>
 	</dict>
+	<!-- Export compliance: the app uses only the encryption built into iOS (HTTPS, and an MD5
+	     cache key in AudioDownloader, which isn't encryption). Declaring it here keeps each
+	     upload from stopping on App Store Connect's encryption question. -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 </dict>
 </plist>

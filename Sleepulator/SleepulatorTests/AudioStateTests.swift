@@ -715,6 +715,35 @@ final class SleepTimerBackstopTests: XCTestCase {
         svc.cancelTimer()
     }
 
+    /// A deadline that passed during a pause (the ticks stopped with the sound) is found by the
+    /// first tick after Play: stopped as the morning foreground would, reconciled and ended at the
+    /// deadline, so it never counts as a clean night. One reached while playing isn't.
+    func testATickThatFindsTheDeadlineLongPastStopsItAsReconciled() {
+        for (late, reconciled, tail) in [(1.0, false, false), (SleepTimerService.overdueAfter + 25, true, false),
+                                         (SleepTimerService.overdueAfter + 25, true, true)] {
+            let svc = SleepTimerService()
+            svc.backstop = SpyBackstop()
+            // A tail set and eligible (a call's end brought back the bed and the podcast): an
+            // overdue deadline still stops at once, as the morning foreground's does.
+            svc.ambientTailFn = { tail ? 15 * 60 : 0 }
+            svc.tailEligibleFn = { tail }
+            svc.stopPodcastFn = { }
+            var stops: [(reconciled: Bool, endedAt: Date)] = []
+            svc.onTerminalStop = { _, r, at in stops.append((r, at)) }
+            svc.startSleepTimer(minutes: 1)
+            let deadline = Date().addingTimeInterval(60)
+            svc.handleTick(at: deadline.addingTimeInterval(late))
+            XCTAssertEqual(stops.map(\.reconciled), [reconciled], "\(late) s late, tail \(tail)")
+            XCTAssertFalse(svc.inTail, "an overdue deadline began the ambient tail")
+            if reconciled {
+                XCTAssertEqual(stops.first?.endedAt.timeIntervalSince(deadline) ?? 99, 0, accuracy: 2,
+                               "the night ended at the deadline, not at the Play")
+            }
+            svc.handleTick(at: deadline.addingTimeInterval(late + 1))
+            XCTAssertEqual(stops.count, 1)                   // once
+        }
+    }
+
     func testReconcileIgnoresEndOfEpisodeTimer() {
         let svc = SleepTimerService()
         var stops = 0
@@ -1328,6 +1357,8 @@ final class PodcastPlayerRebuildTests: XCTestCase {
         let (p, first) = try await startPlaying()
         var note: String?
         var pausedAfterStart = false
+        var events: [String] = []
+        p.onPipelineEvent = { kind, _ in events.append(kind) }   // what the night journal hears
         p.onPlaybackNote = { if let n = $0 { note = n } }
         p.onPlaybackStateChanged = { playing in if !playing { pausedAfterStart = true } }
         let frozen = p.renderHeartbeat
@@ -1342,6 +1373,7 @@ final class PodcastPlayerRebuildTests: XCTestCase {
         XCTAssertTrue(stoodDown)
         XCTAssertEqual(note, "No podcast audio? Pause and play to restart it")
         XCTAssertFalse(pausedAfterStart, "the watchdog must never pause real playback on its own")
+        XCTAssertEqual(Array(events.prefix(2)), ["player rebuilt", "silent after a rebuild"])
     }
 
     func testRebuildResumesAtTheSameSpot() async throws {
@@ -1378,20 +1410,42 @@ final class PodcastPlayerRebuildTests: XCTestCase {
         XCTAssertFalse(p.needsRebuild)
     }
 
+    /// The night journal hears a pipeline death and the rebuild, each stamped when it was
+    /// detected (before the hop to main), so it files them under the night they happened in.
+    func testPipelineDeathAndRebuildAreReportedWithTheirTimes() async throws {
+        let (p, _) = try await startPlaying()
+        var events: [(kind: String, at: Date)] = []
+        p.onPipelineEvent = { events.append(($0, $1)) }
+        NotificationCenter.default.post(name: .AVPlayerItemFailedToPlayToEndTime, object: p.currentItem)
+        let afterPost = Date()                                // detectedAt is taken before the hop
+        _ = await waitUntil { p.needsRebuild }
+        XCTAssertEqual(events.map(\.kind), ["pipeline died (item failed)"])
+        XCTAssertLessThanOrEqual(events.first?.at ?? .distantFuture, afterPost)
+        p.resume()
+        _ = await waitUntil { events.count == 2 }
+        XCTAssertEqual(events.last?.kind, "player rebuilt")
+    }
+
     func testFailureFromAStaleItemIsIgnored() async throws {
         let (p, first) = try await startPlaying()
+        var events: [String] = []
+        p.onPipelineEvent = { kind, _ in events.append(kind) }
         let stale = AVPlayerItem(url: fileURL)
         NotificationCenter.default.post(name: .AVPlayerItemFailedToPlayToEndTime, object: stale)
         try? await Task.sleep(nanoseconds: 200_000_000)
         XCTAssertFalse(p.needsRebuild, "only the loaded item's failure condemns the player")
         XCTAssertEqual(p.playerInstanceId, first)
+        XCTAssertEqual(events, [], "a replaced item's news must not reach the night")
     }
 
     func testMediaServicesResetWhilePlayingRebuildsImmediately() async throws {
         let (p, first) = try await startPlaying()
+        var events: [String] = []
+        p.onPipelineEvent = { kind, _ in events.append(kind) }
         p.handleMediaServicesReset()
         let rebuilt = await waitUntil { p.playerInstanceId != nil && p.playerInstanceId != first }
         XCTAssertTrue(rebuilt, "a media-services reset invalidates the AVPlayer — playing → rebuild now")
+        XCTAssertEqual(events.first, "pipeline died (media services reset)")
     }
 
     func testMediaServicesResetWhilePausedWaitsForPlay() async throws {
@@ -2649,8 +2703,10 @@ final class PlayerQueueActionTests: XCTestCase {
         withAutoPlay(false, engine) {
             engine.queueManager.queue = [ep("1"), ep("2")]
             engine.queueManager.playEpisode(ep("2"))
+            engine.nightJournal.sessionStarted()             // a night is open
             engine.handlePodcastFailure(episodeId: "1")
             XCTAssertFalse(engine.podcastFailed)
+            XCTAssertEqual(engine.nightJournal.open?.taints, [], "a replaced episode's failure spoiled the night")
         }
     }
 
@@ -3810,3 +3866,946 @@ final class RestoreReloadTests: XCTestCase {
     }
 }
 
+
+// MARK: - The night journal (docs/designs/APP-STORE-LAUNCH-1.0.md, NT-1, EV-1)
+
+/// The pure rules: when a closed night counts as clean, and what the trail may never contain.
+final class NightRulesTests: XCTestCase {
+    private func night(_ by: NightEndReason?, live: TimeInterval = 0, taints: [String] = [],
+                       reconciled: Bool = false) -> NightSummary {
+        var s = NightSummary(id: "n", start: Date(timeIntervalSince1970: 0), lastEventAt: Date(timeIntervalSince1970: 0))
+        s.end = by == nil ? nil : Date(timeIntervalSince1970: 100)
+        s.endedBy = by
+        s.live = live
+        s.taints = taints
+        s.reconciled = reconciled
+        return s
+    }
+
+    func testTimerEndWhilePlayingIsClean() {
+        XCTAssertTrue(NightRules.isClean(night(.timer, live: 60)))
+        XCTAssertTrue(NightRules.isClean(night(.episodeEnd, live: 60)))
+    }
+
+    func testATimedNightBelowAMinuteOfLiveAudioIsNotClean() {
+        let below = NightRules.timedNightMinimumLive - 1
+        XCTAssertFalse(NightRules.isClean(night(.timer, live: below)))
+        XCTAssertFalse(NightRules.isClean(night(.episodeEnd, live: below)))
+    }
+
+    func testReconciledDeadlineIsNotClean() {
+        XCTAssertFalse(NightRules.isClean(night(.timer, live: 20 * 60, reconciled: true)))
+    }
+
+    /// The asks count nights, not sessions: at most one clean night per noon-to-noon span, by
+    /// when it started. A nap, then the night, then a 1am start the next night: two.
+    func testCleanNightsCountOncePerNight() {
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = TimeZone(identifier: "UTC")!
+        let day = Date(timeIntervalSince1970: TimeInterval(1_800_000_000 / 86_400 * 86_400))   // a UTC midnight
+        func v(_ hours: Double, clean: Bool = true) -> NightVerdict {
+            let start = day.addingTimeInterval(hours * 3600)
+            return NightVerdict(id: "\(hours)", start: start, end: start + 1800, live: 1800, clean: clean,
+                                endedBy: .timer, taints: [])
+        }
+        let verdicts = [v(15), v(16), v(23),          // two naps and the night: one
+                        v(25),                        // 1am the next day: still that night
+                        v(24 + 23),                   // the next night
+                        v(48 + 23, clean: false)]     // not clean: not counted
+        XCTAssertEqual(NightRules.cleanNightCount(verdicts, calendar: utc), 2)
+        XCTAssertEqual(NightRules.cleanNightCount([], calendar: utc), 0)
+    }
+
+    /// Noon is the wall clock's, so a daylight-saving day doesn't move it: in New York on
+    /// 2026-03-08 (clocks forward), a 12:30 nap is the next night's, not the one before.
+    func testTheNightBoundaryIsWallClockNoonAcrossDaylightSaving() {
+        var ny = Calendar(identifier: .gregorian)
+        ny.timeZone = TimeZone(identifier: "America/New_York")!
+        let starts = [DateComponents(year: 2026, month: 3, day: 7, hour: 23),
+                      DateComponents(year: 2026, month: 3, day: 8, hour: 12, minute: 30)].map { ny.date(from: $0)! }
+        let verdicts = starts.map { NightVerdict(id: "\($0)", start: $0, end: $0 + 3600, live: 3600, clean: true,
+                                                 endedBy: .timer, taints: []) }
+        XCTAssertEqual(NightRules.cleanNightCount(verdicts, calendar: ny), 2)
+    }
+
+    func testAllNightNeedsThreeHoursOfLiveAudio() {
+        XCTAssertFalse(NightRules.isClean(night(.person, live: NightRules.allNightThreshold - 1)))
+        XCTAssertTrue(NightRules.isClean(night(.person, live: NightRules.allNightThreshold)))
+        XCTAssertTrue(NightRules.isClean(night(.focusSwitch, live: NightRules.allNightThreshold)))
+    }
+
+    func testDiedOpenOrTaintedIsNeverClean() {
+        XCTAssertFalse(NightRules.isClean(night(.died, live: 8 * 3600)))
+        XCTAssertFalse(NightRules.isClean(night(nil, live: 8 * 3600)))
+        XCTAssertFalse(NightRules.isClean(night(.timer, live: 60, taints: ["player rebuilt"])))
+        XCTAssertFalse(NightRules.isClean(night(.person, live: 8 * 3600, taints: ["podcast failed"])))
+    }
+
+    func testScrubRemovesLinks() {
+        let s = NightRules.scrub("failed https://feeds.example.com/p?token=secret and http://x.y/z ok")
+        XCTAssertFalse(s.contains("://"))
+        XCTAssertFalse(s.contains("secret"))
+        XCTAssertEqual(NightRules.scrub("player rebuilt"), "player rebuilt")
+    }
+}
+
+/// The journal against a temp folder, with an injected clock.
+@MainActor
+final class NightJournalTests: XCTestCase {
+    private var dir: URL!
+    private var clock = Date(timeIntervalSince1970: 1_800_000_000)
+
+    override func setUp() {
+        super.setUp()
+        dir = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("nj-\(UUID().uuidString)")
+    }
+
+    override func tearDown() {
+        try? FileManager.default.removeItem(at: dir)
+        super.tearDown()
+    }
+
+    private func journal() -> NightJournal {
+        NightJournal(directory: dir, storage: StorageManager(directory: dir), observeTermination: false,
+                     now: { [unowned self] in self.clock })
+    }
+
+    /// Advance the clock in 1 s ticks, as the render and player clocks would.
+    private func play(_ j: NightJournal, seconds: Int) {
+        for _ in 0..<seconds { clock += 1; j.liveTick() }
+    }
+
+    private func fileText(_ j: NightJournal) -> String {
+        j.drain()
+        return j.nightFiles().compactMap { try? String(contentsOf: $0, encoding: .utf8) }.joined()
+    }
+
+    func testThreeHoursThenALongPauseIsACleanNightEndedByThePerson() {
+        let j = journal()
+        j.sessionStarted()
+        play(j, seconds: Int(NightRules.allNightThreshold) + 5)
+        j.sessionStopped()
+        let pausedAt = clock
+        clock += UntimedNight.resumeWindow + 1
+        j.sessionStarted()                                    // next evening: a new night
+        XCTAssertEqual(j.verdicts.count, 1)
+        XCTAssertEqual(j.verdicts.first?.endedBy, .person)
+        XCTAssertEqual(j.verdicts.first?.end, pausedAt)
+        XCTAssertEqual(j.verdicts.first?.clean, true)
+        XCTAssertNotNil(j.open)
+    }
+
+    func testAShortPauseKeepsTheNight() {
+        let j = journal()
+        j.sessionStarted()
+        let id = j.open?.id
+        play(j, seconds: 60)
+        j.sessionStopped()
+        clock += UntimedNight.resumeWindow - 1
+        j.sessionStarted()
+        XCTAssertEqual(j.open?.id, id)
+        XCTAssertNil(j.open?.pausedAt)
+        XCTAssertTrue(j.verdicts.isEmpty)
+    }
+
+    func testTicksFurtherApartThanTheGapDontCount() {
+        let j = journal()
+        j.sessionStarted()
+        j.liveTick()                                          // first tick sets the base
+        clock += NightRules.maxTickGap + 1
+        j.liveTick()
+        XCTAssertEqual(j.open?.live ?? -1, 0, accuracy: 0.001)
+        clock += 1
+        j.liveTick()
+        XCTAssertEqual(j.open?.live ?? -1, 1, accuracy: 0.001)
+    }
+
+    func testTimerStopWhilePlayingIsCleanAndThePauseAfterIsIgnored() {
+        let j = journal()
+        j.sessionStarted()
+        play(j, seconds: 30 * 60)
+        j.timerStopped(episode: false, reconciled: false, endedAt: clock)
+        j.sessionStopped()                                    // stopAll's own pause, after
+        XCTAssertNil(j.open)
+        XCTAssertEqual(j.verdicts.map(\.endedBy), [.timer])
+        XCTAssertEqual(j.verdicts.first?.clean, true)
+    }
+
+    func testAReconciledDeadlineIsNotClean() {
+        let j = journal()
+        j.sessionStarted()
+        play(j, seconds: 20 * 60)
+        j.timerStopped(episode: false, reconciled: true, endedAt: clock)
+        XCTAssertEqual(j.verdicts.first?.clean, false)
+    }
+
+    func testATimerStopOverAPauseEndsTheNightWhereItPaused() {
+        let j = journal()
+        j.sessionStarted()
+        play(j, seconds: 60)
+        j.sessionStopped()
+        let pausedAt = clock
+        clock += 600
+        j.timerStopped(episode: false, reconciled: false, endedAt: clock)
+        XCTAssertEqual(j.verdicts.first?.endedBy, .person)
+        XCTAssertEqual(j.verdicts.first?.end, pausedAt)
+        XCTAssertEqual(j.verdicts.first?.clean, false)        // a minute, not three hours
+    }
+
+    func testATaintDuringTheNightSpoilsIt() {
+        let j = journal()
+        j.sessionStarted()
+        play(j, seconds: 120)                                 // past the minute: only the taint decides
+        j.taint("player rebuilt", at: clock)
+        j.timerStopped(episode: false, reconciled: false, endedAt: clock)
+        XCTAssertEqual(j.verdicts.first?.clean, false)
+        XCTAssertEqual(j.verdicts.first?.taints, ["player rebuilt"])
+    }
+
+    /// EV-1: news that lands after its night closed (and the next opened) is filed by when it
+    /// happened, in both orders.
+    func testALateTaintIsFiledUnderTheNightItHappenedIn() {
+        let j = journal()
+        j.sessionStarted()
+        play(j, seconds: 120)                                 // past the timed night's minute
+        let happened = clock                                  // the failure, detected here
+        clock += 1
+        j.timerStopped(episode: false, reconciled: false, endedAt: clock)
+        XCTAssertEqual(j.verdicts.first?.clean, true)
+        clock += 3600
+        j.sessionStarted()                                    // the next night opens
+        let next = j.open?.id
+        j.taint("pipeline died (item failed)", at: happened)  // the hop lands now
+        XCTAssertEqual(j.verdicts.first?.clean, false)
+        XCTAssertEqual(j.open?.id, next)
+        XCTAssertEqual(j.open?.taints, [])
+    }
+
+    func testALateTaintBeforeTheNextNightOpensStillFindsItsNight() {
+        let j = journal()
+        j.sessionStarted()
+        play(j, seconds: 120)                                 // past the minute: clean until the news
+        let happened = clock
+        j.timerStopped(episode: false, reconciled: false, endedAt: clock + 1)
+        XCTAssertEqual(j.verdicts.first?.clean, true)
+        j.taint("player rebuilt", at: happened)               // lands with no night open
+        XCTAssertEqual(j.verdicts.first?.clean, false)
+        XCTAssertEqual(j.verdicts.first?.taints, ["player rebuilt"])
+    }
+
+    func testATaintOutsideEveryNightIsDropped() {
+        let j = journal()
+        j.taint("podcast failed", at: clock)                  // a daytime Focus podcast
+        XCTAssertTrue(j.verdicts.isEmpty)
+        XCTAssertNil(j.open)
+    }
+
+    func testANightLeftOpenWhilePlayingIsClosedAsDiedAtNextLaunch() {
+        let a = journal()
+        a.sessionStarted()
+        play(a, seconds: Int(NightRules.allNightThreshold) + 5)  // 3 h, then the app dies
+        a.drain()
+        let b = journal()
+        XCTAssertNil(b.open)
+        XCTAssertEqual(b.verdicts.map(\.endedBy), [.died])
+        XCTAssertEqual(b.verdicts.first?.clean, false)
+    }
+
+    func testANightLeftPausedIsClosedByThePersonAtNextLaunch() {
+        let a = journal()
+        a.sessionStarted()
+        play(a, seconds: Int(NightRules.allNightThreshold) + 5)
+        a.sessionStopped()
+        let pausedAt = clock
+        a.drain()
+        clock += 8 * 3600
+        let b = journal()
+        XCTAssertEqual(b.verdicts.first?.endedBy, .person)
+        XCTAssertEqual(b.verdicts.first?.end, pausedAt)
+        XCTAssertEqual(b.verdicts.first?.clean, true)
+    }
+
+    func testTheTrailNeverHoldsALink() {
+        let j = journal()
+        j.sessionStarted()
+        j.note("route change https://example.com/feed?token=abc")
+        j.taint("podcast failed for https://feeds.example.com/x.mp3?key=secret", at: clock)
+        XCTAssertFalse(fileText(j).contains("://"))
+        XCTAssertFalse(fileText(j).contains("secret"))
+    }
+
+    func testOnlyTheTwoNewestNightFilesAreKept() {
+        let j = journal()
+        for _ in 0..<3 {
+            j.sessionStarted()
+            play(j, seconds: 5)
+            j.timerStopped(episode: false, reconciled: false, endedAt: clock)
+            clock += 24 * 3600
+            j.drain()
+        }
+        j.drain()
+        XCTAssertEqual(j.nightFiles().count, NightRules.keptNightFiles)
+        XCTAssertEqual(j.verdicts.count, 3)                   // verdicts outlive the files
+    }
+
+    func testSummaryLine() {
+        let j = journal()
+        XCTAssertEqual(j.summaryLine(), "No night recorded yet.")
+        j.sessionStarted(); play(j, seconds: 65)
+        j.timerStopped(episode: false, reconciled: false, endedAt: clock)
+        clock += 3600
+        j.sessionStarted(); play(j, seconds: 65)
+        j.timerStopped(episode: false, reconciled: true, endedAt: clock)
+        XCTAssertEqual(j.summaryLine(), "Last 2 nights: 1 clean, 1 ended early or spoiled.")
+    }
+
+    /// A died night is the summary's "left open" (the signal support reads first), counted once.
+    func testSummaryLineCountsADiedNightAsLeftOpen() {
+        let a = journal()
+        a.sessionStarted(); play(a, seconds: 5)
+        a.drain()
+        clock += 60
+        let b = journal()                                     // recovery closes it as died
+        XCTAssertEqual(b.summaryLine(), "Last 1 night: 0 clean, 1 left open.")
+    }
+
+    /// A timed night with hardly any sound isn't clean: a deadline that passed while the app
+    /// slept, fired by a lock-screen Play in the morning, mustn't count.
+    func testATimedNightNeedsAMinuteOfLiveAudio() {
+        let j = journal()
+        // play(seconds: n) counts n - 1 seconds: its first tick only sets the base.
+        let minute = Int(NightRules.timedNightMinimumLive)
+        for (episode, seconds) in [(false, minute), (true, minute), (false, minute + 1), (true, minute + 1)] {
+            j.sessionStarted(); play(j, seconds: seconds)
+            j.timerStopped(episode: episode, reconciled: false, endedAt: clock)
+            clock += 3600
+        }
+        XCTAssertEqual(j.verdicts.map(\.endedBy), [.timer, .episodeEnd, .timer, .episodeEnd])
+        XCTAssertEqual(j.verdicts.map(\.clean), [false, false, true, true])
+    }
+
+    /// News just after a night resumes from a pause is the pause's aftermath (a player the pause
+    /// killed, rebuilt by the resume or found by the watchdog seconds later); later news spoils.
+    func testNewsJustAfterAResumeIsANoteLaterNewsSpoils() {
+        let j = journal()
+        j.sessionStarted()
+        play(j, seconds: Int(NightRules.allNightThreshold) + 5)
+        j.sessionStopped()                                    // the alarm
+        clock += 60
+        j.sessionStarted()                                    // dismissed: the bed carries on
+        clock += 4
+        j.taint("player rebuilt", at: clock)                  // the watchdog, 4 s later
+        XCTAssertEqual(j.open?.taints, [])
+        clock += NightRules.graceAfterResume + 1
+        j.taint("pipeline died (item failed)", at: clock)     // a real failure, later
+        XCTAssertEqual(j.open?.taints, ["pipeline died (item failed)"])
+        XCTAssertTrue(fileText(j).contains("player rebuilt just after the sound started"))
+    }
+
+    /// The resume grace has to outlast the watchdog that finds a player the pause killed, or the
+    /// watchdog's rebuild a few seconds after Play would spoil the night.
+    func testTheResumeGraceOutlastsThePlayerWatchdog() {
+        XCTAssertGreaterThan(NightRules.graceAfterResume, RenderHeartbeatMonitor.deadAfter + 2)
+    }
+
+    /// The grace covers only a pause's aftermath, a dead or rebuilt player: a failed episode or
+    /// the noise engine's error right after Play still spoils the night.
+    func testOnlyADeadOrRebuiltPlayerIsAPausesAftermath() {
+        let j = journal()
+        j.sessionStarted()
+        play(j, seconds: 120)
+        j.sessionStopped()
+        clock += 60
+        j.sessionStarted()
+        clock += 2
+        j.taint("podcast failed", at: clock)
+        j.taint("sound engine error", at: clock)
+        XCTAssertEqual(j.open?.taints, ["podcast failed", "sound engine error"])
+    }
+
+    /// A night can open on a player that died while it sat paused past the window (or overnight):
+    /// the watchdog's rebuild a few seconds in is that aftermath, not this night's failure.
+    func testAPlayerRebuiltJustAfterANightOpensIsANote() {
+        let j = journal()
+        j.sessionStarted()
+        clock += 4
+        j.taint("player rebuilt", at: clock)
+        XCTAssertEqual(j.open?.taints, [])
+        XCTAssertTrue(fileText(j).contains("player rebuilt just after the sound started"))
+    }
+
+    /// The noise engine's start error is stamped as the switch flips, a moment before the session
+    /// edge opens the night: it's that night's. Well before the night, it's no night's.
+    func testNewsAMomentBeforeTheNightOpensIsThatNights() {
+        let j = journal()
+        j.sessionStarted()
+        j.taint("sound engine error", at: clock - 1)
+        XCTAssertEqual(j.open?.taints, ["sound engine error"])
+        j.taint("podcast failed", at: clock - 60)
+        XCTAssertEqual(j.open?.taints, ["sound engine error"])
+        XCTAssertTrue(j.verdicts.isEmpty)
+    }
+
+    /// Only a session edge ends a pause: ticks (a fading bed, a podcast scrubbed while paused)
+    /// never resume a night nor count while it's paused.
+    func testTicksNeverCarryOnAPause() {
+        let j = journal()
+        j.sessionStarted()
+        play(j, seconds: 120)
+        j.sessionStopped()
+        let live = j.open?.live ?? -1
+        clock += 60
+        play(j, seconds: 10)
+        XCTAssertNotNil(j.open?.pausedAt)
+        XCTAssertEqual(j.open?.live ?? 0, live, accuracy: 0.001)
+    }
+
+    /// A player's death stamped off main a moment before the Play's edge lands after it: it's the
+    /// pause's aftermath, a note, like the same news a moment after.
+    func testAPipelineDeathStampedJustBeforeThePlayIsANote() {
+        let j = journal()
+        j.sessionStarted()
+        play(j, seconds: 120)
+        j.sessionStopped()
+        clock += 600
+        let died = clock
+        clock += 1
+        j.sessionStarted()                                    // the Play's edge
+        j.taint(NightRules.pipelineDied + " (item failed)", at: died)   // the hop lands now
+        XCTAssertEqual(j.open?.taints, [])
+    }
+
+    /// The first tick after a morning Play finds last night's deadline long past. When the Play
+    /// opened a new night (the pause outlasted the window), the stop ends that night where it
+    /// opened, never before it.
+    func testAnOverdueStopNeverEndsANightBeforeItOpened() {
+        let j = journal()
+        j.sessionStarted()
+        play(j, seconds: 600)
+        j.sessionStopped()                                    // 23:10, then the app is suspended
+        let deadline = clock + 35 * 60                        // the timer's deadline, 23:45
+        clock += 8 * 3600                                     // a lock-screen Play at 07:10
+        j.sessionStarted()                                    // last night closes, a new one opens
+        let opened = clock
+        j.timerStopped(episode: false, reconciled: true, endedAt: deadline)
+        XCTAssertEqual(j.verdicts.count, 2)
+        XCTAssertTrue(j.verdicts.allSatisfy { $0.end >= $0.start }, "\(j.verdicts)")
+        XCTAssertEqual(j.verdicts.last?.end, opened)
+        XCTAssertEqual(j.verdicts.last?.clean, false)
+    }
+
+    /// A paused night recovered at launch inside its window still ends where it paused once the
+    /// window passes with no Play: the asks see it that morning.
+    func testARecoveredPausedNightEndsWhereItPausedOnceItsWindowPasses() {
+        let a = journal()
+        a.sessionStarted()
+        play(a, seconds: Int(NightRules.allNightThreshold) + 5)
+        a.sessionStopped()
+        let pausedAt = clock
+        a.drain()
+        clock += 600                                          // relaunched 10 minutes later
+        let b = journal()
+        XCTAssertNotNil(b.open?.pausedAt)
+        b.closeLapsedPause()                                  // still inside the window
+        XCTAssertNotNil(b.open)
+        clock = pausedAt + UntimedNight.resumeWindow
+        b.closeLapsedPause()
+        XCTAssertNil(b.open)
+        XCTAssertEqual(b.verdicts.map(\.endedBy), [.person])
+        XCTAssertEqual(b.verdicts.first?.end, pausedAt)
+        XCTAssertEqual(b.verdicts.first?.clean, true)
+        b.drain()
+    }
+
+    func testFocusSwitchEndsTheNight() {
+        let j = journal()
+        j.sessionStarted()
+        play(j, seconds: 5)
+        j.switchedToFocus()
+        XCTAssertNil(j.open)
+        XCTAssertEqual(j.verdicts.first?.endedBy, .focusSwitch)
+    }
+
+    /// News after a pause outlasted the window isn't that night's (EV-1): the night ended at its
+    /// pause, and a resume() that rebuilds a dead player the next evening lands in no night.
+    func testATaintAfterThePauseOutlastedTheWindowIsNotThatNights() {
+        let j = journal()
+        j.sessionStarted()
+        play(j, seconds: Int(NightRules.allNightThreshold) + 5)
+        j.sessionStopped()
+        clock += UntimedNight.resumeWindow + 12 * 3600
+        j.taint("player rebuilt", at: clock)                  // before the playing edge
+        j.sessionStarted()
+        XCTAssertEqual(j.verdicts.first?.taints, [])
+        XCTAssertEqual(j.verdicts.first?.clean, true)
+    }
+
+    /// While a night is paused (an alarm, the person's pause) nothing is meant to play: a player
+    /// that dies then, and its rebuild on resume, go in the trail but don't spoil the night.
+    func testATaintWhilePausedDoesntSpoilTheNight() {
+        let j = journal()
+        j.sessionStarted()
+        play(j, seconds: Int(NightRules.allNightThreshold) + 5)
+        j.sessionStopped()                                    // the alarm
+        clock += 1
+        j.taint("pipeline died (item failed)", at: clock)
+        clock += 30
+        j.taint("player rebuilt", at: clock)                  // resume() rebuilds, before the edge
+        j.sessionStarted()                                    // within the window: the same night
+        play(j, seconds: 60)
+        j.switchedToFocus()
+        XCTAssertEqual(j.verdicts.first?.taints, [])
+        XCTAssertEqual(j.verdicts.first?.clean, true)
+        XCTAssertTrue(fileText(j).contains("while paused"))   // still in the trail
+    }
+
+    /// Past the soft cap a file keeps only the lines that decide its verdict, and a pause is one:
+    /// a paused night recovered at launch is the person's stop, with the live time it reached.
+    func testAPausedNightPastTheSoftCapIsClosedByThePersonAtNextLaunch() {
+        let a = journal()
+        a.sessionStarted()
+        let padding = String(repeating: "x", count: 1_000)
+        for _ in 0..<(NightRules.fileSoftCap / 1_000 + 10) { a.note("route change \(padding)") }
+        play(a, seconds: Int(NightRules.allNightThreshold) + 5)  // checkpoints aren't written now
+        a.sessionStopped()
+        a.drain()
+        clock += 8 * 3600
+        let b = journal()
+        XCTAssertEqual(b.verdicts.first?.endedBy, .person)
+        XCTAssertEqual(b.verdicts.first?.clean, true)
+    }
+
+    /// The app was ended while paused (iOS ends suspended apps) and play came back within the
+    /// window: the same night carries on rather than splitting in two.
+    func testAPausedNightRecoveredInsideItsWindowCarriesOn() {
+        let a = journal()
+        a.sessionStarted()
+        let id = a.open?.id
+        play(a, seconds: 3600)
+        a.sessionStopped()
+        a.drain()
+        clock += 600                                          // relaunched 10 minutes later
+        let b = journal()
+        XCTAssertEqual(b.open?.id, id)
+        XCTAssertNotNil(b.open?.pausedAt)
+        XCTAssertTrue(b.verdicts.isEmpty)
+        b.sessionStarted()                                    // play again: the same night
+        XCTAssertEqual(b.open?.id, id)
+        XCTAssertNil(b.open?.pausedAt)
+        XCTAssertEqual(b.open?.live ?? 0, 3600, accuracy: 1)
+        b.drain()
+    }
+
+    /// The threshold line, written past the cap too, counts at recovery on its own.
+    func testTheThresholdLineAloneDecidesARecoveredNight() throws {
+        let enc = JSONEncoder(); enc.dateEncodingStrategy = .iso8601
+        let start = clock
+        var data = Data()
+        for e in [NightEvent(at: start, kind: "opened"),
+                  NightEvent(at: start + NightRules.allNightThreshold, kind: "threshold", detail: "10800"),
+                  NightEvent(at: start + NightRules.allNightThreshold + 60, kind: "paused")] {
+            data.append(try enc.encode(e)); data.append(0x0A)
+        }
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try data.write(to: dir.appendingPathComponent(NightRules.id(for: start)).appendingPathExtension("jsonl"))
+        clock += 8 * 3600                                     // the next launch, the window long gone
+        let j = journal()
+        XCTAssertEqual(j.verdicts.first?.endedBy, .person)
+        XCTAssertEqual(j.verdicts.first?.clean, true)
+    }
+
+    /// The process went between the closing line and the verdict (a force-quit): the next launch
+    /// records the night from its file, once.
+    func testAClosedNightWithNoVerdictIsRecordedAtLaunch() throws {
+        let enc = JSONEncoder(); enc.dateEncodingStrategy = .iso8601
+        let start = clock
+        var data = Data()
+        for e in [NightEvent(at: start, kind: "opened"),
+                  NightEvent(at: start + 10_900, kind: "closed", detail: "person 10900")] {
+            data.append(try enc.encode(e)); data.append(0x0A)
+        }
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try data.write(to: dir.appendingPathComponent(NightRules.id(for: start)).appendingPathExtension("jsonl"))
+        let a = journal()
+        XCTAssertEqual(a.verdicts.map(\.endedBy), [.person])
+        XCTAssertEqual(a.verdicts.first?.clean, true)
+        a.drain()
+        XCTAssertEqual(journal().verdicts.count, 1)            // not again on the next launch
+    }
+
+    /// iOS killed the app mid-write: the file ends in a partial line with no newline. The next
+    /// launch skips the fragment, closes the night as died where the last whole line left it, and
+    /// ends the fragment first, so the closing line sits on a line of its own.
+    /// Value: protects=a night iOS killed mid-write still closes at the next launch, its closing
+    /// line on a line of its own; fails_when=recovery stops skipping an undecodable line or the
+    /// newline repair is removed (the closing line glued to the fragment); why_new=every recovery
+    /// test writes whole lines; seam=none; no_claim=a real kill (TESTING §3U.1)
+    func testANightCutOffMidLineIsClosedAsDiedOnALineOfItsOwn() throws {
+        let enc = JSONEncoder(); enc.dateEncodingStrategy = .iso8601
+        let start = clock
+        var data = Data()
+        for e in [NightEvent(at: start, kind: "opened"),
+                  NightEvent(at: start + 600, kind: "live", detail: "600")] {
+            data.append(try enc.encode(e)); data.append(0x0A)
+        }
+        let cut = try enc.encode(NightEvent(at: start + 900, kind: "live", detail: "900"))
+        data.append(cut.prefix(cut.count / 2))                // the kill landed mid-line: no newline
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let url = dir.appendingPathComponent(NightRules.id(for: start)).appendingPathExtension("jsonl")
+        try data.write(to: url)
+        let j = journal()
+        XCTAssertNil(j.open)
+        XCTAssertEqual(j.verdicts.map(\.endedBy), [.died])
+        XCTAssertEqual(j.verdicts.first?.end, start + 600, "closed where the last whole line left it")
+        XCTAssertEqual(j.verdicts.first?.clean, false)
+        j.drain()
+        let text = try String(contentsOf: url, encoding: .utf8)
+        let lines = text.split(separator: "\n")
+        XCTAssertEqual(lines.count, 4, "opened, live, the fragment, closed: \(text)")
+        let dec = JSONDecoder(); dec.dateDecodingStrategy = .iso8601
+        let last = try XCTUnwrap(lines.last)
+        let closing = try? dec.decode(NightEvent.self, from: Data(last.utf8))
+        XCTAssertEqual(closing?.kind, "closed", "the closing line isn't on a line of its own: \(last)")
+        XCTAssertEqual(closing?.detail, "died 600")
+        XCTAssertTrue(text.hasSuffix("\n"))
+    }
+
+    func testAForceQuitClosesTheNightByThePersonAndSavesItAtOnce() {
+        let a = journal()
+        a.sessionStarted()
+        play(a, seconds: 60)
+        a.appWillTerminate()
+        XCTAssertNil(a.open)
+        XCTAssertEqual(a.verdicts.map(\.endedBy), [.person])
+        XCTAssertEqual(journal().verdicts.map(\.endedBy), [.person])   // on disk without a drain
+    }
+
+    /// The verdicts sit in the journal's own folder, the one excluded from backups.
+    func testTheVerdictsLiveInTheJournalsOwnFolder() {
+        let j = NightJournal(directory: dir, observeTermination: false)
+        j.sessionStarted()
+        j.switchedToFocus()
+        j.drain()
+        XCTAssertTrue(FileManager.default.fileExists(atPath: dir.appendingPathComponent("night-verdicts.json").path))
+        XCTAssertEqual(j.nightFiles().count, 1)                // and never among the night files
+    }
+}
+
+/// The journal only observes: AudioEngine's session edges open and pause a Sleep night, and the
+/// terminal stop reaches the journal before stopAll's pause.
+@MainActor
+final class NightJournalWiringTests: XCTestCase {
+    func testSleepSessionEdgesOpenAndPauseTheNight() {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("njw-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let engine = AudioEngine()
+        engine.nightLengthProvider = { 0 }                    // All night: no timer starts
+        engine.nightJournal = NightJournal(directory: dir, storage: StorageManager(directory: dir), observeTermination: false)
+        engine.focusMode = false
+        engine.noiseOn = true
+        XCTAssertNotNil(engine.nightJournal.open)
+        XCTAssertNil(engine.nightJournal.open?.pausedAt)
+        engine.noiseOn = false
+        XCTAssertNotNil(engine.nightJournal.open?.pausedAt)
+        engine.nightJournal.drain()
+    }
+
+    private func engineWithJournal(_ dir: URL) -> AudioEngine {
+        let engine = AudioEngine()
+        engine.nightLengthProvider = { 0 }                    // All night: no timer starts
+        engine.nightJournal = NightJournal(directory: dir, storage: StorageManager(directory: dir), observeTermination: false)
+        engine.focusMode = false
+        return engine
+    }
+
+    private func interruption(_ type: AVAudioSession.InterruptionType, shouldResume: Bool = false) -> Notification {
+        var info: [AnyHashable: Any] = [AVAudioSessionInterruptionTypeKey: type.rawValue]
+        if type == .ended {
+            info[AVAudioSessionInterruptionOptionKey] =
+                (shouldResume ? AVAudioSession.InterruptionOptions.shouldResume : []).rawValue
+        }
+        return Notification(name: AVAudioSession.interruptionNotification, object: nil, userInfo: info)
+    }
+
+    /// An alarm or a call pauses the night (the bed's switches stay on through it, so no session
+    /// edge reports it); its end, with the bed coming back, continues the same night.
+    func testAnInterruptionPausesTheNightAndItsEndContinuesIt() {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("njw-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let engine = engineWithJournal(dir)
+        engine.noiseOn = true
+        let id = engine.nightJournal.open?.id
+        engine.handleInterruption(note: interruption(.began))
+        XCTAssertNotNil(engine.nightJournal.open?.pausedAt, "the interruption didn't pause the night")
+        engine.handleInterruption(note: interruption(.ended, shouldResume: true))
+        XCTAssertEqual(engine.nightJournal.open?.id, id)
+        XCTAssertNil(engine.nightJournal.open?.pausedAt)
+        engine.noiseOn = false
+        engine.nightJournal.drain()
+    }
+
+    /// An interruption that ends with nothing coming back (the bed turned off during the call)
+    /// leaves the night paused, not playing over silence.
+    func testAnInterruptionThatEndsWithNothingToResumeLeavesTheNightPaused() {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("njw-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let engine = engineWithJournal(dir)
+        engine.noiseOn = true
+        engine.handleInterruption(note: interruption(.began))
+        engine.noiseOn = false                                // turned off during the call
+        // iOS says resume: only the bed being off keeps the night paused.
+        engine.handleInterruption(note: interruption(.ended, shouldResume: true))
+        XCTAssertNotNil(engine.nightJournal.open?.pausedAt, "the night resumed with nothing playing")
+        engine.nightJournal.drain()
+    }
+
+    /// Switching Focus → Sleep with the sound still on starts the night like Play (CLAUDE.md).
+    func testFocusToSleepWithTheSoundOnOpensANight() {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("njw-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let engine = engineWithJournal(dir)
+        defer { engine.noiseOn = false; engine.focusMode = false }
+        engine.focusMode = true
+        engine.noiseOn = true
+        XCTAssertNil(engine.nightJournal.open)
+        engine.focusMode = false
+        XCTAssertNotNil(engine.nightJournal.open, "Focus to Sleep with the sound on didn't start the night")
+        XCTAssertNil(engine.nightJournal.open?.pausedAt)
+        engine.nightJournal.drain()
+    }
+
+    /// The timer's stop reaches the journal through the engine, as the timer's, not as a pause.
+    func testTheEnginesTerminalStopClosesTheNightAsTheTimers() {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("njw-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let engine = engineWithJournal(dir)
+        engine.noiseOn = true
+        engine.sleepTimer.startSleepTimer(minutes: 0)         // deadline == now
+        Thread.sleep(forTimeInterval: 0.01)
+        engine.sleepTimer.reconcileIfExpired()                // onTerminalStop, then stopAll's pause
+        XCTAssertNil(engine.nightJournal.open)
+        XCTAssertEqual(engine.nightJournal.verdicts.map(\.endedBy), [.timer])
+        engine.nightJournal.drain()
+    }
+
+    /// The usual timed night ends in the app, not on the morning foreground: the duration timer's
+    /// fade-complete stop (its tick) closes the night as the timer's, and "stop after this
+    /// episode" (the episode's last clock tick) as the episode's, both clean.
+    /// Value: protects=the usual timed night is recorded as the timer's or episode's end and
+    /// counted clean; fails_when=the in-app tick or episode path passes reconciled: true or loses
+    /// the episode flag, so no timed night is ever clean; why_new=the engine test drives only
+    /// reconcileIfExpired (reconciled, never clean); seam=none; no_claim=live ticks on a locked
+    /// phone (TESTING §3U.4)
+    func testAnInAppTimerStopAndAnEpisodesEndCloseCleanNights() {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("njw-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let engine = engineWithJournal(dir)
+        // One clock for the journal and the timer: a night's id is its start to the second, and
+        // two nights in the same second would be one.
+        var clock = Date(timeIntervalSince1970: 1_800_000_000)
+        engine.nightJournal.now = { clock }
+        engine.sleepTimer.now = { clock }
+        defer { engine.noiseOn = false; engine.sleepTimer.cancelTimer() }
+
+        engine.noiseOn = true                                 // a Sleep night
+        for _ in 0..<65 { clock += 1; engine.nightJournal.liveTick() }   // a minute of sound
+        engine.sleepTimer.startSleepTimer(minutes: 0)         // deadline == now
+        clock += 30 * 60
+        Thread.sleep(forTimeInterval: 0.01)
+        engine.sleepTimer.backgroundTick()                    // the fade-complete stop, in the app
+        RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+        XCTAssertNil(engine.nightJournal.open, "the timer's stop didn't close the night")
+        XCTAssertFalse(engine.isAnythingPlaying)
+
+        clock += 2 * 3600
+        engine.noiseOn = true                                 // the next night
+        for _ in 0..<65 { clock += 1; engine.nightJournal.liveTick() }
+        engine.sleepTimer.startEndOfEpisode(remaining: 30 * 60)
+        clock += 30 * 60
+        engine.sleepTimer.externalTick(remaining: 0.3)        // the episode's last clock tick
+        XCTAssertNil(engine.nightJournal.open, "the episode's end didn't close the night")
+        XCTAssertEqual(engine.nightJournal.verdicts.map(\.endedBy), [.timer, .episodeEnd])
+        XCTAssertEqual(engine.nightJournal.verdicts.map(\.clean), [true, true])
+        engine.nightJournal.drain()
+    }
+
+    /// Focus listening is never a Sleep night: a Focus session doesn't open one, an interruption
+    /// that begins and ends in Focus (with the bed on) doesn't open one, and switching a Sleep
+    /// night into Focus closes it as the switch's.
+    /// Value: protects=Focus listening never opens or extends a Sleep night; fails_when=
+    /// sessionStarted moves out of beginSleepNight's !focusMode guard, the interruption-end guard
+    /// loses !focusMode, or focusMode's didSet stops calling switchedToFocus; why_new=the wiring
+    /// tests run only in Sleep; seam=none; no_claim=live-tick sources
+    func testFocusNeverHoldsASleepNight() {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("njw-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let engine = engineWithJournal(dir)
+        // Back in Sleep, as the other tests (and the hosted UI tests) expect the persisted mode.
+        defer { engine.noiseOn = false; engine.focusMode = false }
+
+        engine.focusMode = true
+        engine.noiseOn = true                                 // a Focus session from rest
+        XCTAssertNil(engine.nightJournal.open, "a Focus session opened a Sleep night")
+        engine.handleInterruption(note: interruption(.began))
+        engine.handleInterruption(note: interruption(.ended, shouldResume: true))
+        XCTAssertNil(engine.nightJournal.open, "an interruption's end in Focus opened a Sleep night")
+        engine.noiseOn = false
+
+        engine.focusMode = false
+        engine.noiseOn = true                                 // a Sleep night
+        XCTAssertNotNil(engine.nightJournal.open)
+        engine.focusMode = true                               // into Focus, the sound still going
+        XCTAssertNil(engine.nightJournal.open, "the switch to Focus left the Sleep night open")
+        XCTAssertEqual(engine.nightJournal.verdicts.map(\.endedBy), [.focusSwitch])
+        engine.nightJournal.drain()
+    }
+
+    func testAPodcastFailureTaintsTheOpenSleepNight() {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("njw-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let engine = engineWithJournal(dir)
+        engine.noiseOn = true
+        engine.handlePodcastFailure(episodeId: nil, at: Date())
+        XCTAssertEqual(engine.nightJournal.open?.taints, ["podcast failed"])
+        engine.noiseOn = false
+        engine.nightJournal.drain()
+    }
+
+    func testTheTerminalStopIsReportedBeforeStopAll() {
+        let svc = SleepTimerService()
+        var order: [String] = []
+        svc.onTerminalStop = { _, reconciled, _ in order.append(reconciled ? "terminal(reconciled)" : "terminal") }
+        svc.stopAllFn = { order.append("stopAll") }
+        svc.startSleepTimer(minutes: 0)                       // deadline == now
+        Thread.sleep(forTimeInterval: 0.01)
+        svc.reconcileIfExpired()
+        XCTAssertEqual(order, ["terminal(reconciled)", "stopAll"])
+        svc.cancelTimer()
+    }
+}
+
+// MARK: - The asks, the tip card, the Rate row and the feedback message (E4, DT1–DT4, R1–R5)
+
+/// SessionGuards' ask rules: the window, the waits, and what never lets an ask through.
+@MainActor
+final class AskRulesTests: XCTestCase {
+    private var calendar: Calendar = {
+        var c = Calendar(identifier: .gregorian)
+        c.timeZone = TimeZone(identifier: "UTC")!
+        return c
+    }()
+
+    private func at(_ hour: Int, _ minute: Int = 0) -> Date {
+        calendar.date(from: DateComponents(year: 2026, month: 10, day: 12, hour: hour, minute: minute))!
+    }
+
+    func testTheWindowIsNineToEightLocal() {
+        XCTAssertFalse(SessionGuards.askWindowOpen(now: at(8, 59), lastNightEnd: nil, calendar: calendar))
+        XCTAssertTrue(SessionGuards.askWindowOpen(now: at(9), lastNightEnd: nil, calendar: calendar))
+        XCTAssertTrue(SessionGuards.askWindowOpen(now: at(19, 59), lastNightEnd: nil, calendar: calendar))
+        XCTAssertFalse(SessionGuards.askWindowOpen(now: at(20), lastNightEnd: nil, calendar: calendar))
+    }
+
+    func testTheAsksWaitTwoHoursAfterTheNight() {
+        let end = at(8)
+        XCTAssertFalse(SessionGuards.askWindowOpen(now: at(9, 59), lastNightEnd: end, calendar: calendar))
+        XCTAssertTrue(SessionGuards.askWindowOpen(now: at(10), lastNightEnd: end, calendar: calendar))
+    }
+
+    private func rating(clean: Int = 3, asked: Bool = false, cardToday: Bool = false, cardShowing: Bool = false,
+                        playing: Bool = false, veil: Bool = false, hour: Int = 12) -> Bool {
+        SessionGuards.mayAskForRating(cleanNights: clean, askedThisVersion: asked, tipCardShownToday: cardToday,
+                                      tipCardShowing: cardShowing, playing: playing, veilDown: veil,
+                                      now: at(hour), lastNightEnd: nil, calendar: calendar)
+    }
+
+    func testTheRatingAskNeedsThreeCleanNightsAndADaytimeBreak() {
+        XCTAssertTrue(rating())
+        XCTAssertFalse(rating(clean: 2))
+        XCTAssertFalse(rating(asked: true))                   // once per version
+        XCTAssertFalse(rating(cardToday: true))               // never the tip card's day
+        XCTAssertFalse(rating(cardShowing: true))             // nor over the card on Home
+        XCTAssertFalse(rating(playing: true))
+        XCTAssertFalse(rating(veil: true))
+        XCTAssertFalse(rating(hour: 21))
+    }
+
+    private func card(clean: Int = 5, tipped: Bool = false, spent: Bool = false, ready: Bool = true,
+                      focus: Bool = false, playing: Bool = false, ratedToday: Bool = false, hour: Int = 12) -> Bool {
+        SessionGuards.tipCardDue(cleanNights: clean, tipped: tipped, spent: spent, productsReady: ready,
+                                 focusMode: focus, playing: playing, ratingAskedToday: ratedToday,
+                                 now: at(hour), lastNightEnd: nil, calendar: calendar)
+    }
+
+    func testTheTipCardWaitsForEverythingAndEndsOnlyOnAnAnswer() {
+        XCTAssertTrue(card())
+        XCTAssertFalse(card(clean: 4))
+        XCTAssertFalse(card(tipped: true))
+        XCTAssertFalse(card(spent: true))
+        XCTAssertFalse(card(ready: false))                    // can't offer what can't be bought
+        XCTAssertFalse(card(focus: true))                     // Sleep Home only (design D10)
+        XCTAssertFalse(card(playing: true))
+        XCTAssertFalse(card(ratedToday: true))
+        XCTAssertFalse(card(hour: 7))
+    }
+}
+
+/// The coachmark band's order: first-run, the night-ring note, then the tip card; never in Focus,
+/// and the tip card never over a playing session.
+@MainActor
+final class CoachmarkTipCardTests: XCTestCase {
+    func testTheTipCardComesAfterTheOtherTipsAndOnlyAtRest() {
+        XCTAssertEqual(CoachmarkContent.current(focusMode: false, hasCompletedFirstRun: false,
+                                                hasSeenNightRingTip: false, tipCardDue: true), .firstRun)
+        XCTAssertEqual(CoachmarkContent.current(focusMode: false, hasCompletedFirstRun: true,
+                                                hasSeenNightRingTip: false, tipCardDue: true), .nightRing)
+        XCTAssertEqual(CoachmarkContent.current(focusMode: false, hasCompletedFirstRun: true,
+                                                hasSeenNightRingTip: true, tipCardDue: true), .tip)
+        XCTAssertNil(CoachmarkContent.current(focusMode: false, hasCompletedFirstRun: true,
+                                              hasSeenNightRingTip: true, tipCardDue: true, sessionActive: true))
+        XCTAssertNil(CoachmarkContent.current(focusMode: true, hasCompletedFirstRun: true,
+                                              hasSeenNightRingTip: true, tipCardDue: true))
+        XCTAssertNil(CoachmarkContent.current(focusMode: false, hasCompletedFirstRun: true,
+                                              hasSeenNightRingTip: true, tipCardDue: false))
+    }
+}
+
+/// The Rate row shows only where it works (design D8).
+@MainActor
+final class RateRowRuleTests: XCTestCase {
+    func testOnlyWithAnAppStoreIDOnAnAppStoreBuild() {
+        XCTAssertFalse(RateRowRule.visible(appStoreID: nil, environment: .production))
+        XCTAssertFalse(RateRowRule.visible(appStoreID: "", environment: .production))
+        XCTAssertFalse(RateRowRule.visible(appStoreID: "123", environment: .other))   // Xcode, TestFlight
+        XCTAssertTrue(RateRowRule.visible(appStoreID: "123", environment: .production))
+        XCTAssertEqual(RateRowRule.writeReviewURL(appStoreID: "123")?.absoluteString,
+                       "https://apps.apple.com/app/id123?action=write-review")
+    }
+}
+
+/// The feedback message says what's attached and where it goes, in plain words (design D9).
+@MainActor
+final class FeedbackMessageTests: XCTestCase {
+    func testTheBodyListsWhatsAttachedWithoutLinks() {
+        let body = FeedbackMessage.body(nightSummary: "Last 2 nights: 1 clean.", nightFiles: 2,
+                                        reportsSince: Date(timeIntervalSince1970: 1_800_000_000),
+                                        version: "1.0", build: "7", iOS: "26.3", device: "iPhone")
+        XCTAssertTrue(body.contains("Attached: the last 2 nights' playback events (no web addresses) and iOS reports since"))
+        XCTAssertTrue(body.contains("Last 2 nights: 1 clean."))
+        XCTAssertTrue(body.contains("Sleepulator 1.0 (7) · iOS 26.3 · iPhone"))
+        XCTAssertFalse(body.contains("://"))
+        XCTAssertTrue(body.hasPrefix("\n"))                    // room for the person's own words first
+    }
+
+    func testNothingAttachedYet() {
+        let body = FeedbackMessage.body(nightSummary: "No night recorded yet.", nightFiles: 0, reportsSince: nil,
+                                        version: "1.0", build: "1", iOS: "26", device: "iPhone")
+        XCTAssertTrue(body.contains("Attached: nothing yet."))
+        XCTAssertTrue(body.contains("No night recorded yet."))
+    }
+
+    func testTheShareTextCarriesTheAddress() {
+        XCTAssertTrue(FeedbackMessage.shareText(address: "help@example.com", body: "x").hasPrefix("Please send this to help@example.com"))
+        XCTAssertEqual(FeedbackMessage.shareText(address: nil, body: "x"), "x")
+    }
+}
