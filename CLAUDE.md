@@ -61,10 +61,13 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   rating prompt, so a dev simulator's own nights can't reach a run, nor the run's reach them. `NightVeilUITests` drops the
   veil on an untimed night (shortened to 15 s by the Debug-only `-veilDelaySeconds` launch
   argument, `SessionGuards.veilDelay`; the real minute made it the slowest test), glances, wakes,
-  and checks Focus's readout; it passes settings as launch
+  and checks Focus's readout. Its glance holds 40 s (Debug-only `-veilGlanceSeconds`,
+  `SessionGuards.glanceHold(override:)`; a unit test pins the real 6 s + 2 s): on CI one slow
+  accessibility query, or XCUITest waiting out a system banner inside a tap, pushed the wake tap
+  past the real 8 s, where it's a fresh glance. It passes settings as launch
   arguments (plist literals, the argument domain) so persisted mode and night length stay put.
   CI's simulators are slow and sometimes drop a synthesized tap, so a tap that matters checks its
-  effect and goes round again (the noise switch, Focus's Stop, `pauseAudio`, the veil's first tap,
+  effect and goes round again (the noise switch, the Focus mode switch, Focus's Stop, `pauseAudio`, the veil's first tap,
   whose glance is read off a screenshot since it's hidden from accessibility), and a test lets an
   overlay finish fading in before tapping it (a tap on the veil as it arrives doesn't reach it).
   They launch with Moving scenes off (`-ambientMotion <false/>`): an app redrawing every frame
@@ -82,13 +85,18 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   `ShowNotesEdgeTests`, `TonightShelfTests`, `QueueMoveToHeadTests`), the player rules
   (`NowPlayingStateTests`, `NightLineCopyTests`, `PlayerQueueActionTests`,
   `PodcastFailureStreakTests`), Settings' rules (`SettingsRulesTests`) and a restore's engine
-  reload (`RestoreReloadTests`), the real-AVPlayer suites (`PodcastPlayerRebuildTests`,
+  reload (`RestoreReloadTests`; its queue, mixes and places tests keep their own temp-dir stores,
+  `PodcastQueueManager(storage:)`, `AudioEngine(storage:)`, `PodcastPlayer(storage:)`: every
+  earlier test's objects write the shared files from their own queues, which
+  `StorageManager.flush()` doesn't drain, and one queue write landed a test late), the real-AVPlayer suites (`PodcastPlayerRebuildTests`,
   `PodcastLoadHoldTests`, `PodcastItemEndTests`), the night journal and the asks (`NightRulesTests`,
   `NightJournalTests`, `NightJournalWiringTests`, `AskRulesTests`, `CoachmarkTipCardTests`,
   `RateRowRuleTests`, `FeedbackMessageTests`), and more);
   `PersistenceTests.swift` (`PersistenceMigrator` / `MixStore`); `BackupRoundTripTests.swift`
   (export, read, restore and Undo, the `Backup.kinds` checks, a restore never switching mode;
-  `BackupControllerTests` for the Backup page's controller);
+  `BackupControllerTests` for the Backup page's controller, which await the Task each controller
+  call returns: the hosted app's first render can hold the main actor 10 s or more mid-test, and
+  a 5 s poll ran out under it);
   `FocusDriversTests.swift`; `GenerativeAudioEngineTests.swift` (`GenerativeMediaResetTests`);
   `TipStoreTests.swift` (`TipFlowTests`, pure; `TipStoreTests`, StoreKitTest against
   `Tips.storekit`). On iOS 26 simulators a command-line run (xcodebuild, CI) hits an Apple bug,
