@@ -3800,18 +3800,17 @@ final class RestoreReloadTests: XCTestCase {
         XCTAssertTrue(presets.contains { $0.name == name }, "the deferred write landed before flushPendingWrites returned")
     }
 
-    // Value: protects=a queue.json today's types can't decode survives the reload after a restore or Undo, as at launch; fails_when=reloadFromDisk assigns [] through the persisting didSet; why_new=the reload saved [] over the queue an Undo had just put back; seam=none; no_claim=LibraryView's matching reload (view state)
+    // Value: protects=a queue.json today's types can't decode survives the reload after a restore or Undo, as at launch; fails_when=reloadFromDisk assigns [] through the persisting didSet; why_new=the reload saved [] over the queue an Undo had just put back; seam=a temp-dir store (PodcastQueueManager(storage:)); no_claim=LibraryView's matching reload (view state)
     func testAQueueReloadLeavesAnUndecodableQueueOnDisk() throws {
-        let storage = StorageManager.shared
-        storage.flush()
-        let before = storage.rawData(for: "queue.json")
-        defer {
-            if let before { try? storage.writeRawNow(before, to: "queue.json") } else { storage.delete(filename: "queue.json") }
-            storage.flush()
-        }
+        // Its own store, not the shared queue.json: every PodcastQueueManager the earlier tests
+        // made writes there from its own queue, and on CI QueueMoveToHeadTests' last write
+        // ([d, c, a, b], 209 bytes) landed inside this test, after the drift.
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("test.sleepulator.\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let storage = StorageManager(directory: dir)
         let drift = Data(#"[{"fromAnOlderBuild":true}]"#.utf8)
         try storage.writeRawNow(drift, to: "queue.json")
-        let manager = PodcastQueueManager()
+        let manager = PodcastQueueManager(storage: storage)
         manager.reloadFromDisk()
         manager.flushPendingWrites()
         storage.flush()
