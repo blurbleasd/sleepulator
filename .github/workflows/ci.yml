@@ -111,7 +111,12 @@ jobs:
       # runner. The AudioEngine-owning suites used to be excluded as "crash on a headless CI
       # simulator"; the real cause was the isolated-deinit runtime bug, fixed in PR #18. None of
       # this exercises real audio: the on-device gate in CLAUDE.md still applies.
+      # TEST_RUNNER_SLEEPULATOR_CI reaches the tests as SLEEPULATOR_CI: TipStoreTests (StoreKitTest)
+      # skip on CI, visibly. Most runs load no products anyway (Apple's SKTestSession Code=3 bug),
+      # and on the simulator that did load them (2026-10-13) purchases took up to 121 s and flaked.
       - name: Test
+        env:
+          TEST_RUNNER_SLEEPULATOR_CI: "1"
         run: |
           set -o pipefail
           DESTINATIONS=(-destination "id=${{ steps.sim.outputs.guard }}")

@@ -173,6 +173,17 @@ extension SessionGuards {
         return askWindowOpen(now: now, lastNightEnd: lastNightEnd, calendar: calendar)
     }
 
+    /// Whether the tip card is on screen: Home is the tab, and its coachmark band shows the card
+    /// (`CoachmarkContent.current`, the rule Home renders by), not the first-run card or the
+    /// night-ring note ahead of it. A due card waiting behind those, or on another tab, isn't
+    /// showing, so it never holds the rating back.
+    static func tipCardShowing(onHomeTab: Bool, focusMode: Bool, hasCompletedFirstRun: Bool,
+                               hasSeenNightRingTip: Bool, tipCardDue: Bool, sessionActive: Bool) -> Bool {
+        onHomeTab && CoachmarkContent.current(focusMode: focusMode, hasCompletedFirstRun: hasCompletedFirstRun,
+                                              hasSeenNightRingTip: hasSeenNightRingTip, tipCardDue: tipCardDue,
+                                              sessionActive: sessionActive) == .tip
+    }
+
     /// Whether the tip card is due on Sleep Home. It waits (never lapses) while anything plays,
     /// outside the window, on a day the rating prompt was asked, until the tips can be bought,
     /// and in Focus (design D10). It ends only on an answer (`spent`, design D6) or a tip.

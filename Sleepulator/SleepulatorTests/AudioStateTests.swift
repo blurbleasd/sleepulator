@@ -2226,8 +2226,9 @@ final class UntimedNightTests: XCTestCase {
         timer.startSleepTimer(minutes: 0)                         // the deadline is now…
         timer.timerTotal = 30 * 60                                // …of a 30-min night
         Thread.sleep(forTimeInterval: 0.01)
-        timer.backgroundTick()                                    // fade complete → the tail
-        RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+        // Fade complete → the tail. The tick's main-queue half, called directly: a fixed run-loop
+        // pump for backgroundTick's hop to main wasn't always long enough on CI's slow simulators.
+        timer.handleTick(at: Date())
         XCTAssertTrue(timer.inTail)
         XCTAssertEqual(timer.nightProgress, 1, accuracy: 1e-6, "the scene held, not dropped by tail / (total + tail)")
     }
@@ -2248,8 +2249,9 @@ final class UntimedNightTests: XCTestCase {
             Thread.sleep(forTimeInterval: 0.01)
             now = t0 + 30 * 60
             if path == "tick" {
-                e.sleepTimer.backgroundTick()                     // the duration timer's fade-complete stop
-                RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+                // The duration timer's fade-complete stop: the tick's main-queue half, called
+                // directly (a fixed pump for backgroundTick's hop lost the race on a slow CI sim).
+                e.sleepTimer.handleTick(at: Date())
             } else {
                 e.sleepTimer.reconcileIfExpired()                 // a deadline passed while suspended
             }
@@ -4276,22 +4278,50 @@ final class NightJournalTests: XCTestCase {
     }
 
     /// The first tick after a morning Play finds last night's deadline long past. When the Play
-    /// opened a new night (the pause outlasted the window), the stop ends that night where it
-    /// opened, never before it.
-    func testAnOverdueStopNeverEndsANightBeforeItOpened() {
+    /// opened a new night (the pause outlasted the window), that night never played: it's
+    /// discarded, so it neither counts as a night nor pushes last night's file out of the two
+    /// "Send feedback" keeps when Play is pressed again.
+    func testAnOverdueStopDiscardsTheNightAMorningPlayOpened() throws {
         let j = journal()
         j.sessionStarted()
         play(j, seconds: 600)
         j.sessionStopped()                                    // 23:10, then the app is suspended
+        let lastNight = try XCTUnwrap(j.open?.id)
         let deadline = clock + 35 * 60                        // the timer's deadline, 23:45
         clock += 8 * 3600                                     // a lock-screen Play at 07:10
         j.sessionStarted()                                    // last night closes, a new one opens
-        let opened = clock
+        let phantom = try XCTUnwrap(j.open?.id)
         j.timerStopped(episode: false, reconciled: true, endedAt: deadline)
-        XCTAssertEqual(j.verdicts.count, 2)
-        XCTAssertTrue(j.verdicts.allSatisfy { $0.end >= $0.start }, "\(j.verdicts)")
-        XCTAssertEqual(j.verdicts.last?.end, opened)
-        XCTAssertEqual(j.verdicts.last?.clean, false)
+        XCTAssertNil(j.open)
+        XCTAssertEqual(j.verdicts.map(\.id), [lastNight])
+        XCTAssertEqual(j.verdicts.first?.endedBy, .person)
+        clock += 3
+        j.sessionStarted()                                    // the sound stopped: Play again
+        j.drain()
+        let kept = j.nightFiles().map { $0.deletingPathExtension().lastPathComponent }
+        XCTAssertTrue(kept.contains(lastNight), "last night's file was pruned: \(kept)")
+        XCTAssertFalse(kept.contains(phantom))
+    }
+
+    /// An alarm's interruption and the player's death it causes reach main in either order: the
+    /// pause takes the interruption's own time, and a dead player stamped a moment before it is
+    /// still the pause's. A failed episode just before a pause still spoils the night.
+    func testAPlayerDeathStampedJustBeforeAnInterruptionsPauseIsANote() {
+        let j = journal()
+        j.sessionStarted()
+        play(j, seconds: 120)
+        let interrupted = clock
+        let died = clock - 0.5                                // stamped off main, before the pause
+        clock += 0.3                                          // the interruption's hop lands
+        j.sessionStopped(at: interrupted)
+        XCTAssertEqual(j.open?.pausedAt, interrupted)
+        j.taint(NightRules.pipelineDied + " (item failed)", at: died)
+        XCTAssertEqual(j.open?.taints, [])
+        XCTAssertTrue(fileText(j).contains("item failed) while paused"))
+        j.taint("podcast failed", at: died)
+        XCTAssertEqual(j.open?.taints, ["podcast failed"])
+        j.taint(NightRules.playerRebuilt, at: interrupted - NightRules.newsLead - 1)   // too early
+        XCTAssertEqual(j.open?.taints, ["podcast failed", NightRules.playerRebuilt])
     }
 
     /// A paused night recovered at launch inside its window still ends where it paused once the
@@ -4533,6 +4563,7 @@ final class NightJournalWiringTests: XCTestCase {
         let dir = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("njw-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: dir) }
         let engine = engineWithJournal(dir)
+        engine.restartBedAfterInterruption = { true }         // not the simulator's audio
         engine.noiseOn = true
         let id = engine.nightJournal.open?.id
         engine.handleInterruption(note: interruption(.began))
@@ -4541,6 +4572,40 @@ final class NightJournalWiringTests: XCTestCase {
         XCTAssertEqual(engine.nightJournal.open?.id, id)
         XCTAssertNil(engine.nightJournal.open?.pausedAt)
         engine.noiseOn = false
+        engine.nightJournal.drain()
+    }
+
+    /// The night's pause takes the interruption's own time, stamped before the hop to main.
+    func testAnInterruptionPausesTheNightAtItsOwnTime() {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("njw-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let engine = engineWithJournal(dir)
+        var clock = Date(timeIntervalSince1970: 1_800_000_000)
+        engine.nightJournal.now = { clock }
+        defer { engine.noiseOn = false }
+        engine.noiseOn = true
+        clock += 60
+        let reached = clock - 0.4                             // it reached the app before the hop
+        engine.handleInterruption(note: interruption(.began), at: reached)
+        XCTAssertEqual(engine.nightJournal.open?.pausedAt, reached)
+        engine.nightJournal.drain()
+    }
+
+    /// A bed that fails to restart after the interruption leaves the night paused: nothing plays.
+    func testAFailedRestartAfterAnInterruptionLeavesTheNightPaused() {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("njw-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let engine = engineWithJournal(dir)
+        defer { engine.noiseOn = false }
+        engine.noiseOn = true
+        engine.handleInterruption(note: interruption(.began))
+        engine.restartBedAfterInterruption = { false }
+        engine.handleInterruption(note: interruption(.ended, shouldResume: true))
+        XCTAssertNotNil(engine.nightJournal.open?.pausedAt, "the night resumed over a bed that didn't restart")
+        engine.restartBedAfterInterruption = { true }
+        engine.handleInterruption(note: interruption(.began))
+        engine.handleInterruption(note: interruption(.ended, shouldResume: true))
+        XCTAssertNil(engine.nightJournal.open?.pausedAt)
         engine.nightJournal.drain()
     }
 
@@ -4612,8 +4677,9 @@ final class NightJournalWiringTests: XCTestCase {
         engine.sleepTimer.startSleepTimer(minutes: 0)         // deadline == now
         clock += 30 * 60
         Thread.sleep(forTimeInterval: 0.01)
-        engine.sleepTimer.backgroundTick()                    // the fade-complete stop, in the app
-        RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+        // The fade-complete stop, in the app: the tick's main-queue half, called directly (a fixed
+        // pump for backgroundTick's hop to main lost the race on a slow CI simulator).
+        engine.sleepTimer.handleTick(at: Date())
         XCTAssertNil(engine.nightJournal.open, "the timer's stop didn't close the night")
         XCTAssertFalse(engine.isAnythingPlaying)
 
@@ -4728,6 +4794,23 @@ final class AskRulesTests: XCTestCase {
         XCTAssertFalse(rating(playing: true))
         XCTAssertFalse(rating(veil: true))
         XCTAssertFalse(rating(hour: 21))
+    }
+
+    /// The rating waits on the card only while Home really shows it: the Home tab, and the card
+    /// ahead in the coachmark band (not behind the first-run card or the night-ring note).
+    func testTheTipCardIsShowingOnlyWhereHomeRendersIt() {
+        func showing(home: Bool = true, focus: Bool = false, firstRun: Bool = true, ringSeen: Bool = true,
+                     due: Bool = true, active: Bool = false) -> Bool {
+            SessionGuards.tipCardShowing(onHomeTab: home, focusMode: focus, hasCompletedFirstRun: firstRun,
+                                         hasSeenNightRingTip: ringSeen, tipCardDue: due, sessionActive: active)
+        }
+        XCTAssertTrue(showing())
+        XCTAssertFalse(showing(home: false))                  // due, but on Podcasts or Settings
+        XCTAssertFalse(showing(firstRun: false))              // behind the first-run card
+        XCTAssertFalse(showing(ringSeen: false))              // behind the night-ring note
+        XCTAssertFalse(showing(due: false))
+        XCTAssertFalse(showing(focus: true))
+        XCTAssertFalse(showing(active: true))
     }
 
     private func card(clean: Int = 5, tipped: Bool = false, spent: Bool = false, ready: Bool = true,

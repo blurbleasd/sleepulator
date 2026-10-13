@@ -93,9 +93,11 @@ nonisolated enum NightRules {
     static func isPauseAftermath(_ kind: String) -> Bool {
         kind == playerRebuilt || kind.hasPrefix(pipelineDied)
     }
-    /// News stamped this soon before a night opened is that night's: the noise engine's start
-    /// error is stamped as the switch flips, just before the session edge opens the night.
-    static let newsBeforeOpen: TimeInterval = 2
+    /// News is stamped where it happens and filed on main after a hop, so it can trail the edge
+    /// it belongs to by this much: the noise engine's start error is stamped as the switch flips,
+    /// just before the session edge opens the night; a player's death is stamped off main, a
+    /// moment before the Play that resumes the night or the interruption that pauses it.
+    static let newsLead: TimeInterval = 2
     /// A checkpoint line every this much live audio, so a death keeps most of the count.
     static let checkpointEvery: TimeInterval = 5 * 60
     /// A tick further apart than this from the last one isn't live time (the app was suspended,
@@ -301,9 +303,10 @@ final class NightJournal {
     }
 
     /// The Sleep session's sound stopped (a pause, a call, headphones out, the timer's own stop).
-    func sessionStopped() {
+    /// `at` is when it stopped, if known before the hop to main (an interruption's own time).
+    func sessionStopped(at: Date? = nil) {
         guard var night = open, night.pausedAt == nil else { return }
-        let t = now()
+        let t = max(at ?? now(), night.start)
         night.pausedAt = t
         open = night
         lastTick = nil
@@ -335,13 +338,16 @@ final class NightJournal {
     /// The sleep timer's terminal stop, reported before it stops everything. Counts as the
     /// timer's end only while playing; a stop over a pause ends the night where it paused. A
     /// deadline from before this night opened (last night's, found by the first tick after a
-    /// morning Play) ends it where it opened, never before.
+    /// morning Play that opened a new night) discards this one: it never played, and recording
+    /// it would count a zero-length night and push last night's file out of the two kept.
     func timerStopped(episode: Bool, reconciled: Bool, endedAt: Date) {
         guard let night = open else { return }
         if let pausedAt = night.pausedAt {
             close(.person, at: pausedAt)
+        } else if endedAt < night.start {
+            discardOpenNight()
         } else {
-            close(episode ? .episodeEnd : .timer, at: max(endedAt, night.start), reconciled: reconciled)
+            close(episode ? .episodeEnd : .timer, at: endedAt, reconciled: reconciled)
         }
     }
 
@@ -370,18 +376,21 @@ final class NightJournal {
     func taint(_ kind: String, at: Date) {
         let kind = NightRules.scrub(kind)
         closeLapsedPause()
-        if let night = open, let pausedAt = night.pausedAt, at >= pausedAt {
+        // A dead or rebuilt player stamped a moment before the pause is the pause's own (an
+        // alarm's interruption and the player's death it causes can reach main in either order).
+        if let night = open, let pausedAt = night.pausedAt,
+           at >= pausedAt || (NightRules.isPauseAftermath(kind) && at >= pausedAt.addingTimeInterval(-NightRules.newsLead)) {
             write(NightEvent(at: at, kind: "note", detail: kind + " while paused"))
             return
         }
         // From a moment before, as the player's news is stamped off main and can trail the edge.
         if open != nil, NightRules.isPauseAftermath(kind), let soundStartedAt,
-           at >= soundStartedAt.addingTimeInterval(-NightRules.newsBeforeOpen),
+           at >= soundStartedAt.addingTimeInterval(-NightRules.newsLead),
            at.timeIntervalSince(soundStartedAt) <= NightRules.graceAfterResume {
             write(NightEvent(at: at, kind: "note", detail: kind + " just after the sound started"))
             return
         }
-        if var night = open, at >= night.start.addingTimeInterval(-NightRules.newsBeforeOpen) {
+        if var night = open, at >= night.start.addingTimeInterval(-NightRules.newsLead) {
             night.taints.append(kind)
             open = night
             write(NightEvent(at: at, kind: "taint", detail: kind), essential: true)
@@ -448,6 +457,19 @@ final class NightJournal {
         // The terminate path: the verdict must land before the process goes, or the night is
         // closed on disk with no verdict (recovery then rebuilds it from the file).
         if flush { storage.flush() }
+    }
+
+    /// Drop the open night with no verdict, and its file.
+    private func discardOpenNight() {
+        guard let night = open else { return }
+        open = nil
+        lastTick = nil
+        soundStartedAt = nil
+        let url = directory.appendingPathComponent(night.id).appendingPathExtension("jsonl")
+        // Synchronously, after its queued lines: the next night's prune must not see it and keep
+        // it over last night's file.
+        fileQueue.sync { try? FileManager.default.removeItem(at: url) }
+        Log.storage.info("night journal: discarded a night a stale deadline ended as it opened")
     }
 
     /// Keep one verdict per night (a recovery can meet a night already recorded), the newest 30.

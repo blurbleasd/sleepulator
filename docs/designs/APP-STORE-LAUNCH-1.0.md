@@ -1961,6 +1961,13 @@ Calls made during the build, for the record:
   unanswered card everywhere (D11): it waits only on the card's day or while it's due with Sleep
   Home on screen (`SessionGuards.mayAskForRating`'s `tipCardShowing`). The night boundary is
   wall-clock noon, so daylight saving doesn't move it. /ship's three-round cap was reached here.
+- **Pass-4 follow-ups (2026-10-13, branch `claude/night-record-followups`).** The four left open in
+  PR #37: the rating waits on the card only while Home renders it (`SessionGuards.tipCardShowing`,
+  through `CoachmarkContent.current`, so a card behind the first-run card or the night-ring note
+  doesn't count); a stale deadline that ends a night a morning Play just opened discards that
+  night instead of recording a zero-length one; an interruption's pause takes its own time and a
+  dead player stamped up to 2 s before it is a note (`NightRules.newsLead`); `.ended` carries the
+  night on only when the bed really restarted or a podcast resumes over it.
 - **Pre-landing review (2026-10-12)** fixed: a stale read that hid a due tip card after products
   loaded; a paused night now ends once its 30 minutes pass and news during a pause (an alarm's
   pipeline death) is a note, not a taint, and an interruption pauses the night (user D2); a

@@ -675,12 +675,15 @@ final class GenerativeAudioEngine {
         }
     }
 
-    func handleInterruption(shouldResume: Bool) {
+    /// Pause for an interruption, or start again after it. Returns whether the engine renders
+    /// again after a resume (a failed start has already reported through `onEngineError`).
+    @discardableResult
+    func handleInterruption(shouldResume: Bool) -> Bool {
         if shouldResume {
             Log.activateAudioSession("interruption")
-            startEngineSafely("interruption")
-        } else {
-            engine.pause()
+            return startEngineSafely("interruption")
         }
+        engine.pause()
+        return false
     }
 }
