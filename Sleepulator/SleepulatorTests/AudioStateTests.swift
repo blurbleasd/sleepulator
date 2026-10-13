@@ -719,15 +719,22 @@ final class SleepTimerBackstopTests: XCTestCase {
     /// first tick after Play: stopped as the morning foreground would, reconciled and ended at the
     /// deadline, so it never counts as a clean night. One reached while playing isn't.
     func testATickThatFindsTheDeadlineLongPastStopsItAsReconciled() {
-        for (late, reconciled) in [(1.0, false), (SleepTimerService.overdueAfter + 25, true)] {
+        for (late, reconciled, tail) in [(1.0, false, false), (SleepTimerService.overdueAfter + 25, true, false),
+                                         (SleepTimerService.overdueAfter + 25, true, true)] {
             let svc = SleepTimerService()
             svc.backstop = SpyBackstop()
+            // A tail set and eligible (a call's end brought back the bed and the podcast): an
+            // overdue deadline still stops at once, as the morning foreground's does.
+            svc.ambientTailFn = { tail ? 15 * 60 : 0 }
+            svc.tailEligibleFn = { tail }
+            svc.stopPodcastFn = { }
             var stops: [(reconciled: Bool, endedAt: Date)] = []
             svc.onTerminalStop = { _, r, at in stops.append((r, at)) }
             svc.startSleepTimer(minutes: 1)
             let deadline = Date().addingTimeInterval(60)
             svc.handleTick(at: deadline.addingTimeInterval(late))
-            XCTAssertEqual(stops.map(\.reconciled), [reconciled], "\(late) s late")
+            XCTAssertEqual(stops.map(\.reconciled), [reconciled], "\(late) s late, tail \(tail)")
+            XCTAssertFalse(svc.inTail, "an overdue deadline began the ambient tail")
             if reconciled {
                 XCTAssertEqual(stops.first?.endedAt.timeIntervalSince(deadline) ?? 99, 0, accuracy: 2,
                                "the night ended at the deadline, not at the Play")
@@ -3909,6 +3916,18 @@ final class NightRulesTests: XCTestCase {
         XCTAssertEqual(NightRules.cleanNightCount([], calendar: utc), 0)
     }
 
+    /// Noon is the wall clock's, so a daylight-saving day doesn't move it: in New York on
+    /// 2026-03-08 (clocks forward), a 12:30 nap is the next night's, not the one before.
+    func testTheNightBoundaryIsWallClockNoonAcrossDaylightSaving() {
+        var ny = Calendar(identifier: .gregorian)
+        ny.timeZone = TimeZone(identifier: "America/New_York")!
+        let starts = [DateComponents(year: 2026, month: 3, day: 7, hour: 23),
+                      DateComponents(year: 2026, month: 3, day: 8, hour: 12, minute: 30)].map { ny.date(from: $0)! }
+        let verdicts = starts.map { NightVerdict(id: "\($0)", start: $0, end: $0 + 3600, live: 3600, clean: true,
+                                                 endedBy: .timer, taints: []) }
+        XCTAssertEqual(NightRules.cleanNightCount(verdicts, calendar: ny), 2)
+    }
+
     func testAllNightNeedsThreeHoursOfLiveAudio() {
         XCTAssertFalse(NightRules.isClean(night(.person, live: NightRules.allNightThreshold - 1)))
         XCTAssertTrue(NightRules.isClean(night(.person, live: NightRules.allNightThreshold)))
@@ -4180,7 +4199,7 @@ final class NightJournalTests: XCTestCase {
         clock += NightRules.graceAfterResume + 1
         j.taint("pipeline died (item failed)", at: clock)     // a real failure, later
         XCTAssertEqual(j.open?.taints, ["pipeline died (item failed)"])
-        XCTAssertTrue(fileText(j).contains("player rebuilt after resuming"))
+        XCTAssertTrue(fileText(j).contains("player rebuilt just after the sound started"))
     }
 
     /// The resume grace has to outlast the watchdog that finds a player the pause killed, or the
@@ -4212,7 +4231,7 @@ final class NightJournalTests: XCTestCase {
         clock += 4
         j.taint("player rebuilt", at: clock)
         XCTAssertEqual(j.open?.taints, [])
-        XCTAssertTrue(fileText(j).contains("player rebuilt after resuming"))
+        XCTAssertTrue(fileText(j).contains("player rebuilt just after the sound started"))
     }
 
     /// The noise engine's start error is stamped as the switch flips, a moment before the session
@@ -4227,42 +4246,52 @@ final class NightJournalTests: XCTestCase {
         XCTAssertTrue(j.verdicts.isEmpty)
     }
 
-    /// iOS doesn't always send an interruption's end (another app's audio): when the bed renders
-    /// again for `soundBackAfter` without a break, the night carries on. The last callbacks
-    /// queued before the pause, a moment's worth, don't.
-    func testSoundBackAfterAnInterruptionCarriesTheNightOn() {
-        let j = journal()
-        j.sessionStarted()
-        let id = j.open?.id
-        play(j, seconds: 120)
-        j.sessionInterrupted()
-        clock += 0.05; j.liveTick()                           // the pause's trailing callbacks
-        clock += 0.05; j.liveTick()
-        clock += 0.05; j.liveTick()
-        XCTAssertNotNil(j.open?.pausedAt, "a pause's last callbacks carried the night on")
-        clock += 600                                          // the other app's audio, then ours again
-        play(j, seconds: Int(NightRules.soundBackAfter))
-        XCTAssertNotNil(j.open?.pausedAt, "carried on before soundBackAfter of sound")
-        play(j, seconds: 1)
-        XCTAssertNil(j.open?.pausedAt)
-        XCTAssertEqual(j.open?.id, id)
-        let live = j.open?.live ?? 0
-        play(j, seconds: 11)
-        XCTAssertEqual(j.open?.live ?? 0, live + 10, accuracy: 0.001)   // counting again
-        XCTAssertTrue(fileText(j).contains("sound back with no interruption end"))
-    }
-
-    /// Only an interruption's pause is carried on by sound: a person's pause stays a pause, and
-    /// an interruption over a night already paused doesn't make it one.
-    func testTicksNeverCarryOnAPersonsPause() {
+    /// Only a session edge ends a pause: ticks (a fading bed, a podcast scrubbed while paused)
+    /// never resume a night nor count while it's paused.
+    func testTicksNeverCarryOnAPause() {
         let j = journal()
         j.sessionStarted()
         play(j, seconds: 120)
         j.sessionStopped()
-        j.sessionInterrupted()                                // a call during the person's pause
+        let live = j.open?.live ?? -1
         clock += 60
         play(j, seconds: 10)
         XCTAssertNotNil(j.open?.pausedAt)
+        XCTAssertEqual(j.open?.live ?? 0, live, accuracy: 0.001)
+    }
+
+    /// A player's death stamped off main a moment before the Play's edge lands after it: it's the
+    /// pause's aftermath, a note, like the same news a moment after.
+    func testAPipelineDeathStampedJustBeforeThePlayIsANote() {
+        let j = journal()
+        j.sessionStarted()
+        play(j, seconds: 120)
+        j.sessionStopped()
+        clock += 600
+        let died = clock
+        clock += 1
+        j.sessionStarted()                                    // the Play's edge
+        j.taint(NightRules.pipelineDied + " (item failed)", at: died)   // the hop lands now
+        XCTAssertEqual(j.open?.taints, [])
+    }
+
+    /// The first tick after a morning Play finds last night's deadline long past. When the Play
+    /// opened a new night (the pause outlasted the window), the stop ends that night where it
+    /// opened, never before it.
+    func testAnOverdueStopNeverEndsANightBeforeItOpened() {
+        let j = journal()
+        j.sessionStarted()
+        play(j, seconds: 600)
+        j.sessionStopped()                                    // 23:10, then the app is suspended
+        let deadline = clock + 35 * 60                        // the timer's deadline, 23:45
+        clock += 8 * 3600                                     // a lock-screen Play at 07:10
+        j.sessionStarted()                                    // last night closes, a new one opens
+        let opened = clock
+        j.timerStopped(episode: false, reconciled: true, endedAt: deadline)
+        XCTAssertEqual(j.verdicts.count, 2)
+        XCTAssertTrue(j.verdicts.allSatisfy { $0.end >= $0.start }, "\(j.verdicts)")
+        XCTAssertEqual(j.verdicts.last?.end, opened)
+        XCTAssertEqual(j.verdicts.last?.clean, false)
     }
 
     /// A paused night recovered at launch inside its window still ends where it paused once the
@@ -4530,26 +4559,6 @@ final class NightJournalWiringTests: XCTestCase {
         engine.nightJournal.drain()
     }
 
-    /// The engine pauses the night as an interruption's, so the bed rendering again carries it on
-    /// when iOS never sends `.ended`.
-    func testSoundBackWithNoInterruptionEndCarriesTheNightOn() {
-        let dir = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("njw-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at: dir) }
-        let engine = engineWithJournal(dir)
-        var clock = Date(timeIntervalSince1970: 1_800_000_000)
-        engine.nightJournal.now = { clock }
-        defer { engine.noiseOn = false }
-        engine.noiseOn = true
-        let id = engine.nightJournal.open?.id
-        engine.handleInterruption(note: interruption(.began))
-        XCTAssertNotNil(engine.nightJournal.open?.pausedAt)
-        clock += 600
-        for _ in 0...Int(NightRules.soundBackAfter) { clock += 1; engine.nightJournal.liveTick() }
-        XCTAssertNil(engine.nightJournal.open?.pausedAt, "the bed came back and the night stayed paused")
-        XCTAssertEqual(engine.nightJournal.open?.id, id)
-        engine.nightJournal.drain()
-    }
-
     /// Switching Focus → Sleep with the sound still on starts the night like Play (CLAUDE.md).
     func testFocusToSleepWithTheSoundOnOpensANight() {
         let dir = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("njw-\(UUID().uuidString)")
@@ -4703,11 +4712,11 @@ final class AskRulesTests: XCTestCase {
         XCTAssertTrue(SessionGuards.askWindowOpen(now: at(10), lastNightEnd: end, calendar: calendar))
     }
 
-    private func rating(clean: Int = 3, asked: Bool = false, cardToday: Bool = false, playing: Bool = false,
-                        veil: Bool = false, hour: Int = 12) -> Bool {
+    private func rating(clean: Int = 3, asked: Bool = false, cardToday: Bool = false, cardShowing: Bool = false,
+                        playing: Bool = false, veil: Bool = false, hour: Int = 12) -> Bool {
         SessionGuards.mayAskForRating(cleanNights: clean, askedThisVersion: asked, tipCardShownToday: cardToday,
-                                      playing: playing, veilDown: veil, now: at(hour), lastNightEnd: nil,
-                                      calendar: calendar)
+                                      tipCardShowing: cardShowing, playing: playing, veilDown: veil,
+                                      now: at(hour), lastNightEnd: nil, calendar: calendar)
     }
 
     func testTheRatingAskNeedsThreeCleanNightsAndADaytimeBreak() {
@@ -4715,6 +4724,7 @@ final class AskRulesTests: XCTestCase {
         XCTAssertFalse(rating(clean: 2))
         XCTAssertFalse(rating(asked: true))                   // once per version
         XCTAssertFalse(rating(cardToday: true))               // never the tip card's day
+        XCTAssertFalse(rating(cardShowing: true))             // nor over the card on Home
         XCTAssertFalse(rating(playing: true))
         XCTAssertFalse(rating(veil: true))
         XCTAssertFalse(rating(hour: 21))

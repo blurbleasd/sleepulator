@@ -844,7 +844,7 @@ final class PodcastPlayer: NSObject {
             guard let self, let current = self.currentItem,
                   failedItem == ObjectIdentifier(current) else { return }   // a stale item's news
             Log.audio.error("podcast failed to play to end (\(reason, privacy: .public)) — AVPlayer will be rebuilt on next play")
-            self.markPipelineDead("pipeline died (item failed)", at: detectedAt)
+            self.markPipelineDead(NightRules.pipelineDied + " (item failed)", at: detectedAt)
         }
     }
 
@@ -854,7 +854,7 @@ final class PodcastPlayer: NSObject {
         guard player != nil else { return }
         let wasPlaying = pausedAt == nil && !didPlayToEnd
         Log.audio.error("media services reset — podcast AVPlayer will be rebuilt (wasPlaying=\(wasPlaying, privacy: .public))")
-        markPipelineDead("pipeline died (media services reset)", at: Date())
+        markPipelineDead(NightRules.pipelineDied + " (media services reset)", at: Date())
         if wasPlaying { resume() }
     }
 
@@ -876,7 +876,7 @@ final class PodcastPlayer: NSObject {
     /// Falls back to the saved-position map when the dead player can't say where it was.
     private func rebuildPlayer(at position: Double?) {
         guard let url = currentUrl, let id = currentId else { return }
-        onPipelineEvent?("player rebuilt", Date())
+        onPipelineEvent?(NightRules.playerRebuilt, Date())
         needsRebuild = true                // play() discards the dead player before loading
         play(url: url, id: id, title: currentTitle, resume: true, startAt: position)
     }

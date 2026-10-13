@@ -171,8 +171,9 @@ final class SleepTimerService: ObservableObject {
     }
 
     /// The terminal stop, once per timer: record the night's end, stop everything, clear the
-    /// timer (whose cancel holds the night settled). One place for the three paths (the duration
-    /// fade, the episode's end, a deadline passed while suspended), so none can miss a step.
+    /// timer (whose cancel holds the night settled). One place for the four paths (the duration
+    /// fade, the episode's end, a deadline passed while suspended, found on the foreground or by
+    /// the first tick after a Play), so none can miss a step.
     /// `endedAt` is when the night really ended, if earlier than now.
     private func fireTerminalStop(_ reason: String, endedAt: Date? = nil, reconciled: Bool = false) {
         if timerRemaining != 0 { timerRemaining = 0 }
@@ -202,8 +203,8 @@ final class SleepTimerService: ObservableObject {
     var stopAllFn: (() -> Void)?
     /// The terminal stop, reported before `stopAllFn`: whether it ended on the episode's own clock
     /// (a stop-after-episode timer that handed off to the tail or the wall clock ends as a
-    /// duration), whether it was a deadline found passed on the morning foreground, and when the
-    /// night really ended.
+    /// duration), whether it was a deadline found already passed (on the morning foreground, or by
+    /// the first tick after a Play: `overdueAfter`), and when the night really ended.
     var onTerminalStop: ((_ episode: Bool, _ reconciled: Bool, _ endedAt: Date) -> Void)?
     var updateFadeMultFn: ((Double) -> Void)?
 
@@ -399,6 +400,16 @@ final class SleepTimerService: ObservableObject {
         guard self.kind == .duration, let end = self.sleepTimerEnd else { return }
         let remaining = end.timeIntervalSince(now)
         if remaining <= 0 {
+            if !self.didFire, remaining < -Self.overdueAfter {
+                // Found late, as the morning foreground finds one, and stopped the same way: no
+                // tail, the night ended at the deadline (on the scenes' clock), not at this Play,
+                // and never counts clean. (A Play that reaches the session edge first opens or
+                // resumes the night it ends; one that loses to this tick starts the ring's timer.)
+                let ended = self.now().addingTimeInterval(end.timeIntervalSince(Date()))
+                self.fireTerminalStop("duration timer found \(Int(-remaining))s past its deadline",
+                                      endedAt: ended, reconciled: true)
+                return
+            }
             // Ambient tail (phase 1 → 2): with a tail configured and a podcast still in the
             // mix, stop only the podcast and extend the deadline — the bed plays on, fading
             // from its current level over the tail. The final stop fires at the new deadline.
@@ -409,14 +420,6 @@ final class SleepTimerService: ObservableObject {
             // Publish the terminal value once, then fire exactly once.
             if self.timerRemaining != 0 { self.timerRemaining = 0 }
             guard !self.didFire else { return }
-            if remaining < -Self.overdueAfter {
-                // Found late, as the morning foreground finds one: the night ended at the
-                // deadline (on the scenes' clock), not at this Play, and never counts clean.
-                let ended = self.now().addingTimeInterval(end.timeIntervalSince(Date()))
-                self.fireTerminalStop("duration timer found \(Int(-remaining))s past its deadline",
-                                      endedAt: ended, reconciled: true)
-                return
-            }
             self.fireTerminalStop("duration timer fade complete")
             return
         }
@@ -437,8 +440,6 @@ final class SleepTimerService: ObservableObject {
             : Double(AudioMath.getFadeMultiplier(timerRemaining: remaining))
         self.lastFadeMult = mult
         self.updateFadeMultFn?(mult)
-        // Update live activity periodically (e.g., every 15 mins or when a bump occurs)
-        // ActivityKit doesn't recommend updating every second.
     }
 
     func bumpTimer() {

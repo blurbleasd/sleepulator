@@ -243,13 +243,14 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   rebuilt player in the first 10 s after the sound starts or resumes (`graceAfterResume`,
   `isPauseAftermath`: the watchdog finds a dead player ~4 s in); any other failure then still
   spoils it. A pause over 30 minutes ends the night where it paused, as soon as the asks look or
-  news arrives (`closeLapsedPause`), not when play is next pressed. An interruption's pause
-  (`sessionInterrupted`) also ends when 2 s of unbroken live ticks show the sound back, since iOS
-  doesn't always send `.ended`; a person's pause never does.
+  news arrives (`closeLapsedPause`), not when play is next pressed. Only a session edge ends a
+  pause, never live ticks (they can come from a fading bed or a scrubbed paused podcast), so a
+  night whose interruption never sends `.ended` stays paused: it undercounts, never fakes.
   A deadline reconciled on the morning foreground never counts, so `SleepTimerService.onTerminalStop`
   fires before `stopAllFn` (the stop would otherwise read as a person's). Nor does one a tick finds
   more than `overdueAfter` (5 s) past, the first tick after a Play over a pause that outlived it:
-  reconciled too, ended at the deadline. Late news is filed by
+  reconciled too, with no ambient tail, ended at the deadline (or where the night opened, if the
+  Play opened a new one). Late news is filed by
   when it happened (an off-main failure carries its time), into the night whose span holds it,
   else dropped. A record found open at launch while playing is `died`. Nothing written may carry a
   URL (`NightRules.scrub`): the files go out with Send feedback, and private feeds keep a
@@ -258,7 +259,8 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   after 5 (`cleanNightCount`: one a night at most, noon to noon by start, so naps don't add up),
   in either case never at night. Rating: at a natural break (a sheet closed, Settings
   left; `\.naturalBreak`), 09:00–20:00, 2+ h after the night ended, nothing playing, once per
-  version, never on the tip card's day. The card: the same window, Sleep Home at rest only, once
+  version, never on the tip card's day nor while it's due with Sleep Home on screen
+  (`tipCardShowing`). The card: the same window, Sleep Home at rest only, once
   products loaded and purchases allowed, never on the rating's day, in the coachmark band; only an
   answer spends it. The rules live in
   `SessionGuards` (`mayAskForRating`, `tipCardDue`), unit-tested. The asks' memory

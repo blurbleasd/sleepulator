@@ -162,12 +162,14 @@ extension SessionGuards {
 
     /// Whether Apple's rating prompt may be requested now, at a natural break (a sheet just
     /// closed, or the person just left Settings; design D12). Either mode (design D10). Once per
-    /// app version, never on a day the tip card showed.
+    /// app version, never on a day the tip card showed, nor while it's showing: due with Sleep
+    /// Home on screen (`tipCardShowing`; leaving Settings for Home would raise both at once). A
+    /// due card elsewhere doesn't hold the rating back: an ignored card would hold it for good.
     static func mayAskForRating(cleanNights: Int, askedThisVersion: Bool, tipCardShownToday: Bool,
-                                playing: Bool, veilDown: Bool, now: Date, lastNightEnd: Date?,
-                                calendar: Calendar = .current) -> Bool {
+                                tipCardShowing: Bool, playing: Bool, veilDown: Bool, now: Date,
+                                lastNightEnd: Date?, calendar: Calendar = .current) -> Bool {
         guard cleanNights >= ratingAfterCleanNights, !askedThisVersion, !tipCardShownToday,
-              !playing, !veilDown else { return false }
+              !tipCardShowing, !playing, !veilDown else { return false }
         return askWindowOpen(now: now, lastNightEnd: lastNightEnd, calendar: calendar)
     }
 

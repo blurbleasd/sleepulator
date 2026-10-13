@@ -145,9 +145,13 @@ Install via Xcode onto the device (not the simulator). Then:
    (no podcast loaded) gets NO tail — the timer stops when set.
 5. **A deadline missed during a pause** (2026-10-12, unverified): a mix only (no tail), a 5 min
    timer. Pause from the lock screen at 3 minutes, lock, wait 5 minutes, then Play from the lock
-   screen. ✅ The sound stops at once (the timer is spent) and doesn't play on; the playback log
-   reads `terminal stop: duration timer found …s past its deadline`, and the night file closes
-   `timer … reconciled` at the deadline's time (§3U.12).
+   screen. Install and run it without Xcode attached (the debugger keeps the app from
+   suspending, so the timer fires on time over the pause). ✅ The sound stops at once (the timer
+   is spent) and the playback log reads `terminal stop: duration timer found …s past its
+   deadline`, the night file closing `timer … reconciled` at the deadline's time. Or, when iOS
+   delivers the timer's tick before the Play: the night closes `person …` at the pause and the
+   Play plays on under the ring's timer. Log which you saw; either way the night isn't clean
+   (§3U.12).
 
 ### D. Night Limiter (acceptance for enabling by default)
 `AppConfig.nightLimiterEnabled` ships `false` until this passes and is logged below.
@@ -727,7 +731,7 @@ to Files: each night is a `.jsonl` file, one event per line.
    with a Clock alarm set to end it. Dismiss the alarm, then stop the sound. Send feedback later
    that morning. ✅ The night's file has `paused` at the alarm, any `pipeline died …` or `player
    rebuilt` as a `note` ending `while paused` (or, within 10 s of the sound coming back,
-   `after resuming`), and the summary counts the night clean. ✅ Two hours
+   `just after the sound started`), and the summary counts the night clean. ✅ Two hours
    after you stopped it (and after 09:00), the night is already counted: you don't have to press
    play again first.
 4. **Locked-phone writes.** Run §3E's night (or a 45 min timer) with a passcode set, locked from
@@ -772,8 +776,8 @@ to Files: each night is a `.jsonl` file, one event per line.
    a tip, then No thanks.
 10. **The rating ask (dev build only).** Apple shows the review prompt every time in a build run
    from Xcode, and never in TestFlight, so run this from Xcode once the journal has 3 clean nights
-   (steps 3, 4 and §3E count). Between 09:00 and 20:00, 2+ hours after the last night ended, nothing
-   playing: open Build mix and close it. ✅ The rating prompt, once; the playback log shows
+   on three different nights, noon to noon (steps 3, 4 and §3E count, each on its own night). Between 09:00 and 20:00, 2+ hours after the last night ended, nothing
+   playing, the tip card not on Sleep Home: open Build mix and close it. ✅ The rating prompt, once; the playback log shows
    `asked for a rating (N clean nights)`. Close another sheet, or leave the Settings tab: ✅
    nothing more this version. ✅ Never at launch, never with sound playing, never on the day the tip card showed, never before 09:00 or after 20:00 (those wait;
    the ask still comes at the next suitable break). Clean nights count one a night at most
@@ -783,13 +787,8 @@ to Files: each night is a `.jsonl` file, one event per line.
    portrait in the iPhone window, plays a mix, the timer and the Now Playing sheet work, nothing is
    clipped. Rotate the iPad: ✅ the app stays portrait.
 12. **A missed deadline isn't a clean night.** Run §3C step 5, then Send feedback. ✅ That night's
-   file ends `closed` `timer … reconciled`, timed at the deadline (not at the Play), and the
-   summary counts it under "ended early or spoiled".
-13. **Sound back with no interruption end.** Sleep, All night, a mix playing. Open another app
-   and play a video with sound (it interrupts the mix), stop it, come back to Sleepulator. If the
-   mix comes back (on its own, or when you start it): ✅ the night file shows `resumed`, or a
-   `note` `sound back with no interruption end`, soon after, and `live` lines carry on; never a
-   pause that lasts until the morning while the mix plays. Log which of the two you saw.
+   file ends `closed` `timer … reconciled`, timed at the deadline (not at the Play), or `closed`
+   `person …` at the pause, and the summary counts it under "ended early or spoiled".
 
 ---
 

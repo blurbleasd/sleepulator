@@ -1942,15 +1942,25 @@ Calls made during the build, for the record:
   `isPauseAftermath`); a failed episode, a lost stream (the stall watchdog's give-up) and the
   noise engine's start error now taint. A paused night found at launch inside its 30-minute
   window carries on. So NT-1's "no AVPlayer rebuild across the whole night" now reads "none while
-  it played, outside the first 10 s after a pause". UI tests run isolated (`-uiTestIsolated`), and
+  it played, outside the first 10 s after the sound starts or resumes". UI tests run isolated (`-uiTestIsolated`), and
   one ask a day holds even when the card is due but not yet rendered.
 - **Ship review round 2 (2026-10-12, user D7–D8)** tightened the count the asks wait for. Clean
   nights count one a night at most (noon to noon, by start; naps and repeated short timers count
   once). A sleep timer whose deadline passed during a pause, fired by the first tick after Play,
   stops as reconciled, ended at the deadline, so it's never clean (`SleepTimerService.overdueAfter`;
-  device check TESTING §3C.5, §3U.12). An interruption's pause also ends when the sound comes back
-  without iOS's "ended" (2 s of unbroken live audio; §3U.13). The tests the 60 s floor had weakened
-  were lengthened past it, with below-the-minute rows for both timer and episode ends.
+  device check TESTING §3C.5, §3U.12). The tests the 60 s floor had weakened were lengthened past
+  it, with below-the-minute rows for both timer and episode ends.
+- **Ship review round 3 (2026-10-12, user D9–D11)** settled round 2's edges. The overdue check
+  runs before the ambient tail (an overdue deadline never starts one), and a stop for a deadline
+  from before the open night ends it where it opened, never before. Which of the Play and the
+  timer's tick iOS delivers first after a wake still decides whether that Play plays on; the night
+  isn't clean either way (TESTING §3C.5). Round 2's "sound back resumes an interrupted night" was
+  reverted (D10): live ticks can come from a fading bed or a scrubbed paused podcast, and a night
+  resumed over silence later read as a crash. A night whose interruption never sends "ended" stays
+  paused and ends at the pause: it undercounts, never fakes. The rating no longer waits on an
+  unanswered card everywhere (D11): it waits only on the card's day or while it's due with Sleep
+  Home on screen (`SessionGuards.mayAskForRating`'s `tipCardShowing`). The night boundary is
+  wall-clock noon, so daylight saving doesn't move it. /ship's three-round cap was reached here.
 - **Pre-landing review (2026-10-12)** fixed: a stale read that hid a due tip card after products
   loaded; a paused night now ends once its 30 minutes pass and news during a pause (an alarm's
   pipeline death) is a note, not a taint, and an interruption pauses the night (user D2); a

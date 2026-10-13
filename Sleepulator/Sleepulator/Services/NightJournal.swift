@@ -13,13 +13,13 @@ import os
 //   podcast failures · interruptions · routes · terminate · Focus ─┘        └──> nights/night-verdicts.json (last 30)
 //
 // A night is clean (NightRules.isClean) when sound really played through it: to its timer's end
-// while playing, with at least a minute of live audio (never a deadline reconciled on the morning
-// foreground), or 3+ hours on All night ended by a person; with no player rebuild, pipeline death,
-// podcast failure, lost stream or noise-engine error while it played. News during a pause (an
-// alarm's), and a dead or rebuilt player in the first 10 s after the sound starts again, is a
-// note. A pause over 30 minutes ends the night where it paused; an interruption's pause also ends
-// when its sound comes back without iOS's "ended". A record left open while playing means the app
-// died: not clean. The rating and tip asks count clean nights, at most one a night
+// while playing, with at least a minute of live audio (never a deadline found already passed, on
+// the morning foreground or by the first tick after a Play), or 3+ hours on All night ended by a
+// person; with no player rebuild, pipeline death, podcast failure, lost stream or noise-engine
+// error while it played. News during a pause (an alarm's), and a dead or rebuilt player in the
+// first 10 s after the sound starts or resumes, is a note. A pause over 30 minutes ends the night
+// where it paused. A record left open while playing means the app died: not clean. The rating and
+// tip asks count clean nights, at most one a night
 // (docs/designs/APP-STORE-LAUNCH-1.0.md, NT-1, EV-1), and "Send feedback"
 // attaches the files, which is why nothing written here may carry a URL (private podcast feeds
 // keep their subscriber's secret in it).
@@ -51,7 +51,8 @@ nonisolated struct NightSummary: Codable, Equatable {
     /// What spoiled the night, if anything (player rebuilt, pipeline died, podcast failed, …).
     var taints: [String] = []
     var endedBy: NightEndReason?
-    /// The terminal stop came from a deadline found passed on the morning foreground.
+    /// The terminal stop came from a deadline found already passed: on the morning foreground, or
+    /// by the first tick after a Play (`SleepTimerService.overdueAfter`).
     var reconciled = false
     /// Set while paused; a resume within `UntimedNight.resumeWindow` keeps the night.
     var pausedAt: Date?
@@ -82,15 +83,19 @@ nonisolated enum NightRules {
     /// resume or by the watchdog a few seconds later (`RenderHeartbeatMonitor.deadAfter`, 4 s).
     static let graceAfterResume: TimeInterval = 10
 
+    /// The pipeline news a pause can leave behind. `PodcastPlayer` sends these; `isPauseAftermath`
+    /// reads them, so a rewording can't quietly end the grace.
+    static let playerRebuilt = "player rebuilt"
+    static let pipelineDied = "pipeline died"
+
     /// Only a dead or rebuilt player is a pause's aftermath. A failed episode, a lost stream,
     /// silence after a rebuild or the noise engine's error spoil a night whatever their timing.
     static func isPauseAftermath(_ kind: String) -> Bool {
-        kind == "player rebuilt" || kind.hasPrefix("pipeline died")
+        kind == playerRebuilt || kind.hasPrefix(pipelineDied)
     }
-    /// Live audio this long without a break carries on a night an interruption paused: iOS
-    /// doesn't always send the interruption's end (another app's audio). Long enough that the
-    /// last render callbacks queued before the pause can't do it.
-    static let soundBackAfter: TimeInterval = 2
+    /// News stamped this soon before a night opened is that night's: the noise engine's start
+    /// error is stamped as the switch flips, just before the session edge opens the night.
+    static let newsBeforeOpen: TimeInterval = 2
     /// A checkpoint line every this much live audio, so a death keeps most of the count.
     static let checkpointEvery: TimeInterval = 5 * 60
     /// A tick further apart than this from the last one isn't live time (the app was suspended,
@@ -112,11 +117,14 @@ nonisolated enum NightRules {
         }
     }
 
-    /// Clean nights, at most one per night: a night runs noon to noon (local), by when it started,
-    /// so naps and a short timer tried three times count once (NT-1; ship review D7, 2026-10-12).
+    /// Clean nights, at most one per night: a night runs noon to noon on the wall clock, by when
+    /// it started, so naps and a short timer tried three times count once (NT-1; ship review D7,
+    /// 2026-10-12). Wall-clock hours, so a daylight-saving day doesn't move the boundary.
     static func cleanNightCount(_ verdicts: [NightVerdict], calendar: Calendar = .current) -> Int {
-        Set(verdicts.filter(\.clean).map {
-            calendar.dateComponents([.year, .month, .day], from: $0.start.addingTimeInterval(-12 * 3600))
+        Set(verdicts.filter(\.clean).map { v in
+            let day = calendar.component(.hour, from: v.start) < 12
+                ? calendar.date(byAdding: .day, value: -1, to: v.start) ?? v.start : v.start
+            return calendar.dateComponents([.year, .month, .day], from: day)
         }).count
     }
 
@@ -188,11 +196,6 @@ final class NightJournal {
     /// When the open night's sound last started: it opened, or resumed from a pause
     /// (`NightRules.graceAfterResume`).
     private var soundStartedAt: Date?
-    /// The open night was paused by an interruption (not a person), so sound coming back on its
-    /// own carries it on.
-    private var pausedByInterruption = false
-    /// While an interruption has the night paused: the current run of live ticks.
-    private var soundBack: (since: Date, last: Date)?
     private var liveAtCheckpoint: TimeInterval = 0
     private var thresholdWritten = false
     private var bytesWritten = 0
@@ -271,8 +274,6 @@ final class NightJournal {
     /// A Sleep session started playing from rest (or Focus → Sleep with sound on).
     func sessionStarted() {
         let t = now()
-        pausedByInterruption = false
-        soundBack = nil
         if var night = open, let pausedAt = night.pausedAt {
             if t.timeIntervalSince(pausedAt) < UntimedNight.resumeWindow {
                 night.pausedAt = nil
@@ -309,36 +310,12 @@ final class NightJournal {
         write(NightEvent(at: t, kind: "paused", detail: liveText(night.live)), essential: true)
     }
 
-    /// An interruption (a call, an alarm, another app's audio) stopped the sound with its switches
-    /// still on. The night pauses as for any stop, and sound coming back carries it on even when
-    /// iOS never sends the interruption's end (`liveTick`). A night already paused stays a pause.
-    func sessionInterrupted() {
-        guard open?.pausedAt == nil else { return }
-        sessionStopped()
-        pausedByInterruption = open?.pausedAt != nil
-        soundBack = nil
-    }
-
     /// Live audio: the RMS tap and the player clock, both on main, ~20 Hz while sound renders.
     /// Counts the time since the last tick from either source (so two sources don't double up),
-    /// only while the night is open and not paused. While an interruption has it paused,
-    /// `soundBackAfter` of unbroken ticks means the sound is back: the night carries on.
+    /// only while the night is open and not paused.
     func liveTick() {
-        guard var night = open else { return }
+        guard var night = open, night.pausedAt == nil else { return }
         let t = now()
-        if night.pausedAt != nil {
-            guard pausedByInterruption else { return }
-            if let run = soundBack, t > run.last, t.timeIntervalSince(run.last) <= NightRules.maxTickGap {
-                soundBack = (run.since, t)
-                if t.timeIntervalSince(run.since) >= NightRules.soundBackAfter {
-                    write(NightEvent(at: t, kind: "note", detail: "sound back with no interruption end"))
-                    sessionStarted()
-                }
-            } else {
-                soundBack = (t, t)
-            }
-            return
-        }
         defer { lastTick = t }
         guard let last = lastTick else { return }
         let gap = t.timeIntervalSince(last)
@@ -356,13 +333,15 @@ final class NightJournal {
     }
 
     /// The sleep timer's terminal stop, reported before it stops everything. Counts as the
-    /// timer's end only while playing; a stop over a pause ends the night where it paused.
+    /// timer's end only while playing; a stop over a pause ends the night where it paused. A
+    /// deadline from before this night opened (last night's, found by the first tick after a
+    /// morning Play) ends it where it opened, never before.
     func timerStopped(episode: Bool, reconciled: Bool, endedAt: Date) {
         guard let night = open else { return }
         if let pausedAt = night.pausedAt {
             close(.person, at: pausedAt)
         } else {
-            close(episode ? .episodeEnd : .timer, at: endedAt, reconciled: reconciled)
+            close(episode ? .episodeEnd : .timer, at: max(endedAt, night.start), reconciled: reconciled)
         }
     }
 
@@ -395,14 +374,14 @@ final class NightJournal {
             write(NightEvent(at: at, kind: "note", detail: kind + " while paused"))
             return
         }
-        if open != nil, NightRules.isPauseAftermath(kind), let soundStartedAt, at >= soundStartedAt,
+        // From a moment before, as the player's news is stamped off main and can trail the edge.
+        if open != nil, NightRules.isPauseAftermath(kind), let soundStartedAt,
+           at >= soundStartedAt.addingTimeInterval(-NightRules.newsBeforeOpen),
            at.timeIntervalSince(soundStartedAt) <= NightRules.graceAfterResume {
-            write(NightEvent(at: at, kind: "note", detail: kind + " after resuming"))
+            write(NightEvent(at: at, kind: "note", detail: kind + " just after the sound started"))
             return
         }
-        // A moment before the open night's start counts as the night: the noise engine's start
-        // error is stamped as the switch flips, just before the session edge opens the night.
-        if var night = open, at >= night.start.addingTimeInterval(-NightRules.maxTickGap) {
+        if var night = open, at >= night.start.addingTimeInterval(-NightRules.newsBeforeOpen) {
             night.taints.append(kind)
             open = night
             write(NightEvent(at: at, kind: "taint", detail: kind), essential: true)
@@ -465,8 +444,6 @@ final class NightJournal {
         open = nil
         lastTick = nil
         soundStartedAt = nil
-        pausedByInterruption = false
-        soundBack = nil
         if let v = NightRules.verdict(night) { record(v) }
         // The terminate path: the verdict must land before the process goes, or the night is
         // closed on disk with no verdict (recovery then rebuilds it from the file).
