@@ -58,8 +58,8 @@ Suites in `SleepulatorTests/` (seven files, many suites):
 - `GenerativeAudioEngineTests.swift` — generative-bed rebuild after a media-services reset.
 - `TipStoreTests.swift` — `TipFlowTests` (every StoreKit outcome to what the tip rows show) and
   `TipStoreTests` (StoreKitTest against `Tips.storekit`). On iOS 26 simulators a command-line run
-  hits Apple's SKTestSession bug and loads no products, so those six skip there; run them from
-  Xcode (⌘U).
+  hits Apple's SKTestSession bug and loads no products, so those six skip there, and CI skips
+  them outright (`SLEEPULATOR_CI`); run them from Xcode (⌘U).
 
 These catch parsing/logic regressions cheaply; they do **not** exercise audio or iOS behavior.
 

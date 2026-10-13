@@ -62,7 +62,8 @@ final class TipFlowTests: XCTestCase {
 /// "[SKTestSession] Error saving configuration file: SKInternalErrorDomain Code=3" and loads no
 /// products (seen here on 26.3; reported on 26.5, Apple forum 826971). These tests then SKIP with
 /// that reason, visibly, instead of failing; they run from Xcode (⌘U). Not always: on 2026-10-13
-/// one of CI's simulators loaded the products and ran them, slowly (a purchase took 119 s). The purchase mapping is
+/// one of CI's simulators loaded the products, and there a purchase took up to 121 s and the
+/// tests flaked. So CI skips them outright (`SLEEPULATOR_CI`, set by the workflow), visibly too. The purchase mapping is
 /// covered either way by TipFlowTests, and a real purchase by the TESTING.md §3U sandbox step.
 /// The skip stays: the user's decision at the pre-landing review (D1, 2026-10-12).
 @MainActor
@@ -71,8 +72,12 @@ final class TipStoreTests: XCTestCase {
     private var defaults: UserDefaults!
     private var suite: String!
 
+    static let skippedOnCI = "StoreKitTest is skipped on CI (SLEEPULATOR_CI): its simulators load no products, "
+        + "or load them and take minutes per purchase. Run TipStoreTests from Xcode."
+
     override func setUpWithError() throws {
         try super.setUpWithError()
+        try XCTSkipIf(ProcessInfo.processInfo.environment["SLEEPULATOR_CI"] != nil, Self.skippedOnCI)
         session = try SKTestSession(configurationFileNamed: "Tips")
         session.resetToDefaultState()
         session.disableDialogs = true
@@ -82,8 +87,9 @@ final class TipStoreTests: XCTestCase {
     }
 
     override func tearDown() {
-        defaults.removePersistentDomain(forName: suite)
-        session.clearTransactions()
+        // Nothing to undo when setUp skipped before making them.
+        if let suite { defaults?.removePersistentDomain(forName: suite) }
+        session?.clearTransactions()
         super.tearDown()
     }
 

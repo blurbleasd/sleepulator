@@ -93,7 +93,9 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   `TipStoreTests.swift` (`TipFlowTests`, pure; `TipStoreTests`, StoreKitTest against
   `Tips.storekit`). On iOS 26 simulators a command-line run (xcodebuild, CI) hits an Apple bug,
   "[SKTestSession] Error saving configuration file … Code=3", and loads no products: those six
-  tests then SKIP with that reason. They run from Xcode (⌘U).
+  tests then SKIP with that reason. CI skips them outright (the workflow sets `SLEEPULATOR_CI`):
+  a CI simulator that did load products took minutes per purchase and flaked. They run from
+  Xcode (⌘U).
 
 ## Services (the core)
 - `AudioEngine` — the app-facing `ObservableObject` facade. Owns UI state + policy, delegates
