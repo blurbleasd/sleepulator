@@ -21,9 +21,15 @@ final class HomeLayoutUITests: XCTestCase {
         // Focus from either start state: a no-op when the last run left the app in Focus.
         let focusMode = app.buttons["Focus mode"]
         XCTAssertTrue(focusMode.waitForExistence(timeout: 15), "No mode switcher on Home")
-        focusMode.tap()
-
         let session = app.buttons["Start focus session"]
+        // This is often the run's first tap, and CI once lost it: Sleep still selected, no alert,
+        // and the screen never moved. Check the switch took and go round again, like the taps
+        // below. Another tap on Focus while in Focus does nothing.
+        for _ in 0..<3 where !session.exists {
+            focusMode.tap()
+            if session.waitForExistence(timeout: 5) { break }
+        }
+
         // An exact label: on a fresh install the first-run tip is a button that says "Build mix" too.
         let buildMix = app.buttons["Build mix"]
         let miniPlayer = app.descendants(matching: .any)["miniPlayer"]
