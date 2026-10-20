@@ -3758,6 +3758,16 @@ final class SettingsRulesTests: XCTestCase {
 @MainActor
 final class RestoreReloadTests: XCTestCase {
 
+    /// A temp-dir store, removed after the test (as `PersistenceTests.freshStorage`): for a test
+    /// that reads a file back, since every engine, store and player the earlier tests made writes
+    /// the shared files from its own queue, and `StorageManager.flush()` doesn't drain those.
+    private func freshStorage() -> StorageManager {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("test.sleepulator.\(UUID().uuidString)")
+        addTeardownBlock { try? FileManager.default.removeItem(at: dir) }
+        return StorageManager(directory: dir)
+    }
+
     // Value: protects=a restore's reload applies the Pomodoro lengths and never cancels a running sleep timer; fails_when=reloadAfterRestore drops reloadLengths, or focusMode's didSet starts cancelling on a same-value assignment; why_new=no test called reloadAfterRestore; seam=none; no_claim=the stores' disk reloads
     func testARestoreReloadAppliesPomodoroLengthsAndKeepsTheNightsTimer() {
         let d = UserDefaults.standard
@@ -3777,16 +3787,12 @@ final class RestoreReloadTests: XCTestCase {
         XCTAssertGreaterThan(engine.sleepTimer.timerRemaining, 0, "a restore never cancels a running sleep timer")
     }
 
-    // Value: protects=flushPendingWrites lands the engine's deferred mixes.json write before it returns; fails_when=AudioEngine.flushPendingWrites stops calling mixStore.flushPendingWrites; why_new=a restore didn't flush the engine's queues, so a queued write could land on top of it; seam=none; no_claim=the queue and volume barriers and the store's flush (MixStore flushes it too); places: the next test
+    // Value: protects=flushPendingWrites lands the engine's deferred mixes.json write before it returns; fails_when=AudioEngine.flushPendingWrites stops calling mixStore.flushPendingWrites; why_new=a restore didn't flush the engine's queues, so a queued write could land on top of it; seam=a temp-dir store (AudioEngine(storage:)); no_claim=the queue and volume barriers and the engine's shared-store flush (MixStore flushes its own store); places: the next test
     func testFlushPendingWritesLandsTheDeferredMixesWrite() throws {
-        let storage = StorageManager.shared
-        storage.flush()
-        let before = storage.rawData(for: "mixes.json")
-        defer {
-            if let before { try? storage.writeRawNow(before, to: "mixes.json") } else { storage.delete(filename: "mixes.json") }
-            storage.flush()
-        }
-        let engine = AudioEngine()
+        // Its own store, not the shared mixes.json: another test's engine or MixStore could land
+        // a write there between this flush and the read.
+        let storage = freshStorage()
+        let engine = AudioEngine(storage: storage)
         let name = "Flush test \(UUID().uuidString)"
         engine.savePreset(named: name)                     // written 0.5 s later, unless flushed
         engine.flushPendingWrites()
@@ -3843,23 +3849,12 @@ final class RestoreReloadTests: XCTestCase {
         XCTAssertEqual(manager.finishedEpisodes, stored, "an id over the item limit isn't recorded")
     }
 
-    // Value: protects=flushPositionsNow writes the player's in-memory saved places to positions.json before it returns; fails_when=flushPositionsNow skips the in-memory map (e.g. reduced to a queue barrier) or returns before the store writes it; why_new=this suite covered only mixes.json, and places held in memory reach disk only every ~30 s or on a pause; seam=none; no_claim=that AudioEngine.flushPendingWrites calls it (podPlayer is private to AudioEngine)
+    // Value: protects=flushPositionsNow writes the player's in-memory saved places to positions.json before it returns; fails_when=flushPositionsNow skips the in-memory map (e.g. reduced to a queue barrier) or returns before the store writes it; why_new=this suite covered only mixes.json, and places held in memory reach disk only every ~30 s or on a pause; seam=a temp-dir store (PodcastPlayer(storage:)); no_claim=that AudioEngine.flushPendingWrites calls it (podPlayer is private to AudioEngine)
     func testFlushPositionsNowWritesThePlacesHeldInMemory() throws {
-        let storage = StorageManager.shared
-        storage.flush()
-        let before = storage.rawData(for: "positions.json")
-        defer {
-            if let before { try? storage.writeRawNow(before, to: "positions.json") } else { storage.delete(filename: "positions.json") }
-            storage.flush()
-        }
-        let player = PodcastPlayer()
-        let loaded = player.savedPositions
-        // Runs before the restore above. The player writes its map again as it goes (its deinit
-        // flushes), so it's handed back what it loaded: the test's place can't land after the restore.
-        defer {
-            player.setPositions(loaded)
-            player.flushPositionsNow()
-        }
+        // Its own store, as above: every engine the earlier tests made has a player writing the
+        // shared positions.json from its own queue, and again in its deinit.
+        let storage = freshStorage()
+        let player = PodcastPlayer(storage: storage)
         let key = "flush-test-\(UUID().uuidString)"
         player.setPositions([key: 42])                     // held in memory, as between the 30 s flushes
         player.flushPositionsNow()                         // no store flush here: it must have landed
