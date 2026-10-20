@@ -499,7 +499,10 @@ final class AudioEngine: ObservableObject {
         podPlayer.setFade(Float(fadeMultiplier))
     }
     
-    init() {
+    /// `storage` is the store the launch migration and the saved mixes (`MixStore`, mixes.json)
+    /// use. Injected so a unit test can keep its mixes in a temp-dir store, as MixStore's own seam
+    /// does; the queue and the player's places stay on the shared store.
+    init(storage: StorageManager = .shared) {
         self.noiseVolume = UserDefaults.standard.object(forKey: "noiseVolume") as? Double ?? 0.4
         self.binVolume = UserDefaults.standard.object(forKey: "binVolume") as? Double ?? 0.3
         self.podVolume = UserDefaults.standard.object(forKey: "podVolume") as? Double ?? 0.7
@@ -531,10 +534,11 @@ final class AudioEngine: ObservableObject {
         // Legacy -> file-store migration (lastMix, mixes, library seed, episode positions),
         // extracted to PersistenceMigrator (Slice A1). It owns the fragile launch-time legacy
         // reads and hands back the values to seed @Published state below.
-        let migrated = PersistenceMigrator().run()
+        let migrated = PersistenceMigrator(storage: storage).run()
         self.mixStore = MixStore(lastMix: migrated.lastMix,
                                  savedPresets: migrated.savedPresets,
-                                 storageQueue: storageQueue)
+                                 storageQueue: storageQueue,
+                                 storage: storage)
         if let positions = migrated.migratedPositions {
             // podPlayer loaded an empty positions map at its own init (it's constructed
             // before this body runs); hand it the migrated data so the first flush to disk

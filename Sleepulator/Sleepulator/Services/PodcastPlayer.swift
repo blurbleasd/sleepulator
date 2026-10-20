@@ -185,6 +185,10 @@ final class PodcastPlayer: NSObject {
     /// and is audible — the fix for "podcast plays but there's no sound."
     private var fadeMult: Float = 1.0
     private var cachedPositions: [String: Double]?
+    /// Where positions.json lives. Injected so a unit test can keep its places in a temp-dir
+    /// store: every other test's player writes the shared file from its own queue (and again in
+    /// its deinit), and one of those writes could land between the test's flush and its read.
+    private let storage: StorageManager
     /// Saved positions as the player holds them in memory: fresher than positions.json, which is
     /// written through async queues after each pause and every 30 s.
     var savedPositions: [String: Double] { cachedPositions ?? [:] }
@@ -305,9 +309,10 @@ final class PodcastPlayer: NSObject {
         }
     }
     
-    override init() {
+    init(storage: StorageManager = .shared) {
+        self.storage = storage
         super.init()
-        cachedPositions = StorageManager.shared.load(from: "positions.json") ?? [:]
+        cachedPositions = storage.load(from: "positions.json") ?? [:]
         setupAudioSession()
         setupRemoteCommands()
     }
@@ -347,16 +352,16 @@ final class PodcastPlayer: NSObject {
     func flushPositionsNow() {
         flushPositionsToDisk()
         storageQueue.sync {}
-        StorageManager.shared.flush()
+        storage.flush()
     }
 
     func flushPositionsToDisk() {
         if let positions = cachedPositions {
             let pruned = Self.prunedPositions(positions, keeping: currentId)
             cachedPositions = pruned
-            let toSave = pruned
+            let toSave = pruned, storage = storage
             storageQueue.async {
-                StorageManager.shared.save(toSave, to: "positions.json")
+                storage.save(toSave, to: "positions.json")
             }
         }
     }
@@ -371,7 +376,7 @@ final class PodcastPlayer: NSObject {
 
     /// Re-read the resume-position map from disk — used by the in-process Restore.
     func reloadPositions() {
-        cachedPositions = StorageManager.shared.load(from: "positions.json") ?? [:]
+        cachedPositions = storage.load(from: "positions.json") ?? [:]
     }
 
     private func setupAudioSession() {
