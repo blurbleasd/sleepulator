@@ -35,7 +35,7 @@ struct FirefliesMetalView: View {
     var body: some View {
         ShaderBackdrop(paused: paused, nightSlowdown: 0.3,
                        sleepTimer: sleepTimer, audioLevel: nil, tilt: tilt, occluded: occluded) { s in
-            let night = follower.night(Double(s.night), now: Date.timeIntervalSinceReferenceDate)
+            let night = follower.night(Double(s.night), now: Date.timeIntervalSinceReferenceDate, inSight: !occluded)
             let left = FireflyNight.remaining(night: night)
             return ShaderLibrary.fireflyField(
                 .float(s.phase),
@@ -58,16 +58,22 @@ struct FirefliesMetalView: View {
 final class FireflyNightFollower {
     private var shown: Double?
     private var last: TimeInterval?
+    /// Whether the last read was drawn in sight (an animated frame, or the still frame with Moving
+    /// scenes off), so the time since was watched.
+    private var lastInSight = false
 
     // Explicitly nonisolated: the implicit MainActor-isolated deinit aborts on iOS 18.4–26.3
     // runtimes (CLAUDE.md, "Isolated deinits"). Only releases stored properties.
     nonisolated deinit {}
 
-    /// The night to draw at `now` (seconds), given the timer's.
-    func night(_ target: Double, now: TimeInterval) -> Double {
-        let next = FireflyNight.follow(shown: shown, target: target, dt: last.map { now - $0 } ?? 0)
+    /// The night to draw at `now` (seconds), given the timer's, and whether this read is in sight.
+    func night(_ target: Double, now: TimeInterval, inSight: Bool = true) -> Double {
+        let dt = last.map { now - $0 } ?? 0
+        let next = FireflyNight.follow(shown: shown, target: target, dt: dt,
+                                       watched: lastInSight && dt <= FireflyNight.watchedGap)
         shown = next
         last = now
+        lastInSight = inSight
         return next
     }
 }
@@ -87,7 +93,8 @@ nonisolated enum FireflyNight {
     }
 
     /// The share of the meadow's fireflies left at the end of the night: just its survivors, one per
-    /// patch of the meadow (5-8 on a phone), fully lit, with every other firefly out. It has to sit
+    /// patch of the meadow (3-8 by screen height: 3 on an SE with Display Zoom, 5 on most phones, 8 on
+    /// a Plus), fully lit, with every other firefly out. It has to sit
     /// between the survivors' fade (`GOING`, 0.06) and the others' first rank (`LAST`, 0.10) in
     /// FirefliesShader.metal.
     static let meadowAtEnd = 0.08
@@ -98,27 +105,38 @@ nonisolated enum FireflyNight {
     /// mid-flash.
     static let backRate = 1.0 / 120
 
-    /// The fastest it may move on (fireflies going out): a night in 30 s. Faster than any timer's
-    /// night (a minute left on "Stop after this episode" takes 60 s), so a real night is followed as
-    /// it is, and only a jump ahead (a seek) is eased, over a few seconds rather than a frame.
+    /// The fastest it may move on (fireflies going out): a night in 30 s. A timer's night set with 30 s
+    /// or more left moves no faster, so it's followed as it is; a "Stop after this episode" set with
+    /// less can trail the stop by up to 30 s. A jump ahead (a seek) is eased over a few seconds.
     static let onRate = 1.0 / 30
 
-    /// The most time one read may count toward bringing fireflies back: about a drawn frame's worth,
-    /// as `SceneClock` clamps its step. After the screen was out of sight (locked, under the veil) the
-    /// first read would otherwise count the whole gap, and a "+15m" on the lock screen would relight
-    /// them all in the first frame after unlocking. Going out, the gap counts in full: the night moved
-    /// on while no one watched.
+    /// The most time a read after an unwatched gap may count toward bringing fireflies back: half a
+    /// second, `SceneClock`'s own step cap (a 2 fps hitch). After the screen was out of sight (locked,
+    /// under the veil) the first read would otherwise count the whole gap, and a "+15m" on the lock
+    /// screen would relight them all in the first frame after unlocking. Going out, the gap counts in
+    /// full: the night moved on while no one watched.
     static let maxBackStep = 0.5
 
+    /// The longest gap between reads that were both in sight: the still frame (Moving scenes off)
+    /// re-reads every 20 s. Longer, or after a read out of sight, the gap wasn't watched.
+    static let watchedGap = 21.0
+
+    /// An unwatched gap this long starts afresh, the night as it is: the night's own resume window
+    /// (`UntimedNight.resumeWindow`, pinned by a test), past which it is over or a new one has begun,
+    /// so the next bedtime opens on a full meadow rather than easing back from last night's few.
+    static let freshAfter: TimeInterval = 30 * 60
+
     /// The night to show after `dt` seconds, moving toward `target` no faster than `onRate` going on
-    /// and `backRate` (over at most `maxBackStep` of `dt`) coming back. Nothing shown yet (the scene
-    /// just appeared): the night as it is.
-    static func follow(shown: Double?, target: Double, dt: Double) -> Double {
+    /// and `backRate` coming back, over the whole of `dt` if it was `watched` (both reads in sight)
+    /// and at most `maxBackStep` of it if not. Nothing shown yet (the scene just appeared), or an
+    /// unwatched gap of `freshAfter` or more: the night as it is.
+    static func follow(shown: Double?, target: Double, dt: Double, watched: Bool = true) -> Double {
         let goal = clamped(target)
         guard let shown else { return goal }
         let elapsed = max(dt, 0)
+        if !watched && elapsed >= freshAfter { return goal }
         if goal >= shown { return min(goal, shown + onRate * elapsed) }
-        return max(goal, shown - backRate * min(elapsed, maxBackStep))
+        return max(goal, shown - backRate * (watched ? elapsed : min(elapsed, maxBackStep)))
     }
 
     /// How far they've fallen into step: 0 = each on its own clock, 1 = one rhythm (a flash then

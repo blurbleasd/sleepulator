@@ -242,7 +242,7 @@ inline float3 fireflies(float2 pos, float2 size, float cell, float2 band, float 
             float h2 = hashCell(id, salt + 2u);
             float h3 = hashCell(id, salt + 3u);
             // When it flashes. The jitter wanders over a minute or so (bounded, so its own rhythm
-            // drifts ±10% without ever racing), and both it and the spread shrink as sync rises.
+            // drifts up to ±11% without ever racing), and both it and the spread shrink as sync rises.
             float own = hashCell(id, salt + 6u)
                       + JITTER * (0.6 * sin(phase * 0.105 + h2 * 40.0) + 0.4 * sin(phase * 0.065 + h3 * 40.0));
             float offset = still ? own : mix(own, WAVE * centre.x / size.x, sync);
