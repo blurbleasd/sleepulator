@@ -189,7 +189,10 @@ final class SleepTimerService: ObservableObject {
     }
 
     private var sleepTimer: DispatchSourceTimer?
-    private var sleepTimerEnd: Date?
+    /// When the running timer ends, on the wall clock. Readable so tests can tick against the
+    /// deadline the timer stored, not one taken after `startSleepTimer` returns (its Live Activity
+    /// request can take seconds in a test host).
+    private(set) var sleepTimerEnd: Date?
     // tick() runs from the GCD timer AND from backgroundTick() (RMS tap + AVPlayer observer),
     // so several threads can hit expiry at once. This guards the terminal stop to fire exactly
     // once. Checked/set only on the main queue, so no extra locking is needed.

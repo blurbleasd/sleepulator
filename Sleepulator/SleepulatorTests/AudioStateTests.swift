@@ -718,7 +718,7 @@ final class SleepTimerBackstopTests: XCTestCase {
     /// A deadline that passed during a pause (the ticks stopped with the sound) is found by the
     /// first tick after Play: stopped as the morning foreground would, reconciled and ended at the
     /// deadline, so it never counts as a clean night. One reached while playing isn't.
-    func testATickThatFindsTheDeadlineLongPastStopsItAsReconciled() {
+    func testATickThatFindsTheDeadlineLongPastStopsItAsReconciled() throws {
         for (late, reconciled, tail) in [(1.0, false, false), (SleepTimerService.overdueAfter + 25, true, false),
                                          (SleepTimerService.overdueAfter + 25, true, true)] {
             let svc = SleepTimerService()
@@ -731,7 +731,9 @@ final class SleepTimerBackstopTests: XCTestCase {
             var stops: [(reconciled: Bool, endedAt: Date)] = []
             svc.onTerminalStop = { _, r, at in stops.append((r, at)) }
             svc.startSleepTimer(minutes: 1)
-            let deadline = Date().addingTimeInterval(60)
+            // The deadline the timer stored. One taken here, after start returned, ran up to 3 s
+            // late when the Live Activity request stalled, and failed the ±2 s check below.
+            let deadline = try XCTUnwrap(svc.sleepTimerEnd)
             svc.handleTick(at: deadline.addingTimeInterval(late))
             XCTAssertEqual(stops.map(\.reconciled), [reconciled], "\(late) s late, tail \(tail)")
             XCTAssertFalse(svc.inTail, "an overdue deadline began the ambient tail")
