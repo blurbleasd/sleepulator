@@ -23,7 +23,9 @@ xcodebuild test -project Sleepulator/Sleepulator.xcodeproj \
 
 Suites in `SleepulatorTests/` (seven files, many suites):
 
-- `AudioMathTests.swift` — fade curve, carrier/beat math, scrub targets.
+- `AudioMathTests.swift` — fade curve, carrier/beat math, scrub targets, the Metal shader
+  preflight set (`MetalShadersTests`, also checked against the app's compiled library) and the
+  scene registry (`SceneSwipeLoopTests`: the swipe loop, unique scene ids).
 - `AudioStateTests.swift` — engine state/policy plus `PodcastParserTests` (CDATA, durations,
   dates, caps, enclosures), `OPMLParserTests` (scheme validation, dedupe, corrupt files),
   `StorageManagerTests` (backup recovery), `NetRetryTests`, `CacheEvictionTests`, the
@@ -209,7 +211,7 @@ everything below is display-link / render behavior only a device shows.
    around the two-minute comet cycle).
 5. **Focus scenes.** Current: streams *flow* during a running pomodoro — no per-tick jitter — and
    momentum builds over a work interval, eases on break.
-   **Moving scenes off (added 2026-10-13, simulator-checked only).** Settings → Moving scenes off,
+   **Moving scenes off (added 2026-10-13, simulator-checked only; Contour added 2026-10-21, simulator-checked).** Settings → Moving scenes off,
    Focus, a 5-minute Focus length so the change is quick to see. On each of Current, Tide,
    Sandfall and Contour, start a session and let the controls fade. ✅ The scene holds its pose,
    but its reading follows the interval, creeping with the countdown: Current's front crosses,
@@ -875,4 +877,4 @@ phone at your desk.
 | Date | Device / iOS | Sections run | Result / notes |
 |------|--------------|--------------|----------------|
 | 2026-10-10 | iPhone 16 Pro (ProMotion) / iOS 27.0.1 | §3R | ✅ Pass. The orb breathes and the Focus ring depletes smoothly. Debug build of `main` + #29 (`efbdbaa`) + the screensaver branch (`95ee8f0`). |
-| 2026-10-12 | iPhone 16 Pro (ProMotion) / iOS not recorded | §V.1, §V.3, §V.4 (informal) | ✅ Look only, not the full §V pass. The first cut read "a mountain map, but 1-dimensional"; after the layered relief (`582be55`): "has depth now". The drift felt calm and it was fine to work beside. Debug build of `claude/screensaver-concepts-23f53c`. Owed: §V.2, §V.5, §V.6 and a full 25-minute block. |
+| 2026-10-12 | iPhone 16 Pro (ProMotion) / iOS not recorded | §V.1, §V.3 (informal); §V.4 partial (under 25 min) | ✅ Look only, not the full §V pass. The first cut read "a mountain map, but 1-dimensional"; after the layered relief (`582be55`): "has depth now". The drift felt calm and it was fine to work beside. Debug build of `claude/screensaver-concepts-23f53c`. Owed: §V.2, §V.4 (a full 25-minute block), §V.5 and §V.6. |

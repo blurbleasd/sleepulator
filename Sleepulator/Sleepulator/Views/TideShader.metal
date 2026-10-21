@@ -16,7 +16,7 @@ using namespace metal;
 // of light. The waterline HEIGHT is driven by `energy`, so a work interval
 // visibly fills the screen — the glanceable progress cue the scene is for.
 //
-// Also fixed, shared with the other two Focus shaders: the old
+// Also fixed, shared with the other Focus shaders: the old
 // `col/(col + 0.85)` tonemap mapped 1.0 → 0.54, so nothing could approach white
 // and the whole image sat in one washed-out mid band. Now an exposure curve.
 //

@@ -114,7 +114,7 @@ struct HomeView: View {
 
     /// Scenes (and CoreMotion) settle to a static frame whenever the screen is occluded by the
     /// night-dim veil, the app isn't active (backgrounded / app-switcher), or the display is in a
-    /// low-luminance / Always-On state — or the user turned off the app-level "Ambient motion"
+    /// low-luminance / Always-On state — or the user turned off the app-level "Moving scenes"
     /// setting. Previously freezing was gated on the sleep-timer veil alone, so a no-timer session
     /// animated at full rate all night. This is purely additive — it only adds reasons to freeze,
     /// never removes the veil case.
@@ -129,7 +129,7 @@ struct HomeView: View {
     // Build-mix drawer writes these via SceneSelector.
     @AppStorage("sceneSleep") private var sleepSceneId = "night-sky"
     @AppStorage("sceneFocus") private var focusSceneId = "current"
-    /// App-level "Ambient motion" override (Settings ▸ Display). ON by default = the current behavior;
+    /// App-level "Moving scenes" override (Settings ▸ Display). ON by default = the current behavior;
     /// OFF stills the backdrop to a static frame. An explicit control on top of system Reduce Motion,
     /// which by convention only gates parallax (SCREENSAVER-LIBRARY-SPEC §5) — the app toggle is the
     /// home for the user who wants the scene itself to hold still.
