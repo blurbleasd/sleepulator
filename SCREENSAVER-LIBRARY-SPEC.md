@@ -123,8 +123,8 @@ Every scene must honour:
 - **`paused`** — settle to static when the screen is out of sight or Moving scenes is off (an
   all-night screen shouldn't animate under the veil), as `ShaderBackdrop` does. A still frame in
   sight should keep its scene's reading live and stop redrawing only when `SceneContext.occluded`.
-  Today Night sky and Rain on glass re-read the night's darkening, and Current, Tide and Sandfall
-  follow the Pomodoro (`FocusStillFrame`); the other Sleep scenes' still frames don't yet darken.
+  Today Night sky and Rain on glass re-read the night's darkening, and Current, Tide, Sandfall
+  and Contour follow the Pomodoro (`FocusStillFrame`); the other Sleep scenes' still frames don't yet darken.
   Under the screensaver itself scenes keep moving, but hold back transients
   (`SceneContext.screensaver`).
 - **The ambient-motion preference** — NOT raw system Reduce Motion. We deliberately decided

@@ -319,7 +319,7 @@ struct ContourScene: AmbientScene {
     let mood = SceneMood.focus
 
     func makeBackdrop(_ ctx: SceneContext) -> AnyView {
-        AnyView(ContourMetalView(paused: ctx.paused, pomodoro: ctx.pomodoro))
+        AnyView(ContourMetalView(paused: ctx.paused, occluded: ctx.occluded, pomodoro: ctx.pomodoro))
     }
 }
 

@@ -5,15 +5,21 @@ import SwiftUI
 /// two contour lines a sheet one step up, casting a short shadow on the one below. The lines drift
 /// downhill, and light spreads down from the summit as a work interval goes on.
 ///
-/// The look comes from the shared `FocusDrivers` mapping, sampled live each tick (never observed,
-/// so the per-tick redraw can't trigger the `@Published` re-render storm CLAUDE.md warns about).
-/// `ContourLight.light` is the reading: the share of the screen in light, which
-/// `ContourLight.radius` turns into the light's radius. `look` sets the brightness, the tint and the
-/// drift rate, which a `SceneClock` integrates (see `CurrentMetalView`). `paused` freezes the scene
-/// to one static frame at the frozen pose; system Reduce Motion doesn't (SCREENSAVER-LIBRARY-SPEC §5).
+/// The look comes from the shared `FocusDrivers` mapping, sampled live each tick; the view never
+/// observes the Pomodoro (only its `FocusStillFrame` child, below), so the per-tick redraw can't
+/// trigger the `@Published` re-render storm CLAUDE.md warns about. `ContourLight.light` is the
+/// reading: the share of the screen in light, which `ContourLight.radius` turns into the light's
+/// radius. `look` sets the brightness, the tint and the drift rate, which a `SceneClock` integrates
+/// (see `CurrentMetalView`). `paused` (occlusion, or "Moving scenes" off) freezes the scene to one
+/// static frame at the frozen pose, whose light still follows the session while the screen is in
+/// sight; system Reduce Motion doesn't (SCREENSAVER-LIBRARY-SPEC §5).
 struct ContourMetalView: View {
-    var paused: Bool = false
-    /// Read live (not observed) so phase/progress drive the look.
+    var paused: Bool
+    /// The out-of-sight part of `paused` (`SceneContext.occluded`): only then does the still frame
+    /// stop following the Pomodoro.
+    var occluded: Bool
+    /// Read live, not observed here, so phase/progress drive the look (`FocusStillFrame` does
+    /// observe it).
     let pomodoro: PomodoroService
 
     /// Random start so the map opens on fresh terrain each appearance.
@@ -24,7 +30,11 @@ struct ContourMetalView: View {
             let size = geo.size
             // Unconditional TimelineView in the else branch: the `paused:` schedule variant stops
             // driving frames on ProMotion (see CurrentMetalView).
-            if paused {
+            if paused && !occluded {
+                // Still but in sight (Moving scenes off): the terrain holds, the light follows the
+                // session.
+                FocusStillFrame(pomodoro: pomodoro) { field(size: size, now: nil) }
+            } else if paused {
                 field(size: size, now: nil)
             } else {
                 // 30 fps, unlike Current's 60. The lines drift a few points a second, a fraction

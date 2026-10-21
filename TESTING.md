@@ -210,10 +210,11 @@ everything below is display-link / render behavior only a device shows.
 5. **Focus scenes.** Current: streams *flow* during a running pomodoro — no per-tick jitter — and
    momentum builds over a work interval, eases on break.
    **Moving scenes off (added 2026-10-13, simulator-checked only).** Settings → Moving scenes off,
-   Focus, a 5-minute Focus length so the change is quick to see. On each of Current, Tide and
-   Sandfall, start a session and let the controls fade. ✅ The scene holds its pose, but its
-   reading follows the interval, creeping with the countdown: Current's front crosses, Tide's
-   waterline rises, Sandfall's top bulb drains (`FocusStillFrame`). ✅ A start, a break and a stop
+   Focus, a 5-minute Focus length so the change is quick to see. On each of Current, Tide,
+   Sandfall and Contour, start a session and let the controls fade. ✅ The scene holds its pose,
+   but its reading follows the interval, creeping with the countdown: Current's front crosses,
+   Tide's waterline rises, Sandfall's top bulb drains, Contour's light spreads from the summit
+   (`FocusStillFrame`). ✅ A start, a break and a stop
    show at once. Lock for 30 s and unlock, away from a phase boundary (one crossed while locked
    starts the next phase late, a separate Pomodoro issue). ✅ The reading is at the true time.
    Out of sight it stops: mid-session, with Instruments' SwiftUI template attached, pull down
@@ -843,10 +844,12 @@ phone at your desk.
 5. **ProMotion and heat.** ✅ A smooth drift on a 120 Hz phone (it renders at 30 fps; the lines move
    a fraction of a pixel per frame). After the full block: ✅ the phone is no warmer than after one
    on Current, and the exported log's scene line shows a steady frame rate.
-6. **Moving scenes off.** Settings → Moving scenes off. ✅ A still map. Check whether the light
-   still spreads over the interval: a paused Focus scene only redraws when Home does, and Home
-   doesn't redraw on the Pomodoro's progress, so it may hold where it was. That gap, if it shows,
-   is shared by all four Focus scenes.
+6. **Moving scenes off.** Settings → Moving scenes off, a 5-minute Focus length and a 1-minute
+   short break. ✅ A still map: the terrain and lines hold. Start a session and let the controls
+   fade: ✅ the light spreads from the summit as the interval goes on (`FocusStillFrame`, as in
+   §H step 5), creeping once a second. At the break: ✅ the map turns teal at once and the light
+   pulls back up. Stop: ✅ every line goes back to one even brightness and the edge is gone, at
+   once, not at the next redraw.
 
 ---
 
