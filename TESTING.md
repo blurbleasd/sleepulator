@@ -210,8 +210,11 @@ everything below is display-link / render behavior only a device shows.
    Sandfall, start a session and let the controls fade. ✅ The scene holds its pose, but its
    reading follows the interval, creeping with the countdown: Current's front crosses, Tide's
    waterline rises, Sandfall's top bulb drains (`FocusStillFrame`). ✅ A start, a break and a stop
-   show at once. Lock for 30 s and unlock. ✅ The reading is at the true time. Before the fix the
-   still frame kept the look it had when Focus came up (the idle one) all session.
+   show at once. Lock for 30 s and unlock. ✅ The reading is at the true time. Out of sight it
+   stops: mid-session, background the app (or let Always-On take the screen) with Xcode's Debug
+   navigator or Instruments → Core Animation attached. ✅ FPS ≈ 0 and no 1 Hz commits from the
+   scene until it's back in sight. Before the fix the still frame kept the look it had when Focus
+   came up (the idle one) all session.
 6. **Veil caption.** Veil engages → "Tap to wake" rides the fade in, fades out ~6 s later,
    panel is then true black (check no lit pixels in a dark room). Wake → re-engage: caption
    reliably re-shows.
