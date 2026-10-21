@@ -5,9 +5,8 @@ import UIKit
 import simd
 @testable import Sleepulator
 
-/// Pins the Pomodoro→look mapping shared by the Canvas `CurrentView` and the Metal
-/// `CurrentMetalView`. The one part of the Focus Metal port that's verifiable off-device; the
-/// shader itself and its thermals are device-verified.
+/// Pins the Pomodoro→look mapping the Focus scenes share. The shaders and their thermals are
+/// device-verified; `FocusStillFrameTests`, below, cover the still frame's redraw.
 final class FocusDriversTests: XCTestCase {
 
     private let acc = 1e-9
@@ -159,9 +158,13 @@ final class FocusStillFrameTests: XCTestCase {
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first,
                                   "no window scene in the test host")
         let p = PomodoroService()
-        var draws = 0
+        // What each redraw read: a count alone would credit any stray redraw to the Pomodoro.
+        var readings: [(running: Bool, remaining: TimeInterval)] = []
         // A drawn shape, as the scenes' frames are: with an `EmptyView` content SwiftUI never called it.
-        let host = UIHostingController(rootView: FocusStillFrame(pomodoro: p, content: { draws += 1; return Rectangle().fill(.black) }))
+        let host = UIHostingController(rootView: FocusStillFrame(pomodoro: p, content: {
+            readings.append((p.isRunning, p.remaining))
+            return Rectangle().fill(.black)
+        }))
         // Shown in its own window over the test host's, not made key.
         let window = UIWindow(windowScene: scene)
         window.frame = scene.coordinateSpace.bounds
@@ -170,34 +173,41 @@ final class FocusStillFrameTests: XCTestCase {
         host.view.layoutIfNeeded()
         defer { p.stop(); window.isHidden = true; window.rootViewController = nil }
 
-        // Turns the main run loop until `done`, or for `seconds`.
-        func turn(for seconds: TimeInterval, until done: () -> Bool = { false }) {
-            let end = Date().addingTimeInterval(seconds)
-            while !done(), Date() < end { RunLoop.main.run(until: Date().addingTimeInterval(0.02)) }
+        // Turns the main run loop until `done` or the budget is spent. It's spent per turn (a 20 ms
+        // turn, at most 50 ms counted), not by the wall clock: the host app's first render can hold
+        // main for 10 s or more, and a wall-clock budget ran out under it with the tick still queued.
+        func turn(for budget: TimeInterval, until done: () -> Bool = { false }) {
+            var left = budget
+            while !done(), left > 0 {
+                let t0 = Date()
+                RunLoop.main.run(until: t0.addingTimeInterval(0.02))
+                left -= min(Date().timeIntervalSince(t0), 0.05)
+            }
         }
-        // The waits end as soon as the draw lands; the ceilings are for CI's slow simulators.
-        turn(for: 2) { draws > 0 }
-        XCTAssertGreaterThan(draws, 0, "the frame never rendered")
-        // Settle until the draws stop for 0.5 s: layout passes after the first draw aren't publishes.
-        var settled = draws, quietSince = Date()
+        turn(for: 2) { !readings.isEmpty }
+        XCTAssertFalse(readings.isEmpty, "the frame never rendered")
+        // Settle until 25 turns (about 0.5 s) pass with no draw: layout passes after the first draw
+        // aren't publishes.
+        var settled = readings.count, quietTurns = 0
         turn(for: 3) {
-            if draws != settled { settled = draws; quietSince = Date() }
-            return Date().timeIntervalSince(quietSince) >= 0.5
+            if readings.count != settled { settled = readings.count; quietTurns = 0 } else { quietTurns += 1 }
+            return quietTurns >= 25
         }
+        XCTAssertGreaterThanOrEqual(quietTurns, 25, "the frame never settled")
 
         // Nothing published, nothing redrawn: so the redraws below are the Pomodoro's.
-        var before = draws
+        let before = readings.count
         turn(for: 0.2)
-        XCTAssertEqual(draws, before, "the frame redrew with nothing published")
+        XCTAssertEqual(readings.count, before, "the frame redrew with nothing published")
 
         p.start()
-        turn(for: 2) { draws > before }
-        XCTAssertGreaterThan(draws, before, "a start didn't redraw the frame")
+        turn(for: 2) { readings.last?.running == true }
+        XCTAssertEqual(readings.last?.running, true, "a start didn't redraw the frame with the session running")
 
-        // The 1 Hz tick redraws it too: the reading creeps with the countdown.
-        before = draws
-        turn(for: 3) { draws > before }
-        XCTAssertGreaterThan(draws, before, "a tick didn't redraw the frame")
+        // The 1 Hz tick redraws it too, with the countdown lower: the reading creeps.
+        let started = p.remaining
+        turn(for: 3) { (readings.last?.remaining ?? started) < started }
+        XCTAssertLessThan(readings.last?.remaining ?? started, started, "a tick didn't redraw the frame with the countdown")
     }
 
     // Value: protects=a Focus still frame moves at once on a start, break or stop; fails_when=a start, skip or stop no longer publishes objectWillChange, all FocusStillFrame observes; why_new=PomodoroProgressTests reads progress(at:), never what the service publishes, and the hosted test checks only start and tick; seam=none; no_claim=the 1 Hz tick (the hosted test), or that nothing publishes while idle

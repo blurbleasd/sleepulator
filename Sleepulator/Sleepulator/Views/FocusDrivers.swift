@@ -2,12 +2,12 @@ import SwiftUI
 
 /// The single source of truth for how a Focus scene reads the Pomodoro.
 ///
-/// Both the CPU `CurrentView` (Canvas) and the GPU `CurrentMetalView` (Metal A/B sibling) derive
-/// their look from the *same* mapping here, so during the A/B the two can only differ in how they
-/// render — never in how they read the session. Because it's a pure function it's also the one
-/// off-device-testable seam of the Focus port (the shader + thermals are device-verified).
+/// The Focus scenes (Current, Tide, Sandfall) derive their look and their progress position from
+/// this mapping, so they can only differ in how they render, never in how they read the session.
+/// It's pure, so it's unit-tested (the shaders and thermals are device-verified). `FocusStillFrame`,
+/// below, is how their still frames keep reading it with Moving scenes off.
 ///
-/// Numbers are lifted verbatim from `CurrentView` so the port is a true visual A/B, not a redesign:
+/// The numbers came from the retired Canvas `CurrentView`, so the Metal port was a true A/B:
 ///   work:  opacity/amplitude/speed ramp up with `progress`  → momentum
 ///   rest:  eased, cooler                                    → recovery
 ///   idle:  calm middle ground                               → not running

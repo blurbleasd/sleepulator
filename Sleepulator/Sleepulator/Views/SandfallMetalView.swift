@@ -10,7 +10,7 @@ import SwiftUI
 /// freezes it to one static frame, whose fill still follows the session while the screen is in
 /// sight (`FocusStillFrame`). System Reduce Motion doesn't (SCREENSAVER-LIBRARY-SPEC §5).
 struct SandfallMetalView: View {
-    var paused: Bool = false
+    var paused: Bool
     /// The out-of-sight part of `paused` (`SceneContext.occluded`): only then does the still frame
     /// stop following the Pomodoro.
     var occluded: Bool

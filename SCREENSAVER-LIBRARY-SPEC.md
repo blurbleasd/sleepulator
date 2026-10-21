@@ -61,7 +61,7 @@ Tags: **⚙︎** generative (cheap, recommended) · **✦** time-reactive · **�
 
 **Focus (calm-alert; the ring stays the hero):**
 - **Energy sweep** ⚙︎ — _retired 2026-07-06_ (a rotating glow with no depth). Focus defaults to
-  **Current**, built with **Tide** and **Sandfall** (`AmbientScene.swift`).
+  **Current**, built alongside **Tide** and **Sandfall** (`AmbientScene.swift`).
 - **Flow field** ⚙︎ — particles drifting along a slow vector field.
 - **Contour topography** ⚙︎ — subtle moving contour lines; a "deep work" feel.
 - **Rain on glass (day)** ⚙︎🔊 — the rain scene in a cool daytime key.
@@ -96,9 +96,9 @@ protocol AmbientScene {
 }
 ```
 
-**4.2 The two current scenes live behind the protocol.** `NightSkyScene` wraps
-`StarfieldView` + `MoonArc` + `ShootingStarView` + the darkening overlay; `EnergyScene` wraps
-`FocusBackdrop`. A no-behaviour-change refactor — the home looks identical. `SceneRegistry.all`
+**4.2 The two scenes of the time moved behind the protocol** (Phase 1 history; today's scenes are
+`SceneRegistry.all`). `NightSkyScene` wrapped `StarfieldView` + `MoonArc` + `ShootingStarView` +
+the darkening overlay; `EnergyScene` wrapped `FocusBackdrop`. A no-behaviour-change refactor — the home looks identical. `SceneRegistry.all`
 lists them; `scenes(for: mood)` filters.
 
 **4.3 Home renders the selected scene.** `HomeView`'s backdrop is
@@ -127,9 +127,8 @@ Every scene must honour:
 - **The ambient-motion preference** — NOT raw system Reduce Motion. We deliberately decided
   Sleep's decorative motion (twinkle, moon glide, meteor) should run even with system Reduce
   Motion on, because the opacity twinkle isn't vestibular motion and the sky reads dead static
-  otherwise. The proper home for this is an **app-level "Ambient motion" toggle** (not yet
-  built) that scenes read from the context; until it exists, the current scenes simply run
-  their motion. New scenes should follow the same rule, not re-gate on system Reduce Motion.
+  otherwise. Its home is the app-level toggle, built as Settings ▸ **Moving scenes** (`ambientMotion`),
+  which reaches every scene through `SceneContext.paused`. New scenes should follow the same rule, not re-gate on system Reduce Motion.
 
 ## 6. A picker (only once there's something to pick)
 
@@ -156,8 +155,7 @@ There's no queue and no deadline: build the next scene whenever the itch hits.
 - **`TimelineView` + `Canvas` as the standard engine** for new scenes (better for battery + the
   settle) vs. the hand-rolled `repeatForever` views the current sky uses? Leaning Timeline/Canvas
   for anything continuously animated; revisit the current two if/when convenient.
-- **The app-level "Ambient motion" toggle** (§5) — worth adding before the second scene, so the
-  contract is real and consistent rather than ad-hoc per scene.
+- **The app-level "Ambient motion" toggle** (§5) — built as Settings ▸ Moving scenes.
 - **Per-mode vs shared selection**, and whether a `both`-mood scene remembers separate settings
   per mode. Likely independent per mood.
 

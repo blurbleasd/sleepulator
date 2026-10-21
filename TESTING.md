@@ -183,8 +183,9 @@ Install via Xcode onto the device (not the simulator). Then:
 2. Confirm downloads live in Application Support and are excluded from iCloud backup.
 
 ### H. Ambient scenes — settle, freeze, and the phase clock (added 2026-07-05, unverified)
-The SceneClock refactor (ShaderBackdrop.swift) moved every scene onto
-`TimelineView(.animation(paused:))` + an integrating phase clock. XCTest covers the clock math;
+The SceneClock refactor (ShaderBackdrop.swift) put every scene on an integrating phase clock, and
+(since the 2026-07-11 ProMotion stall) on an `if paused { still frame } else { TimelineView }` swap
+rather than `TimelineView(.animation(paused:))`. XCTest covers the clock math;
 everything below is display-link / render behavior only a device shows.
 
 1. **Freeze is truly static.** Start a Sleep mix + timer, let the veil engage. In Xcode's Debug
@@ -211,10 +212,11 @@ everything below is display-link / render behavior only a device shows.
    reading follows the interval, creeping with the countdown: Current's front crosses, Tide's
    waterline rises, Sandfall's top bulb drains (`FocusStillFrame`). ✅ A start, a break and a stop
    show at once. Lock for 30 s and unlock. ✅ The reading is at the true time. Out of sight it
-   stops: mid-session, background the app (or let Always-On take the screen) with Xcode's Debug
-   navigator or Instruments → Core Animation attached. ✅ FPS ≈ 0 and no 1 Hz commits from the
-   scene until it's back in sight. Before the fix the still frame kept the look it had when Focus
-   came up (the idle one) all session.
+   stops: mid-session, let Always-On take the screen (backgrounding renders nothing, so it proves
+   nothing) with Instruments' SwiftUI template attached. ✅ `FocusStillFrame`'s body stops being
+   evaluated and the GPU shows no full-screen fragment pass until the screen is back in sight;
+   the Focus ring's and readout's own 1 Hz updates are expected. Before the fix the still frame
+   kept the look it had when Focus came up (the idle one) all session.
 6. **Veil caption.** Veil engages → "Tap to wake" rides the fade in, fades out ~6 s later,
    panel is then true black (check no lit pixels in a dark room). Wake → re-engage: caption
    reliably re-shows.
