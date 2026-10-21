@@ -710,8 +710,8 @@ final class PomodoroService: ObservableObject {
     /// Phase boundaries, natural (a tick) or a skip: chime, flip work↔rest, notify the owner, and
     /// re-arm the backgrounded-phase-end notification + Live Activity.
     ///
-    /// The next phase starts at `boundary`: the old phase's end for a tick, now for a skip. A
-    /// silent session has no audio to keep the app awake, so with the phone locked it's suspended,
+    /// The next phase starts at `boundary`: the old phase's end once it has passed (a tick, or a
+    /// skip of a phase that already ended, `skipPhase(at:)`), else now for a skip. A silent session has no audio to keep the app awake, so with the phone locked it's suspended,
     /// and the first tick after unlock can come minutes past the boundary. Starting the phase at
     /// that tick ran the break late by the whole wait, on the ring, the Focus scenes and the Live
     /// Activity, while the boundary's notification had come on time. Every boundary passed by

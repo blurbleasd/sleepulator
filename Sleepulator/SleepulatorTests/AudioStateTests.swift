@@ -1364,6 +1364,88 @@ final class PomodoroMissedBoundaryTests: XCTestCase {
         XCTAssertEqual(p.remaining, 1500 - 60, accuracy: 1e-6)
         XCTAssertEqual(chimes, 1)
     }
+
+    // Value: protects=a tick past a break's end starts focus at the break's end, counting no round; fails_when=the walk from a break starts focus at the tick, or counts the break as a round; why_new=every tick test started its walk in focus; seam=handleTick(at:); no_claim=the bed's return to full volume (AudioEngine)
+    func testATickPastTheBreaksEndStartsFocusAtTheBreaksEnd() throws {
+        let p = session()
+        defer { p.stop() }
+        p.handleTick(at: try XCTUnwrap(p.phaseEnd))                 // into the short break
+        let breakEnd = try XCTUnwrap(p.phaseEnd)
+        chimes = 0
+        phaseChanges = []
+
+        p.handleTick(at: breakEnd.addingTimeInterval(30))
+
+        XCTAssertEqual(p.phase, .work)
+        XCTAssertEqual(p.completedCycles, 1)
+        XCTAssertFalse(p.restIsLong)
+        XCTAssertEqual(try XCTUnwrap(p.phaseEnd).timeIntervalSince(breakEnd), 1500, accuracy: 1e-6)
+        XCTAssertEqual(p.remaining, 1470, accuracy: 1e-6)
+        XCTAssertEqual(chimes, 1)
+        XCTAssertEqual(phaseChanges.first?.0, .work)
+        XCTAssertEqual(phaseChanges.first?.1, true)
+    }
+
+    // Value: protects=a catch-up that starts in a short break counts the focus interval it passed and lands in the next break, timed from the boundaries; fails_when=the walk from a break miscounts rounds or times the landing from the tick; why_new=every catch-up test started in focus, though a lock in a break is as likely; seam=handleTick(at:); no_claim=none beyond protects
+    func testACatchUpFromAShortBreakCountsTheFocusIntervalItPassed() throws {
+        let p = session()
+        defer { p.stop() }
+        p.handleTick(at: try XCTUnwrap(p.phaseEnd))                 // into the short break
+        let breakEnd = try XCTUnwrap(p.phaseEnd)
+        chimes = 0
+        phaseChanges = []
+
+        p.handleTick(at: breakEnd.addingTimeInterval(1500 + 60))   // locked through the break's end and the next focus interval
+
+        XCTAssertEqual(p.phase, .rest)
+        XCTAssertEqual(p.completedCycles, 2)
+        XCTAssertFalse(p.restIsLong)
+        XCTAssertEqual(try XCTUnwrap(p.phaseEnd).timeIntervalSince(breakEnd), 1800, accuracy: 1e-6)
+        XCTAssertEqual(p.remaining, 240, accuracy: 1e-6)
+        XCTAssertEqual(chimes, 1)
+        XCTAssertEqual(phaseChanges.map { $0.0 }, [.rest])
+    }
+
+    // Value: protects=Skip break in a long break starts focus now at full length and clears the long break, counting no round; fails_when=a skip from a long break keeps restIsLong or counts a round; why_new=no test skipped a long break; seam=skipPhase(at:); no_claim=CycleDots' drawing
+    func testSkippingALongBreakStartsFocusAndClearsIt() throws {
+        let p = session(cycles: 2)
+        defer { p.stop() }
+        p.handleTick(at: try XCTUnwrap(p.phaseEnd).addingTimeInterval(300 + 1500))   // into the long break
+        XCTAssertTrue(p.restIsLong)
+        let tap = try XCTUnwrap(p.phaseEnd).addingTimeInterval(-840)                // a minute into it
+        chimes = 0
+        phaseChanges = []
+
+        p.skipPhase(at: tap)
+
+        XCTAssertEqual(p.phase, .work)
+        XCTAssertFalse(p.restIsLong)
+        XCTAssertEqual(p.completedCycles, 2)
+        XCTAssertEqual(try XCTUnwrap(p.phaseEnd).timeIntervalSince(tap), 1500, accuracy: 1e-6)
+        XCTAssertEqual(p.remaining, 1500, accuracy: 1e-6)
+        XCTAssertEqual(chimes, 1)
+        XCTAssertEqual(phaseChanges.map { $0.0 }, [.work])
+    }
+
+    // Value: protects=a catch-up over thousands of boundaries lands exactly and publishes a fixed number of times; fails_when=the walk writes @Published per boundary again, or the round count drifts over many sets; why_new=every catch-up test crossed 4 boundaries or fewer and none watched objectWillChange; seam=handleTick(at:); no_claim=SwiftUI's render cost
+    func testAClockJumpOverThousandsOfBoundariesLandsExactlyAndPublishesOnce() throws {
+        let p = session()   // 25/5/15, 4 rounds: one set is 4 × 1500 + 3 × 300 + 900 = 7800 s
+        defer { p.stop() }
+        let sessionStart = try XCTUnwrap(p.phaseEnd).addingTimeInterval(-1500)
+        var willChanges = 0
+        let sub = p.objectWillChange.sink { willChanges += 1 }
+        defer { sub.cancel() }
+
+        p.handleTick(at: sessionStart.addingTimeInterval(7800 * 1000 + 60))   // ~90 days: 1,000 sets, 8,000 boundaries
+
+        XCTAssertEqual(p.phase, .work)
+        XCTAssertEqual(p.completedCycles, 4000)
+        XCTAssertFalse(p.restIsLong)
+        XCTAssertEqual(p.remaining, 1440, accuracy: 1e-3)
+        XCTAssertEqual(chimes, 1)
+        XCTAssertEqual(phaseChanges.map { $0.0 }, [.work])
+        XCTAssertLessThanOrEqual(willChanges, 8, "one publish per move, not per boundary")
+    }
 }
 
 // MARK: - Resume / persistence integrity
