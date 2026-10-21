@@ -27,7 +27,9 @@ Suites in `SleepulatorTests/` (seven files, many suites):
 - `AudioStateTests.swift` — engine state/policy plus `PodcastParserTests` (CDATA, durations,
   dates, caps, enclosures), `OPMLParserTests` (scheme validation, dedupe, corrupt files),
   `StorageManagerTests` (backup recovery), `NetRetryTests`, `CacheEvictionTests`, the
-  sleep-timer suites (backstop, cancel, end-of-episode), layering, mode reconciliation, the
+  sleep-timer suites (backstop, cancel, end-of-episode), the Pomodoro's clock
+  (`PomodoroProgressTests`; `PomodoroMissedBoundaryTests`: boundaries a late tick finds start
+  the next phase at the boundary, each one counted), layering, mode reconciliation, the
   Night sky meteor's rules (`NightSkyMotionTests`: only while the controls show, faint, rare after
   the first, never popping), and the
   Podcasts-tab rules (`PodcastTextTests`, `ShowNotesPreviewTests`, `ShowNotesEdgeTests`,
@@ -252,6 +254,15 @@ the brightness you actually use at night, in **both** Sleep and Focus.
    ring's 30 fps redraw fully stopped (paused); on return the arc is at the correct remaining
    time with no jump-back. Idle (no session): the faint track ring is still perceptible at low
    brightness.
+   **A boundary crossed while locked (added 2026-10-20, unit-tested only).** Settings: Focus
+   length 5 min, short break 1 min. Start a Focus session with no sound (nothing keeps the app
+   awake, so it's suspended while locked) and lock at about 4:00 left. Unlock 4.5 min later.
+   ✅ The break shows about 0:30 left, not a fresh 1:00, and the ring, readout and Live Activity
+   agree. Stop, start again, lock at about 4:00 left, and unlock 7 min later. ✅ The session is
+   in its second focus interval with about 3:00 left, one round done in the cycle dots, and no
+   run of chimes (one at most). Only the first boundary posts a notification while locked: a
+   phase's notification is scheduled when the phase starts, and a suspended app starts none.
+   Before the fix the next phase began at unlock and ran its full length.
 
 ### J. Resume integrity + diagnosability (added 2026-07-05, unverified)
 1. **Muted layer survives resume.** Build a mix with an extra layer, mute that layer, stop.

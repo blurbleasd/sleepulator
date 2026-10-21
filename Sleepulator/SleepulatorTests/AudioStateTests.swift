@@ -1163,6 +1163,120 @@ final class PomodoroProgressTests: XCTestCase {
     }
 }
 
+// MARK: - Pomodoro boundaries passed while suspended
+
+/// A silent Focus session's app is suspended while the phone is locked, so the first tick after
+/// unlock can come long after a phase boundary. The next phase runs from the boundary itself, and
+/// every boundary passed meanwhile counts. Ticks go through `handleTick(at:)` at chosen times,
+/// measured from the session's own `phaseEnd`.
+@MainActor
+final class PomodoroMissedBoundaryTests: XCTestCase {
+    private var chimes = 0
+    private var phaseChanges: [(PomodoroService.Phase, Bool)] = []
+
+    /// A running session with these lengths. They persist (`didSet`), so the saved ones come back
+    /// after the test.
+    private func session(work: Int = 25, rest: Int = 5, longRest: Int = 15, cycles: Int = 4) -> PomodoroService {
+        let d = UserDefaults.standard
+        let keys = ["pomoWork", "pomoRest", "pomoLongRest", "pomoCycles"]
+        let saved = keys.map { d.object(forKey: $0) }
+        addTeardownBlock {
+            for (key, value) in zip(keys, saved) { if let value { d.set(value, forKey: key) } else { d.removeObject(forKey: key) } }
+        }
+        let p = PomodoroService()
+        (p.workMinutes, p.restMinutes, p.longRestMinutes, p.cyclesBeforeLongBreak) = (work, rest, longRest, cycles)
+        p.chimeFn = { [unowned self] in self.chimes += 1 }
+        p.phaseChangedFn = { [unowned self] phase, running in self.phaseChanges.append((phase, running)) }
+        p.start()
+        chimes = 0
+        phaseChanges = []
+        return p
+    }
+
+    // Value: protects=a boundary found late starts the break at the boundary, with the time left from there; fails_when=advancePhase starts the next phase at the tick (Date()) again; why_new=the late start was only on device, nothing ticked at a chosen time; seam=handleTick(at:); no_claim=the GCD timer's suspension, the notification's timing, the Live Activity's display
+    func testABoundaryPassedWhileSuspendedStartsTheBreakAtTheBoundary() throws {
+        let p = session()
+        defer { p.stop() }
+        let workEnd = try XCTUnwrap(p.phaseEnd)
+
+        p.handleTick(at: workEnd.addingTimeInterval(120))   // unlocked 2 min into the break
+
+        XCTAssertEqual(p.phase, .rest)
+        XCTAssertEqual(p.completedCycles, 1)
+        XCTAssertFalse(p.restIsLong)
+        XCTAssertEqual(try XCTUnwrap(p.phaseEnd).timeIntervalSince(workEnd), 300, accuracy: 1e-6, "the break runs from the boundary")
+        XCTAssertEqual(p.remaining, 180, accuracy: 1e-6)
+        XCTAssertEqual(p.progress(at: workEnd.addingTimeInterval(120)), 0.4, accuracy: 1e-6)
+        XCTAssertEqual(chimes, 1)
+        XCTAssertEqual(phaseChanges.map { $0.0 }, [.rest])
+    }
+
+    // Value: protects=two boundaries passed while suspended land in the next work interval, its time counted from the break's end, with one chime; fails_when=the catch-up takes only one boundary (stuck in a break that's over) or chimes per boundary; why_new=nothing covered more than one boundary per tick; seam=handleTick(at:); no_claim=the notification for the second boundary (none is scheduled while suspended)
+    func testTwoBoundariesPassedWhileSuspendedLandInTheNextWorkInterval() throws {
+        let p = session()
+        defer { p.stop() }
+        let workEnd = try XCTUnwrap(p.phaseEnd)
+        let breakEnd = workEnd.addingTimeInterval(300)
+
+        p.handleTick(at: breakEnd.addingTimeInterval(60))   // a minute into the second work interval
+
+        XCTAssertEqual(p.phase, .work)
+        XCTAssertEqual(p.completedCycles, 1, "one work interval finished; the second is under way")
+        XCTAssertFalse(p.restIsLong)
+        XCTAssertEqual(try XCTUnwrap(p.phaseEnd).timeIntervalSince(breakEnd), 1500, accuracy: 1e-6)
+        XCTAssertEqual(p.remaining, 1440, accuracy: 1e-6)
+        XCTAssertEqual(chimes, 1, "one chime for the catch-up, not one per boundary")
+        XCTAssertEqual(phaseChanges.count, 1)
+        XCTAssertEqual(phaseChanges.first?.0, .work)
+        XCTAssertEqual(phaseChanges.first?.1, true)
+    }
+
+    // Value: protects=a catch-up counts every finished work interval, so a long break falls due on the wall clock; fails_when=completedCycles or restIsLong is set once per catch-up instead of per boundary; why_new=the long-break count across a catch-up was untested; seam=handleTick(at:); no_claim=CycleDots' drawing
+    func testACatchUpThroughThreeBoundariesReachesTheLongBreak() throws {
+        let p = session(cycles: 2)
+        defer { p.stop() }
+        let workEnd = try XCTUnwrap(p.phaseEnd)
+        let secondWorkEnd = workEnd.addingTimeInterval(300 + 1500)
+
+        p.handleTick(at: secondWorkEnd.addingTimeInterval(100))
+
+        XCTAssertEqual(p.phase, .rest)
+        XCTAssertTrue(p.restIsLong, "the second work interval earned the long break")
+        XCTAssertEqual(p.completedCycles, 2)
+        XCTAssertEqual(p.remaining, 900 - 100, accuracy: 1e-6)
+        XCTAssertEqual(chimes, 1)
+    }
+
+    // Value: protects=an on-time tick still steps one phase and the ring's refill eases in from the tick; fails_when=phaseElapsed measures from the phase's start again (a tick 0.7 s late skips the 0.5 s ease) or the loop overshoots a phase; why_new=starting phases at the boundary moved the start before the tick; seam=handleTick(at:); no_claim=FocusHero's drawing
+    func testAnOnTimeTickStepsOnePhaseAndTheRefillStartsAtTheTick() throws {
+        let p = session()
+        defer { p.stop() }
+        let workEnd = try XCTUnwrap(p.phaseEnd)
+        let tick = workEnd.addingTimeInterval(0.7)
+
+        p.handleTick(at: tick)
+
+        XCTAssertEqual(p.phase, .rest)
+        XCTAssertEqual(try XCTUnwrap(p.phaseEnd).timeIntervalSince(workEnd), 300, accuracy: 1e-6)
+        XCTAssertEqual(p.phaseElapsed(at: tick), 0, accuracy: 1e-9, "the ring's refill starts when the phase comes up")
+        XCTAssertEqual(p.phaseElapsed(at: tick.addingTimeInterval(0.25)), 0.25, accuracy: 1e-6)
+    }
+
+    // Value: protects=a tick before the boundary only counts down; fails_when=handleTick flips on r > 0; why_new=handleTick(at:) is new; seam=handleTick(at:); no_claim=none
+    func testATickBeforeTheBoundaryOnlyCountsDown() throws {
+        let p = session()
+        defer { p.stop() }
+        let workEnd = try XCTUnwrap(p.phaseEnd)
+
+        p.handleTick(at: workEnd.addingTimeInterval(-30))
+
+        XCTAssertEqual(p.phase, .work)
+        XCTAssertEqual(p.completedCycles, 0)
+        XCTAssertEqual(p.remaining, 30, accuracy: 1e-6)
+        XCTAssertEqual(chimes, 0)
+    }
+}
+
 // MARK: - Resume / persistence integrity
 
 /// "Resume Last Night" must restore the exact recipe faithfully — including a muted extra layer,
