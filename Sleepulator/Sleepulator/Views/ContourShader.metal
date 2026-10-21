@@ -52,9 +52,12 @@ namespace ctr {
 
 // ---- tunables (edit + rebuild) ---------------------------------------------------
 // The cone against the noise is the reading against the look. Simulating this terrain over 24
-// random pans, the lit share of the screen tracks `light` with no bias and a spread of ±0.07
-// (1 sd) at these values; at 0.60 / 0.85 / 3.0 it was ±0.16, and one capture lit half the
-// screen 23% into an interval. A stronger cone tightens it further but draws a bullseye.
+// random pans, the lit share of the screen tracks `light` with a spread of ±0.07 (1 sd) at these
+// values, without bias between ~15% and ~85%; outside that the MARGIN ramps squash it on purpose
+// (about 5% lit at 10%, 94% at 90%) so an interval starts dark and ends fully lit. At 0.60 / 0.85
+// / 3.0 it was ±0.16, and one capture lit half the screen 23% into an interval. A stronger cone
+// tightens it further but draws a bullseye. H_MEAN and MARGIN were measured for these FREQ,
+// WARP and octave settings: retune those and re-measure both, or the reading drifts unseen.
 constant float FREQ     = 3.6;     // terrain features per screen height
 constant float WARP     = 0.9;     // domain-warp strength (folds ridges into organic shapes)
 constant float RISE     = 0.90;    // the cone's height, summit to the farthest corner

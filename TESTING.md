@@ -831,7 +831,7 @@ phone at your desk.
    clearly apart from it (log how far off it looks).
 2. **The light is the interval.** Start a session and let the controls fade. ✅ A quarter in, a disc
    of light about a quarter of the screen sits around the summit, edged by one bright line; halfway,
-   about half the screen; near the end, nearly all of it. (The lit share is usually within about 7% of the interval's, rarely more than ~15%: 1 sd is ±0.07.)
+   about half the screen; near the end, nearly all of it. (The lit share is usually within about 7% of the interval's, rarely more than ~15%: 1 sd is ±0.07. In the first and last ~15% of an interval it runs dark and full on purpose: little is lit 10% in, most of it 90% in.) ✅ No stray bright ring flashes for a frame as an interval or a break starts.
    ✅ The bright edge holds still while the lines drift through it. With a 5-minute Focus length
    and a 1-minute short break (Settings' shortest), ✅ the edge glides between seconds, as the ring
    does, through the work interval and the break; it never jumps (15-20 pt once a second on the
