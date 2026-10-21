@@ -35,7 +35,8 @@ Suites in `SleepulatorTests/` (seven files, many suites):
   (`PomodoroLiveActivityTests`: a start ends what was up and keeps its own, Stop ends it),
   layering, mode reconciliation, the
   Night sky meteor's rules (`NightSkyMotionTests`: only while the controls show, faint, rare after
-  the first, never popping), and the
+  the first, never popping), Fireflies' night (`FireflyNightTests`: out of step and all there at
+  bedtime, in step and down to the meadow's few at the end, the nearest going first), and the
   Podcasts-tab rules (`PodcastTextTests`, `ShowNotesPreviewTests`, `ShowNotesEdgeTests`,
   `TonightShelfTests`, `QueueMoveToHeadTests`), the player rules (`NowPlayingStateTests`,
   `NightLineCopyTests`, `PlayerQueueActionTests`, `PodcastFailureStreakTests`), Settings' rules
@@ -201,8 +202,8 @@ everything below is display-link / render behavior only a device shows.
    navigator (or Instruments → Core Animation), FPS ≈ 0 and no CA commits from the app while
    the veil is up, beyond a 1 Hz commit from the timer's observers on a timed night (NightDarken,
    NightFade, the ring); on All night ≈ 0. Repeat with each of: Night sky, Aurora, Embers, Still water, Deep space,
-   Breathe, Rain on glass. ✅ No redraws, no meteor wakeups (Night sky), gyro off (Aurora /
-   Deep space — check with the Energy Log that CoreMotion isn't running).
+   Fireflies, Breathe, Rain on glass. ✅ No redraws, no meteor wakeups (Night sky), gyro off (Aurora /
+   Deep space / Fireflies — check with the Energy Log that CoreMotion isn't running).
 2. **Freeze-in-place, not reset.** Tap to wake after ≥ 10 min under the veil. ✅ Every scene
    resumes from the pose it froze at — no snap to a birth pose, no burst of catch-up motion.
    Repeat via the lock/unlock path (scenePhase) and the app switcher.
@@ -872,6 +873,45 @@ phone at your desk.
    §H step 5), creeping once a second. At the break: ✅ the map turns teal at once and the light
    pulls back up. Stop: ✅ every line goes back to one even brightness and the edge is gone, at
    once, not at the next redraw.
+
+### W. Fireflies: a meadow that falls into step (added 2026-10-21, simulator-checked only)
+A new Sleep scene (`FirefliesShader.metal`, `FirefliesMetalView`): fireflies over a meadow at the
+edge of a wood that fall into step through the night and go out one by one, the nearest first,
+until a few are left pulsing together (`FireflyNight`). Offline frames of the shader and a
+simulator capture showed the look, the clustering and the end of the night (5 left on a 6.3"
+screen; 5-7 on any size, by a Python count of the shader's hash). Motion feel, calm, black level
+on OLED at 2am, ProMotion and a full night need the phone. Room dark, phone on the nightstand,
+brightness where you'd leave it at night, Fireflies selected (Build mix → Backdrop), Forest or
+Green playing.
+
+1. **It has depth.** At bedtime with the controls faded. ✅ It reads as a meadow at a wood's edge,
+   not dots on a screen: a faint sky over two lines of trees (round crowns, a few spires), the far
+   one hazier toward its foot, mist along the near wood's foot, and grass standing black against
+   the mist in front, a few stems taller than the rest. ✅ Fireflies at three depths: small and dim
+   among the trees, brighter over the meadow (the grass in front of them), and now and then a big
+   soft out-of-focus one close up. Hold the phone and tilt it: ✅ the grass and the near ones shift
+   most, the far wood least.
+2. **Alive but calm; nothing strobes.** Watch two minutes. ✅ Each firefly swells over about half a
+   second and fades over a second or so, lifting a little as it glows, roughly every 5 s at its own
+   time; its glow spreads wider in the mist. ✅ The mist drifts slowly and the grass sways. ✅ No
+   flash pops on or off, none lights the room, and nothing else blinks.
+3. **Visible at night brightness.** ✅ The treetops against the sky, the far wood against the near
+   one, the mist and the grass's tops are all visible to dark-adapted eyes (they sit about 8-25
+   levels above black; the near wood is black on purpose). ✅ No banding in the sky or the mist.
+4. **The night arc.** A 15-minute timer, the veil off in Settings so you can watch. ✅ Early on
+   the flashes come at random. By about a third in the big near ones have gone and the flashes
+   start to bunch; by two-thirds most of the far ones in the trees are out and the meadow's flash
+   within a second of each other, then go dark for a few seconds together. ✅ That group flash
+   never reads as the whole screen pulsing (log it if it does: it's the scene's one risk). ✅ At the
+   end a few (5-7) are left, spread over the meadow, flashing together, slower than at bedtime,
+   the flash rolling left to right across them. ✅ None goes out with a pop: each fades over a
+   stretch of the night. An All night session, woken after an hour: ✅ the same few, together.
+5. **Moving scenes off.** Settings → Moving scenes off. ✅ A still meadow, some fireflies caught
+   mid-glow. Over a 15-minute night: ✅ they thin out to the few (the still frame re-reads the night
+   every 20 s while in sight).
+6. **ProMotion and battery.** Watch a minute on a 120 Hz phone. ✅ Smooth glows and drift, no
+   stalls. Overnight with the veil on: ✅ battery comparable to Night sky (a full-screen shader at
+   30 fps while the meadow is in sight; nothing renders under the veil).
 
 ---
 

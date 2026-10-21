@@ -85,7 +85,7 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   `StorageManagerTests`, `NetRetryTests`, `CacheEvictionTests`, the sleep-timer suites, the
   Pomodoro's clock (`PomodoroProgressTests`, `PomodoroMissedBoundaryTests`), Home's
   pure UI rules (`SessionGuardsTests`, `NightRingMathTests`, `MiniPlayerClearanceTests`,
-  `HomeScreensaverPolicyTests`, `NightSkyMotionTests`), the podcast rules (`PodcastTextTests`, `ShowNotesPreviewTests`,
+  `HomeScreensaverPolicyTests`, `NightSkyMotionTests`, `FireflyNightTests`), the podcast rules (`PodcastTextTests`, `ShowNotesPreviewTests`,
   `ShowNotesEdgeTests`, `TonightShelfTests`, `QueueMoveToHeadTests`), the player rules
   (`NowPlayingStateTests`, `NightLineCopyTests`, `PlayerQueueActionTests`,
   `PodcastFailureStreakTests`), Settings' rules (`SettingsRulesTests`) and a restore's engine
