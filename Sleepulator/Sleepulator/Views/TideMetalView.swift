@@ -5,12 +5,17 @@ import SwiftUI
 /// depth shading, a crisp surface line and specular shimmer — instead of the flat Canvas fill it
 /// replaced.
 ///
-/// The level + tint come from the shared `FocusDrivers` mapping. Values are read live each tick
-/// (never observed). Ambient surface motion runs off its own `SceneClock` at a constant rate (the
-/// tide's motion isn't Pomodoro-paced); `paused` (occlusion, or "Moving scenes" off) freezes it to
-/// one static frame. System Reduce Motion doesn't (SCREENSAVER-LIBRARY-SPEC §5).
+/// The level comes from the shared `FocusDrivers.fill`; the tint and energy are this view's own.
+/// Values are read live each tick; the view never observes the Pomodoro (only its
+/// `FocusStillFrame` child, below). Ambient surface motion runs off its own `SceneClock` at a
+/// constant rate (the tide's motion isn't Pomodoro-paced); `paused` (occlusion, or "Moving scenes"
+/// off) freezes it to one static frame, whose waterline still follows the session while the screen
+/// is in sight. System Reduce Motion doesn't (SCREENSAVER-LIBRARY-SPEC §5).
 struct TideMetalView: View {
-    var paused: Bool = false
+    var paused: Bool
+    /// The out-of-sight part of `paused` (`SceneContext.occluded`): only then does the still frame
+    /// stop following the Pomodoro.
+    var occluded: Bool
     let pomodoro: PomodoroService
 
     private static let workTint = SIMD3<Double>(0.34, 0.60, 0.95)  // cool blue
@@ -24,7 +29,11 @@ struct TideMetalView: View {
             let size = geo.size
             // Unconditional TimelineView — the `paused:` variant stops driving frames on device
             // (ProMotion); see CurrentMetalView. SceneClock is @State so freeze holds its pose.
-            if paused {
+            if paused && !occluded {
+                // Still but in sight (Moving scenes off): the pose holds, the level follows the
+                // session.
+                FocusStillFrame(pomodoro: pomodoro) { field(size: size, now: nil) }
+            } else if paused {
                 field(size: size, now: nil)
             } else {
                 // 60 fps, not 30. Focus scenes are fast by design (flowing streams, falling

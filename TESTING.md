@@ -54,7 +54,9 @@ Suites in `SleepulatorTests/` (seven files, many suites):
   restore never switching mode. `BackupControllerTests` covers the Backup page's controller:
   results that land after the page closed, the export letting go of its document, an incomplete
   Undo, and the queued writes landing first.
-- `FocusDriversTests.swift` — the Pomodoro → Focus-scene look mapping.
+- `FocusDriversTests.swift` — the Pomodoro → Focus-scene look mapping, and `FocusStillFrameTests`
+  (with Moving scenes off, a Focus scene's still frame redraws on each Pomodoro publish and reads
+  it afresh; one test hosts it in a window).
 - `GenerativeAudioEngineTests.swift` — generative-bed rebuild after a media-services reset.
 - `TipStoreTests.swift` — `TipFlowTests` (every StoreKit outcome to what the tip rows show) and
   `TipStoreTests` (StoreKitTest against `Tips.storekit`). On iOS 26 simulators a command-line run
@@ -181,8 +183,11 @@ Install via Xcode onto the device (not the simulator). Then:
 2. Confirm downloads live in Application Support and are excluded from iCloud backup.
 
 ### H. Ambient scenes — settle, freeze, and the phase clock (added 2026-07-05, unverified)
-The SceneClock refactor (ShaderBackdrop.swift) moved every scene onto
-`TimelineView(.animation(paused:))` + an integrating phase clock. XCTest covers the clock math;
+The SceneClock refactor (ShaderBackdrop.swift) put every shader scene (and Breathe) on an
+integrating phase clock, and (since the 2026-07-11 ProMotion stall) on an
+`if paused { still frame } else { TimelineView }` swap rather than
+`TimelineView(.animation(paused:))`. Rain on glass never used the clock: its drops run on
+absolute time and drop out when held still. XCTest covers the clock math;
 everything below is display-link / render behavior only a device shows.
 
 1. **Freeze is truly static.** Start a Sleep mix + timer, let the veil engage. In Xcode's Debug
@@ -201,10 +206,22 @@ everything below is display-link / render behavior only a device shows.
    the night deepens and stop past ~40%; the comet fades out past ~15% and is gone by ~40%;
    a freeze never leaves a comet/meteor burned on the frozen frame (try pausing repeatedly
    around the two-minute comet cycle).
-5. **Focus scenes.** Energy: sweep rotates smoothly (1/10 s cadence through the blur — check
-   for stepping) and survives backgrounding (the old repeatForever animation died on the first
-   app switch). Current: streams *flow* during a running pomodoro — no per-tick jitter — and
+5. **Focus scenes.** Current: streams *flow* during a running pomodoro — no per-tick jitter — and
    momentum builds over a work interval, eases on break.
+   **Moving scenes off (added 2026-10-13, simulator-checked only).** Settings → Moving scenes off,
+   Focus, a 5-minute Focus length so the change is quick to see. On each of Current, Tide and
+   Sandfall, start a session and let the controls fade. ✅ The scene holds its pose, but its
+   reading follows the interval, creeping with the countdown: Current's front crosses, Tide's
+   waterline rises, Sandfall's top bulb drains (`FocusStillFrame`). ✅ A start, a break and a stop
+   show at once. Lock for 30 s and unlock, away from a phase boundary (one crossed while locked
+   starts the next phase late, a separate Pomodoro issue). ✅ The reading is at the true time.
+   Out of sight it stops: mid-session, with Instruments' SwiftUI template attached, pull down
+   Control Center or Notification Center over Focus Home (the app goes inactive with Home still
+   behind it; Always-On and the Lock Screen background the app, which renders nothing and so
+   proves nothing). ✅ `FocusStillFrame`'s body stops being evaluated and the GPU shows no
+   full-screen fragment pass until it's dismissed, then the reading is at the true time; the
+   Focus ring's and readout's own 1 Hz updates are expected. Before the fix the still frame kept
+   the look it had when Focus came up (the idle one) all session.
 6. **Veil caption.** Veil engages → "Tap to wake" rides the fade in, fades out ~6 s later,
    panel is then true black (check no lit pixels in a dark room). Wake → re-engage: caption
    reliably re-shows.
