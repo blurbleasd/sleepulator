@@ -17,9 +17,10 @@ import os
 /// `isAvailable(_:in:known:)` below, unit-tested off-device.
 enum MetalShaders {
     /// The known-shipping stitchable functions — the sentinel + preflight set. If the library lists
-    /// none of these, enumeration doesn't cover stitchables on this runtime (see the type doc). Keep
-    /// roughly in sync as scenes are added; a name missing from here only means it isn't preflighted,
-    /// never a crash.
+    /// none of these, enumeration doesn't cover stitchables on this runtime (see the type doc). It
+    /// must list exactly the compiled [[stitchable]] functions: add a new scene's shader here.
+    /// `MetalShadersTests.testThePreflightKnowsEveryCompiledShader` fails otherwise, wherever the
+    /// runtime enumerates stitchables. (At run time a missing name still only goes unchecked.)
     // Must match the actual [[stitchable]] function names, or preflight cries wolf every launch and
     // masks a real miss. These drifted once (embersField/deepSpaceField/energyField were checked but
     // the functions are emberField/nebulaField, and Energy was a retired Canvas scene with no shader)
@@ -27,7 +28,7 @@ enum MetalShaders {
     static let known: Set<String> = [
         "auroraField", "emberField", "nebulaField", "stillWaterField",   // Sleep .colorEffect scenes
         "nightSkyField",
-        "currentField", "tideField", "sandField",                        // Focus .colorEffect scenes
+        "currentField", "tideField", "sandField", "contourField",        // Focus .colorEffect scenes
         "rainGlassLens", "stillWaterLens",                               // depth .layerEffect lenses
     ]
 

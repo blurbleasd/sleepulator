@@ -23,7 +23,9 @@ xcodebuild test -project Sleepulator/Sleepulator.xcodeproj \
 
 Suites in `SleepulatorTests/` (seven files, many suites):
 
-- `AudioMathTests.swift` — fade curve, carrier/beat math, scrub targets.
+- `AudioMathTests.swift` — fade curve, carrier/beat math, scrub targets, the Metal shader
+  preflight set (`MetalShadersTests`, also checked against the app's compiled library) and the
+  scene registry (`SceneSwipeLoopTests`: the swipe loop, unique scene ids).
 - `AudioStateTests.swift` — engine state/policy plus `PodcastParserTests` (CDATA, durations,
   dates, caps, enclosures), `OPMLParserTests` (scheme validation, dedupe, corrupt files),
   `StorageManagerTests` (backup recovery), `NetRetryTests`, `CacheEvictionTests`, the
@@ -58,9 +60,10 @@ Suites in `SleepulatorTests/` (seven files, many suites):
   restore never switching mode. `BackupControllerTests` covers the Backup page's controller:
   results that land after the page closed, the export letting go of its document, an incomplete
   Undo, and the queued writes landing first.
-- `FocusDriversTests.swift` — the Pomodoro → Focus-scene look mapping, and `FocusStillFrameTests`
+- `FocusDriversTests.swift` — the Pomodoro → Focus-scene look mapping, `FocusStillFrameTests`
   (with Moving scenes off, a Focus scene's still frame redraws on each Pomodoro publish and reads
-  it afresh; one test hosts it in a window).
+  it afresh; one test hosts it in a window), and Contour's light (`ContourLightTests`: the radius
+  whose disc covers the interval's share of the screen).
 - `GenerativeAudioEngineTests.swift` — generative-bed rebuild after a media-services reset.
 - `TipStoreTests.swift` — `TipFlowTests` (every StoreKit outcome to what the tip rows show) and
   `TipStoreTests` (StoreKitTest against `Tips.storekit`). On iOS 26 simulators a command-line run
@@ -212,13 +215,14 @@ everything below is display-link / render behavior only a device shows.
    around the two-minute comet cycle).
 5. **Focus scenes.** Current: streams *flow* during a running pomodoro — no per-tick jitter — and
    momentum builds over a work interval, eases on break.
-   **Moving scenes off (added 2026-10-13, simulator-checked only).** Settings → Moving scenes off,
-   Focus, a 5-minute Focus length so the change is quick to see. On each of Current, Tide and
-   Sandfall, start a session and let the controls fade. ✅ The scene holds its pose, but its
-   reading follows the interval, creeping with the countdown: Current's front crosses, Tide's
-   waterline rises, Sandfall's top bulb drains (`FocusStillFrame`). ✅ A start, a break and a stop
-   show at once. Lock for 30 s and unlock, then once more across a phase boundary (the next phase
-   now starts at the boundary itself, §I step 6). ✅ The reading is at the true time.
+   **Moving scenes off (added 2026-10-13, simulator-checked only; Contour added 2026-10-21, simulator-checked).** Settings → Moving scenes off,
+   Focus, a 5-minute Focus length so the change is quick to see. On each of Current, Tide,
+   Sandfall and Contour, start a session and let the controls fade. ✅ The scene holds its pose,
+   but its reading follows the interval, creeping with the countdown: Current's front crosses,
+   Tide's waterline rises, Sandfall's top bulb drains, Contour's light spreads from the summit
+   (`FocusStillFrame`). ✅ A start, a break and a stop show at once. Lock for 30 s and unlock,
+   then once more across a phase boundary (the next phase now starts at the boundary itself,
+   §I step 6). ✅ The reading is at the true time.
    Out of sight it stops: mid-session, with Instruments' SwiftUI template attached, pull down
    Control Center or Notification Center over Focus Home (the app goes inactive with Home still
    behind it; Always-On and the Lock Screen background the app, which renders nothing and so
@@ -827,6 +831,48 @@ to Files: each night is a `.jsonl` file, one event per line.
    file ends `closed` `timer … reconciled`, timed at the deadline (not at the Play), or `closed`
    `person …` at the pause, and the summary counts it under "ended early or spoiled".
 
+### V. Contour: a Focus map lit from the summit (added 2026-10-12; look checked on the phone 2026-10-12, full pass owed)
+A new Focus scene (`ContourShader.metal`, `ContourMetalView`): contour lines of a mountain whose
+summit sits under the ring, with light spreading down from it as a work interval goes on. The
+simulator showed the look and the reading at 7/23/50/80% of a 1-minute interval and a quarter into
+a break; motion feel, OLED black, heat and a real 25-minute block need the phone. On the phone
+(2026-10-12) the look, the calm drift and working beside it were checked informally (see the log);
+the full pass below is owed. Focus, Contour selected (Build mix → Backdrop), a sound playing, the
+phone at your desk.
+
+1. **It reads as a map with depth.** Controls up. ✅ A dimmed topographic map, the ring and play
+   button sitting on the summit, contour rings around it bent by the terrain. Every fifth line is
+   bolder (index contours). It reads as a mountain, not a target. Controls faded: ✅ it reads as a
+   layered relief model, not a flat drawing: each band a sheet a step above the one below, higher
+   sheets lighter, a soft shadow at the foot of each step on the lower right, and the edges lit on
+   the upper left. (The first cut, plain hillshading, read "1-dimensional" on the phone.) The
+   summit is fixed at 40% down the screen, where the ring sits on a 6.3"/6.9" Pro: on a smaller
+   phone (an SE) or at a large text size, ✅ it still sits under or close beside the ring, not
+   clearly apart from it (log how far off it looks).
+2. **The light is the interval.** Start a session and let the controls fade. ✅ A quarter in, a disc
+   of light about a quarter of the screen sits around the summit, edged by one bright line; halfway,
+   about half the screen; near the end, nearly all of it. (The lit share is usually within about 7% of the interval's, rarely more than ~15%: 1 sd is ±0.07. In the first and last ~15% of an interval it runs dark and full on purpose: little is lit 10% in, most of it 90% in.) ✅ No stray bright ring flashes for a frame as an interval or a break starts.
+   ✅ The bright edge holds still while the lines drift through it. With a 5-minute Focus length
+   and a 1-minute short break (Settings' shortest), ✅ the edge glides between seconds, as the ring
+   does, through the work interval and the break; it never jumps (15-20 pt once a second on the
+   break, before the fix). On a break: ✅ the map turns teal and the light pulls back up toward
+   the summit. Stop the session: ✅ every line goes back to
+   one even brightness and the edge is gone.
+3. **The motion is a drift, not a churn.** Watch two minutes. ✅ The lines drift steadily outward
+   from the summit, and the terrain slowly pans and re-forms. ✅ Flat stretches don't boil, steep
+   ones don't shimmer or bead into moiré, and nothing flickers.
+4. **You can work beside it.** A full 25-minute block, controls faded. ✅ It stays at the edge of
+   your attention: alive without pulling your eye off the work.
+5. **ProMotion and heat.** ✅ A smooth drift on a 120 Hz phone (it renders at 30 fps; the lines move
+   a fraction of a pixel per frame). After the full block: ✅ the phone is no warmer than after one
+   on Current, and the exported log's scene line shows a steady frame rate.
+6. **Moving scenes off.** Settings → Moving scenes off, a 5-minute Focus length and a 1-minute
+   short break. ✅ A still map: the terrain and lines hold. Start a session and let the controls
+   fade: ✅ the light spreads from the summit as the interval goes on (`FocusStillFrame`, as in
+   §H step 5), creeping once a second. At the break: ✅ the map turns teal at once and the light
+   pulls back up. Stop: ✅ every line goes back to one even brightness and the edge is gone, at
+   once, not at the next redraw.
+
 ---
 
 ## Quick release checklist
@@ -851,4 +897,5 @@ to Files: each night is a `.jsonl` file, one event per line.
 | Date | Device / iOS | Sections run | Result / notes |
 |------|--------------|--------------|----------------|
 | 2026-10-10 | iPhone 16 Pro (ProMotion) / iOS 27.0.1 | §3R | ✅ Pass. The orb breathes and the Focus ring depletes smoothly. Debug build of `main` + #29 (`efbdbaa`) + the screensaver branch (`95ee8f0`). |
+| 2026-10-12 | iPhone 16 Pro (ProMotion) / iOS not recorded | §V.1, §V.3 (informal); §V.4 partial (under 25 min) | ✅ Look only, not the full §V pass. The first cut read "a mountain map, but 1-dimensional"; after the layered relief (`582be55`): "has depth now". The drift felt calm and it was fine to work beside. Debug build of `claude/screensaver-concepts-23f53c`. Owed: §V.2, §V.4 (a full 25-minute block), §V.5 and §V.6. |
 | 2026-10-20 | iPhone 16 Pro (ProMotion) / iOS 27.0.1 | §3I step 7 | ✅ Pass. A Focus session's Live Activity stays up on the Lock Screen and in the Dynamic Island; Stop ends it; a restart, and a start after a force-quit, leave just the new one up. Debug build of `claude/goofy-roentgen-40078e` (`25fe7a5`). |
