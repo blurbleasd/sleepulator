@@ -541,6 +541,43 @@ final class SleepTimerService: ObservableObject {
 
 // MARK: - Pomodoro (focus mode timer)
 
+#if canImport(ActivityKit)
+/// The Pomodoro's Live Activities, named by id. ActivityKit can't put one up in XCTest, so this is
+/// injected, and a test can check which activities a start or a stop ends.
+protocol PomodoroActivityHosting {
+    var enabled: Bool { get }
+    /// Every Pomodoro activity up right now: this session's and any an earlier run left behind.
+    func listed() -> [String]
+    /// Puts up a new activity; its id, or nil when ActivityKit refuses.
+    func request(_ content: ActivityContent<PomodoroAttributes.ContentState>) -> String?
+    func update(_ id: String, _ content: ActivityContent<PomodoroAttributes.ContentState>)
+    /// Ends exactly these. ActivityKit's end is async, so it finishes on a task of its own.
+    func end(_ ids: [String], _ content: ActivityContent<PomodoroAttributes.ContentState>)
+}
+
+/// The real ones: `Activity<PomodoroAttributes>`.
+struct LivePomodoroActivities: PomodoroActivityHosting {
+    var enabled: Bool { ActivityAuthorizationInfo().areActivitiesEnabled }
+
+    func listed() -> [String] { Activity<PomodoroAttributes>.activities.map(\.id) }
+
+    func request(_ content: ActivityContent<PomodoroAttributes.ContentState>) -> String? {
+        (try? Activity.request(attributes: PomodoroAttributes(), content: content))?.id
+    }
+
+    func update(_ id: String, _ content: ActivityContent<PomodoroAttributes.ContentState>) {
+        guard let activity = Activity<PomodoroAttributes>.activities.first(where: { $0.id == id }) else { return }
+        Task { await activity.update(content) }
+    }
+
+    func end(_ ids: [String], _ content: ActivityContent<PomodoroAttributes.ContentState>) {
+        // Resolved here, not in the task: an activity requested after this call is never one it ends.
+        let ending = Activity<PomodoroAttributes>.activities.filter { ids.contains($0.id) }
+        Task { for activity in ending { await activity.end(content, dismissalPolicy: .immediate) } }
+    }
+}
+#endif
+
 /// A looping work/break timer for Focus mode. Unlike the sleep timer it never fades
 /// or stops the audio — it just marks interval boundaries with a chime. Ambient and
 /// binaural keep playing the whole time.
@@ -571,7 +608,10 @@ final class PomodoroService: ObservableObject {
     private static let phaseNotifId = "app.sleepulator.pomodoro.phase"
     private var requestedNotifAuth = false
     #if canImport(ActivityKit)
-    private var pomoActivity: Activity<PomodoroAttributes>?
+    /// The Live Activities this drives. Injected so a test can see which ones a start or a stop ends.
+    var activities: PomodoroActivityHosting = LivePomodoroActivities()
+    /// This session's activity.
+    private var pomoActivityId: String?
     #endif
     /// Length of the phase currently counting down — denominator for `progress`.
     private var phaseTotal: TimeInterval = 0
@@ -750,39 +790,34 @@ final class PomodoroService: ObservableObject {
 
     private func startLiveActivity() {
         #if canImport(ActivityKit)
-        guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
-        // End any activity left over from a previous run/relaunch BEFORE requesting a fresh one, so
-        // we never stack duplicates that a later Stop can't reach. Snapshot the stale set first so
-        // the end task can't catch the new activity we're about to request.
-        let stale = Activity<PomodoroAttributes>.activities
-        let staleFinal = ActivityContent(state: pomoState(), staleDate: nil)
-        Task { for a in stale { await a.end(staleFinal, dismissalPolicy: .immediate) } }
+        guard activities.enabled else { return }
+        // No cleanup of its own: start() opened with stop(), which already ended every activity
+        // that was up (the last session's, or one a previous run left), so a fresh one never
+        // stacks on a duplicate that a later Stop can't reach.
         let content = ActivityContent(state: pomoState(), staleDate: phaseEnd)
-        pomoActivity = try? Activity.request(attributes: PomodoroAttributes(), content: content)
+        pomoActivityId = activities.request(content)
         #endif
     }
 
     private func updateLiveActivity() {
         #if canImport(ActivityKit)
-        guard let activity = pomoActivity else { return }
-        let content = ActivityContent(state: pomoState(), staleDate: phaseEnd)
-        Task { await activity.update(content) }
+        guard let id = pomoActivityId else { return }
+        activities.update(id, ActivityContent(state: pomoState(), staleDate: phaseEnd))
         #endif
     }
 
     private func endLiveActivity() {
         #if canImport(ActivityKit)
-        pomoActivity = nil
+        pomoActivityId = nil
         let final = ActivityContent(state: pomoState(), staleDate: nil)
         // End the tracked activity AND any persisted/orphaned ones. After an app relaunch the
-        // in-memory `pomoActivity` handle is nil while a Pomodoro ring is still on the lock screen /
-        // Dynamic Island — ending only the handle (the old code) is why Stop left it stuck. Ending
-        // every activity of the type dismisses it no matter how it got there.
-        Task {
-            for activity in Activity<PomodoroAttributes>.activities {
-                await activity.end(final, dismissalPolicy: .immediate)
-            }
-        }
+        // in-memory handle is nil while a Pomodoro ring is still on the lock screen / Dynamic
+        // Island — ending only the handle (the old code) is why Stop left it stuck. Ending every
+        // activity of the type dismisses it no matter how it got there.
+        // The list is read now, before this returns. start() calls stop() and then requests the
+        // new session's activity; read later, in the end's task, the list held that one too and
+        // ended it as soon as it went up.
+        activities.end(activities.listed(), final)
         #endif
     }
 
