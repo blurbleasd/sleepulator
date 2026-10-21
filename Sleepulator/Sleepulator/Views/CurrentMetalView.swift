@@ -61,7 +61,7 @@ struct CurrentMetalView: View {
         // ShaderBackdrop's rate has no Reduce Motion term.
         //
         // Per SCREENSAVER-LIBRARY-SPEC §5 Reduce Motion gates PARALLAX only; the app-level
-        // "Ambient motion" toggle (Settings ▸ Display) is the control for holding a scene still,
+        // "Moving scenes" toggle (Settings ▸ Display) is the control for holding a scene still,
         // and it already reaches every scene through `paused`.
         // THE reading: a luminous front whose x IS the interval's progress — it crosses the field
         // exactly once per work interval and runs back across a break. -1 hides it (idle), so the

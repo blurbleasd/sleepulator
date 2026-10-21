@@ -803,14 +803,18 @@ selected (Build mix → Backdrop), a sound playing, the phone at your desk.
    bolder (index contours). It reads as a mountain, not a target. Controls faded: ✅ it reads as a
    layered relief model, not a flat drawing: each band a sheet a step above the one below, higher
    sheets lighter, a soft shadow at the foot of each step on the lower right, and the edges lit on
-   the upper left. (The first cut, plain hillshading, read "1-dimensional" on the phone.)
+   the upper left. (The first cut, plain hillshading, read "1-dimensional" on the phone.) The
+   summit is fixed at 40% down the screen, where the ring sits on a 6.3"/6.9" Pro: on a smaller
+   phone (an SE) or at a large text size, ✅ it still sits under or close beside the ring, not
+   clearly apart from it (log how far off it looks).
 2. **The light is the interval.** Start a session and let the controls fade. ✅ A quarter in, a disc
    of light about a quarter of the screen sits around the summit, edged by one bright line; halfway,
    about half the screen; near the end, nearly all of it. (It tracks the share within about ±7%.)
-   ✅ The bright edge holds still while the lines drift through it. On a one-minute interval and a
-   one-minute break: ✅ the edge glides between seconds, as the ring does; it never jumps 15-20 pt
-   once a second. On a break: ✅ the map turns
-   teal and the light pulls back up toward the summit. Stop the session: ✅ every line goes back to
+   ✅ The bright edge holds still while the lines drift through it. With a 5-minute Focus length
+   and a 1-minute short break (Settings' shortest), ✅ the edge glides between seconds, as the ring
+   does, through the work interval and the break; it never jumps (15-20 pt once a second on the
+   break, before the fix). On a break: ✅ the map turns teal and the light pulls back up toward
+   the summit. Stop the session: ✅ every line goes back to
    one even brightness and the edge is gone.
 3. **The motion is a drift, not a churn.** Watch two minutes. ✅ The lines drift steadily outward
    from the summit, and the terrain slowly pans and re-forms. ✅ Flat stretches don't boil, steep

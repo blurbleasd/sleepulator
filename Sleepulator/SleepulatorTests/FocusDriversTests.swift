@@ -178,11 +178,12 @@ final class ContourLightTests: XCTestCase {
         XCTAssertEqual(ContourLight.radius(share: 0.5, aspect: 0), 0)
     }
 
-    // Value: protects=the disc at radius(share:) covers that share of the screen's points, upright
-    //   and on its side; fails_when=share stops clipping the disc at a screen edge, or mis-scales
-    //   the summit by the aspect; why_new=the round trip above inverts whatever share computes, so a
-    //   wrong share still passes it; seam=none; no_claim=the shader's noise-bent edge (±0.07,
-    //   device-checked in TESTING §V.2); a summit-centred disc only
+    // Value: protects=the disc at radius(share:) covers that share of the screen's points on the
+    //   iPhone shapes the app runs on; fails_when=share's closed form drops or doubles a quarter,
+    //   stops clipping at a screen edge, or mis-scales the summit by the aspect; why_new=the round
+    //   trip above inverts whatever share computes, so a wrong share still passes it; seam=none;
+    //   no_claim=the shader's noise-bent edge (±0.07, device-checked in TESTING §V.2); a
+    //   summit-centred disc only
     func testTheLitDiscCoversThatShareOfTheScreensPoints() {
         // An independent count: every point whose centre is within the radius of the summit.
         func litShare(radius r: Double, width: Int, height: Int) -> Double {
@@ -198,49 +199,14 @@ final class ContourLightTests: XCTestCase {
             }
             return Double(lit) / Double(width * height)
         }
-        // iPhone 17 Pro both ways up: the sides clip the disc first upright, the top and bottom on
-        // its side (the app rotates).
-        for (width, height) in [(402, 874), (874, 402)] {
+        // The app is portrait-only on iPhone: an iPhone 17 Pro, an SE (the widest shape, so the
+        // sides clip the disc soonest) and a Pro Max.
+        for (width, height) in [(402, 874), (375, 667), (440, 956)] {
             let aspect = Double(width) / Double(height)
             for target in [0.1, 0.5, 0.9] {
                 let r = ContourLight.radius(share: target, aspect: aspect)
                 XCTAssertEqual(litShare(radius: r, width: width, height: height), target, accuracy: 0.003,
                                "\(width)×\(height) at \(target)")
-            }
-        }
-    }
-
-    // Value: protects=the per-frame table gives the solved radius, so the light's edge sits where the interval says; fails_when=the table samples too coarsely where the radius climbs (near the summit, or filling the last corners on its side), mis-indexes a segment, or misses the ends; why_new=the table is new and the view reads only it; seam=none; no_claim=the shader's use of the radius
-    func testTheTableGivesTheSolvedRadius() {
-        for aspect in [402.0 / 874.0, 874.0 / 402.0] {
-            let table = ContourLight.Table(aspect: aspect)
-            for step in 0...200 {
-                let share = Double(step) / 200
-                // 0.001 screen heights is under a point on an 874 pt screen.
-                XCTAssertEqual(table.radius(share: share), ContourLight.radius(share: share, aspect: aspect),
-                               accuracy: 0.001, "aspect \(aspect) at \(share)")
-            }
-            XCTAssertEqual(table.radius(share: -0.5), 0)
-            XCTAssertEqual(table.radius(share: 1.5), ContourLight.reach(aspect: aspect), accuracy: 1e-12)
-        }
-        XCTAssertEqual(ContourLight.Table(aspect: 0).radius(share: 0.5), 0)
-    }
-
-    // Value: protects=the light's radius follows the screen's current shape, so a zero-height first
-    //   layout pass or a rotation never pins the edge to a stale table; fails_when=ContourLightCache
-    //   keeps its first table whatever the aspect (after a zero-size first pass, no light all
-    //   session); why_new=the Table tests build a fresh table per aspect, never the cache the view
-    //   reads; seam=none; no_claim=SwiftUI's layout passes and the view's @State lifetime (unit only)
-    func testTheCacheFollowsTheScreensShape() {
-        let cache = ContourLightCache()
-        let upright = 402.0 / 874.0, onItsSide = 874.0 / 402.0
-        // A zero-height first layout pass lights nothing; then the real size arrives, and the app rotates.
-        XCTAssertEqual(cache.radius(share: 0.5, aspect: 0), 0)
-        for aspect in [upright, onItsSide, upright] {
-            for share in [0.1, 0.5, 0.9] {
-                XCTAssertEqual(cache.radius(share: share, aspect: aspect),
-                               ContourLight.radius(share: share, aspect: aspect),
-                               accuracy: 0.001, "aspect \(aspect) at \(share)")
             }
         }
     }

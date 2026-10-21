@@ -255,9 +255,10 @@ class MetalShadersTests: XCTestCase {
     //   tests above use a fixed set, never the app's real library; seam=none; no_claim=a device
     //   runtime's enumeration (the simulator's library; skipped where none is listed)
     func testThePreflightKnowsEveryCompiledShader() throws {
-        guard let library = MTLCreateSystemDefaultDevice()?.makeDefaultLibrary() else {
-            throw XCTSkip("no Metal device or default library here")
-        }
+        guard let device = MTLCreateSystemDefaultDevice() else { throw XCTSkip("no Metal device here") }
+        // With a device, a missing library is the failure the preflight exists for: every Metal
+        // scene would draw black.
+        let library = try XCTUnwrap(device.makeDefaultLibrary(), "the app shipped no default.metallib")
         let compiled = Set(library.functionNames)
         guard !compiled.isDisjoint(with: MetalShaders.known) else {
             throw XCTSkip("this runtime doesn't list stitchable functions")
