@@ -36,7 +36,9 @@ Suites in `SleepulatorTests/` (seven files, many suites):
   layering, mode reconciliation, the
   Night sky meteor's rules (`NightSkyMotionTests`: only while the controls show, faint, rare after
   the first, never popping), Fireflies' night (`FireflyNightTests`: out of step and all there at
-  bedtime, in step and down to the meadow's few at the end, the nearest going first), and the
+  bedtime, in step and down to the meadow's few at the end, the nearest going first, and a jump in
+  the night eased: back at most a night in two minutes, even after a lock, on at most a night in
+  30 s; `follow`, `FireflyNightFollower`), and the
   Podcasts-tab rules (`PodcastTextTests`, `ShowNotesPreviewTests`, `ShowNotesEdgeTests`,
   `TonightShelfTests`, `QueueMoveToHeadTests`), the player rules (`NowPlayingStateTests`,
   `NightLineCopyTests`, `PlayerQueueActionTests`, `PodcastFailureStreakTests`), Settings' rules
@@ -620,12 +622,14 @@ From the screensaver critique (24/40). The simulator showed every scene, the Foc
 both glances, but brightness, colour at 2am, motion on ProMotion and anything over 45 minutes
 need the phone. Room dark, phone on the nightstand, brightness where you'd leave it at night.
 
-1. **Every Sleep scene is warm and dim.** Swipe through all seven at bedtime. ✅ No scene throws
+1. **Every Sleep scene is warm and dim.** Swipe through all eight at bedtime. ✅ No scene throws
    blue light: Night sky's stars and glow are warm, Aurora is red curtains, Still water a small round amber moon (not a tall
    oval) with flat ripples, Rain on glass shows drops that cling and slip with a bright lower
    edge (not meteors), Deep space a faint rust nebula. Embers churns slowly; Breathe's glow sits
-   on the ring and swells more than it brightens. ✅ No identical stars repeating down the
-   screen in Deep space, Aurora or Still water.
+   on the ring and swells more than it brightens; Fireflies is warm yellow-green points over a
+   warm dark meadow, no blue in its sky or mist (its own pass is §W). ✅ No identical stars
+   repeating down the screen in Deep space, Aurora or Still water, and no firefly pattern
+   repeating in Fireflies.
 2. **Night sky and Breathe actually move on ProMotion.** Watch each for a minute in the
    screensaver. ✅ The sky turns and its cloud drifts smoothly, Breathe swells and fades
    continuously. (Both
@@ -879,7 +883,7 @@ A new Sleep scene (`FirefliesShader.metal`, `FirefliesMetalView`): fireflies ove
 edge of a wood that fall into step through the night and go out one by one, the nearest first,
 until a few are left pulsing together (`FireflyNight`). Offline frames of the shader and a
 simulator capture showed the look, the clustering and the end of the night (5 left on a 6.3"
-screen; 5-7 on any size, by a Python count of the shader's hash). Motion feel, calm, black level
+screen; 5-8 on any size, by a Python count of the shader's hash). Motion feel, calm, black level
 on OLED at 2am, ProMotion and a full night need the phone. Room dark, phone on the nightstand,
 brightness where you'd leave it at night, Fireflies selected (Build mix → Backdrop), Forest or
 Green playing.
@@ -904,16 +908,19 @@ Green playing.
    by about half the big near ones have gone; by two-thirds most of the far ones in the trees are out and the meadow's flash
    within a second of each other, then go dark for a few seconds together. ✅ That group flash
    never reads as the whole screen pulsing (log it if it does: it's the scene's one risk). ✅ At the
-   end a few (5-7) are left, spread over the meadow, flashing together, slower than at bedtime,
+   end a few (5-8) are left, spread over the meadow, flashing together, slower than at bedtime,
    the flash rolling left to right across them. ✅ None goes out with a pop: each fades over a
    stretch of the night. In the last two minutes tap "Still awake? +15m": ✅ the fireflies that had
    gone out come back over several seconds, never all at once in a flash (`FireflyNight.follow`
-   eases the night back). An All night session, woken after an hour: ✅ the same few, together.
+   eases the night back). Again near the end, lock the phone, tap +15m on the lock screen's Live
+   Activity, wait a minute and unlock: ✅ the same, they come back over seconds after the unlock,
+   none in the first frame. Mid-night, pull down Control Center and push it back: ✅ the lit
+   fireflies don't change. An All night session, woken after an hour: ✅ the same few, together.
 5. **Moving scenes off.** Settings → Moving scenes off, Auto-Lock Never, the veil off. ✅ A still
    meadow, some fireflies caught mid-glow and the meadow's survivors glowing steadily. Over a
    15-minute night: ✅ they thin out to the few, which always show (the still frame re-reads the
    night every 20 s while in sight; a firefly may go out between re-reads, but as the night goes
-   on none lights up).
+   on none lights up; after a +15m they come back slowly, a little each re-read).
 6. **ProMotion and battery.** Watch a minute on a 120 Hz phone. ✅ Smooth glows and drift, no
    stalls. Overnight with the veil on: ✅ battery comparable to Night sky (a full-screen shader at
    30 fps while the meadow is in sight; nothing renders under the veil).

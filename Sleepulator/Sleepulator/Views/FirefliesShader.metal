@@ -32,8 +32,9 @@ using namespace metal;
 // Driven from SwiftUI `.colorEffect` through ShaderBackdrop. Swift owns phase
 // (night-slowed integrated seconds: the flashes, the wander, the drift, the
 // sway), time (monotonic: the dither), size (points), night, sync and left
-// (`FireflyNight`), gyro and scale (pixels per point). Everything else is a
-// constant below (edit + rebuild).
+// (`FireflyNight`, on the eased night), gyro, scale (pixels per point) and
+// frozen (the still frame with Moving scenes off: flashes held, survivors
+// steady). Everything else is a constant below (edit + rebuild).
 // ============================================================================
 
 namespace ffly {
@@ -97,7 +98,7 @@ inline float fbm(float2 p, int octaves) {
 inline float canopy(float x, float cell, float2 heights, float spires, uint salt) {
     float id = floor(x / cell);
     float top = 0.0;
-    for (int k = -3; k <= 3; k++) {
+    for (int k = -2; k <= 2; k++) {
         float c = id + float(k);
         float2 key = float2(c, 9.0);
         float height = mix(heights.x, heights.y, hashCell(key, salt));
@@ -107,8 +108,9 @@ inline float canopy(float x, float cell, float2 heights, float spires, uint salt
             top = max(top, height * 1.3 - abs(dx) * 2.6);
         } else {
             // A round top flaring out below into the crown's lower branches, so a crown never stands
-            // as a column. Its reach, r + (height - r) / 1.8, stays within the three cells checked
-            // either side for both woods drawn below (a spire's, half its height, too).
+            // as a column. Its reach, r + (height - r) / 1.8, is at most 47.3 pt (near wood) and
+            // 21.4 pt (far), and a spire's, half its height, 32 and 13: under the 2.2 cells (48.4
+            // and 28.6 pt) to the nearest tree not checked, two cells either side.
             float r = cell * mix(0.6, 1.2, hashCell(key, salt + 1u));
             float side = abs(dx);
             top = max(top, side < r ? height - r + sqrt(r * r - dx * dx) : height - r - (side - r) * 1.8);
@@ -128,18 +130,18 @@ inline float canopyReach(float2 heights) {
 
 // Grass along the bottom edge, one blade per cell: leaning, tapering to a point, bending more
 // toward its tip, and swaying a little in a slow breeze that travels along the row. Returns
-// coverage (0…1). `reach` is how many cells either side a blade can lean into: it must cover the
-// widest bend, `lean / 2 + 0.03` of the tallest blade, in cells.
+// coverage (0…1).
 inline float grass(float2 pos, float bottom, float cell, float presence, float2 heights, float lean,
-                   float width, int reach, uint salt, float phase, float px) {
+                   float width, uint salt, float phase, float px) {
     float h = bottom - pos.y;
     if (h < 0.0 || h > heights.y) return 0.0;
     float id = floor(pos.x / cell);
     float cover = 0.0;
-    // A blade reaching this height is at least this tall, so here it bends at most this far: low
-    // down only a cell or two either side can cover the pixel, not the whole `reach`.
+    // A blade reaching this height is at least this tall, so here it bends at most this far
+    // (`lean / 2 + 0.03` of its height, with the sway): only the cells within that, plus a blade's
+    // width, either side can cover the pixel. Low down that's a cell or two.
     float bendHere = (lean * 0.5 + 0.03) * h * min(h / heights.x, 1.0);
-    int span = min(reach, int(ceil((bendHere + width + 0.12 + px) / cell)));
+    int span = int(ceil((bendHere + width + 0.12 + px) / cell));
     for (int k = -span; k <= span; k++) {
         float c = id + float(k);
         float2 key = float2(c, 5.0);
@@ -177,9 +179,10 @@ inline float mistProfile(float above) {
 
 // One layer of fireflies, at most one per cell, each wandering about its cell (the 3×3 cells
 // around the pixel are checked; a firefly's light never reaches past its neighbours). The nearest
-// layer checks only the 2×2 cells whose centres bracket the pixel: its light reaches at most 90 pt
-// from its cell's centre (a 0.25-cell jitter, 1.4× its wander, its lift and the disc's 15.5 pt), under
-// its 130 pt cell. Rows outside the band can't hold one, so they're skipped.
+// layer checks only the 2×2 cells whose centres bracket the pixel, and only those within its reach:
+// its disc reaches at most 90 pt across from its cell's centre (a 0.25-cell jitter, 1.4× its
+// wander, the disc's 15.5 pt) and 84 pt up or down (the jitter, 0.9× its wander, its lift, the
+// disc), each under its 130 pt cell. Rows outside the band can't hold one, so they're skipped.
 //   band:     the layer's span down the screen (fractions of the height), thinning at its edges
 //   core:     the glow's core radius (points); halo: its soft falloff (points)
 //   bokeh:    > 0 draws an out-of-focus disc of this radius instead (the nearest layer)
@@ -189,7 +192,8 @@ inline float mistProfile(float above) {
 //             spread over the screen on any phone instead of left to chance (1-3 on an SE, with
 //             independent ranks). Their rank is 0; everyone else's starts at LAST.
 //   sync:     how far they've fallen into step (`FireflyNight.sync`)
-//   still:    the still frame (Moving scenes off, or out of sight): its clock is frozen, so a
+//   still:    the still frame with Moving scenes off (not a moment's freeze, under the veil's fade
+//             or Control Center, which keeps the last frame exactly): its clock is frozen, so a
 //             firefly's flash is held at its own moment, never moved by `sync` (re-read every 20 s
 //             in sight, it would jump flashes on and off), and the survivors glow steadily (at the
 //             end of the night they flash together, and a frozen moment between flashes would show
@@ -216,6 +220,8 @@ inline float3 fireflies(float2 pos, float2 size, float cell, float2 band, float 
         for (int i = first; i <= 1; i++) {
             float2 id = id0 + float2(float(i), float(j));
             float2 centre = (id + 0.5) * cell;
+            if (bracket && (abs(pos.x - centre.x) > 0.25 * cell + 1.4 * wander + bokeh + 2.5
+                            || abs(pos.y - centre.y) > 0.25 * cell + 0.9 * wander + lift + bokeh + 2.5)) continue;
             bool survivor = false;
             if (keep > 0.0) {
                 float row = floor(id.y / 2.0);
@@ -235,8 +241,6 @@ inline float3 fireflies(float2 pos, float2 size, float cell, float2 band, float 
             if (alive <= 0.0) continue;
             float h2 = hashCell(id, salt + 2u);
             float h3 = hashCell(id, salt + 3u);
-            float h4 = hashCell(id, salt + 4u);
-            float h5 = hashCell(id, salt + 5u);
             // When it flashes. The jitter wanders over a minute or so (bounded, so its own rhythm
             // drifts ±10% without ever racing), and both it and the spread shrink as sync rises.
             float own = hashCell(id, salt + 6u)
@@ -246,6 +250,8 @@ inline float3 fireflies(float2 pos, float2 size, float cell, float2 band, float 
             float glow = smoothstep(0.0, RISE, u) * (1.0 - smoothstep(RISE, FADE, u));
             if (still && survivor) glow = max(glow, 0.55);
             if (glow <= 0.0) continue;
+            float h4 = hashCell(id, salt + 4u);
+            float h5 = hashCell(id, salt + 5u);
             // Where it is: a slow wander about the cell, lifting as it glows (dark, it's unseen,
             // so the drop back between flashes never shows).
             float w = phase * (0.22 + 0.16 * h3);
@@ -332,11 +338,19 @@ half4 fireflyField(float2 pos, half4 color,
     }
 
     // --- the meadow: from the wood's uneven foot toward you, darkening as it nears ---
-    float footY = FOOT * size.y - tiltBy.y * 14.0 + 8.0 * (fbm(float2(nearX / 70.0, 3.3), 3) - 0.5);
-    float meadow = smoothstep(footY - 2.0, footY + 2.0, pos.y);
-    float nearness = smoothstep(footY, size.y, pos.y);
-    float3 ground = mix(float3(0.030, 0.024, 0.016), float3(0.004, 0.003, 0.002), sqrt(nearness));
-    col = mix(col, ground * (1.0 - 0.4 * p), meadow);
+    // The foot wanders 4 pt either side of its line. Above it by more than that and 2.5 of the
+    // mist's rise, neither the meadow nor the mist (under 0.2% of its depth) reaches a pixel, so
+    // the sky and the woods skip the foot's FBM, the meadow and the mist.
+    float footBase = FOOT * size.y - tiltBy.y * 14.0;
+    bool lowDown = pos.y >= footBase - 4.0 - 2.5 * MIST_UP * size.y;
+    float footY = footBase;
+    if (lowDown) {
+        footY += 8.0 * (fbm(float2(nearX / 70.0, 3.3), 3) - 0.5);
+        float meadow = smoothstep(footY - 2.0, footY + 2.0, pos.y);
+        float nearness = smoothstep(footY, size.y, pos.y);
+        float3 ground = mix(float3(0.030, 0.024, 0.016), float3(0.004, 0.003, 0.002), sqrt(nearness));
+        col = mix(col, ground * (1.0 - 0.4 * p), meadow);
+    }
 
     // --- the far fireflies: among the trees and at the meadow's far edge ---
     float2 farPos = pos + tiltBy * 10.0;
@@ -346,19 +360,21 @@ half4 fireflyField(float2 pos, half4 color,
     col += mix(fireflyLight, float3(dot(fireflyLight, float3(0.4, 0.4, 0.2))) * float3(1.0, 0.85, 0.55), 0.3);
 
     // --- mist pooled along the wood's foot, thinning toward you; drifting with the air ---
-    float2 mistPos = pos + tiltBy * 14.0;                 // its texture, sampled at its depth
-    float shape = mistProfile((footY - pos.y) / size.y);  // its pool, along the foot's line
-    // Its texture only where the pool is: past 0.2% of its depth the faintest texture changes the
-    // light by under a tenth of a level, so the sky and the wood skip the three FBMs.
-    float mist = 0.35 * shape;
-    if (shape > 0.002) {
-        float drift = fmod(phase * MIST_SPEED, MIST_WRAP);
-        float2 m = float2((mistPos.x + drift) / 230.0, mistPos.y / 34.0);
-        float2 warp = float2(fbm(m * 0.7 + float2(0.0, phase * 0.004), 3), fbm(m * 0.7 + float2(5.2, 1.7), 3));
-        float tex = fbm(m + (warp - 0.5) * 1.2, 4);
-        mist = shape * mix(0.35, 1.0, smoothstep(0.30, 0.78, tex));
+    if (lowDown) {
+        float2 mistPos = pos + tiltBy * 14.0;                 // its texture, sampled at its depth
+        float shape = mistProfile((footY - pos.y) / size.y);  // its pool, along the foot's line
+        // Its texture only where the pool is: past 0.2% of its depth the faintest texture changes
+        // the light by under a tenth of a level.
+        float mist = 0.35 * shape;
+        if (shape > 0.002) {
+            float drift = fmod(phase * MIST_SPEED, MIST_WRAP);
+            float2 m = float2((mistPos.x + drift) / 230.0, mistPos.y / 34.0);
+            float2 warp = float2(fbm(m * 0.7 + float2(0.0, phase * 0.004), 3), fbm(m * 0.7 + float2(5.2, 1.7), 3));
+            float tex = fbm(m + (warp - 0.5) * 1.2, 4);
+            mist = shape * mix(0.35, 1.0, smoothstep(0.30, 0.78, tex));
+        }
+        col = col * (1.0 - 0.35 * mist) + float3(0.080, 0.064, 0.046) * mist * (1.0 - 0.45 * p);
     }
-    col = col * (1.0 - 0.35 * mist) + float3(0.080, 0.064, 0.046) * mist * (1.0 - 0.45 * p);
 
     // --- the meadow's fireflies, behind the grass ---
     float2 midPos = pos + tiltBy * 18.0;
@@ -369,8 +385,8 @@ half4 fireflyField(float2 pos, half4 color,
     const float grassDepth = 30.0;
     float2 grassPos = pos + tiltBy * grassDepth;
     float bottom = size.y + grassDepth * 0.35 + 2.0;      // its roots stay below the edge at full pitch
-    float blades = max(grass(grassPos, bottom, 5.0, 0.95, float2(0.06, 0.22) * size.y, 0.25, 1.6, 7, 301u, phase, px),
-                       grass(grassPos, bottom, 15.0, 0.35, float2(0.12, 0.40) * size.y, 0.22, 2.2, 4, 401u, phase, px));
+    float blades = max(grass(grassPos, bottom, 5.0, 0.95, float2(0.06, 0.22) * size.y, 0.25, 1.6, 301u, phase, px),
+                       grass(grassPos, bottom, 15.0, 0.35, float2(0.12, 0.40) * size.y, 0.22, 2.2, 401u, phase, px));
     col = mix(col, float3(0.002, 0.0015, 0.001), blades);
 
     // --- the nearest fireflies: out of focus, in front of everything ---

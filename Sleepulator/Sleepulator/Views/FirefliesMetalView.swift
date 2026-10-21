@@ -13,8 +13,9 @@ import SwiftUI
 ///   - `sleepTimer.nightProgress`, eased (`FireflyNight.follow`), sets the sync and the fireflies
 ///     left, and dims the scene;
 ///   - `tilt` parallaxes the layers by depth;
-///   - `occluded` keeps the still meadow following the night with Moving scenes off; the still frame
-///     holds each firefly's flash where it froze and keeps the survivors glowing (the shader's `still`).
+///   - `occluded` keeps the still meadow following the night with Moving scenes off. Only then does
+///     the frame hold each firefly's flash where it froze and keep the survivors glowing (the
+///     shader's `still`); a moment's freeze (the veil fading in, Control Center) keeps the last frame.
 struct FirefliesMetalView: View {
     var paused: Bool = false
     var occluded: Bool = true
@@ -24,6 +25,9 @@ struct FirefliesMetalView: View {
     var tilt: (() -> SIMD2<Float>)? = nil
 
     @Environment(\.displayScale) private var displayScale
+    /// Settings ▸ Moving scenes. Off, the still frame is the scene all night, so it gets the still
+    /// look; on, a still frame is only a moment's freeze and must match the frame before it.
+    @AppStorage("ambientMotion") private var ambientMotion = true
 
     /// The night the meadow shows, eased toward the timer's (see `FireflyNight.follow`).
     @State private var follower = FireflyNightFollower()
@@ -42,7 +46,7 @@ struct FirefliesMetalView: View {
                 .float3(Float(left.far), Float(left.meadow), Float(left.near)),
                 .float2(s.gyro.x, s.gyro.y),
                 .float(Float(displayScale)),
-                .float(s.frozen ? 1 : 0)
+                .float(s.frozen && !ambientMotion ? 1 : 0)
             )
         }
     }
@@ -83,24 +87,38 @@ nonisolated enum FireflyNight {
     }
 
     /// The share of the meadow's fireflies left at the end of the night: just its survivors, one per
-    /// patch of the meadow (5-7 on a phone), fully lit, with every other firefly out. It has to sit
+    /// patch of the meadow (5-8 on a phone), fully lit, with every other firefly out. It has to sit
     /// between the survivors' fade (`GOING`, 0.06) and the others' first rank (`LAST`, 0.10) in
     /// FirefliesShader.metal.
     static let meadowAtEnd = 0.08
 
-    /// The fastest the night the scene shows may move, in nights per second: a whole night in two
-    /// minutes. A real night moves far slower (a 5-minute timer takes 300 s), so this only bites on a
-    /// jump: "Still awake? +15m" or a seek back moves the timer's night back at once, and the
-    /// fireflies that had gone out would come back in one frame, a third of them mid-flash.
-    static let maxRate = 1.0 / 120
+    /// The fastest the night the scene shows may move back (fireflies coming back), in nights per
+    /// second: a whole night in two minutes. "Still awake? +15m" or a seek back moves the timer's night
+    /// back at once, and the fireflies that had gone out would come back in one frame, a third of them
+    /// mid-flash.
+    static let backRate = 1.0 / 120
 
-    /// The night to show after `dt` seconds, moving toward `target` no faster than `maxRate`, either
-    /// way. Nothing shown yet (the scene just appeared): the night as it is.
+    /// The fastest it may move on (fireflies going out): a night in 30 s. Faster than any timer's
+    /// night (a minute left on "Stop after this episode" takes 60 s), so a real night is followed as
+    /// it is, and only a jump ahead (a seek) is eased, over a few seconds rather than a frame.
+    static let onRate = 1.0 / 30
+
+    /// The most time one read may count toward bringing fireflies back: about a drawn frame's worth,
+    /// as `SceneClock` clamps its step. After the screen was out of sight (locked, under the veil) the
+    /// first read would otherwise count the whole gap, and a "+15m" on the lock screen would relight
+    /// them all in the first frame after unlocking. Going out, the gap counts in full: the night moved
+    /// on while no one watched.
+    static let maxBackStep = 0.5
+
+    /// The night to show after `dt` seconds, moving toward `target` no faster than `onRate` going on
+    /// and `backRate` (over at most `maxBackStep` of `dt`) coming back. Nothing shown yet (the scene
+    /// just appeared): the night as it is.
     static func follow(shown: Double?, target: Double, dt: Double) -> Double {
         let goal = clamped(target)
         guard let shown else { return goal }
-        let step = maxRate * max(dt, 0)
-        return shown + min(max(goal - shown, -step), step)
+        let elapsed = max(dt, 0)
+        if goal >= shown { return min(goal, shown + onRate * elapsed) }
+        return max(goal, shown - backRate * min(elapsed, maxBackStep))
     }
 
     /// How far they've fallen into step: 0 = each on its own clock, 1 = one rhythm (a flash then
