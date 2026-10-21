@@ -54,7 +54,9 @@ Suites in `SleepulatorTests/` (seven files, many suites):
   restore never switching mode. `BackupControllerTests` covers the Backup page's controller:
   results that land after the page closed, the export letting go of its document, an incomplete
   Undo, and the queued writes landing first.
-- `FocusDriversTests.swift` — the Pomodoro → Focus-scene look mapping.
+- `FocusDriversTests.swift` — the Pomodoro → Focus-scene look mapping, and `FocusStillFrameTests`
+  (with Moving scenes off, a Focus scene's still frame redraws on each Pomodoro publish and reads
+  it afresh; one test hosts it in a window).
 - `GenerativeAudioEngineTests.swift` — generative-bed rebuild after a media-services reset.
 - `TipStoreTests.swift` — `TipFlowTests` (every StoreKit outcome to what the tip rows show) and
   `TipStoreTests` (StoreKitTest against `Tips.storekit`). On iOS 26 simulators a command-line run
@@ -201,10 +203,15 @@ everything below is display-link / render behavior only a device shows.
    the night deepens and stop past ~40%; the comet fades out past ~15% and is gone by ~40%;
    a freeze never leaves a comet/meteor burned on the frozen frame (try pausing repeatedly
    around the two-minute comet cycle).
-5. **Focus scenes.** Energy: sweep rotates smoothly (1/10 s cadence through the blur — check
-   for stepping) and survives backgrounding (the old repeatForever animation died on the first
-   app switch). Current: streams *flow* during a running pomodoro — no per-tick jitter — and
+5. **Focus scenes.** Current: streams *flow* during a running pomodoro — no per-tick jitter — and
    momentum builds over a work interval, eases on break.
+   **Moving scenes off (added 2026-10-13, simulator-checked only).** Settings → Moving scenes off,
+   Focus, a 5-minute Focus length so the change is quick to see. On each of Current, Tide and
+   Sandfall, start a session and let the controls fade. ✅ The scene holds its pose, but its
+   reading follows the interval, creeping with the countdown: Current's front crosses, Tide's
+   waterline rises, Sandfall's top bulb drains (`FocusStillFrame`). ✅ A start, a break and a stop
+   show at once. Lock for 30 s and unlock. ✅ The reading is at the true time. Before the fix the
+   still frame kept the look it had when Focus came up (the idle one) all session.
 6. **Veil caption.** Veil engages → "Tap to wake" rides the fade in, fades out ~6 s later,
    panel is then true black (check no lit pixels in a dark room). Wake → re-engage: caption
    reliably re-shows.

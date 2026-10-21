@@ -10,15 +10,19 @@ import SwiftUI
 /// trigger the `@Published` re-render storm CLAUDE.md warns about).
 ///
 /// Flow uses its OWN `SceneClock` rather than `ShaderBackdrop`, because Current's rate is the
-/// Pomodoro's `driveSpeed` (momentum), not the night-slowdown `ShaderBackdrop` integrates. Reduce
+/// Pomodoro's `look.speed` (momentum), not the night-slowdown `ShaderBackdrop` integrates. Reduce
 /// Motion feeds rate 0 → `flow` freezes → a static field (no advection). `paused` (occlusion)
-/// freezes the schedule to one static frame at the frozen pose.
+/// freezes the schedule to one static frame at the frozen pose; while the screen is in sight
+/// ("Moving scenes" off) that frame still follows the session (`FocusStillFrame`).
 struct CurrentMetalView: View {
     var paused: Bool = false
+    /// The out-of-sight part of `paused` (`SceneContext.occluded`): only then does the still frame
+    /// stop following the Pomodoro.
+    var occluded: Bool
     /// Read live (not observed) so phase/progress drive the look.
     let pomodoro: PomodoroService
 
-    /// Integrates `driveSpeed` into a flow phase (rate, not absolute-time × speed — see
+    /// Integrates `look.speed` into a flow phase (rate, not absolute-time × speed — see
     /// `SceneClock`). Random start so the streams open at a fresh pose each appearance.
     @State private var clock = SceneClock(start: .random(in: 0...2048))
 
@@ -30,7 +34,11 @@ struct CurrentMetalView: View {
             // churn (the Pomodoro's ~1Hz tick), so it froze when idle and lurched during a session
             // (device 2026-07-11). The SceneClock is @State on this view, so it survives the if/else
             // and the paused frame still renders the frozen pose (never a t:0 birth-pose snap).
-            if paused {
+            if paused && !occluded {
+                // Still but in sight (Moving scenes off): the pose holds, the front follows the
+                // session.
+                FocusStillFrame(pomodoro: pomodoro) { field(size: size, now: nil) }
+            } else if paused {
                 field(size: size, now: nil)
             } else {
                 // 60 fps, not 30. Focus scenes are fast by design (flowing streams, falling

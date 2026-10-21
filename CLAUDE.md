@@ -387,6 +387,8 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   frame loop that freezes swaps instead: `if paused { staticFrame } else { TimelineView(…) }`,
   with a `@State` `SceneClock` holding the pose (`ShaderBackdrop`, `OrbButton`). A view showing
   real time, like the Focus ring, draws its static frame from the published value instead.
+  So do the Focus scenes, whose positions are the Pomodoro: in sight, their still frame observes
+  it (`FocusStillFrame`). A bare one, never redrawn, kept the idle look a whole session.
 
 ## Build / run
 - **Native Xcode build** — open `Sleepulator/Sleepulator.xcodeproj`. NOT Capacitor/CLI; there's

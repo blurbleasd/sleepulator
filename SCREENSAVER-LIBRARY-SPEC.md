@@ -60,7 +60,8 @@ Tags: **⚙︎** generative (cheap, recommended) · **✦** time-reactive · **�
 - **Deep space** ⚙︎ — slow-parallax starfield + a faint nebula; comets instead of meteors.
 
 **Focus (calm-alert; the ring stays the hero):**
-- **Energy sweep** ⚙︎ — _current default._ The cool sweep behind the timer.
+- **Energy sweep** ⚙︎ — _retired 2026-07-06_ (a rotating glow with no depth). Focus defaults to
+  **Current**, built with **Tide** and **Sandfall** (`AmbientScene.swift`).
 - **Flow field** ⚙︎ — particles drifting along a slow vector field.
 - **Contour topography** ⚙︎ — subtle moving contour lines; a "deep work" feel.
 - **Rain on glass (day)** ⚙︎🔊 — the rain scene in a cool daytime key.
@@ -118,7 +119,10 @@ to the mood's first scene — so nothing changes until you pick something.
 
 Every scene must honour:
 - **`paused`** — settle to static when the screen is out of sight or Moving scenes is off (an
-  all-night screen shouldn't animate under the veil), as `ShaderBackdrop` does. Under the
+  all-night screen shouldn't animate under the veil), as `ShaderBackdrop` does. A still frame
+  whose scene shows a reading keeps it live while in sight (Night sky's and Rain on glass's
+  darkening, a Focus scene's Pomodoro position) and stops redrawing only when
+  `SceneContext.occluded`. Under the
   screensaver itself scenes keep moving, but hold back transients (`SceneContext.screensaver`).
 - **The ambient-motion preference** — NOT raw system Reduce Motion. We deliberately decided
   Sleep's decorative motion (twinkle, moon glide, meteor) should run even with system Reduce

@@ -70,3 +70,21 @@ enum FocusDrivers {
         return Look(op: 0.45, amp: 0.65, speed: 0.65, tint: idleTint)
     }
 }
+
+/// A Focus scene's still frame while the screen is in sight ("Moving scenes" off, not
+/// `SceneContext.occluded`). The scenes read the Pomodoro live inside their own redraw and never
+/// observe it, so a bare still frame was drawn once, when Focus came up, and kept that look for the
+/// whole session: the idle look, with no reading at all (simulator, 2026-10-13). This view observes
+/// the Pomodoro instead, so the frame is drawn again on each of its publishes: once a second while a
+/// session runs, and at once on a start, a phase change or a stop; never while idle. The pose holds:
+/// the scene draws with `now: nil`, so its `SceneClock` never ticks. Isolated, like `NightFade`: a
+/// publish redraws only the scene's own frame, never Home.
+///
+/// `content` is a closure, called in this body, so each redraw reads the Pomodoro afresh. Built in
+/// the caller's body (`NightFade`'s `content: Content`), the frame would keep the caller's reading.
+struct FocusStillFrame<Content: View>: View {
+    @ObservedObject var pomodoro: PomodoroService
+    @ViewBuilder var content: () -> Content
+
+    var body: some View { content() }
+}

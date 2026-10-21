@@ -7,9 +7,13 @@ import SwiftUI
 ///
 /// `progress` + sand tint come from the shared `FocusDrivers` mapping (the fill tracks the
 /// Pomodoro; the fall animates off a `SceneClock`). `paused` (occlusion, or "Moving scenes" off)
-/// freezes it to one static frame. System Reduce Motion doesn't (SCREENSAVER-LIBRARY-SPEC §5).
+/// freezes it to one static frame, whose fill still follows the session while the screen is in
+/// sight (`FocusStillFrame`). System Reduce Motion doesn't (SCREENSAVER-LIBRARY-SPEC §5).
 struct SandfallMetalView: View {
     var paused: Bool = false
+    /// The out-of-sight part of `paused` (`SceneContext.occluded`): only then does the still frame
+    /// stop following the Pomodoro.
+    var occluded: Bool
     let pomodoro: PomodoroService
 
     private static let workSand = SIMD3<Double>(0.82, 0.85, 0.93)  // cool pale
@@ -25,7 +29,11 @@ struct SandfallMetalView: View {
             let size = geo.size
             // Unconditional TimelineView — the `paused:` variant stops driving frames on device
             // (ProMotion); see CurrentMetalView. SceneClock is @State so freeze holds its pose.
-            if paused {
+            if paused && !occluded {
+                // Still but in sight (Moving scenes off): the pose holds, the fill follows the
+                // session.
+                FocusStillFrame(pomodoro: pomodoro) { field(size: size, now: nil) }
+            } else if paused {
                 field(size: size, now: nil)
             } else {
                 // 60 fps, not 30. Focus scenes are fast by design (flowing streams, falling
