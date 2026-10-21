@@ -183,9 +183,11 @@ Install via Xcode onto the device (not the simulator). Then:
 2. Confirm downloads live in Application Support and are excluded from iCloud backup.
 
 ### H. Ambient scenes — settle, freeze, and the phase clock (added 2026-07-05, unverified)
-The SceneClock refactor (ShaderBackdrop.swift) put every scene on an integrating phase clock, and
-(since the 2026-07-11 ProMotion stall) on an `if paused { still frame } else { TimelineView }` swap
-rather than `TimelineView(.animation(paused:))`. XCTest covers the clock math;
+The SceneClock refactor (ShaderBackdrop.swift) put every shader scene (and Breathe) on an
+integrating phase clock, and (since the 2026-07-11 ProMotion stall) on an
+`if paused { still frame } else { TimelineView }` swap rather than
+`TimelineView(.animation(paused:))`. Rain on glass never used the clock: its drops run on
+absolute time and drop out when held still. XCTest covers the clock math;
 everything below is display-link / render behavior only a device shows.
 
 1. **Freeze is truly static.** Start a Sleep mix + timer, let the veil engage. In Xcode's Debug

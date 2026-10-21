@@ -154,9 +154,12 @@ There's no queue and no deadline: build the next scene whenever the itch hits.
 
 ## 8. Open questions
 
-- _Settled since:_ the engine is Metal shaders behind `ShaderBackdrop`'s still-frame /
-  `TimelineView` swap (never `TimelineView(.animation(paused:))`, CLAUDE.md), and the app-level
-  motion toggle shipped as Settings ▸ Moving scenes (§5).
+- _Settled since:_ continuously animated scenes swap a still frame for a `TimelineView` (never
+  `TimelineView(.animation(paused:))`, CLAUDE.md). `ShaderBackdrop` is the shared host for the
+  Metal Sleep scenes (Night sky, Aurora, Embers, Still water, Deep space); Current, Tide and
+  Sandfall are Metal but do their own swap, Rain on glass is a `TimelineView` + `Canvas` loop, and
+  Breathe is blurred gradients on a `TimelineView`. The app-level motion toggle shipped as
+  Settings ▸ Moving scenes (§5).
 - **Per-mode vs shared selection**, and whether a `both`-mood scene remembers separate settings
   per mode. Likely independent per mood.
 
