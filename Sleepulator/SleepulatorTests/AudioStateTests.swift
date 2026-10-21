@@ -2,6 +2,9 @@ import XCTest
 import AVFoundation
 import SwiftUI
 import Combine
+#if canImport(ActivityKit)
+import ActivityKit
+#endif
 @testable import Sleepulator
 
 @MainActor
@@ -1162,6 +1165,72 @@ final class PomodoroProgressTests: XCTestCase {
         XCTAssertEqual(p.phaseElapsed(at: ref.addingTimeInterval(120)) - base, 120, accuracy: 1e-6)
     }
 }
+
+// MARK: - Pomodoro Live Activity
+
+#if canImport(ActivityKit)
+/// start() opens with stop(), which ends the Live Activities that are up, and then requests the new
+/// session's. Which ones a stop ends is decided as it runs: read later, in the end's task, the list
+/// held the new session's activity too and ended it as soon as it went up.
+@MainActor
+final class PomodoroLiveActivityTests: XCTestCase {
+    /// ActivityKit's stand-in: activities are ids, put up and ended at once.
+    private final class FakeActivities: PomodoroActivityHosting {
+        var up: [String]
+        var ended: [String] = []
+        private var made = 0
+        init(up: [String]) { self.up = up }
+        var enabled: Bool { true }
+        func listed() -> [String] { up }
+        func request(_ content: ActivityContent<PomodoroAttributes.ContentState>) -> String? {
+            made += 1
+            up.append("session-\(made)")
+            return up.last
+        }
+        func update(_ id: String, _ content: ActivityContent<PomodoroAttributes.ContentState>) {}
+        func end(_ ids: [String], _ content: ActivityContent<PomodoroAttributes.ContentState>) {
+            ended += ids
+            up.removeAll { ids.contains($0) }
+        }
+    }
+
+    /// Value: protects=a Focus session's Live Activity stays up once start() returns, while what
+    /// was up before (a previous run's orphan, the last session's) is ended; fails_when=
+    /// endLiveActivity reads the activity list in a task again, or startLiveActivity ends a list it
+    /// reads after its request; why_new=no test covered the Pomodoro's Live Activity;
+    /// seam=PomodoroService.activities; no_claim=ActivityKit itself (LivePomodoroActivities), the
+    /// Lock Screen and Dynamic Island (TESTING.md §3I step 7)
+    func testStartEndsWhatWasUpAndKeepsItsOwn() {
+        let fake = FakeActivities(up: ["orphan"])
+        let p = PomodoroService()
+        p.activities = fake
+        defer { p.stop() }
+
+        p.start()
+        XCTAssertEqual(fake.ended, ["orphan"], "a previous run's activity is ended")
+        XCTAssertEqual(fake.up, ["session-1"], "the new session's activity stays up")
+
+        p.start()
+        XCTAssertEqual(fake.ended, ["orphan", "session-1"], "a restart ends the last session's")
+        XCTAssertEqual(fake.up, ["session-2"], "and keeps its own")
+    }
+
+    /// Value: protects=Stop still ends the session's Live Activity; fails_when=stop() stops
+    /// calling endLiveActivity, or the end skips the tracked activity; why_new=the start test
+    /// alone would pass if nothing were ever ended after a start; seam=PomodoroService.activities;
+    /// no_claim=ActivityKit dismissing it from the Lock Screen
+    func testStopEndsTheSessionsActivity() {
+        let fake = FakeActivities(up: [])
+        let p = PomodoroService()
+        p.activities = fake
+
+        p.start()
+        p.stop()
+        XCTAssertEqual(fake.ended, ["session-1"])
+        XCTAssertEqual(fake.up, [])
+    }
+}
+#endif
 
 // MARK: - Resume / persistence integrity
 
