@@ -29,7 +29,9 @@ Suites in `SleepulatorTests/` (seven files, many suites):
   `StorageManagerTests` (backup recovery), `NetRetryTests`, `CacheEvictionTests`, the
   sleep-timer suites (backstop, cancel, end-of-episode), the Pomodoro's clock
   (`PomodoroProgressTests`; `PomodoroMissedBoundaryTests`: boundaries a late tick finds start
-  the next phase at the boundary, each one counted), layering, mode reconciliation, the
+  the next phase at the boundary, each one counted) and Live Activity
+  (`PomodoroLiveActivityTests`: a start ends what was up and keeps its own, Stop ends it),
+  layering, mode reconciliation, the
   Night sky meteor's rules (`NightSkyMotionTests`: only while the controls show, faint, rare after
   the first, never popping), and the
   Podcasts-tab rules (`PodcastTextTests`, `ShowNotesPreviewTests`, `ShowNotesEdgeTests`,
@@ -282,6 +284,11 @@ the brightness you actually use at night, in **both** Sleep and Focus.
    run of chimes (one at most). Only the first boundary posts a notification while locked: a
    phase's notification is scheduled when the phase starts, and a suspended app starts none.
    Before the fix the next phase began at unlock and ran its full length.
+7. **Focus Live Activity (added 2026-10-20, passed on device 2026-10-20).** Start a Focus session, lock
+   the phone: ✅ the Pomodoro's Live Activity is on the Lock Screen and in the Dynamic Island, and
+   it stays up past a minute (before the fix it ended as soon as it appeared). Unlock and press
+   Stop: ✅ it's gone from both. Start again: ✅ a new one, and it stays up. Force-quit the app
+   with it up, reopen, start a session: ✅ just one activity, the new one, still up.
 
 ### J. Resume integrity + diagnosability (added 2026-07-05, unverified)
 1. **Muted layer survives resume.** Build a mix with an extra layer, mute that layer, stop.
@@ -844,3 +851,4 @@ to Files: each night is a `.jsonl` file, one event per line.
 | Date | Device / iOS | Sections run | Result / notes |
 |------|--------------|--------------|----------------|
 | 2026-10-10 | iPhone 16 Pro (ProMotion) / iOS 27.0.1 | §3R | ✅ Pass. The orb breathes and the Focus ring depletes smoothly. Debug build of `main` + #29 (`efbdbaa`) + the screensaver branch (`95ee8f0`). |
+| 2026-10-20 | iPhone 16 Pro (ProMotion) / iOS 27.0.1 | §3I step 7 | ✅ Pass. A Focus session's Live Activity stays up on the Lock Screen and in the Dynamic Island; Stop ends it; a restart, and a start after a force-quit, leave just the new one up. Debug build of `claude/goofy-roentgen-40078e` (`25fe7a5`). |
