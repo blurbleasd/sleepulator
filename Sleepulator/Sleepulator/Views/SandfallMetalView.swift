@@ -5,10 +5,11 @@ import SwiftUI
 /// and the bottom mounding as the Pomodoro `progress` runs 0→1, and a turbulent falling column
 /// through the neck — instead of the Canvas triangles + 14 stiff grains it replaced.
 ///
-/// `progress` + sand tint come from the shared `FocusDrivers` mapping (the fill tracks the
-/// Pomodoro; the fall animates off a `SceneClock`). `paused` (occlusion, or "Moving scenes" off)
-/// freezes it to one static frame, whose fill still follows the session while the screen is in
-/// sight (`FocusStillFrame`). System Reduce Motion doesn't (SCREENSAVER-LIBRARY-SPEC §5).
+/// The fill comes from the shared `FocusDrivers.fill` (it tracks the Pomodoro); the sand tint and
+/// energy are this view's own, and the fall animates off a `SceneClock`. `paused` (occlusion, or
+/// "Moving scenes" off) freezes it to one static frame, whose fill still follows the session while
+/// the screen is in sight (`FocusStillFrame`). System Reduce Motion doesn't
+/// (SCREENSAVER-LIBRARY-SPEC §5).
 struct SandfallMetalView: View {
     var paused: Bool
     /// The out-of-sight part of `paused` (`SceneContext.occluded`): only then does the still frame

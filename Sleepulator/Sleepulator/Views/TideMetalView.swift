@@ -5,11 +5,12 @@ import SwiftUI
 /// depth shading, a crisp surface line and specular shimmer — instead of the flat Canvas fill it
 /// replaced.
 ///
-/// The level + tint come from the shared `FocusDrivers` mapping. Values are read live each tick; the
-/// view never observes the Pomodoro (only its `FocusStillFrame` child, below). Ambient surface motion runs off its own `SceneClock` at a constant rate (the
-/// tide's motion isn't Pomodoro-paced); `paused` (occlusion, or "Moving scenes" off) freezes it to
-/// one static frame, whose waterline still follows the session while the screen is in sight
-/// (`FocusStillFrame`). System Reduce Motion doesn't (SCREENSAVER-LIBRARY-SPEC §5).
+/// The level comes from the shared `FocusDrivers.fill`; the tint and energy are this view's own.
+/// Values are read live each tick; the view never observes the Pomodoro (only its
+/// `FocusStillFrame` child, below). Ambient surface motion runs off its own `SceneClock` at a
+/// constant rate (the tide's motion isn't Pomodoro-paced); `paused` (occlusion, or "Moving scenes"
+/// off) freezes it to one static frame, whose waterline still follows the session while the screen
+/// is in sight. System Reduce Motion doesn't (SCREENSAVER-LIBRARY-SPEC §5).
 struct TideMetalView: View {
     var paused: Bool
     /// The out-of-sight part of `paused` (`SceneContext.occluded`): only then does the still frame

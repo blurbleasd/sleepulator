@@ -6,21 +6,22 @@ import SwiftUI
 /// Canvas edition that stroked sine paths.
 ///
 /// The look is driven by the shared `FocusDrivers` mapping, the one place the Focus scenes read the
-/// Pomodoro. Values are sampled *live* each tick; the view never observes it, so the per-tick redraw
-/// can't trigger the `@Published` re-render storm CLAUDE.md warns about. Only its isolated
+/// Pomodoro. Values are sampled *live* each tick; the view never observes it, so the per-tick
+/// redraw can't trigger the `@Published` re-render storm CLAUDE.md warns about. Only its isolated
 /// `FocusStillFrame` child observes it, while paused and in sight, and a publish redraws just that.
 ///
 /// Flow uses its OWN `SceneClock` rather than `ShaderBackdrop`, because Current's rate is the
-/// Pomodoro's `look.speed` (momentum), not the night-slowdown `ShaderBackdrop` integrates. Reduce
-/// Motion feeds rate 0 → `flow` freezes → a static field (no advection). `paused` (occlusion, or
-/// "Moving scenes" off) freezes the schedule to one static frame at the frozen pose; while the
-/// screen is in sight that frame still follows the session (`FocusStillFrame`).
+/// Pomodoro's `look.speed` (momentum), not the night-slowdown `ShaderBackdrop` integrates. System
+/// Reduce Motion doesn't still it (it gates parallax only; see the NOTE in `field`). `paused`
+/// (occlusion, or "Moving scenes" off) freezes the schedule to one static frame at the frozen pose;
+/// while the screen is in sight that frame still follows the session (`FocusStillFrame`).
 struct CurrentMetalView: View {
     var paused: Bool
     /// The out-of-sight part of `paused` (`SceneContext.occluded`): only then does the still frame
     /// stop following the Pomodoro.
     var occluded: Bool
-    /// Read live, not observed here, so phase/progress drive the look (`FocusStillFrame` observes it).
+    /// Read live, not observed here, so phase/progress drive the look (`FocusStillFrame` does
+    /// observe it).
     let pomodoro: PomodoroService
 
     /// Integrates `look.speed` into a flow phase (rate, not absolute-time × speed — see

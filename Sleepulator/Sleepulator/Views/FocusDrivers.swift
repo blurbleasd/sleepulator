@@ -2,10 +2,11 @@ import SwiftUI
 
 /// The single source of truth for how a Focus scene reads the Pomodoro.
 ///
-/// The Focus scenes (Current, Tide, Sandfall) derive their look and their progress position from
-/// this mapping, so they can only differ in how they render, never in how they read the session.
-/// It's pure, so it's unit-tested (the shaders and thermals are device-verified). `FocusStillFrame`,
-/// below, is how their still frames keep reading it with Moving scenes off.
+/// Every Focus scene takes its progress position from `fill`, so Current, Tide and Sandfall can't
+/// disagree about how far through the interval you are; Current also takes its look from `look`,
+/// while Tide and Sandfall shade their own energy and tint. Pure, so it's unit-tested (the shaders
+/// and thermals are device-verified). `FocusStillFrame`, below, is how their still frames keep
+/// reading it with Moving scenes off.
 ///
 /// The numbers came from the retired Canvas `CurrentView`, so the Metal port was a true A/B:
 ///   work:  opacity/amplitude/speed ramp up with `progress`  → momentum
@@ -31,9 +32,6 @@ enum FocusDrivers {
         var speed: Double
         /// Stream tint, linear RGB in 0…1.
         var tint: SIMD3<Double>
-
-        /// The tint as a SwiftUI `Color`, for the Canvas scene.
-        var color: Color { Color(red: tint.x, green: tint.y, blue: tint.z) }
     }
 
     /// Where the scene's POSITIONAL progress cue should sit: 0 = start of the travel, 1 = end;
@@ -75,10 +73,10 @@ enum FocusDrivers {
 /// `SceneContext.occluded`). The scenes read the Pomodoro live inside their own redraw and never
 /// observe it, so a bare still frame was drawn once, when Focus came up, and kept that look for the
 /// whole session: the idle look, with no reading at all (simulator, 2026-10-13). This view observes
-/// the Pomodoro instead, so the frame is drawn again on each of its publishes: once a second while a
-/// session runs, and at once on a start, a phase change or a stop; never while idle. The pose holds:
-/// the scene draws with `now: nil`, so its `SceneClock` never ticks. Isolated, like `NightFade`: a
-/// publish redraws only the scene's own frame, never Home.
+/// the Pomodoro instead, so the frame is drawn again on each of its publishes: once a second while
+/// a session runs, and at once on a start, a phase change or a stop; never while idle. The pose
+/// holds: the scene draws with `now: nil`, so its `SceneClock` never ticks. Isolated, like
+/// `NightFade`: a publish redraws only the scene's own frame, never Home.
 ///
 /// `content` is a closure, called in this body, so each redraw reads the Pomodoro afresh. Built in
 /// the caller's body (`NightFade`'s `content: Content`), the frame would keep the caller's reading.

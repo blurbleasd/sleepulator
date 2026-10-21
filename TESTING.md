@@ -211,12 +211,15 @@ everything below is display-link / render behavior only a device shows.
    Sandfall, start a session and let the controls fade. ✅ The scene holds its pose, but its
    reading follows the interval, creeping with the countdown: Current's front crosses, Tide's
    waterline rises, Sandfall's top bulb drains (`FocusStillFrame`). ✅ A start, a break and a stop
-   show at once. Lock for 30 s and unlock. ✅ The reading is at the true time. Out of sight it
-   stops: mid-session, let Always-On take the screen (backgrounding renders nothing, so it proves
-   nothing) with Instruments' SwiftUI template attached. ✅ `FocusStillFrame`'s body stops being
-   evaluated and the GPU shows no full-screen fragment pass until the screen is back in sight;
-   the Focus ring's and readout's own 1 Hz updates are expected. Before the fix the still frame
-   kept the look it had when Focus came up (the idle one) all session.
+   show at once. Lock for 30 s and unlock, away from a phase boundary (one crossed while locked
+   starts the next phase late, a separate Pomodoro issue). ✅ The reading is at the true time.
+   Out of sight it stops: mid-session, with Instruments' SwiftUI template attached, pull down
+   Control Center or Notification Center over Focus Home (the app goes inactive with Home still
+   behind it; Always-On and the Lock Screen background the app, which renders nothing and so
+   proves nothing). ✅ `FocusStillFrame`'s body stops being evaluated and the GPU shows no
+   full-screen fragment pass until it's dismissed, then the reading is at the true time; the
+   Focus ring's and readout's own 1 Hz updates are expected. Before the fix the still frame kept
+   the look it had when Focus came up (the idle one) all session.
 6. **Veil caption.** Veil engages → "Tap to wake" rides the fade in, fades out ~6 s later,
    panel is then true black (check no lit pixels in a dark room). Wake → re-engage: caption
    reliably re-shows.
