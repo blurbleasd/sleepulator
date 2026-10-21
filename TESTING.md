@@ -254,7 +254,9 @@ the brightness you actually use at night, in **both** Sleep and Focus.
    ring's 30 fps redraw fully stopped (paused); on return the arc is at the correct remaining
    time with no jump-back. Idle (no session): the faint track ring is still perceptible at low
    brightness.
-   **A boundary crossed while locked (added 2026-10-20, unit-tested only).** Settings: Focus
+   **A boundary crossed while locked (added 2026-10-20, unit-tested only).** Install and run it
+   without Xcode attached, as in §3C step 5: the debugger keeps the app from suspending, so the
+   boundary passes on time and the step can't tell the fix from the old code. Settings: Focus
    length 5 min, short break 1 min. Start a Focus session with no sound (nothing keeps the app
    awake, so it's suspended while locked) and lock at about 4:00 left. Unlock 4.5 min later.
    ✅ The break shows about 0:30 left, not a fresh 1:00, and the ring, readout and Live Activity
