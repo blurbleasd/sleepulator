@@ -78,9 +78,13 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   look came inside the fade (`lookAfterTheWake`). The target is made by `Sleepulator/setup_ui_tests.rb`
   (idempotent; re-run it after adding a file there). It runs in the same app the unit tests are
   hosted in, so a UI test must leave persisted state (mode, night length) as it found it.
-- **Tests** — `SleepulatorTests/` (XCTest). Seven files, many suites: `AudioMathTests.swift`;
+- **Tests** — `SleepulatorTests/` (XCTest). Seven files, many suites: `AudioMathTests.swift` (also
+  `MetalShadersTests`, which checks `MetalShaders.known` against the app's compiled `[[stitchable]]`
+  functions, so a new scene's shader goes in that set, and `SceneSwipeLoopTests`: the swipe loop,
+  unique scene ids);
   `AudioStateTests.swift` (also holds `PodcastParserTests`, `OPMLParserTests`,
-  `StorageManagerTests`, `NetRetryTests`, `CacheEvictionTests`, the sleep-timer suites, Home's
+  `StorageManagerTests`, `NetRetryTests`, `CacheEvictionTests`, the sleep-timer suites, the
+  Pomodoro's clock (`PomodoroProgressTests`, `PomodoroMissedBoundaryTests`), Home's
   pure UI rules (`SessionGuardsTests`, `NightRingMathTests`, `MiniPlayerClearanceTests`,
   `HomeScreensaverPolicyTests`, `NightSkyMotionTests`), the podcast rules (`PodcastTextTests`, `ShowNotesPreviewTests`,
   `ShowNotesEdgeTests`, `TonightShelfTests`, `QueueMoveToHeadTests`), the player rules
@@ -98,7 +102,8 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   `BackupControllerTests` for the Backup page's controller, which await the Task each controller
   call returns: the hosted app's first render can hold the main actor 10 s or more mid-test, and
   a 5 s poll ran out under it);
-  `FocusDriversTests.swift` (also `FocusStillFrameTests`, one hosted in a window);
+  `FocusDriversTests.swift` (also `FocusStillFrameTests`, one hosted in a window, and
+  `ContourLightTests`: the radius whose disc covers the interval's share of the screen);
   `GenerativeAudioEngineTests.swift` (`GenerativeMediaResetTests`);
   `TipStoreTests.swift` (`TipFlowTests`, pure; `TipStoreTests`, StoreKitTest against
   `Tips.storekit`). On iOS 26 simulators a command-line run (xcodebuild, CI) hits an Apple bug,

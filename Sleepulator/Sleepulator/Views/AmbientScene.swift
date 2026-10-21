@@ -305,6 +305,24 @@ struct SandfallScene: AmbientScene {
     }
 }
 
+/// "Contour" (Focus): a topographic map of a mountain whose summit sits under the Focus ring, its
+/// lines drifting downhill over slowly re-forming terrain. Light spreads down from the summit: the
+/// share of the screen in light IS the interval, the whole map lit by the end of a work interval and
+/// the light back up on the summit after a break (`ContourShader.metal` `contourField` via
+/// `ContourMetalView`, the radius from `ContourLight`). At rest the lines sit at one even brightness
+/// with no edge of light. The one line-drawn Focus scene, it reads by radius where the others each
+/// move one way. System Reduce Motion doesn't still it (SCREENSAVER-LIBRARY-SPEC §5); the "Moving
+/// scenes" setting does, via `paused`.
+struct ContourScene: AmbientScene {
+    let id = "contour"
+    let title = "Contour"
+    let mood = SceneMood.focus
+
+    func makeBackdrop(_ ctx: SceneContext) -> AnyView {
+        AnyView(ContourMetalView(paused: ctx.paused, occluded: ctx.occluded, pomodoro: ctx.pomodoro))
+    }
+}
+
 // MARK: - Registry
 
 /// Lists every scene and resolves a persisted selection id to a scene. Selection itself lives
@@ -318,7 +336,7 @@ enum SceneRegistry {
         #endif
         scenes.append(contentsOf: [
             BreathingBloomScene(), AuroraScene(), EmbersScene(), StillWaterScene(), DeepSpaceScene(),
-            CurrentScene(), TideScene(), SandfallScene()
+            CurrentScene(), TideScene(), SandfallScene(), ContourScene()
         ] as [any AmbientScene])
         return scenes
     }()

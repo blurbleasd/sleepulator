@@ -136,6 +136,100 @@ final class FocusDriversTests: XCTestCase {
 
 }
 
+/// Contour's reading: the light covers the interval's share of the SCREEN. The shader lights the
+/// ground above the cone's height at `ContourLight.radius`, so the radius has to cover exactly
+/// that share of a phone-shaped screen, edges and all.
+final class ContourLightTests: XCTestCase {
+
+    /// iPhone 17 Pro in points (402 × 874).
+    private let aspect = 402.0 / 874.0
+
+    // Value: protects=radius(share:) inverts share(radius:) across the interval; fails_when=the bisection stops converging (too few halvings, or the wrong half kept); why_new=cheap at five targets, where the pixel-count test below checks three; seam=none; no_claim=share itself (a round trip passes for any share; the pixel count checks it)
+    func testTheRadiusCoversThatShareOfTheScreen() {
+        for target in [0.05, 0.25, 0.5, 0.75, 0.95] {
+            let r = ContourLight.radius(share: target, aspect: aspect)
+            XCTAssertEqual(ContourLight.share(radius: r, aspect: aspect), target, accuracy: 0.002, "share \(target)")
+        }
+    }
+
+    // Value: protects=no light before an interval starts and the whole map lit at its end; fails_when=the ends clamp to a radius short of the corners, or a share past 1 overflows; why_new=the scene is new; seam=none
+    func testTheEndsAreNoneAndAll() {
+        let reach = ContourLight.reach(aspect: aspect)
+        XCTAssertEqual(ContourLight.radius(share: 0, aspect: aspect), 0)
+        XCTAssertEqual(ContourLight.radius(share: -1, aspect: aspect), 0)
+        XCTAssertEqual(ContourLight.radius(share: 1, aspect: aspect), reach)
+        XCTAssertEqual(ContourLight.radius(share: 2, aspect: aspect), reach)
+        XCTAssertEqual(ContourLight.share(radius: reach, aspect: aspect), 1, accuracy: 0.001)
+        // The farthest corner from a summit at (0.5, 0.4) is a bottom one.
+        XCTAssertEqual(reach, ((0.5 * aspect) * (0.5 * aspect) + 0.6 * 0.6).squareRoot(), accuracy: 1e-12)
+    }
+
+    // Value: protects=the light only ever spreads through a work interval; fails_when=the bisection or the area integral isn't monotonic; why_new=the scene is new; seam=none
+    func testTheRadiusGrowsWithTheShare() {
+        var last = -1.0
+        for step in 0...20 {
+            let r = ContourLight.radius(share: Double(step) / 20, aspect: aspect)
+            XCTAssertGreaterThan(r, last, "step \(step)")
+            last = r
+        }
+    }
+
+    // Value: protects=a zero-height first layout pass draws the idle map instead of trapping or dividing by zero; fails_when=share/radius divide by a zero aspect; why_new=the scene is new; seam=none
+    func testAZeroSizedScreenGivesNoLight() {
+        XCTAssertEqual(ContourLight.share(radius: 0.5, aspect: 0), 0)
+        XCTAssertEqual(ContourLight.radius(share: 0.5, aspect: 0), 0)
+    }
+
+    // Value: protects=the disc at radius(share:) covers that share of the screen's points on the
+    //   iPhone shapes the app runs on; fails_when=share's closed form drops or doubles a quarter,
+    //   mis-clips one cut by both its side and its top, stops clipping at a screen edge, or
+    //   mis-scales the summit by the aspect; why_new=the round trip above inverts whatever share
+    //   computes, so a wrong share still passes it; seam=none; no_claim=the shader's noise-bent
+    //   edge (±0.07 1 sd, device-checked in TESTING §V.2); a summit-centred disc only
+    func testTheLitDiscCoversThatShareOfTheScreensPoints() {
+        // An independent count of every point whose centre is within the radius of the summit,
+        // a row at a time: in each row the lit centres are those strictly inside the half chord.
+        func litShare(radius r: Double, width: Int, height: Int) -> Double {
+            let h = Double(height)
+            let cx = ContourLight.summit.x * Double(width) / h, cy = ContourLight.summit.y
+            var lit = 0
+            for y in 0..<height {
+                let dy = (Double(y) + 0.5) / h - cy
+                let half2 = r * r - dy * dy
+                guard half2 > 0 else { continue }
+                let half = half2.squareRoot()
+                // Columns i whose centre (i + 0.5) / h lies in the open interval (cx - half, cx + half).
+                let first = max(0, Int(((cx - half) * h - 0.5).rounded(.down)) + 1)
+                let last = min(width - 1, Int(((cx + half) * h - 0.5).rounded(.up)) - 1)
+                lit += max(0, last - first + 1)
+            }
+            return Double(lit) / Double(width * height)
+        }
+        // The app is portrait-only on iPhone: an iPhone 17 Pro; an SE (16:9, the one aspect unlike
+        // the others: its sides sit farther from the summit, so they clip the disc last); and a
+        // Pro Max (the 17 Pro's aspect on a different point grid). 0.1 is unclipped, 0.5 clipped at
+        // the sides, 0.8 has the upper quarters cut by both side and top, 0.99 the lower ones too.
+        for (width, height) in [(402, 874), (375, 667), (440, 956)] {
+            let aspect = Double(width) / Double(height)
+            for target in [0.1, 0.5, 0.8, 0.99] {
+                let r = ContourLight.radius(share: target, aspect: aspect)
+                XCTAssertEqual(litShare(radius: r, width: width, height: height), target, accuracy: 0.003,
+                               "\(width)×\(height) at \(target)")
+            }
+        }
+    }
+
+    // Value: protects=with no session the shader gets the idle signal (light < 0: even lines, no edge), and a break hands the light back; fails_when=idle maps to 0 (a session at its start: dim lines, no light) or a break reads as work; why_new=FocusDrivers.fill is tested but not the -1 the shader keys idle on; seam=none; no_claim=the shader's idle branch (device, TESTING §V.2)
+    func testIdleReadsAsNoSessionAndABreakHandsTheLightBack() {
+        for progress in [0.0, 0.5, 1.0] {
+            XCTAssertLessThan(ContourLight.light(isRunning: false, isWork: true, progress: progress), 0)
+            XCTAssertLessThan(ContourLight.light(isRunning: false, isWork: false, progress: progress), 0)
+        }
+        XCTAssertEqual(ContourLight.light(isRunning: true, isWork: true, progress: 0.25), 0.25, accuracy: 1e-12)
+        XCTAssertEqual(ContourLight.light(isRunning: true, isWork: false, progress: 0.25), 0.75, accuracy: 1e-12)
+    }
+}
+
 /// `FocusStillFrame`, the Focus scenes' still frame with Moving scenes off, redraws on each of the
 /// Pomodoro's publishes, and each redraw must read the Pomodoro afresh.
 @MainActor

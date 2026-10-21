@@ -61,9 +61,11 @@ Tags: **⚙︎** generative (cheap, recommended) · **✦** time-reactive · **�
 
 **Focus (calm-alert; the ring stays the hero):**
 - **Energy sweep** ⚙︎ — _retired 2026-07-06_ (a rotating glow with no depth). Focus defaults to
-  **Current**, built alongside **Tide** and **Sandfall** (`AmbientScene.swift`).
+  **Current**, built alongside **Tide**, **Sandfall** and **Contour** (`AmbientScene.swift`).
 - **Flow field** ⚙︎ — particles drifting along a slow vector field.
-- **Contour topography** ⚙︎ — subtle moving contour lines; a "deep work" feel.
+- **Contour topography** ⚙︎✦ — subtle moving contour lines; a "deep work" feel. _Built
+  2026-10-12 as "Contour": a mountain whose summit sits under the ring, lit from the summit
+  outward across a work interval (TESTING.md §V)._
 - **Rain on glass (day)** ⚙︎🔊 — the rain scene in a cool daytime key.
 
 **Quality over quantity.** A "cheap generative scene" is deceptively expensive to make
@@ -121,8 +123,8 @@ Every scene must honour:
 - **`paused`** — settle to static when the screen is out of sight or Moving scenes is off (an
   all-night screen shouldn't animate under the veil), as `ShaderBackdrop` does. A still frame in
   sight should keep its scene's reading live and stop redrawing only when `SceneContext.occluded`.
-  Today Night sky and Rain on glass re-read the night's darkening, and Current, Tide and Sandfall
-  follow the Pomodoro (`FocusStillFrame`); the other Sleep scenes' still frames don't yet darken.
+  Today Night sky and Rain on glass re-read the night's darkening, and Current, Tide, Sandfall
+  and Contour follow the Pomodoro (`FocusStillFrame`); the other Sleep scenes' still frames don't yet darken.
   Under the screensaver itself scenes keep moving, but hold back transients
   (`SceneContext.screensaver`).
 - **The ambient-motion preference** — NOT raw system Reduce Motion. We deliberately decided
@@ -156,8 +158,8 @@ There's no queue and no deadline: build the next scene whenever the itch hits.
 
 - _Settled since:_ continuously animated scenes swap a still frame for a `TimelineView` (never
   `TimelineView(.animation(paused:))`, CLAUDE.md). `ShaderBackdrop` is the shared host for the
-  Metal Sleep scenes (Night sky, Aurora, Embers, Still water, Deep space); Current, Tide and
-  Sandfall are Metal but do their own swap, Rain on glass is a `TimelineView` + `Canvas` loop, and
+  Metal Sleep scenes (Night sky, Aurora, Embers, Still water, Deep space); Current, Tide,
+  Sandfall and Contour are Metal but do their own swap, Rain on glass is a `TimelineView` + `Canvas` loop, and
   Breathe is blurred gradients on a `TimelineView`. The app-level motion toggle shipped as
   Settings ▸ Moving scenes (§5).
 - **Per-mode vs shared selection**, and whether a `both`-mood scene remembers separate settings

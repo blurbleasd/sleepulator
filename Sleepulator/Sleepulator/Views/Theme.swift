@@ -31,7 +31,7 @@ enum NightDamping {
     /// Deliberately NOT gated on system Reduce Motion: per SCREENSAVER-LIBRARY-SPEC §5 the app
     /// runs decorative ambient motion (the orb breath, star twinkle) even under Reduce Motion —
     /// it's slow opacity/scale breath, not vestibular motion, and the sky/orb read dead without
-    /// it. The proper opt-out is the spec's pending app-level "Ambient motion" toggle, not this.
+    /// it. The proper opt-out is the app-level "Moving scenes" toggle (Settings ▸ Display), not this.
     static func factor(nightProgress: Double, bedtime: Bool) -> Double {
         if bedtime { return 0 }
         return max(0, min(1, 1 - nightProgress))

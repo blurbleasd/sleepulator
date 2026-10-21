@@ -2,9 +2,9 @@ import SwiftUI
 
 /// The single source of truth for how a Focus scene reads the Pomodoro.
 ///
-/// Every Focus scene takes its progress position from `fill`, so Current, Tide and Sandfall can't
-/// disagree about how far through the interval you are; Current also takes its look from `look`,
-/// while Tide and Sandfall shade their own energy and tint. Pure, so it's unit-tested (the shaders
+/// Every Focus scene takes its progress position from `fill`, so Current, Tide, Sandfall and Contour
+/// can't disagree about how far through the interval you are; Current and Contour also take their
+/// look from `look`, while Tide and Sandfall shade their own energy and tint. Pure, so it's unit-tested (the shaders
 /// and thermals are device-verified). `FocusStillFrame`, below, is how their still frames keep
 /// reading it with Moving scenes off.
 ///
@@ -43,7 +43,7 @@ enum FocusDrivers {
     /// 80 %, so the scenes never actually told you anything about the session ("they don't speak
     /// to focus"). Position and extent are absolute and readable at a glance, so progress now
     /// rides one positional channel per scene — the waterline's height, the hourglass's fill,
-    /// the front's x — and intensity is demoted to mere shading.
+    /// the front's x, the reach of Contour's light — and intensity is demoted to mere shading.
     ///
     /// A work interval FILLS (0 → 1); a break DRAINS it back (1 → 0), so a glance says both how
     /// far through you are and which kind of interval you're in. Pure, so it's unit-tested.
