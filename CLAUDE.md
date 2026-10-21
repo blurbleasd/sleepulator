@@ -67,7 +67,8 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   past the real 8 s, where it's a fresh glance. It passes settings as launch
   arguments (plist literals, the argument domain) so persisted mode and night length stay put.
   CI's simulators are slow and sometimes drop a synthesized tap, so a tap that matters checks its
-  effect and goes round again (the noise switch, the Focus mode switch, Focus's Stop, `pauseAudio`, the veil's first tap,
+  effect and goes round again (the noise switch, the mode switch, the tab bar, which can show a tap dead on target and
+  keep the old tab selected, Focus's Stop, `pauseAudio`, the veil's first tap,
   whose glance is read off a screenshot since it's hidden from accessibility), and a test lets an
   overlay finish fading in before tapping it (a tap on the veil as it arrives doesn't reach it).
   They launch with Moving scenes off (`-ambientMotion <false/>`): an app redrawing every frame

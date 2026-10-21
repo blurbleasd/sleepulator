@@ -236,10 +236,16 @@ final class HomeLayoutUITests: XCTestCase {
         app.launchArguments = ["-ambientMotion", "<false/>", "-uiTestIsolated", "<true/>"]
         app.launch()
 
-        // Sleep from either start state. A fresh launch has no episode loaded.
+        // Sleep from either start state. A fresh launch has no episode loaded. Checked and gone
+        // round like the Focus test's switches: from Focus, a lost tap left the bar up and failed
+        // the tree check below. The effect is re-read before each tap, so a late one isn't doubled.
         let sleepMode = app.buttons["Sleep mode"]
         XCTAssertTrue(sleepMode.waitForExistence(timeout: 15), "No mode switcher on Home")
-        sleepMode.tap()
+        for _ in 0..<3 where !sleepMode.isSelected {
+            sleepMode.tap()
+            _ = waitUntil(timeout: 3) { sleepMode.isSelected }
+        }
+        XCTAssertTrue(sleepMode.isSelected, "Couldn't switch Home to Sleep")
 
         // An exact label: on a fresh install the first-run tip is a button that says "Build mix" too.
         let buildMix = app.buttons["Build mix"]
@@ -252,7 +258,16 @@ final class HomeLayoutUITests: XCTestCase {
         XCTAssertTrue(sleepMode.isHittable, "The mode switcher is clipped out of Home's hit test")
 
         // Off Home it comes back: Podcasts always shows it.
-        app.tabBars.buttons["Podcasts"].tap()
+        // A loaded simulator sometimes loses a synthesized tap on the tab bar: dead on target, the
+        // bar shows the touch (its lens lifts, or slides to the tab and back) and the old tab stays
+        // selected (5 failed runs' recordings, 2026-10-21). So each tab tap checks its tab took and
+        // goes round again.
+        let podcastsTab = app.tabBars.buttons["Podcasts"]
+        for _ in 0..<3 where !podcastsTab.isSelected {
+            podcastsTab.tap()
+            _ = waitUntil(timeout: 3) { podcastsTab.isSelected }
+        }
+        XCTAssertTrue(podcastsTab.isSelected, "Couldn't open the Podcasts tab")
         XCTAssertTrue(miniPlayer.waitForExistence(timeout: 5), "No mini-player on Podcasts")
         // Rendered where it floats, above the tab bar and uncovered: existence alone passes for a bar
         // inserted out of place or covered. (A real tap on the bar is the Focus test's check.)
@@ -269,7 +284,12 @@ final class HomeLayoutUITests: XCTestCase {
         // Value: protects=a shown bar leaves the a11y tree when Sleep Home at rest returns;
         // fails_when=the hide fades the bar instead of removing it; why_new=the cold-launch check
         // above never sees a rendered bar taken out; seam=none
-        app.tabBars.buttons["Sleep"].tap()
+        let sleepTab = app.tabBars.buttons["Sleep"]
+        for _ in 0..<3 where !sleepTab.isSelected {
+            sleepTab.tap()
+            _ = waitUntil(timeout: 3) { sleepTab.isSelected }
+        }
+        XCTAssertTrue(sleepTab.isSelected, "Couldn't go back to the Sleep tab")
         XCTAssertTrue(buildMix.waitForExistence(timeout: 5), "No Build mix button back on Sleep Home")
         XCTAssertTrue(miniPlayer.waitForNonExistence(timeout: 5),
                       "The mini-player stayed in the accessibility tree after returning to Sleep Home")
