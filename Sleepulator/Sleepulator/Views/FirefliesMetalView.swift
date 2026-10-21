@@ -10,9 +10,11 @@ import SwiftUI
 /// by one until a few are left pulsing together (`FireflyNight`). A thin wrapper over
 /// `ShaderBackdrop`, which owns the redraw loop, the freeze and the `SceneClock`
 /// (`nightSlowdown: 0.3`: the flashes, the drift and the sway ease to 70% as the night deepens):
-///   - `sleepTimer.nightProgress` sets the sync and the fireflies left, and dims the sky and mist;
+///   - `sleepTimer.nightProgress`, eased (`FireflyNight.follow`), sets the sync and the fireflies
+///     left, and dims the scene;
 ///   - `tilt` parallaxes the layers by depth;
-///   - `occluded` keeps the still meadow following the night with Moving scenes off.
+///   - `occluded` keeps the still meadow following the night with Moving scenes off; the still frame
+///     holds each firefly's flash where it froze and keeps the survivors glowing (the shader's `still`).
 struct FirefliesMetalView: View {
     var paused: Bool = false
     var occluded: Bool = true
@@ -23,22 +25,46 @@ struct FirefliesMetalView: View {
 
     @Environment(\.displayScale) private var displayScale
 
+    /// The night the meadow shows, eased toward the timer's (see `FireflyNight.follow`).
+    @State private var follower = FireflyNightFollower()
+
     var body: some View {
         ShaderBackdrop(paused: paused, nightSlowdown: 0.3,
                        sleepTimer: sleepTimer, audioLevel: nil, tilt: tilt, occluded: occluded) { s in
-            let night = Double(s.night)
+            let night = follower.night(Double(s.night), now: Date.timeIntervalSinceReferenceDate)
             let left = FireflyNight.remaining(night: night)
             return ShaderLibrary.fireflyField(
                 .float(s.phase),
                 .float(s.elapsed),
                 .float2(s.size),
-                .float(s.night),
+                .float(Float(night)),
                 .float(Float(FireflyNight.sync(night: night))),
                 .float3(Float(left.far), Float(left.meadow), Float(left.near)),
                 .float2(s.gyro.x, s.gyro.y),
-                .float(Float(displayScale))
+                .float(Float(displayScale)),
+                .float(s.frozen ? 1 : 0)
             )
         }
+    }
+}
+
+/// The night Fireflies shows, eased by `FireflyNight.follow`. A plain class mutated inside the
+/// redraw, like `SceneClock`, and never observed: a published change would re-render the view on
+/// every frame.
+final class FireflyNightFollower {
+    private var shown: Double?
+    private var last: TimeInterval?
+
+    // Explicitly nonisolated: the implicit MainActor-isolated deinit aborts on iOS 18.4–26.3
+    // runtimes (CLAUDE.md, "Isolated deinits"). Only releases stored properties.
+    nonisolated deinit {}
+
+    /// The night to draw at `now` (seconds), given the timer's.
+    func night(_ target: Double, now: TimeInterval) -> Double {
+        let next = FireflyNight.follow(shown: shown, target: target, dt: last.map { now - $0 } ?? 0)
+        shown = next
+        last = now
+        return next
     }
 }
 
@@ -58,9 +84,24 @@ nonisolated enum FireflyNight {
 
     /// The share of the meadow's fireflies left at the end of the night: just its survivors, one per
     /// patch of the meadow (5-7 on a phone), fully lit, with every other firefly out. It has to sit
-    /// between the survivors' fade (0…0.06) and the others' first rank (`LAST`, 0.10) in
+    /// between the survivors' fade (`GOING`, 0.06) and the others' first rank (`LAST`, 0.10) in
     /// FirefliesShader.metal.
     static let meadowAtEnd = 0.08
+
+    /// The fastest the night the scene shows may move, in nights per second: a whole night in two
+    /// minutes. A real night moves far slower (a 5-minute timer takes 300 s), so this only bites on a
+    /// jump: "Still awake? +15m" or a seek back moves the timer's night back at once, and the
+    /// fireflies that had gone out would come back in one frame, a third of them mid-flash.
+    static let maxRate = 1.0 / 120
+
+    /// The night to show after `dt` seconds, moving toward `target` no faster than `maxRate`, either
+    /// way. Nothing shown yet (the scene just appeared): the night as it is.
+    static func follow(shown: Double?, target: Double, dt: Double) -> Double {
+        let goal = clamped(target)
+        guard let shown else { return goal }
+        let step = maxRate * max(dt, 0)
+        return shown + min(max(goal - shown, -step), step)
+    }
 
     /// How far they've fallen into step: 0 = each on its own clock, 1 = one rhythm (a flash then
     /// rolls across the screen as a wave). Out of step through the first stretch of the night, in

@@ -231,8 +231,8 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   (`noteSessionEdge`) and a switch to Focus ends it. It's visual only (scenes darken and still,
   comets and meteors retire past 0.4, the orb calms); the audio fade never reads it. Views that
   observe the timer for darkening (`NightDarken`, `NightFade`) also re-read it every 20 s while
-  the screen is in sight (`SceneContext.occluded`; with "Moving scenes" off, Night sky and Rain on
-  glass still darken),
+  the screen is in sight (`SceneContext.occluded`; with "Moving scenes" off, Night sky, Fireflies
+  and Rain on glass still darken),
   since an untimed night publishes nothing. The night never brightens on its own at a timer
   boundary: a timer started mid-night settles on from where the night already is
   (`SleepTimerService.timedBase`), the ambient tail re-bases instead of dropping back, a cancel

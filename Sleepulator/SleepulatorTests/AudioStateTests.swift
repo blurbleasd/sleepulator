@@ -3365,6 +3365,40 @@ final class FireflyNightTests: XCTestCase {
         }
     }
 
+    func testABumpBackEasesTheNightInsteadOfJumping() {
+        // "Still awake? +15m" near the end of a 30-minute timer moves the night from about 0.93 to
+        // 0.62 at once. Shown as is, the fireflies that had gone out would relight in one frame.
+        let frame = 1.0 / 30
+        var shown = FireflyNight.follow(shown: 0.93, target: 0.62, dt: frame)
+        XCTAssertEqual(shown, 0.93 - FireflyNight.maxRate * frame, accuracy: 1e-12)
+        for _ in 0..<(30 * 30) { shown = FireflyNight.follow(shown: shown, target: 0.62, dt: frame) }
+        XCTAssertGreaterThan(shown, 0.62, "it took the jump in under 31 s")
+        for _ in 0..<(30 * 10) { shown = FireflyNight.follow(shown: shown, target: 0.62, dt: frame) }
+        XCTAssertEqual(shown, 0.62, accuracy: 1e-9, "it never reached the bumped night")
+    }
+
+    func testAFireflyComingBackFadesInOverSeconds() {
+        // FirefliesShader.metal fades a firefly in or out over GOING (0.06) of its layer's share. At
+        // the capped pace no layer's share moves that far in 2 s, anywhere in the night.
+        let twoSeconds = 2 * FireflyNight.maxRate
+        for n in sweep {
+            let a = FireflyNight.remaining(night: n), b = FireflyNight.remaining(night: min(n + twoSeconds, 1))
+            XCTAssertLessThan(abs(b.far - a.far), 0.06, "far at \(n)")
+            XCTAssertLessThan(abs(b.meadow - a.meadow), 0.06, "meadow at \(n)")
+            XCTAssertLessThan(abs(b.near - a.near), 0.06, "near at \(n)")
+        }
+    }
+
+    func testARealNightIsShownAsItIs() {
+        // Even a 5-minute timer (the ring's chips start at 15) moves the night 1/300 a second: unslowed.
+        let frame = 1.0 / 30, step = frame / 300
+        XCTAssertEqual(FireflyNight.follow(shown: 0.5, target: 0.5 + step, dt: frame), 0.5 + step, accuracy: 1e-12)
+        // The scene appearing mid-night shows that night, not a slide from bedtime.
+        XCTAssertEqual(FireflyNight.follow(shown: nil, target: 0.62, dt: 0), 0.62)
+        // Two reads at one instant don't move it.
+        XCTAssertEqual(FireflyNight.follow(shown: 0.93, target: 0.62, dt: 0), 0.93)
+    }
+
     func testANightOutsideItsRangeIsClamped() {
         XCTAssertEqual(FireflyNight.remaining(night: -0.5), FireflyNight.remaining(night: 0))
         XCTAssertEqual(FireflyNight.remaining(night: 1.5), FireflyNight.remaining(night: 1))

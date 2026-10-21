@@ -17,8 +17,9 @@ struct SceneContext {
     /// See `HomeView.scenesFrozen` / the `nightDimmed → audio.screenDimmed` hand-off.
     let paused: Bool
     /// The out-of-sight part of `paused`: the veil, backgrounded, low luminance. NightFade and Night
-    /// sky's still frame (`ShaderBackdrop.occluded`) stop their periodic re-reads only then, so with
-    /// Moving scenes off Night sky and Rain on glass still darken. Likewise the Focus scenes' still
+    /// sky's and Fireflies' still frames (`ShaderBackdrop.occluded`) stop their periodic re-reads only
+    /// then, so with Moving scenes off Night sky, Fireflies and Rain on glass still follow the night.
+    /// Likewise the Focus scenes' still
     /// frames (`FocusStillFrame`) stop following the Pomodoro only then, so with Moving scenes off
     /// their readings still move.
     var occluded: Bool = false
@@ -294,8 +295,8 @@ struct DeepSpaceScene: AmbientScene {
 /// trees and over the grass, mist along the wood's foot and tall grass black in front
 /// (`FirefliesShader.metal` `fireflyField` via `FirefliesMetalView`). The night is in the structure:
 /// the fireflies fall into step and go out one by one until a few are left pulsing together
-/// (`FireflyNight`). The darkest Sleep scene; pairs with Forest and Green. Flashes are slow swells,
-/// never a blink.
+/// (`FireflyNight`). Very dark (mean luma about 6 of 255 at bedtime, 4 at the night's end); pairs
+/// with Forest and Green. Flashes are slow swells, never a blink.
 struct FirefliesScene: AmbientScene {
     let id = "fireflies"
     let title = "Fireflies"

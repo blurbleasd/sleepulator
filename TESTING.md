@@ -890,7 +890,8 @@ Green playing.
    the mist in front, a few stems taller than the rest. ✅ Fireflies at three depths: small and dim
    among the trees, brighter over the meadow (the grass in front of them), and now and then a big
    soft out-of-focus one close up. Hold the phone and tilt it: ✅ the grass and the near ones shift
-   most, the far wood least.
+   most, the far wood least, and every layer moves the same way (the fireflies in the trees stay
+   among the trees; the grass's roots never lift off the bottom edge).
 2. **Alive but calm; nothing strobes.** Watch two minutes. ✅ Each firefly swells over about half a
    second and fades over a second or so, lifting a little as it glows, roughly every 5 s at its own
    time; its glow spreads wider in the mist. ✅ The mist drifts slowly and the grass sways. ✅ No
@@ -898,17 +899,21 @@ Green playing.
 3. **Visible at night brightness.** ✅ The treetops against the sky, the far wood against the near
    one, the mist and the grass's tops are all visible to dark-adapted eyes (they sit about 8-25
    levels above black; the near wood is black on purpose). ✅ No banding in the sky or the mist.
-4. **The night arc.** A 15-minute timer, the veil off in Settings so you can watch. ✅ Early on
-   the flashes come at random. By about a third in the big near ones have gone and the flashes
-   start to bunch; by two-thirds most of the far ones in the trees are out and the meadow's flash
+4. **The night arc.** A 15-minute timer, Auto-Lock Never and the veil off in Settings so you can
+   watch. ✅ Early on the flashes come at random. By about a third the flashes start to bunch, and
+   by about half the big near ones have gone; by two-thirds most of the far ones in the trees are out and the meadow's flash
    within a second of each other, then go dark for a few seconds together. ✅ That group flash
    never reads as the whole screen pulsing (log it if it does: it's the scene's one risk). ✅ At the
    end a few (5-7) are left, spread over the meadow, flashing together, slower than at bedtime,
    the flash rolling left to right across them. ✅ None goes out with a pop: each fades over a
-   stretch of the night. An All night session, woken after an hour: ✅ the same few, together.
-5. **Moving scenes off.** Settings → Moving scenes off. ✅ A still meadow, some fireflies caught
-   mid-glow. Over a 15-minute night: ✅ they thin out to the few (the still frame re-reads the night
-   every 20 s while in sight).
+   stretch of the night. In the last two minutes tap "Still awake? +15m": ✅ the fireflies that had
+   gone out come back over several seconds, never all at once in a flash (`FireflyNight.follow`
+   eases the night back). An All night session, woken after an hour: ✅ the same few, together.
+5. **Moving scenes off.** Settings → Moving scenes off, Auto-Lock Never, the veil off. ✅ A still
+   meadow, some fireflies caught mid-glow and the meadow's survivors glowing steadily. Over a
+   15-minute night: ✅ they thin out to the few, which always show (the still frame re-reads the
+   night every 20 s while in sight; a firefly may go out between re-reads, but as the night goes
+   on none lights up).
 6. **ProMotion and battery.** Watch a minute on a 120 Hz phone. ✅ Smooth glows and drift, no
    stalls. Overnight with the veil on: ✅ battery comparable to Night sky (a full-screen shader at
    30 fps while the meadow is in sight; nothing renders under the veil).
