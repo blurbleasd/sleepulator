@@ -102,7 +102,14 @@ final class HomeLayoutUITests: XCTestCase {
         // in Focus (the teardown is the fallback). So the bar's top is read before the switch and
         // checked after it.
         let barTop = miniPlayer.waitForExistence(timeout: 5) ? miniPlayer.frame.minY : nil
-        app.buttons["Sleep mode"].tap()
+        // Checked and gone round like the Focus switch above: a lost tap here failed the bar check
+        // below for a reason that had nothing to do with the bar. The session is stopped, so no
+        // confirm comes up.
+        let sleepMode = app.buttons["Sleep mode"]
+        for _ in 0..<3 where !(sleepMode.exists && sleepMode.isSelected) {
+            if sleepMode.exists { sleepMode.tap() }
+            _ = waitUntil(timeout: 3) { sleepMode.exists && sleepMode.isSelected }
+        }
         guard let barTop else { return XCTFail("No mini-player in Focus after the session") }
         XCTAssertTrue(barTapActed, "A tap on the mini-player in Focus did nothing: it didn't reach the bar")
 
