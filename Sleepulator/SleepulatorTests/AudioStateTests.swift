@@ -3320,6 +3320,60 @@ final class NightSkyMotionTests: XCTestCase {
     }
 }
 
+/// Fireflies' night (`FireflyNight`): out of step and all there at bedtime, falling into step and
+/// going out (the nearest first) through the night, never all gone.
+final class FireflyNightTests: XCTestCase {
+    private let sweep = (0...200).map { Double($0) / 200 }
+
+    func testAtBedtimeEachKeepsItsOwnTimeAndAllAreThere() {
+        XCTAssertEqual(FireflyNight.sync(night: 0), 0)
+        XCTAssertEqual(FireflyNight.sync(night: 0.1), 0, "out of step through the first stretch")
+        XCTAssertEqual(FireflyNight.remaining(night: 0), FireflyNight.Left(far: 1, meadow: 1, near: 1))
+    }
+
+    func testAtTheEndAFewArePulsingTogether() {
+        // All night holds the night at 1, so this is what waking at 3am shows.
+        XCTAssertEqual(FireflyNight.sync(night: 1), 1)
+        let left = FireflyNight.remaining(night: 1)
+        XCTAssertEqual(left.far, 0)
+        XCTAssertEqual(left.near, 0)
+        XCTAssertEqual(left.meadow, FireflyNight.meadowAtEnd, accuracy: 1e-9)
+        // FirefliesShader.metal: the meadow's survivors are fully lit from 0.06, the rest are out
+        // below LAST (0.10). Outside that window the end of the night shows none, or too many.
+        XCTAssertGreaterThanOrEqual(left.meadow, 0.06)
+        XCTAssertLessThan(left.meadow, 0.10)
+    }
+
+    func testTheyFallIntoStepAndGoOutWithoutTurningBack() {
+        var previous = (sync: 0.0, left: FireflyNight.remaining(night: 0))
+        for n in sweep.dropFirst() {
+            let sync = FireflyNight.sync(night: n), left = FireflyNight.remaining(night: n)
+            XCTAssertGreaterThanOrEqual(sync, previous.sync, "sync fell back at \(n)")
+            XCTAssertLessThanOrEqual(left.far, previous.left.far, "a far one came back at \(n)")
+            XCTAssertLessThanOrEqual(left.meadow, previous.left.meadow, "a meadow one came back at \(n)")
+            XCTAssertLessThanOrEqual(left.near, previous.left.near, "a near one came back at \(n)")
+            previous = (sync, left)
+        }
+    }
+
+    func testTheNearestGoFirstAndTheMeadowLast() {
+        // The big out-of-focus ones are the most light, so they leave first; the meadow keeps a few.
+        for n in sweep {
+            let left = FireflyNight.remaining(night: n)
+            XCTAssertLessThanOrEqual(left.near, left.far, "at \(n)")
+            XCTAssertLessThanOrEqual(left.far, left.meadow, "at \(n)")
+        }
+    }
+
+    func testANightOutsideItsRangeIsClamped() {
+        XCTAssertEqual(FireflyNight.remaining(night: -0.5), FireflyNight.remaining(night: 0))
+        XCTAssertEqual(FireflyNight.remaining(night: 1.5), FireflyNight.remaining(night: 1))
+        XCTAssertEqual(FireflyNight.sync(night: 1.5), 1)
+        XCTAssertEqual(FireflyNight.sync(night: .nan), 0)
+        XCTAssertEqual(FireflyNight.remaining(night: .nan), FireflyNight.remaining(night: 0))
+    }
+}
+
 /// Pure text rules behind the podcast screens (`PodcastText`): show-notes cleanup, counts, and
 /// placeholder show names.
 final class PodcastTextTests: XCTestCase {

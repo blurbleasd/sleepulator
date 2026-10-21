@@ -290,6 +290,24 @@ struct DeepSpaceScene: AmbientScene {
     }
 }
 
+/// "Fireflies" (Sleep): a meadow at the edge of a wood, warm points glowing and fading among the
+/// trees and over the grass, mist along the wood's foot and tall grass black in front
+/// (`FirefliesShader.metal` `fireflyField` via `FirefliesMetalView`). The night is in the structure:
+/// the fireflies fall into step and go out one by one until a few are left pulsing together
+/// (`FireflyNight`). The darkest Sleep scene; pairs with Forest and Green. Flashes are slow swells,
+/// never a blink.
+struct FirefliesScene: AmbientScene {
+    let id = "fireflies"
+    let title = "Fireflies"
+    let mood = SceneMood.sleep
+    var usesMotion: Bool { true }   // the woods, the mist, the grass and the fireflies parallax with gyro
+
+    func makeBackdrop(_ ctx: SceneContext) -> AnyView {
+        AnyView(FirefliesMetalView(paused: ctx.paused, occluded: ctx.occluded,
+                                   sleepTimer: ctx.sleepTimer, tilt: ctx.tilt))
+    }
+}
+
 /// "Sandfall" (Focus): an hourglass whose bottom bulb's fill IS the interval, draining across a
 /// work interval and running back on a break (`SandfallShader.metal` `sandField` via
 /// `SandfallMetalView`). At rest its sand lies settled in the bottom bulb. Promoted 2026-09-21
@@ -336,6 +354,7 @@ enum SceneRegistry {
         #endif
         scenes.append(contentsOf: [
             BreathingBloomScene(), AuroraScene(), EmbersScene(), StillWaterScene(), DeepSpaceScene(),
+            FirefliesScene(),
             CurrentScene(), TideScene(), SandfallScene(), ContourScene()
         ] as [any AmbientScene])
         return scenes
