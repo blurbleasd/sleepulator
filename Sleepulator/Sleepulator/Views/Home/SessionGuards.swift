@@ -67,6 +67,17 @@ enum SessionGuards {
     /// The 3am glance's timing: it shows for `glanceHold`, then fades over `glanceFade`.
     static let glanceHold: TimeInterval = 6
     static let glanceFade: TimeInterval = 2
+
+    /// The glance's hold for this launch. A Debug build takes a longer one from the argument domain
+    /// (`-veilGlanceSeconds <real>40</real>`) so NightVeilUITests' wake tap can't land after the
+    /// glance: on CI a 5 s accessibility query, and once an 8 s wait on a system banner, pushed it
+    /// past the real 8 s. Held to 6…60 s. Never a setting, and Release always holds 6 s.
+    static func glanceHold(override: Double) -> TimeInterval {
+        #if DEBUG
+        if override > 0 { return max(glanceHold, min(60, override)) }
+        #endif
+        return glanceHold
+    }
     /// A second tap this soon after the first is the same reach for the phone, not a request to
     /// wake: it would skip the glance while it's still arriving.
     static let glanceSettle: TimeInterval = 0.8
@@ -77,10 +88,11 @@ enum SessionGuards {
     /// black); a tap while the glance shows or is still fading wakes the scene and the controls.
     /// VoiceOver and Switch Control wake in one step: the veil's label already says what it is,
     /// and they never needed the light. `sinceGlance` is nil when no glance has shown this veil.
-    static func veilTap(sinceGlance: TimeInterval?, assistiveTech: Bool) -> VeilTap {
+    /// `hold` is this launch's `glanceHold(override:)`.
+    static func veilTap(sinceGlance: TimeInterval?, assistiveTech: Bool, hold: TimeInterval = glanceHold) -> VeilTap {
         if assistiveTech { return .wake }
         // Negative only if the clock behind it stepped back: treat it as a stale glance.
-        guard let t = sinceGlance, t >= 0, t < glanceHold + glanceFade else { return .glance }
+        guard let t = sinceGlance, t >= 0, t < hold + glanceFade else { return .glance }
         return t < glanceSettle ? .ignore : .wake
     }
 

@@ -21,9 +21,15 @@ final class HomeLayoutUITests: XCTestCase {
         // Focus from either start state: a no-op when the last run left the app in Focus.
         let focusMode = app.buttons["Focus mode"]
         XCTAssertTrue(focusMode.waitForExistence(timeout: 15), "No mode switcher on Home")
-        focusMode.tap()
-
         let session = app.buttons["Start focus session"]
+        // This is often the run's first tap, and CI once lost it: Sleep still selected, no alert,
+        // and the screen never moved. Check the switch took and go round again, like the taps
+        // below. Another tap on Focus while in Focus does nothing.
+        for _ in 0..<3 where !session.exists {
+            focusMode.tap()
+            if session.waitForExistence(timeout: 5) { break }
+        }
+
         // An exact label: on a fresh install the first-run tip is a button that says "Build mix" too.
         let buildMix = app.buttons["Build mix"]
         let miniPlayer = app.descendants(matching: .any)["miniPlayer"]
@@ -96,7 +102,14 @@ final class HomeLayoutUITests: XCTestCase {
         // in Focus (the teardown is the fallback). So the bar's top is read before the switch and
         // checked after it.
         let barTop = miniPlayer.waitForExistence(timeout: 5) ? miniPlayer.frame.minY : nil
-        app.buttons["Sleep mode"].tap()
+        // Checked and gone round like the Focus switch above: a lost tap here failed the bar check
+        // below for a reason that had nothing to do with the bar. The session is stopped, so no
+        // confirm comes up.
+        let sleepMode = app.buttons["Sleep mode"]
+        for _ in 0..<3 where !(sleepMode.exists && sleepMode.isSelected) {
+            if sleepMode.exists { sleepMode.tap() }
+            _ = waitUntil(timeout: 3) { sleepMode.exists && sleepMode.isSelected }
+        }
         guard let barTop else { return XCTFail("No mini-player in Focus after the session") }
         XCTAssertTrue(barTapActed, "A tap on the mini-player in Focus did nothing: it didn't reach the bar")
 

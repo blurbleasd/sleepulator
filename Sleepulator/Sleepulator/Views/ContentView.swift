@@ -133,7 +133,8 @@ struct ContentView: View {
     private func veilTapped() {
         let assistive = UIAccessibility.isVoiceOverRunning || UIAccessibility.isSwitchControlRunning
         let uptime = ProcessInfo.processInfo.systemUptime
-        switch SessionGuards.veilTap(sinceGlance: veilGlanceAt.map { uptime - $0 }, assistiveTech: assistive) {
+        switch SessionGuards.veilTap(sinceGlance: veilGlanceAt.map { uptime - $0 }, assistiveTech: assistive,
+                                     hold: glanceHold) {
         case .ignore: return
         case .glance: showGlance()
         case .wake:
@@ -159,7 +160,12 @@ struct ContentView: View {
         }
         veilGlanceHide?.cancel()
         veilGlanceHide = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + SessionGuards.glanceHold, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + glanceHold, execute: work)
+    }
+
+    /// 6 s, or a Debug launch's `-veilGlanceSeconds` (`SessionGuards.glanceHold(override:)`).
+    private var glanceHold: TimeInterval {
+        SessionGuards.glanceHold(override: UserDefaults.standard.double(forKey: "veilGlanceSeconds"))
     }
 
     private func endGlance() {

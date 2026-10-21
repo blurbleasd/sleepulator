@@ -1306,12 +1306,9 @@ final class BackupControllerTests: XCTestCase {
         return Fixture(controller: controller, storage: storage, dir: dir, defaults: defaults, suite: suite)
     }
 
-    /// Waits up to 5 s, and fails the test if the condition never held.
-    private func waitUntil(_ condition: () -> Bool, file: StaticString = #filePath, line: UInt = #line) async throws {
-        let deadline = Date().addingTimeInterval(5)
-        while !condition(), Date() < deadline { try await Task.sleep(for: .milliseconds(10)) }
-        if !condition() { XCTFail("timed out waiting", file: file, line: line) }
-    }
+    // The tests await the Task each controller call starts, never a clock: the host app's first
+    // render can hold the main actor for 10 s or more, at whichever test is running then. A 5 s
+    // poll for the export ran out during one on CI (2026-10-13) and failed with the export done.
 
     // Value: protects=a failure that lands while Backup & support is closed is shown when it opens again, and a result with a one-tap Undo is still dropped; fails_when=present drops failures again, or keeps every result; why_new="Couldn't save a copy …, so nothing was replaced" was lost when the page had closed; seam=alertDelay 0, a temp store; no_claim=SwiftUI's alert presentation
     func testAFailureWaitsForThePageButARestoreResultIsDropped() async throws {
@@ -1320,22 +1317,19 @@ final class BackupControllerTests: XCTestCase {
         defer { f.cleanUp() }
         let backup = f.controller
 
-        backup.picked(.failure(CocoaError(.fileReadNoPermission)))           // the page is closed
-        try await Task.sleep(for: .milliseconds(100))
+        await backup.picked(.failure(CocoaError(.fileReadNoPermission)))?.value   // the page is closed
         XCTAssertNil(backup.prompt)
-        backup.pageAppeared()
-        try await waitUntil { backup.prompt != nil }
+        await backup.pageAppeared()?.value
         guard case .failed(let title, _)? = backup.prompt else { return XCTFail("the failure is shown once the page opens") }
         XCTAssertEqual(title, "Couldn't restore")
         backup.isPrompting.wrappedValue = false
 
         backup.pageDisappeared()
         let file: [String: Any] = ["masterVolume": 0.9, Backup.markerKey: 1]
-        backup.restore(Backup.Pending(data: try JSONSerialization.data(withJSONObject: file), contents: Backup.contents(of: file)))
-        try await waitUntil { reloaded && !backup.busy }
+        await backup.restore(Backup.Pending(data: try JSONSerialization.data(withJSONObject: file), contents: Backup.contents(of: file))).value
+        XCTAssertTrue(reloaded && !backup.busy, "the restore finished")
         XCTAssertEqual(f.defaults.double(forKey: "masterVolume"), 0.9, accuracy: 1e-9, "the restore itself finished")
-        backup.pageAppeared()
-        try await Task.sleep(for: .milliseconds(100))
+        await backup.pageAppeared()?.value
         XCTAssertNil(backup.prompt, "\"Backup restored\" with its one-tap Undo isn't shown out of context")
     }
 
@@ -1349,14 +1343,14 @@ final class BackupControllerTests: XCTestCase {
             try Data("{ truncated".utf8).write(to: f.dir.appendingPathComponent(name))
         }
         backup.pageAppeared()
-        backup.export()
-        try await waitUntil { backup.isExporting }
+        await backup.export()?.value
+        XCTAssertTrue(backup.isExporting, "the save sheet is up")
         XCTAssertNotNil(backup.exportDocument)
 
-        backup.exported(.success(f.dir.appendingPathComponent("saved.json")))
+        let said = backup.exported(.success(f.dir.appendingPathComponent("saved.json")))
         backup.isExporting = false                                           // SwiftUI resets it as the exporter closes
         XCTAssertNil(backup.exportDocument)
-        try await waitUntil { backup.prompt != nil }
+        await said?.value
         guard case .notice(_, let message)? = backup.prompt else { return XCTFail("the save says what it left out") }
         XCTAssertEqual(message, Backup.leftOutMessage(["savedPodcasts"]))
     }
@@ -1372,13 +1366,13 @@ final class BackupControllerTests: XCTestCase {
         let backup = f.controller
         backup.pageAppeared()
         let file: [String: Any] = ["episodePositions": ["ep9": 5.0], Backup.markerKey: 1]
-        backup.restore(Backup.Pending(data: try JSONSerialization.data(withJSONObject: file), contents: Backup.contents(of: file)))
-        try await waitUntil { reloads == 1 && !backup.busy && backup.prompt != nil }
+        await backup.restore(Backup.Pending(data: try JSONSerialization.data(withJSONObject: file), contents: Backup.contents(of: file))).value
+        XCTAssertTrue(reloads == 1 && !backup.busy && backup.prompt != nil, "the restore finished and said so")
         backup.isPrompting.wrappedValue = false
         try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: f.dir.path)
 
-        backup.undo()
-        try await waitUntil { reloads == 2 && !backup.busy && backup.prompt != nil }
+        await backup.undo().value
+        XCTAssertFalse(backup.busy, "the Undo finished")
         guard case .failed(let title, _)? = backup.prompt else { return XCTFail("got \(String(describing: backup.prompt))") }
         XCTAssertEqual(title, "Couldn't put everything back")
         XCTAssertEqual(reloads, 2, "an incomplete Undo still reloads what it put back")
@@ -1394,11 +1388,10 @@ final class BackupControllerTests: XCTestCase {
         // A directory where the show list goes: that section can't be saved.
         try FileManager.default.createDirectory(at: f.dir.appendingPathComponent("library.json"), withIntermediateDirectories: true)
         let file: [String: Any] = ["savedPodcasts": [Any](), "masterVolume": 0.4, Backup.markerKey: 1]
-        backup.restore(Backup.Pending(data: try JSONSerialization.data(withJSONObject: file), contents: Backup.contents(of: file)))
-        try await waitUntil { reloads == 1 && !backup.busy }
+        await backup.restore(Backup.Pending(data: try JSONSerialization.data(withJSONObject: file), contents: Backup.contents(of: file))).value
+        XCTAssertTrue(reloads == 1 && !backup.busy, "the restore finished")
         XCTAssertNil(backup.prompt, "the page is closed")
-        backup.pageAppeared()
-        try await waitUntil { backup.prompt != nil }
+        await backup.pageAppeared()?.value
         guard case .notice(let title, let message)? = backup.prompt else { return XCTFail("got \(String(describing: backup.prompt))") }
         XCTAssertEqual(title, "Backup restored")
         XCTAssertTrue(message.contains("couldn't be saved"), message)
@@ -1410,8 +1403,8 @@ final class BackupControllerTests: XCTestCase {
         defer { f.cleanUp() }
         let backup = f.controller
         backup.pageAppeared()
-        backup.export()
-        try await waitUntil { backup.isExporting }
+        await backup.export()?.value
+        XCTAssertTrue(backup.isExporting, "the save sheet is up")
         XCTAssertNotNil(backup.exportDocument)
         backup.isExporting = false                                           // cancelled: no completion call
         XCTAssertNil(backup.exportDocument)
@@ -1433,8 +1426,8 @@ final class BackupControllerTests: XCTestCase {
         let backup = f.controller
         backup.pageAppeared()
 
-        backup.export()
-        try await waitUntil { backup.isExporting }
+        await backup.export()?.value
+        XCTAssertTrue(backup.isExporting, "the save sheet is up")
         let exported = try XCTUnwrap(backup.exportDocument?.data)
         let dict = try XCTUnwrap(JSONSerialization.jsonObject(with: exported) as? [String: Any])
         XCTAssertEqual(dict["episodePositions"] as? [String: Double], ["ep1": 42.0], "the export settled before it read the store")
@@ -1443,14 +1436,14 @@ final class BackupControllerTests: XCTestCase {
         backup.isExporting = false
 
         let file: [String: Any] = ["episodePositions": ["ep9": 5.0], Backup.markerKey: 1]
-        backup.restore(Backup.Pending(data: try JSONSerialization.data(withJSONObject: file), contents: Backup.contents(of: file)))
-        try await waitUntil { reloads == 1 && !backup.busy }
+        await backup.restore(Backup.Pending(data: try JSONSerialization.data(withJSONObject: file), contents: Backup.contents(of: file))).value
         XCTAssertEqual(reloads, 1, "the restore finished")
+        XCTAssertFalse(backup.busy)
         XCTAssertEqual(settles - exportSettles, 2, "the restore settles before its Undo copy and again before its writes")
 
-        backup.undo()
-        try await waitUntil { reloads == 2 && !backup.busy }
+        await backup.undo().value
         XCTAssertEqual(reloads, 2, "the Undo finished")
+        XCTAssertFalse(backup.busy)
         XCTAssertEqual(settles - exportSettles, 3, "the Undo settles once, before its writes")
     }
 }
