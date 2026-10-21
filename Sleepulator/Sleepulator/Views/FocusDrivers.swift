@@ -2,12 +2,13 @@ import SwiftUI
 
 /// The single source of truth for how a Focus scene reads the Pomodoro.
 ///
-/// Both the CPU `CurrentView` (Canvas) and the GPU `CurrentMetalView` (Metal A/B sibling) derive
-/// their look from the *same* mapping here, so during the A/B the two can only differ in how they
-/// render — never in how they read the session. Because it's a pure function it's also the one
-/// off-device-testable seam of the Focus port (the shader + thermals are device-verified).
+/// Every Focus scene takes its progress position from `fill`, so Current, Tide and Sandfall can't
+/// disagree about how far through the interval you are; Current also takes its look from `look`,
+/// while Tide and Sandfall shade their own energy and tint. Pure, so it's unit-tested (the shaders
+/// and thermals are device-verified). `FocusStillFrame`, below, is how their still frames keep
+/// reading it with Moving scenes off.
 ///
-/// Numbers are lifted verbatim from `CurrentView` so the port is a true visual A/B, not a redesign:
+/// The numbers came from the retired Canvas `CurrentView`, so the Metal port was a true A/B:
 ///   work:  opacity/amplitude/speed ramp up with `progress`  → momentum
 ///   rest:  eased, cooler                                    → recovery
 ///   idle:  calm middle ground                               → not running
@@ -31,9 +32,6 @@ enum FocusDrivers {
         var speed: Double
         /// Stream tint, linear RGB in 0…1.
         var tint: SIMD3<Double>
-
-        /// The tint as a SwiftUI `Color`, for the Canvas scene.
-        var color: Color { Color(red: tint.x, green: tint.y, blue: tint.z) }
     }
 
     /// Where the scene's POSITIONAL progress cue should sit: 0 = start of the travel, 1 = end;
@@ -69,4 +67,22 @@ enum FocusDrivers {
         }
         return Look(op: 0.45, amp: 0.65, speed: 0.65, tint: idleTint)
     }
+}
+
+/// A Focus scene's still frame while the screen is in sight ("Moving scenes" off, not
+/// `SceneContext.occluded`). The scenes read the Pomodoro live inside their own redraw and never
+/// observe it, so a bare still frame was drawn once, when Focus came up, and kept that look for the
+/// whole session: the idle look, with no reading at all (simulator, 2026-10-13). This view observes
+/// the Pomodoro instead, so the frame is drawn again on each of its publishes: once a second while
+/// a session runs, and at once on a start, a phase change or a stop; never while idle. The pose
+/// holds: the scene draws with `now: nil`, so its `SceneClock` never ticks. Isolated, like
+/// `NightFade`: a publish redraws only the scene's own frame, never Home.
+///
+/// `content` is a closure, called in this body, so each redraw reads the Pomodoro afresh. Built in
+/// the caller's body (`NightFade`'s `content: Content`), the frame would keep the caller's reading.
+struct FocusStillFrame<Content: View>: View {
+    @ObservedObject var pomodoro: PomodoroService
+    @ViewBuilder var content: () -> Content
+
+    var body: some View { content() }
 }

@@ -18,7 +18,9 @@ struct SceneContext {
     let paused: Bool
     /// The out-of-sight part of `paused`: the veil, backgrounded, low luminance. NightFade and Night
     /// sky's still frame (`ShaderBackdrop.occluded`) stop their periodic re-reads only then, so with
-    /// Moving scenes off Night sky and Rain on glass still darken.
+    /// Moving scenes off Night sky and Rain on glass still darken. Likewise the Focus scenes' still
+    /// frames (`FocusStillFrame`) stop following the Pomodoro only then, so with Moving scenes off
+    /// their readings still move.
     var occluded: Bool = false
     /// Home's controls have faded to the screensaver. A scene holds back its transients under it
     /// (Night sky's meteors are only for someone watching).
@@ -138,7 +140,7 @@ struct CurrentScene: AmbientScene {
     let mood = SceneMood.focus
 
     func makeBackdrop(_ ctx: SceneContext) -> AnyView {
-        AnyView(CurrentMetalView(paused: ctx.paused, pomodoro: ctx.pomodoro))
+        AnyView(CurrentMetalView(paused: ctx.paused, occluded: ctx.occluded, pomodoro: ctx.pomodoro))
     }
 }
 
@@ -153,7 +155,7 @@ struct TideScene: AmbientScene {
     let mood = SceneMood.focus
 
     func makeBackdrop(_ ctx: SceneContext) -> AnyView {
-        AnyView(TideMetalView(paused: ctx.paused, pomodoro: ctx.pomodoro))
+        AnyView(TideMetalView(paused: ctx.paused, occluded: ctx.occluded, pomodoro: ctx.pomodoro))
     }
 }
 
@@ -299,7 +301,7 @@ struct SandfallScene: AmbientScene {
     let mood = SceneMood.focus
 
     func makeBackdrop(_ ctx: SceneContext) -> AnyView {
-        AnyView(SandfallMetalView(paused: ctx.paused, pomodoro: ctx.pomodoro))
+        AnyView(SandfallMetalView(paused: ctx.paused, occluded: ctx.occluded, pomodoro: ctx.pomodoro))
     }
 }
 

@@ -98,7 +98,8 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   `BackupControllerTests` for the Backup page's controller, which await the Task each controller
   call returns: the hosted app's first render can hold the main actor 10 s or more mid-test, and
   a 5 s poll ran out under it);
-  `FocusDriversTests.swift`; `GenerativeAudioEngineTests.swift` (`GenerativeMediaResetTests`);
+  `FocusDriversTests.swift` (also `FocusStillFrameTests`, one hosted in a window);
+  `GenerativeAudioEngineTests.swift` (`GenerativeMediaResetTests`);
   `TipStoreTests.swift` (`TipFlowTests`, pure; `TipStoreTests`, StoreKitTest against
   `Tips.storekit`). On iOS 26 simulators a command-line run (xcodebuild, CI) hits an Apple bug,
   "[SKTestSession] Error saving configuration file … Code=3", and loads no products: those six
@@ -388,6 +389,8 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   frame loop that freezes swaps instead: `if paused { staticFrame } else { TimelineView(…) }`,
   with a `@State` `SceneClock` holding the pose (`ShaderBackdrop`, `OrbButton`). A view showing
   real time, like the Focus ring, draws its static frame from the published value instead.
+  So do the Focus scenes, whose positions are the Pomodoro: in sight, their still frame observes
+  it (`FocusStillFrame`). A bare one, never redrawn, kept the idle look a whole session.
 
 ## Build / run
 - **Native Xcode build** — open `Sleepulator/Sleepulator.xcodeproj`. NOT Capacitor/CLI; there's
