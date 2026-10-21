@@ -180,30 +180,36 @@ final class ContourLightTests: XCTestCase {
 
     // Value: protects=the disc at radius(share:) covers that share of the screen's points on the
     //   iPhone shapes the app runs on; fails_when=share's closed form drops or doubles a quarter,
-    //   stops clipping at a screen edge, or mis-scales the summit by the aspect; why_new=the round
-    //   trip above inverts whatever share computes, so a wrong share still passes it; seam=none;
-    //   no_claim=the shader's noise-bent edge (±0.07, device-checked in TESTING §V.2); a
-    //   summit-centred disc only
+    //   mis-clips one cut by both its side and its top, stops clipping at a screen edge, or
+    //   mis-scales the summit by the aspect; why_new=the round trip above inverts whatever share
+    //   computes, so a wrong share still passes it; seam=none; no_claim=the shader's noise-bent
+    //   edge (±0.07 1 sd, device-checked in TESTING §V.2); a summit-centred disc only
     func testTheLitDiscCoversThatShareOfTheScreensPoints() {
-        // An independent count: every point whose centre is within the radius of the summit.
+        // An independent count of every point whose centre is within the radius of the summit,
+        // a row at a time: in each row the lit centres are those strictly inside the half chord.
         func litShare(radius r: Double, width: Int, height: Int) -> Double {
             let h = Double(height)
             let cx = ContourLight.summit.x * Double(width) / h, cy = ContourLight.summit.y
             var lit = 0
             for y in 0..<height {
                 let dy = (Double(y) + 0.5) / h - cy
-                for x in 0..<width {
-                    let dx = (Double(x) + 0.5) / h - cx
-                    if dx * dx + dy * dy < r * r { lit += 1 }
-                }
+                let half2 = r * r - dy * dy
+                guard half2 > 0 else { continue }
+                let half = half2.squareRoot()
+                // Columns i whose centre (i + 0.5) / h lies in the open interval (cx - half, cx + half).
+                let first = max(0, Int(((cx - half) * h - 0.5).rounded(.down)) + 1)
+                let last = min(width - 1, Int(((cx + half) * h - 0.5).rounded(.up)) - 1)
+                lit += max(0, last - first + 1)
             }
             return Double(lit) / Double(width * height)
         }
-        // The app is portrait-only on iPhone: an iPhone 17 Pro, an SE (the widest shape, so the
-        // sides clip the disc soonest) and a Pro Max.
+        // The app is portrait-only on iPhone: an iPhone 17 Pro; an SE (16:9, the one aspect unlike
+        // the others: its sides sit farther from the summit, so they clip the disc last); and a
+        // Pro Max (the 17 Pro's aspect on a different point grid). 0.1 is unclipped, 0.5 clipped at
+        // the sides, 0.8 has the upper quarters cut by both side and top, 0.99 the lower ones too.
         for (width, height) in [(402, 874), (375, 667), (440, 956)] {
             let aspect = Double(width) / Double(height)
-            for target in [0.1, 0.5, 0.9] {
+            for target in [0.1, 0.5, 0.8, 0.99] {
                 let r = ContourLight.radius(share: target, aspect: aspect)
                 XCTAssertEqual(litShare(radius: r, width: width, height: height), target, accuracy: 0.003,
                                "\(width)×\(height) at \(target)")

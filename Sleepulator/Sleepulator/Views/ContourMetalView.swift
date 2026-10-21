@@ -98,9 +98,8 @@ enum ContourLight {
     }
 
     /// The share of the screen within `radius` of the summit, exactly: the disc split into four
-    /// quarters at the summit, each clipped by its corner's rectangle in closed form. It replaced a
-    /// 256-column integral, whose cost per frame (and then a per-shape table to avoid it) the
-    /// review flagged; now the view's per-frame bisection is ~500 square roots and arcsines.
+    /// quarters at the summit, each clipped by its corner's rectangle in closed form. Cheap enough
+    /// that the view bisects it every frame (~500 square roots and arcsines), so no lookup table.
     static func share(radius: Double, aspect: Double) -> Double {
         guard radius > 0, aspect > 0 else { return 0 }
         let cx = summit.x * aspect, cy = summit.y

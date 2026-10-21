@@ -23,8 +23,8 @@ using namespace metal;
 // `edge`, the radius from the summit whose disc covers the `light` share of the
 // screen (ContourLight, unit-tested), and the shader lights the ground above the
 // height that radius has on the cone. The noise bends that edge but, kept weak
-// enough against the cone (see RISE), leaves the lit share of the screen within
-// about ±0.07 of the interval's. A work interval starts with the
+// enough against the cone (see RISE), leaves the lit share of the screen on the
+// interval's with a spread of about ±0.07 (1 sd). A work interval starts with the
 // summit lit and ends with the whole map lit; a break pulls the light back up.
 // The edge of the light is one bright, still contour, so position reads at a
 // glance. `light < 0` is no session: every line sits at one even, middling

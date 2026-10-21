@@ -791,12 +791,14 @@ to Files: each night is a `.jsonl` file, one event per line.
    file ends `closed` `timer … reconciled`, timed at the deadline (not at the Play), or `closed`
    `person …` at the pause, and the summary counts it under "ended early or spoiled".
 
-### V. Contour: a Focus map lit from the summit (added 2026-10-12, simulator-checked only)
+### V. Contour: a Focus map lit from the summit (added 2026-10-12; look checked on the phone 2026-10-12, full pass owed)
 A new Focus scene (`ContourShader.metal`, `ContourMetalView`): contour lines of a mountain whose
 summit sits under the ring, with light spreading down from it as a work interval goes on. The
 simulator showed the look and the reading at 7/23/50/80% of a 1-minute interval and a quarter into
-a break; motion feel, OLED black, heat and a real 25-minute block need the phone. Focus, Contour
-selected (Build mix → Backdrop), a sound playing, the phone at your desk.
+a break; motion feel, OLED black, heat and a real 25-minute block need the phone. On the phone
+(2026-10-12) the look, the calm drift and working beside it were checked informally (see the log);
+the full pass below is owed. Focus, Contour selected (Build mix → Backdrop), a sound playing, the
+phone at your desk.
 
 1. **It reads as a map with depth.** Controls up. ✅ A dimmed topographic map, the ring and play
    button sitting on the summit, contour rings around it bent by the terrain. Every fifth line is
@@ -809,7 +811,7 @@ selected (Build mix → Backdrop), a sound playing, the phone at your desk.
    clearly apart from it (log how far off it looks).
 2. **The light is the interval.** Start a session and let the controls fade. ✅ A quarter in, a disc
    of light about a quarter of the screen sits around the summit, edged by one bright line; halfway,
-   about half the screen; near the end, nearly all of it. (It tracks the share within about ±7%.)
+   about half the screen; near the end, nearly all of it. (The lit share is usually within about 7% of the interval's, rarely more than ~15%: 1 sd is ±0.07.)
    ✅ The bright edge holds still while the lines drift through it. With a 5-minute Focus length
    and a 1-minute short break (Settings' shortest), ✅ the edge glides between seconds, as the ring
    does, through the work interval and the break; it never jumps (15-20 pt once a second on the
@@ -853,3 +855,4 @@ selected (Build mix → Backdrop), a sound playing, the phone at your desk.
 | Date | Device / iOS | Sections run | Result / notes |
 |------|--------------|--------------|----------------|
 | 2026-10-10 | iPhone 16 Pro (ProMotion) / iOS 27.0.1 | §3R | ✅ Pass. The orb breathes and the Focus ring depletes smoothly. Debug build of `main` + #29 (`efbdbaa`) + the screensaver branch (`95ee8f0`). |
+| 2026-10-12 | iPhone 16 Pro (ProMotion) / iOS not recorded | §V.1, §V.3, §V.4 (informal) | ✅ Look only, not the full §V pass. The first cut read "a mountain map, but 1-dimensional"; after the layered relief (`582be55`): "has depth now". The drift felt calm and it was fine to work beside. Debug build of `claude/screensaver-concepts-23f53c`. Owed: §V.2, §V.5, §V.6 and a full 25-minute block. |
