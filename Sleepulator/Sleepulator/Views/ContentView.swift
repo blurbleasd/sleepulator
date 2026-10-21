@@ -17,6 +17,8 @@ struct ContentView: View {
     @AppStorage("hasCompletedFirstRun") private var hasCompletedFirstRun = false
     @AppStorage("hasSeenNightRingTip") private var hasSeenNightRingTip = false
     @State private var tipCardDue = false
+    /// Sleep Home's morning read-back of the night just gone, re-read with the asks.
+    @State private var morningLine: MorningReadback.Line?
     @State private var showTipSheet = false
     #if DEBUG
     /// The card's UI test answers it in memory only (see `spendTipCard`).
@@ -198,7 +200,7 @@ struct ContentView: View {
             TabView(selection: $selectedTab) {
                 HomeView(audio: audio, mixStore: audio.mixStore, selectedTab: $selectedTab,
                          nowPlayingPresented: showNowPlaying, miniPlayerTouches: miniPlayerTouches,
-                         orbCenter: $orbCenter, tipCardDue: tipCardDue,
+                         orbCenter: $orbCenter, tipCardDue: tipCardDue, morningLine: morningLine,
                          onLeaveTip: { showTipSheet = true },
                          onTipCardDeclined: { spendTipCard(); refreshAsks() },
                          onTipCardShown: markTipCardShown)
@@ -330,6 +332,8 @@ struct ContentView: View {
             // Any touch is interaction: restart the countdown. On the veil itself, its own tap
             // wakes (and re-arms) instead.
             windowActivity.onTouch = { if !nightDimmed { scheduleDim() } }
+            // A cold launch may never report a scene-phase change: read the morning line now.
+            refreshAsks()
         }
         // Pausing drops the pending dim (never forces the screen bright); resuming re-arms it.
         .onChange(of: audio.isAnythingPlaying) { _, playing in
@@ -454,6 +458,11 @@ struct ContentView: View {
         // "Shown today" is stamped when the card renders (HomeView's onTipCardShown), not here:
         // due on another tab, or behind another card, it was never seen.
         if due != tipCardDue { tipCardDue = due }
+        // The morning read-back looks at the same moments, after the lapsed pause is closed.
+        let line = MorningReadback.line(last: audio.nightJournal.verdicts.last,
+                                        nightOpen: audio.nightJournal.open != nil,
+                                        focusMode: audio.focusMode, playing: sessionBusy, now: now)
+        if line != morningLine { morningLine = line }
     }
 
     /// A sheet just closed or the person just left Settings: maybe Apple's rating prompt

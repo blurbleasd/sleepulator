@@ -873,6 +873,25 @@ phone at your desk.
    pulls back up. Stop: ✅ every line goes back to one even brightness and the edge is gone, at
    once, not at the next redraw.
 
+### X. Morning read-back: how last night went (added 2026-10-21, simulator-checked only)
+`MorningReadback`: the morning after a clean night, Sleep Home at rest shows one dim line under
+the night line. Unit tests pin the window and the wording; only a real night proves the journal
+calls it clean.
+
+1. **A timed night reads back.** Sleep, a 30-minute night on the ring, play, lock, sleep. In the
+   morning (after 05:00), open the app. ✅ Under the night line: "Last night · 30 min, eased out
+   at …" with the time the fade ended. ✅ Smaller and dimmer than the night line, one line on the
+   phone at default text size.
+2. **All night reads back.** All night, play for 3+ hours, then pause in the morning and wait 30
+   minutes (or stop it). ✅ "Last night · 7 hr 12 min, until 6:40 AM" style, the hours matching
+   the sound you heard.
+3. **It steps aside.** ✅ Tap Play: the line goes and the layer pills take its place; the orb
+   doesn't jump. Switch to Focus: ✅ no line. Back to Sleep at rest: ✅ it's back. After 18:00:
+   ✅ gone (reopen the app to re-read).
+4. **A broken night says nothing.** A night the app died in (Xcode ▸ Stop mid-night, as §U.1).
+   ✅ No line the next morning.
+5. **VoiceOver.** ✅ It reads "Last night, 30 minutes, eased out at …", units in words.
+
 ---
 
 ## Quick release checklist

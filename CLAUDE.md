@@ -29,7 +29,9 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
     `ModeSwitcher`, `MixDrawer`, `TimerSelectionSheet`, `Backdrops` (Night sky's meteor:
     `ShootingStarView` and its pure, unit-tested `NightSkyMotion` rules; the sky itself is
     `Views/NightSkyMetalView.swift` + `NightSkyShader.metal`), and the pure, unit-tested rules
-    `SessionGuards` and `HomeScreensaverPolicy`. `Views/TonightShelfView.swift`
+    `SessionGuards`, `HomeScreensaverPolicy` and `MorningReadback` (the morning after a clean
+    night, one dim line in the pills' slot: "Last night · 1 hr 30 min, eased out at 12:41 AM").
+    `Views/TonightShelfView.swift`
     is the Podcasts tab's "Tonight" (Focus: "Continue") shelf. `Views/NowPlayingState.swift` holds
     the player views' pure, unit-tested rules: `NowPlayingState` (hero, Up Next, phase),
     `PlayerClock` (times, speeds, lengths, clamped) and `NightLineCopy` (the Sleep player's
@@ -95,7 +97,7 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   earlier test's objects write the shared files from their own queues, which
   `StorageManager.flush()` doesn't drain, and one queue write landed a test late), the real-AVPlayer suites (`PodcastPlayerRebuildTests`,
   `PodcastLoadHoldTests`, `PodcastItemEndTests`), the night journal and the asks (`NightRulesTests`,
-  `NightJournalTests`, `NightJournalWiringTests`, `AskRulesTests`, `CoachmarkTipCardTests`,
+  `NightJournalTests`, `NightJournalWiringTests`, `AskRulesTests`, `MorningReadbackTests`, `CoachmarkTipCardTests`,
   `RateRowRuleTests`, `FeedbackMessageTests`), and more);
   `PersistenceTests.swift` (`PersistenceMigrator` / `MixStore`); `BackupRoundTripTests.swift`
   (export, read, restore and Undo, the `Backup.kinds` checks, a restore never switching mode;
@@ -288,6 +290,11 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   `SessionGuards` (`mayAskForRating`, `tipCardDue`), unit-tested. The asks' memory
   (`tipCardSpent`, `ratingAskedVersion`, `ratingAskedOn`, `tipCardShownOn`, `tippedOnThisPhone`,
   `tipTransactionsHandled`) is device-only: keep these keys OUT of `Backup.kinds`.
+- **The morning read-back speaks only for a clean night.** Sleep Home at rest, 05:00–18:00, for
+  the night just gone (started 18:00 to before 05:00, last evening or after midnight), 10+ min of
+  live audio, never while a session is open or a card is in the band (`MorningReadback`,
+  unit-tested). A night that hiccupped never claims it went well. ContentView reads it with the
+  asks (`refreshAsks`, also on appear) and hands Home a plain value, never `@Published`.
 - **Isolated deinits.** Under `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor` a class with no explicit
   `deinit` gets an implicit MainActor-*isolated* one (an explicit `deinit` is nonisolated). On the
   iOS 18.4–26.3 Swift runtimes that path aborts ("pointer being freed was not allocated" in

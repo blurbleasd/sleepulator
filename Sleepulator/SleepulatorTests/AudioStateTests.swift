@@ -5199,6 +5199,100 @@ final class AskRulesTests: XCTestCase {
     }
 }
 
+/// Sleep Home's morning read-back (`MorningReadback`): only a clean night speaks, only the morning
+/// after, and only at rest in Sleep.
+final class MorningReadbackTests: XCTestCase {
+    private var calendar: Calendar = {
+        var c = Calendar(identifier: .gregorian)
+        c.timeZone = TimeZone(identifier: "UTC")!
+        c.locale = Locale(identifier: "en_GB")
+        return c
+    }()
+
+    /// The clock time as the line writes it (ICU's, which can differ between runtimes).
+    private func clock(_ date: Date) -> String {
+        date.formatted(Date.FormatStyle(date: .omitted, time: .shortened, locale: calendar.locale!,
+                                        calendar: calendar, timeZone: calendar.timeZone))
+    }
+
+    private func at(day: Int = 12, _ hour: Int, _ minute: Int = 0) -> Date {
+        calendar.date(from: DateComponents(year: 2026, month: 10, day: day, hour: hour, minute: minute))!
+    }
+
+    /// Started 23:10 on the 11th; ended 00:41 on the 12th by the timer, 90 minutes of live audio.
+    private func night(start: Date? = nil, end: Date? = nil, live: TimeInterval = 90 * 60,
+                       clean: Bool = true, by: NightEndReason = .timer) -> NightVerdict {
+        NightVerdict(id: "n", start: start ?? at(day: 11, 23, 10), end: end ?? at(0, 41), live: live,
+                     clean: clean, endedBy: by, taints: [])
+    }
+
+    private func line(_ v: NightVerdict? = nil, open: Bool = false, focus: Bool = false,
+                      playing: Bool = false, now: Date? = nil) -> MorningReadback.Line? {
+        MorningReadback.line(last: v ?? night(), nightOpen: open, focusMode: focus, playing: playing,
+                             now: now ?? at(7, 30), calendar: calendar)
+    }
+
+    func testEachEndingReadsInPlainWords() {
+        let late = clock(at(0, 41)), morning = clock(at(6, 40))
+        XCTAssertTrue(late.contains("41"), late)
+        XCTAssertEqual(line()?.text, "Last night · 1 hr 30 min, eased out at \(late)")
+        XCTAssertEqual(line(night(live: 52 * 60, by: .episodeEnd))?.text,
+                       "Last night · 52 min, ended with the episode at \(late)")
+        XCTAssertEqual(line(night(end: at(6, 40), live: 7 * 3600 + 12 * 60, by: .person))?.text,
+                       "Last night · 7 hr 12 min, until \(morning)")
+        XCTAssertEqual(line(night(end: at(6, 40), live: 7 * 3600, by: .focusSwitch))?.text,
+                       "Last night · 7 hr, until \(morning)")
+    }
+
+    func testVoiceOverHearsTheUnitsInWords() {
+        let spoken = line()?.spoken ?? ""
+        XCTAssertTrue(spoken.hasPrefix("Last night, 1 hour"), spoken)
+        XCTAssertFalse(spoken.contains("hr"), spoken)
+        XCTAssertTrue(spoken.hasSuffix("eased out at \(clock(at(0, 41)))"), spoken)
+    }
+
+    func testOnlyACleanNightSpeaks() {
+        XCTAssertNil(line(night(clean: false)))
+        XCTAssertNil(line(night(clean: true, by: .died)))
+        XCTAssertNil(line(night(live: 9 * 60)))                         // a test, not a night
+        XCTAssertNotNil(line(night(live: 10 * 60)))
+    }
+
+    func testOnlyAtRestInSleep() {
+        XCTAssertNil(line(focus: true))
+        XCTAssertNil(line(playing: true))
+        XCTAssertNil(line(open: true))                                  // paused, the night not over
+        XCTAssertNil(MorningReadback.line(last: nil, nightOpen: false, focusMode: false, playing: false,
+                                          now: at(7, 30), calendar: calendar))
+    }
+
+    func testTheMorningRunsFromFiveAMToSixPM() {
+        XCTAssertNil(line(now: at(4, 59)))
+        XCTAssertNotNil(line(now: at(5)))
+        XCTAssertNotNil(line(now: at(17, 59)))
+        XCTAssertNil(line(now: at(18)))                                 // by evening it's tonight
+    }
+
+    /// Stopped at 23:30 and opened at 23:45: that's tonight, not last night.
+    func testNeverTheSameEvening() {
+        let early = night(start: at(day: 11, 23), end: at(day: 11, 23, 30), live: 30 * 60)
+        XCTAssertNil(line(early, now: at(day: 11, 23, 45)))
+        XCTAssertNotNil(line(early, now: at(8)))
+    }
+
+    func testAfterMidnightStartsStillCountAsLastNight() {
+        XCTAssertNotNil(line(night(start: at(1, 15), end: at(2, 45))))
+        XCTAssertNil(line(night(start: at(5, 30), end: at(6, 45))))     // up for the day, a nap
+        XCTAssertNil(line(night(start: at(day: 11, 14), end: at(day: 11, 15)))) // afternoon rest
+    }
+
+    func testANightTwoDaysOldIsNotLastNight() {
+        let old = night(start: at(day: 10, 23), end: at(day: 11, 1))
+        XCTAssertNil(line(old, now: at(9)))
+        XCTAssertNotNil(line(old, now: at(day: 11, 9)))
+    }
+}
+
 /// The coachmark band's order: first-run, the night-ring note, then the tip card; never in Focus,
 /// and the tip card never over a playing session.
 @MainActor
