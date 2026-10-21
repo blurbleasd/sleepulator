@@ -67,6 +67,17 @@ enum SessionGuards {
     /// The 3am glance's timing: it shows for `glanceHold`, then fades over `glanceFade`.
     static let glanceHold: TimeInterval = 6
     static let glanceFade: TimeInterval = 2
+
+    /// The glance's hold for this launch. A Debug build takes a longer one from the argument domain
+    /// (`-veilGlanceSeconds <real>40</real>`) so NightVeilUITests' wake tap can't land after the
+    /// glance: on CI a 5 s accessibility query, and once an 8 s wait on a system banner, pushed it
+    /// past the real 8 s. Held to 6…60 s. Never a setting, and Release always holds 6 s.
+    static func glanceHold(override: Double) -> TimeInterval {
+        #if DEBUG
+        if override > 0 { return max(glanceHold, min(60, override)) }
+        #endif
+        return glanceHold
+    }
     /// A second tap this soon after the first is the same reach for the phone, not a request to
     /// wake: it would skip the glance while it's still arriving.
     static let glanceSettle: TimeInterval = 0.8
@@ -77,10 +88,11 @@ enum SessionGuards {
     /// black); a tap while the glance shows or is still fading wakes the scene and the controls.
     /// VoiceOver and Switch Control wake in one step: the veil's label already says what it is,
     /// and they never needed the light. `sinceGlance` is nil when no glance has shown this veil.
-    static func veilTap(sinceGlance: TimeInterval?, assistiveTech: Bool) -> VeilTap {
+    /// `hold` is this launch's `glanceHold(override:)`.
+    static func veilTap(sinceGlance: TimeInterval?, assistiveTech: Bool, hold: TimeInterval = glanceHold) -> VeilTap {
         if assistiveTech { return .wake }
         // Negative only if the clock behind it stepped back: treat it as a stale glance.
-        guard let t = sinceGlance, t >= 0, t < glanceHold + glanceFade else { return .glance }
+        guard let t = sinceGlance, t >= 0, t < hold + glanceFade else { return .glance }
         return t < glanceSettle ? .ignore : .wake
     }
 
@@ -171,6 +183,17 @@ extension SessionGuards {
         guard cleanNights >= ratingAfterCleanNights, !askedThisVersion, !tipCardShownToday,
               !tipCardShowing, !playing, !veilDown else { return false }
         return askWindowOpen(now: now, lastNightEnd: lastNightEnd, calendar: calendar)
+    }
+
+    /// Whether the tip card is on screen: Home is the tab, and its coachmark band shows the card
+    /// (`CoachmarkContent.current`, the rule Home renders by), not the first-run card or the
+    /// night-ring note ahead of it. A due card waiting behind those, or on another tab, isn't
+    /// showing, so it never holds the rating back.
+    static func tipCardShowing(onHomeTab: Bool, focusMode: Bool, hasCompletedFirstRun: Bool,
+                               hasSeenNightRingTip: Bool, tipCardDue: Bool, sessionActive: Bool) -> Bool {
+        onHomeTab && CoachmarkContent.current(focusMode: focusMode, hasCompletedFirstRun: hasCompletedFirstRun,
+                                              hasSeenNightRingTip: hasSeenNightRingTip, tipCardDue: tipCardDue,
+                                              sessionActive: sessionActive) == .tip
     }
 
     /// Whether the tip card is due on Sleep Home. It waits (never lapses) while anything plays,

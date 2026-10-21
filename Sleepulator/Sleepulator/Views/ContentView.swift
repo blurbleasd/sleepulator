@@ -13,6 +13,9 @@ struct ContentView: View {
     @AppStorage("ratingAskedVersion") private var ratingAskedVersion = ""
     @AppStorage("ratingAskedOn") private var ratingAskedOn: Double = 0
     @AppStorage("tipCardShownOn") private var tipCardShownOn: Double = 0
+    // Home's coachmark state (HomeView owns them), read for whether the tip card is on screen.
+    @AppStorage("hasCompletedFirstRun") private var hasCompletedFirstRun = false
+    @AppStorage("hasSeenNightRingTip") private var hasSeenNightRingTip = false
     @State private var tipCardDue = false
     @State private var showTipSheet = false
     #if DEBUG
@@ -130,7 +133,8 @@ struct ContentView: View {
     private func veilTapped() {
         let assistive = UIAccessibility.isVoiceOverRunning || UIAccessibility.isSwitchControlRunning
         let uptime = ProcessInfo.processInfo.systemUptime
-        switch SessionGuards.veilTap(sinceGlance: veilGlanceAt.map { uptime - $0 }, assistiveTech: assistive) {
+        switch SessionGuards.veilTap(sinceGlance: veilGlanceAt.map { uptime - $0 }, assistiveTech: assistive,
+                                     hold: glanceHold) {
         case .ignore: return
         case .glance: showGlance()
         case .wake:
@@ -156,7 +160,12 @@ struct ContentView: View {
         }
         veilGlanceHide?.cancel()
         veilGlanceHide = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + SessionGuards.glanceHold, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + glanceHold, execute: work)
+    }
+
+    /// 6 s, or a Debug launch's `-veilGlanceSeconds` (`SessionGuards.glanceHold(override:)`).
+    private var glanceHold: TimeInterval {
+        SessionGuards.glanceHold(override: UserDefaults.standard.double(forKey: "veilGlanceSeconds"))
     }
 
     private func endGlance() {
@@ -456,7 +465,10 @@ struct ContentView: View {
         let now = Date()
         guard SessionGuards.mayAskForRating(
             cleanNights: audio.nightJournal.cleanNightCount, askedThisVersion: ratingAskedVersion == AppInfo.version,
-            tipCardShownToday: sameDay(tipCardShownOn, now), tipCardShowing: tipCardDue && selectedTab == 0,
+            tipCardShownToday: sameDay(tipCardShownOn, now),
+            tipCardShowing: SessionGuards.tipCardShowing(
+                onHomeTab: selectedTab == 0, focusMode: audio.focusMode, hasCompletedFirstRun: hasCompletedFirstRun,
+                hasSeenNightRingTip: hasSeenNightRingTip, tipCardDue: tipCardDue, sessionActive: sessionBusy),
             playing: sessionBusy, veilDown: nightDimmed, now: now, lastNightEnd: lastNightEnd) else { return }
         ratingAskedVersion = AppInfo.version
         ratingAskedOn = now.timeIntervalSince1970

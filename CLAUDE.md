@@ -61,10 +61,13 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   rating prompt, so a dev simulator's own nights can't reach a run, nor the run's reach them. `NightVeilUITests` drops the
   veil on an untimed night (shortened to 15 s by the Debug-only `-veilDelaySeconds` launch
   argument, `SessionGuards.veilDelay`; the real minute made it the slowest test), glances, wakes,
-  and checks Focus's readout; it passes settings as launch
+  and checks Focus's readout. Its glance holds 40 s (Debug-only `-veilGlanceSeconds`,
+  `SessionGuards.glanceHold(override:)`; a unit test pins the real 6 s + 2 s): on CI one slow
+  accessibility query, or XCUITest waiting out a system banner inside a tap, pushed the wake tap
+  past the real 8 s, where it's a fresh glance. It passes settings as launch
   arguments (plist literals, the argument domain) so persisted mode and night length stay put.
   CI's simulators are slow and sometimes drop a synthesized tap, so a tap that matters checks its
-  effect and goes round again (the noise switch, Focus's Stop, `pauseAudio`, the veil's first tap,
+  effect and goes round again (the noise switch, the Focus mode switch, Focus's Stop, `pauseAudio`, the veil's first tap,
   whose glance is read off a screenshot since it's hidden from accessibility), and a test lets an
   overlay finish fading in before tapping it (a tap on the veil as it arrives doesn't reach it).
   They launch with Moving scenes off (`-ambientMotion <false/>`): an app redrawing every frame
@@ -82,18 +85,26 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   `ShowNotesEdgeTests`, `TonightShelfTests`, `QueueMoveToHeadTests`), the player rules
   (`NowPlayingStateTests`, `NightLineCopyTests`, `PlayerQueueActionTests`,
   `PodcastFailureStreakTests`), Settings' rules (`SettingsRulesTests`) and a restore's engine
-  reload (`RestoreReloadTests`), the real-AVPlayer suites (`PodcastPlayerRebuildTests`,
+  reload (`RestoreReloadTests`; its queue, mixes and places tests keep their own temp-dir stores,
+  `PodcastQueueManager(storage:)`, `AudioEngine(storage:)`, `PodcastPlayer(storage:)`: every
+  earlier test's objects write the shared files from their own queues, which
+  `StorageManager.flush()` doesn't drain, and one queue write landed a test late), the real-AVPlayer suites (`PodcastPlayerRebuildTests`,
   `PodcastLoadHoldTests`, `PodcastItemEndTests`), the night journal and the asks (`NightRulesTests`,
   `NightJournalTests`, `NightJournalWiringTests`, `AskRulesTests`, `CoachmarkTipCardTests`,
   `RateRowRuleTests`, `FeedbackMessageTests`), and more);
   `PersistenceTests.swift` (`PersistenceMigrator` / `MixStore`); `BackupRoundTripTests.swift`
   (export, read, restore and Undo, the `Backup.kinds` checks, a restore never switching mode;
-  `BackupControllerTests` for the Backup page's controller);
-  `FocusDriversTests.swift`; `GenerativeAudioEngineTests.swift` (`GenerativeMediaResetTests`);
+  `BackupControllerTests` for the Backup page's controller, which await the Task each controller
+  call returns: the hosted app's first render can hold the main actor 10 s or more mid-test, and
+  a 5 s poll ran out under it);
+  `FocusDriversTests.swift` (also `FocusStillFrameTests`, one hosted in a window);
+  `GenerativeAudioEngineTests.swift` (`GenerativeMediaResetTests`);
   `TipStoreTests.swift` (`TipFlowTests`, pure; `TipStoreTests`, StoreKitTest against
   `Tips.storekit`). On iOS 26 simulators a command-line run (xcodebuild, CI) hits an Apple bug,
   "[SKTestSession] Error saving configuration file … Code=3", and loads no products: those six
-  tests then SKIP with that reason. They run from Xcode (⌘U).
+  tests then SKIP with that reason. CI skips them outright (the workflow sets `SLEEPULATOR_CI`):
+  a CI simulator that did load products took minutes per purchase and flaked. They run from
+  Xcode (⌘U).
 
 ## Services (the core)
 - `AudioEngine` — the app-facing `ObservableObject` facade. Owns UI state + policy, delegates
@@ -246,12 +257,16 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   spoils it. A pause over 30 minutes ends the night where it paused, as soon as the asks look or
   news arrives (`closeLapsedPause`), not when play is next pressed. Only a session edge ends a
   pause, never live ticks (they can come from a fading bed or a scrubbed paused podcast), so a
-  night whose interruption never sends `.ended` stays paused: it undercounts, never fakes.
+  night whose interruption never sends `.ended` stays paused: it undercounts, never fakes. The
+  pause takes the interruption's own time (stamped before the hop to main), a dead or rebuilt
+  player stamped up to `newsLead` (2 s) before a pause is the pause's, and `.ended` carries the
+  night on only when the bed really restarted (`restartBedAfterInterruption`) or a podcast
+  resumes over it.
   A deadline reconciled on the morning foreground never counts, so `SleepTimerService.onTerminalStop`
   fires before `stopAllFn` (the stop would otherwise read as a person's). Nor does one a tick finds
   more than `overdueAfter` (5 s) past, the first tick after a Play over a pause that outlived it:
-  reconciled too, with no ambient tail, ended at the deadline (or where the night opened, if the
-  Play opened a new one). Late news is filed by
+  reconciled too, with no ambient tail, ended at the deadline. A deadline from before the open
+  night (the Play opened a new one) discards that night: it never played. Late news is filed by
   when it happened (an off-main failure carries its time), into the night whose span holds it,
   else dropped. A record found open at launch while playing is `died`. Nothing written may carry a
   URL (`NightRules.scrub`): the files go out with Send feedback, and private feeds keep a
@@ -260,8 +275,8 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   after 5 (`cleanNightCount`: one a night at most, noon to noon by start, so naps don't add up),
   in either case never at night. Rating: at a natural break (a sheet closed, Settings
   left; `\.naturalBreak`), 09:00–20:00, 2+ h after the night ended, nothing playing, once per
-  version, never on the tip card's day nor while it's due with Sleep Home on screen
-  (`tipCardShowing`). The card: the same window, Sleep Home at rest only, once
+  version, never on the tip card's day nor while Home shows it (`SessionGuards.tipCardShowing`:
+  the Home tab with the card ahead in the coachmark band, by `CoachmarkContent.current`). The card: the same window, Sleep Home at rest only, once
   products loaded and purchases allowed, never on the rating's day, in the coachmark band; only an
   answer spends it. The rules live in
   `SessionGuards` (`mayAskForRating`, `tipCardDue`), unit-tested. The asks' memory
@@ -373,6 +388,8 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   frame loop that freezes swaps instead: `if paused { staticFrame } else { TimelineView(…) }`,
   with a `@State` `SceneClock` holding the pose (`ShaderBackdrop`, `OrbButton`). A view showing
   real time, like the Focus ring, draws its static frame from the published value instead.
+  So do the Focus scenes, whose positions are the Pomodoro: in sight, their still frame observes
+  it (`FocusStillFrame`). A bare one, never redrawn, kept the idle look a whole session.
 
 ## Build / run
 - **Native Xcode build** — open `Sleepulator/Sleepulator.xcodeproj`. NOT Capacitor/CLI; there's

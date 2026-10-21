@@ -81,23 +81,28 @@ final class BackupController: ObservableObject {
         undoDate = Backup.undoDate(storage: storage, defaults: defaults)
     }
 
-    func pageAppeared() {
+    // The entry points below hand back the Task they start (discardable: the views ignore it), so
+    // a unit test awaits the work rather than polling for its effect against the clock.
+
+    @discardableResult
+    func pageAppeared() -> Task<Void, Never>? {
         pageVisible = true
         refresh()
-        guard let pending = pendingPrompt else { return }
+        guard let pending = pendingPrompt else { return nil }
         pendingPrompt = nil
         lastDismissal = Date()                 // the page is still sliding in
-        Task { await present(pending) }
+        return Task { await present(pending) }
     }
 
     func pageDisappeared() {
         pageVisible = false
     }
 
-    func export() {
-        guard !busy else { return }
+    @discardableResult
+    func export() -> Task<Void, Never>? {
+        guard !busy else { return nil }
         busy = true
-        Task {
+        return Task {
             defer { busy = false }
             do {
                 let now = Date()
@@ -118,33 +123,32 @@ final class BackupController: ObservableObject {
         }
     }
 
-    func exported(_ result: Result<URL, Error>) {
+    @discardableResult
+    func exported(_ result: Result<URL, Error>) -> Task<Void, Never>? {
         // The exporter is animating out now: an alert that follows waits for it, as after the picker.
         lastDismissal = Date()
         switch result {
         case .success(let url):
             Log.storage.info("Exported backup to \(url.lastPathComponent, privacy: .public)")
-            if let message = Backup.leftOutMessage(exportLeftOut) {
-                Task { await present(.notice(title: "Part of the backup is missing", message: message)) }
-            }
+            guard let message = Backup.leftOutMessage(exportLeftOut) else { return nil }
+            return Task { await present(.notice(title: "Part of the backup is missing", message: message)) }
         case .failure(let error):
             Log.storage.error("Backup export failed: \(error.localizedDescription, privacy: .public)")
-            Task { await present(.failed(title: "Couldn't save the backup", message: "Try again, or pick another place to save it.")) }
+            return Task { await present(.failed(title: "Couldn't save the backup", message: "Try again, or pick another place to save it.")) }
         }
     }
 
     /// The picker's answer: read and validate the file, then ask before replacing anything.
-    func picked(_ result: Result<[URL], Error>) {
+    @discardableResult
+    func picked(_ result: Result<[URL], Error>) -> Task<Void, Never>? {
         // The picker is animating out now: the alert that follows waits for it like any other.
         lastDismissal = Date()
         guard case .success(let urls) = result, let url = urls.first else {
-            if case .failure = result {
-                Task { await present(.failed(title: "Couldn't restore", message: Backup.failureMessage(.noAccess))) }
-            }
-            return
+            guard case .failure = result else { return nil }
+            return Task { await present(.failed(title: "Couldn't restore", message: Backup.failureMessage(.noAccess))) }
         }
         busy = true
-        Task {
+        return Task {
             let read = await Backup.read(url)
             busy = false
             switch read {
@@ -154,9 +158,10 @@ final class BackupController: ObservableObject {
         }
     }
 
-    func restore(_ pending: Backup.Pending) {
+    @discardableResult
+    func restore(_ pending: Backup.Pending) -> Task<Void, Never> {
         busy = true
-        Task {
+        return Task {
             guard let outcome = await Backup.restore(pending, storage: storage, defaults: defaults, settle: settle) else {
                 busy = false
                 refresh()
@@ -175,9 +180,10 @@ final class BackupController: ObservableObject {
         Task { await present(.confirmUndo(undoDate)) }
     }
 
-    func undo() {
+    @discardableResult
+    func undo() -> Task<Void, Never> {
         busy = true
-        Task {
+        return Task {
             let result = await Backup.undo(storage: storage, defaults: defaults, settle: settle)
             if result != .gone { reload() }        // an incomplete Undo still put most of it back
             busy = false

@@ -60,7 +60,8 @@ Tags: **⚙︎** generative (cheap, recommended) · **✦** time-reactive · **�
 - **Deep space** ⚙︎ — slow-parallax starfield + a faint nebula; comets instead of meteors.
 
 **Focus (calm-alert; the ring stays the hero):**
-- **Energy sweep** ⚙︎ — _current default._ The cool sweep behind the timer.
+- **Energy sweep** ⚙︎ — _retired 2026-07-06_ (a rotating glow with no depth). Focus defaults to
+  **Current**, built alongside **Tide** and **Sandfall** (`AmbientScene.swift`).
 - **Flow field** ⚙︎ — particles drifting along a slow vector field.
 - **Contour topography** ⚙︎✦ — subtle moving contour lines; a "deep work" feel. _Built
   2026-10-12 as "Contour": a mountain whose summit sits under the ring, lit from the summit
@@ -97,10 +98,10 @@ protocol AmbientScene {
 }
 ```
 
-**4.2 The two current scenes live behind the protocol.** `NightSkyScene` wraps
-`StarfieldView` + `MoonArc` + `ShootingStarView` + the darkening overlay; `EnergyScene` wraps
-`FocusBackdrop`. A no-behaviour-change refactor — the home looks identical. `SceneRegistry.all`
-lists them; `scenes(for: mood)` filters.
+**4.2 The two scenes of the time moved behind the protocol** (Phase 1 history; today's scenes are
+`SceneRegistry.all`, filtered by `scenes(for: mood)`). `NightSkyScene` wrapped `StarfieldView` +
+`MoonArc` + `ShootingStarView` + the darkening overlay; `EnergyScene` wrapped `FocusBackdrop`. A
+no-behaviour-change refactor: the home looked identical.
 
 **4.3 Home renders the selected scene.** `HomeView`'s backdrop is
 `SceneRegistry.selected(for: mood).makeBackdrop(ctx)` instead of a hardcoded `if focusMode`
@@ -120,14 +121,18 @@ to the mood's first scene — so nothing changes until you pick something.
 
 Every scene must honour:
 - **`paused`** — settle to static when the screen is out of sight or Moving scenes is off (an
-  all-night screen shouldn't animate under the veil), as `ShaderBackdrop` does. Under the
-  screensaver itself scenes keep moving, but hold back transients (`SceneContext.screensaver`).
+  all-night screen shouldn't animate under the veil), as `ShaderBackdrop` does. A still frame in
+  sight should keep its scene's reading live and stop redrawing only when `SceneContext.occluded`.
+  Today Night sky and Rain on glass re-read the night's darkening, and Current, Tide and Sandfall
+  follow the Pomodoro (`FocusStillFrame`); the other Sleep scenes' still frames don't yet darken.
+  Under the screensaver itself scenes keep moving, but hold back transients
+  (`SceneContext.screensaver`).
 - **The ambient-motion preference** — NOT raw system Reduce Motion. We deliberately decided
-  Sleep's decorative motion (twinkle, moon glide, meteor) should run even with system Reduce
-  Motion on, because the opacity twinkle isn't vestibular motion and the sky reads dead static
-  otherwise. The proper home for this is an **app-level "Ambient motion" toggle** (not yet
-  built) that scenes read from the context; until it exists, the current scenes simply run
-  their motion. New scenes should follow the same rule, not re-gate on system Reduce Motion.
+  Sleep's decorative motion (the stars' slow turn, drifting cloud, meteor) should run even with
+  system Reduce Motion on, because it isn't vestibular motion and the sky reads dead static
+  otherwise. Its home is the app-level toggle, built as Settings ▸ **Moving scenes**
+  (`ambientMotion`), which reaches every scene through `SceneContext.paused`. New scenes should
+  follow the same rule, not re-gate on system Reduce Motion.
 
 ## 6. A picker (only once there's something to pick)
 
@@ -151,18 +156,19 @@ There's no queue and no deadline: build the next scene whenever the itch hits.
 
 ## 8. Open questions
 
-- **`TimelineView` + `Canvas` as the standard engine** for new scenes (better for battery + the
-  settle) vs. the hand-rolled `repeatForever` views the current sky uses? Leaning Timeline/Canvas
-  for anything continuously animated; revisit the current two if/when convenient.
-- **The app-level "Ambient motion" toggle** (§5) — worth adding before the second scene, so the
-  contract is real and consistent rather than ad-hoc per scene.
+- _Settled since:_ continuously animated scenes swap a still frame for a `TimelineView` (never
+  `TimelineView(.animation(paused:))`, CLAUDE.md). `ShaderBackdrop` is the shared host for the
+  Metal Sleep scenes (Night sky, Aurora, Embers, Still water, Deep space); Current, Tide and
+  Sandfall are Metal but do their own swap, Rain on glass is a `TimelineView` + `Canvas` loop, and
+  Breathe is blurred gradients on a `TimelineView`. The app-level motion toggle shipped as
+  Settings ▸ Moving scenes (§5).
 - **Per-mode vs shared selection**, and whether a `both`-mood scene remembers separate settings
   per mode. Likely independent per mood.
 
 ## 9. Status (2026-06-21)
 
 - **Phase 1 (seam) shipped** — `AmbientScene` / `SceneContext` / `SceneRegistry` added,
-  `NightSkyScene` + `EnergyScene` wrap the current backdrops, `HomeView` renders the selected
+  `NightSkyScene` + `EnergyScene` wrapped the backdrops of the time, `HomeView` renders the selected
   scene per mood. No-behaviour-change refactor (device-confirm the backdrops look identical).
 
 ---

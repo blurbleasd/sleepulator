@@ -7,9 +7,9 @@ final class PodcastQueueManager: ObservableObject {
     @Published var queue: [Episode] = [] {
         didSet {
             guard persistsQueue else { return }
-            let q = queue
+            let q = queue, storage = storage
             storageQueue.async {
-                StorageManager.shared.save(q, to: "queue.json")
+                storage.save(q, to: "queue.json")
             }
         }
     }
@@ -38,6 +38,9 @@ final class PodcastQueueManager: ObservableObject {
     }
     
     private let storageQueue = DispatchQueue(label: "app.sleepulator.queueStorage", qos: .utility)
+    /// Where queue.json lives. Injected so a unit test can keep its queue in a temp-dir store: a
+    /// write another test's manager still had queued landed on the shared file mid-test.
+    private let storage: StorageManager
     /// Off only while a reload shows an empty queue for a queue.json it can't decode (see
     /// `reloadFromDisk`).
     private var persistsQueue = true
@@ -58,7 +61,8 @@ final class PodcastQueueManager: ObservableObject {
     var loadPodcastFn: ((_ url: String, _ id: String, _ title: String, _ resume: Bool) -> Void)?
     var pausePodcastFn: (() -> Void)?
     
-    init() {
+    init(storage: StorageManager = .shared) {
+        self.storage = storage
         self.autoPlay = UserDefaults.standard.object(forKey: "autoPlay") as? Bool ?? true
         self.shuffleQueue = UserDefaults.standard.object(forKey: "shuffleQueue") as? Bool ?? false
         self.deleteOnCompletion = UserDefaults.standard.object(forKey: "deleteOnCompletion") as? Bool ?? false
@@ -71,7 +75,7 @@ final class PodcastQueueManager: ObservableObject {
             self.finishedEpisodes = Set(capped)
         }
         
-        if let savedQueue: [Episode] = StorageManager.shared.load(from: "queue.json") {
+        if let savedQueue: [Episode] = storage.load(from: "queue.json") {
             self.queue = savedQueue
         }
         
@@ -101,7 +105,7 @@ final class PodcastQueueManager: ObservableObject {
 
         // As at launch: a queue.json today's types can't decode (an update's schema change, or the
         // one an Undo just put back as it was) is left on disk. Assigning [] saved [] over it.
-        if let saved: [Episode] = StorageManager.shared.load(from: "queue.json") {
+        if let saved: [Episode] = storage.load(from: "queue.json") {
             queue = saved
         } else {
             persistsQueue = false

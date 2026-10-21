@@ -499,7 +499,10 @@ final class AudioEngine: ObservableObject {
         podPlayer.setFade(Float(fadeMultiplier))
     }
     
-    init() {
+    /// `storage` is the store the launch migration and the saved mixes (`MixStore`, mixes.json)
+    /// use. Injected so a unit test can keep its mixes in a temp-dir store, as MixStore's own seam
+    /// does; the queue and the player's places stay on the shared store.
+    init(storage: StorageManager = .shared) {
         self.noiseVolume = UserDefaults.standard.object(forKey: "noiseVolume") as? Double ?? 0.4
         self.binVolume = UserDefaults.standard.object(forKey: "binVolume") as? Double ?? 0.3
         self.podVolume = UserDefaults.standard.object(forKey: "podVolume") as? Double ?? 0.7
@@ -531,10 +534,11 @@ final class AudioEngine: ObservableObject {
         // Legacy -> file-store migration (lastMix, mixes, library seed, episode positions),
         // extracted to PersistenceMigrator (Slice A1). It owns the fragile launch-time legacy
         // reads and hands back the values to seed @Published state below.
-        let migrated = PersistenceMigrator().run()
+        let migrated = PersistenceMigrator(storage: storage).run()
         self.mixStore = MixStore(lastMix: migrated.lastMix,
                                  savedPresets: migrated.savedPresets,
-                                 storageQueue: storageQueue)
+                                 storageQueue: storageQueue,
+                                 storage: storage)
         if let positions = migrated.migratedPositions {
             // podPlayer loaded an empty positions map at its own init (it's constructed
             // before this body runs); hand it the migrated data so the first flush to disk
@@ -785,7 +789,7 @@ final class AudioEngine: ObservableObject {
         // each event here via closures, hopping to the main queue first (AVAudioSession delivers
         // these on an arbitrary system thread) so the handlers can safely touch @Published state
         // and updateParams (main-queue + single-writer on the lock-free param buffer).
-        sessionController.onInterruption = { [weak self] note in self?.handleInterruption(note: note) }
+        sessionController.onInterruption = { [weak self] note, at in self?.handleInterruption(note: note, at: at) }
         sessionController.onRouteChange = { [weak self] note in self?.handleRouteChange(note: note) }
         sessionController.onAppBackground = { [weak self] in self?.handleAppBackground() }
         sessionController.onOnlineChanged = { [weak self] online in self?.connectivity.isOnline = online }
@@ -1516,8 +1520,16 @@ final class AudioEngine: ObservableObject {
     /// Main-queue only (AudioSessionController hops every forward to main).
     private var podWasPlayingBeforeInterruption = false
 
-    /// Internal so the tests can deliver an interruption without the audio session.
-    func handleInterruption(note: Notification) {
+    /// Restarts the bed after an interruption and says whether it renders again. Injectable so
+    /// the tests can fail a restart without the simulator's audio.
+    lazy var restartBedAfterInterruption: () -> Bool = { [weak self] in
+        self?.genEngine.handleInterruption(shouldResume: true) ?? false
+    }
+
+    /// Internal so the tests can deliver an interruption without the audio session. `at` is when
+    /// it reached the app, before the hop to main (`AudioSessionController`), so the night's pause
+    /// is filed before the player's death it causes, whichever reaches main first.
+    func handleInterruption(note: Notification, at: Date? = nil) {
         guard let typeValue = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
               let type = AVAudioSession.InterruptionType(rawValue: typeValue) else { return }
 
@@ -1529,7 +1541,7 @@ final class AudioEngine: ObservableObject {
             nightJournal.note("interruption began")
             // The bed's switches stay on through it, so no session edge reports this stop: the
             // night pauses here (a podcast alone also pauses through its edge, below).
-            nightJournal.sessionStopped()
+            nightJournal.sessionStopped(at: at)
             podWasPlayingBeforeInterruption = podWasPlayingBeforeInterruption || podActive
             genEngine.handleInterruption(shouldResume: false)
             if podActive { podPlayer.pause() }
@@ -1549,9 +1561,8 @@ final class AudioEngine: ObservableObject {
             // only the generative branch did this, so a podcast-only user got silence.
             Log.activateAudioSession("post-interruption")
 
-            if noiseOn || binauralOn {
-                genEngine.handleInterruption(shouldResume: true)
-            }
+            let bedOn = noiseOn || binauralOn
+            let bedBack = bedOn && restartBedAfterInterruption()
 
             let willResumePod = options.contains(.shouldResume) && podWasPlayingBeforeInterruption
             Log.timer.notice("interruption ended (shouldResume=\(options.contains(.shouldResume), privacy: .public), resumingPod=\(willResumePod, privacy: .public))")
@@ -1560,10 +1571,13 @@ final class AudioEngine: ObservableObject {
                 podPlayer.resume()
             }
             podWasPlayingBeforeInterruption = false
-            // The bed came back: the night carries on (within the resume window, the same one).
-            // After the podcast's resume, so a rebuild it makes is filed while still paused. A
-            // podcast alone carries the night on through its playing edge.
-            if !focusMode, noiseOn || binauralOn { nightJournal.sessionStarted() }
+            // The sound came back: the night carries on (within the resume window, the same one).
+            // After the podcast's resume, so a rebuild it makes is filed while still paused. Only
+            // a bed that really restarted, or a podcast resuming over a bed that didn't (its
+            // playing edge can't report it: the bed's switches are still on). A bed that failed
+            // leaves the night paused over the silence; play pressed again carries it on. A
+            // podcast alone carries the night on through its own playing edge.
+            if !focusMode, bedBack || (bedOn && willResumePod) { nightJournal.sessionStarted() }
         }
     }
     
