@@ -189,7 +189,10 @@ final class SleepTimerService: ObservableObject {
     }
 
     private var sleepTimer: DispatchSourceTimer?
-    private var sleepTimerEnd: Date?
+    /// When the running timer ends, on the wall clock. Readable so tests can tick against the
+    /// deadline the timer stored, not one taken after `startSleepTimer` returns (its Live Activity
+    /// request can take seconds in a test host).
+    private(set) var sleepTimerEnd: Date?
     // tick() runs from the GCD timer AND from backgroundTick() (RMS tap + AVPlayer observer),
     // so several threads can hit expiry at once. This guards the terminal stop to fire exactly
     // once. Checked/set only on the main queue, so no extra locking is needed.
@@ -597,14 +600,21 @@ final class PomodoroService: ObservableObject {
     var longRestMinutes: Int { didSet { UserDefaults.standard.set(longRestMinutes, forKey: "pomoLongRest") } }
     var cyclesBeforeLongBreak: Int { didSet { UserDefaults.standard.set(cyclesBeforeLongBreak, forKey: "pomoCycles") } }
 
-    /// Called at every phase boundary so the owner can play a chime.
+    /// Called when the session moves on to a new phase (a tick or a skip) so the owner can play a
+    /// chime: once per move, however many boundaries a late tick passed (`advancePhase`).
     var chimeFn: (() -> Void)?
-    /// Fired on start, every phase boundary, and stop — (newPhase, isRunning). AudioEngine
-    /// uses it to soften the ambient bed during breaks (FOCUS-MODE-SPEC R6).
+    /// Fired on start, each move to a new phase (once per move, with the phase the session is in
+    /// now), and stop — (newPhase, isRunning). AudioEngine uses it to soften the ambient bed
+    /// during breaks (FOCUS-MODE-SPEC R6).
     var phaseChangedFn: ((Phase, Bool) -> Void)?
 
     private var timer: DispatchSourceTimer?
-    private var phaseEnd: Date?
+    /// When the current phase ends, on the wall clock. Readable so tests can tick against it.
+    private(set) var phaseEnd: Date?
+    /// When the app moved onto the current phase: a start, a skip, or the tick that found the
+    /// boundary. That tick can come minutes after the phase began (`advancePhase`), and the ring's
+    /// refill eases in from here, not from the phase's start.
+    private var phaseShownAt: Date?
     private static let phaseNotifId = "app.sleepulator.pomodoro.phase"
     private var requestedNotifAuth = false
     #if canImport(ActivityKit)
@@ -632,12 +642,14 @@ final class PomodoroService: ObservableObject {
         return min(1, max(0, 1 - remainingNow / phaseTotal))
     }
 
-    /// Seconds since the current phase began (0 exactly at a boundary). Lets the ring ease its
-    /// arc back in over the first moment of a new phase instead of snapping from empty to full.
-    /// Same main-thread read discipline as `progress(at:)`; 0 when idle.
+    /// Seconds since the current phase came up in the app (0 at that moment), which is when the
+    /// phase began unless a late tick caught up to it. Lets the ring ease its arc back in over the
+    /// first moment of a new phase instead of snapping from empty to full; measured from the
+    /// phase's own start, a tick even half a second late skipped the ease. Same main-thread read
+    /// discipline as `progress(at:)`; 0 when idle.
     func phaseElapsed(at now: Date) -> TimeInterval {
-        guard isRunning, phaseTotal > 0, let end = phaseEnd else { return 0 }
-        return max(0, phaseTotal - max(0, end.timeIntervalSince(now)))
+        guard isRunning, let shown = phaseShownAt else { return 0 }
+        return max(0, now.timeIntervalSince(shown))
     }
 
     /// The lengths when none are saved. Settings' steppers show the same defaults
@@ -670,7 +682,8 @@ final class PomodoroService: ObservableObject {
         phase = .work
         completedCycles = 0
         restIsLong = false
-        beginPhase(minutes: workMinutes)
+        let now = Date()
+        beginPhase(minutes: workMinutes, at: now, now: now)
         isRunning = true
         phaseChangedFn?(.work, true)
         schedulePhaseEndNotification()
@@ -687,6 +700,7 @@ final class PomodoroService: ObservableObject {
         timer?.cancel()
         timer = nil
         phaseEnd = nil
+        phaseShownAt = nil
         isRunning = false
         remaining = 0
         cancelPhaseEndNotification()
@@ -695,48 +709,85 @@ final class PomodoroService: ObservableObject {
     }
 
     /// Skip the rest of the current phase — end a break early, or bail out of a work interval
-    /// (which still counts the cycle, matching the natural boundary's accounting).
-    func skipPhase() {
+    /// (which still counts the cycle, matching the natural boundary's accounting). A phase that
+    /// already ended is caught up to instead, as a tick would: in the moment after unlock, before
+    /// the first tick, the screen still shows it, and skipping from it started the next phase late.
+    func skipPhase(at now: Date = Date()) {
         guard isRunning else { return }
-        advancePhase()
+        if let end = phaseEnd, end <= now {
+            advancePhase(from: end, now: now)
+        } else {
+            advancePhase(from: now, now: now)
+        }
     }
 
-    private func beginPhase(minutes: Int) {
+    /// Starts a phase of `minutes` at `start`, as the app sees it at `now`.
+    private func beginPhase(minutes: Int, at start: Date, now: Date) {
         let secs = Double(minutes) * 60
-        phaseEnd = Date().addingTimeInterval(secs)
+        let end = start.addingTimeInterval(secs)
+        phaseEnd = end
         phaseTotal = secs
-        remaining = secs
+        phaseShownAt = now
+        remaining = max(0, end.timeIntervalSince(now))
     }
 
     private func tick() {
         // Runs on the GCD timer's global queue; read phaseEnd on main to avoid racing start/stop.
         let now = Date()
         DispatchQueue.main.async {
-            guard self.isRunning, let end = self.phaseEnd else { return }
-            let r = end.timeIntervalSince(now)
-            if r <= 0 {
-                self.advancePhase()
-            } else {
-                self.remaining = r
-            }
+            self.handleTick(at: now)
         }
     }
 
-    /// One phase boundary — natural (tick) or user skip: chime, flip work↔rest, notify the
-    /// owner, and re-arm the backgrounded-phase-end notification + Live Activity.
-    private func advancePhase() {
-        chimeFn?()
-        if phase == .work {
-            // Finished a work interval. Every Nth one earns a long break.
-            completedCycles += 1
-            let longDue = completedCycles % max(1, cyclesBeforeLongBreak) == 0
-            restIsLong = longDue
-            phase = .rest
-            beginPhase(minutes: longDue ? longRestMinutes : restMinutes)
+    /// The main-queue half of `tick()`, at the wall-clock time the tick fired (tests pass theirs).
+    func handleTick(at now: Date) {
+        guard isRunning, let end = phaseEnd else { return }
+        let r = end.timeIntervalSince(now)
+        if r <= 0 {
+            advancePhase(from: end, now: now)
         } else {
-            restIsLong = false
-            phase = .work
-            beginPhase(minutes: workMinutes)
+            remaining = r
+        }
+    }
+
+    /// Phase boundaries, natural (a tick) or a skip: chime, flip work↔rest, notify the owner, and
+    /// re-arm the backgrounded-phase-end notification + Live Activity.
+    ///
+    /// The next phase starts at `boundary`: the old phase's end once it has passed (a tick, or a
+    /// skip of a phase that already ended, `skipPhase(at:)`), else now for a skip. A silent session has no audio to keep the app awake, so with the phone locked it's suspended,
+    /// and the first tick after unlock can come minutes past the boundary. Starting the phase at
+    /// that tick ran the break late by the whole wait, on the ring, the Focus scenes and the Live
+    /// Activity, while the boundary's notification had come on time. Every boundary passed by
+    /// `now` is taken in turn, so each finished work interval counts and a long break comes when
+    /// due. One chime and one `phaseChangedFn` for the lot: a run of bells on unlock is noise, and
+    /// the owner only acts on the phase the session is in now. The walk runs on locals and
+    /// publishes once: a clock set forward by hand can put thousands of boundaries behind one
+    /// tick, and every published write notifies each Focus view.
+    private func advancePhase(from boundary: Date, now: Date) {
+        chimeFn?()
+        var next = phase, cycles = completedCycles, isLong = restIsLong
+        var start = boundary
+        while true {
+            let minutes: Int
+            if next == .work {
+                // Finished a work interval. Every Nth one earns a long break.
+                cycles += 1
+                isLong = cycles % max(1, cyclesBeforeLongBreak) == 0
+                next = .rest
+                minutes = isLong ? longRestMinutes : restMinutes
+            } else {
+                isLong = false
+                next = .work
+                minutes = workMinutes
+            }
+            let end = start.addingTimeInterval(Double(minutes) * 60)
+            // A zero-length phase (no setting allows one) can't spin here.
+            if end > now || minutes <= 0 {
+                (phase, completedCycles, restIsLong) = (next, cycles, isLong)
+                beginPhase(minutes: minutes, at: start, now: now)
+                break
+            }
+            start = end
         }
         phaseChangedFn?(phase, true)
         schedulePhaseEndNotification()

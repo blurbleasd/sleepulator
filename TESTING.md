@@ -29,7 +29,9 @@ Suites in `SleepulatorTests/` (seven files, many suites):
 - `AudioStateTests.swift` — engine state/policy plus `PodcastParserTests` (CDATA, durations,
   dates, caps, enclosures), `OPMLParserTests` (scheme validation, dedupe, corrupt files),
   `StorageManagerTests` (backup recovery), `NetRetryTests`, `CacheEvictionTests`, the
-  sleep-timer suites (backstop, cancel, end-of-episode), the Pomodoro's Live Activity
+  sleep-timer suites (backstop, cancel, end-of-episode), the Pomodoro's clock
+  (`PomodoroProgressTests`; `PomodoroMissedBoundaryTests`: boundaries a late tick finds start
+  the next phase at the boundary, each one counted) and Live Activity
   (`PomodoroLiveActivityTests`: a start ends what was up and keeps its own, Stop ends it),
   layering, mode reconciliation, the
   Night sky meteor's rules (`NightSkyMotionTests`: only while the controls show, faint, rare after
@@ -218,9 +220,9 @@ everything below is display-link / render behavior only a device shows.
    Sandfall and Contour, start a session and let the controls fade. ✅ The scene holds its pose,
    but its reading follows the interval, creeping with the countdown: Current's front crosses,
    Tide's waterline rises, Sandfall's top bulb drains, Contour's light spreads from the summit
-   (`FocusStillFrame`). ✅ A start, a break and a stop
-   show at once. Lock for 30 s and unlock, away from a phase boundary (one crossed while locked
-   starts the next phase late, a separate Pomodoro issue). ✅ The reading is at the true time.
+   (`FocusStillFrame`). ✅ A start, a break and a stop show at once. Lock for 30 s and unlock,
+   then once more across a phase boundary (the next phase now starts at the boundary itself,
+   §I step 6). ✅ The reading is at the true time.
    Out of sight it stops: mid-session, with Instruments' SwiftUI template attached, pull down
    Control Center or Notification Center over Focus Home (the app goes inactive with Home still
    behind it; Always-On and the Lock Screen background the app, which renders nothing and so
@@ -275,6 +277,17 @@ the brightness you actually use at night, in **both** Sleep and Focus.
    ring's 30 fps redraw fully stopped (paused); on return the arc is at the correct remaining
    time with no jump-back. Idle (no session): the faint track ring is still perceptible at low
    brightness.
+   **A boundary crossed while locked (added 2026-10-20, unit-tested only).** Install and run it
+   without Xcode attached, as in §3C step 5: the debugger keeps the app from suspending, so the
+   boundary passes on time and the step can't tell the fix from the old code. Settings: Focus
+   length 5 min, short break 1 min. Start a Focus session with no sound (nothing keeps the app
+   awake, so it's suspended while locked) and lock at about 4:00 left. Unlock 4.5 min later.
+   ✅ The break shows about 0:30 left, not a fresh 1:00, and the ring, readout and Live Activity
+   agree. Stop, start again, lock at about 4:00 left, and unlock 7 min later. ✅ The session is
+   in its second focus interval with about 3:00 left, one round done in the cycle dots, and no
+   run of chimes (one at most). Only the first boundary posts a notification while locked: a
+   phase's notification is scheduled when the phase starts, and a suspended app starts none.
+   Before the fix the next phase began at unlock and ran its full length.
 7. **Focus Live Activity (added 2026-10-20, passed on device 2026-10-20).** Start a Focus session, lock
    the phone: ✅ the Pomodoro's Live Activity is on the Lock Screen and in the Dynamic Island, and
    it stays up past a minute (before the fix it ended as soon as it appeared). Unlock and press
