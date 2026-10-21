@@ -80,7 +80,11 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
 - **Tests** — `SleepulatorTests/` (XCTest). Seven files, many suites: `AudioMathTests.swift`;
   `AudioStateTests.swift` (also holds `PodcastParserTests`, `OPMLParserTests`,
   `StorageManagerTests`, `NetRetryTests`, `CacheEvictionTests`, the sleep-timer suites, the
-  Pomodoro's clock (`PomodoroProgressTests`, `PomodoroMissedBoundaryTests`), Home's
+  Pomodoro's clock (`PomodoroProgressTests`, `PomodoroMissedBoundaryTests`), its Live Activity
+  and phase-end notification (`PomodoroLiveActivityTests`, `PomodoroPhaseEndNotificationTests`;
+  a test that starts a Pomodoro puts it on fakes first, `PomodoroService.onFakes()`, since
+  `start()` otherwise posts a real notification and requests a real Live Activity, and
+  `Activity.request` can stall about 3 s in the test host), Home's
   pure UI rules (`SessionGuardsTests`, `NightRingMathTests`, `MiniPlayerClearanceTests`,
   `HomeScreensaverPolicyTests`, `NightSkyMotionTests`), the podcast rules (`PodcastTextTests`, `ShowNotesPreviewTests`,
   `ShowNotesEdgeTests`, `TonightShelfTests`, `QueueMoveToHeadTests`), the player rules
