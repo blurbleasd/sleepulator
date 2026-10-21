@@ -1147,10 +1147,10 @@ final class PomodoroProgressTests: XCTestCase {
         p.start()
         defer { p.stop() }
         // Anchor to a reference taken AFTER start() returns, and assert on DELTAS from it.
-        // `start()` schedules a local notification + a Live Activity (both IPC) after capturing
-        // phaseEnd, so `phaseElapsed(at: Date())` is really "how long start()'s tail took" — a
+        // `start()` schedules a local notification + a Live Activity (both IPC) after stamping
+        // phaseShownAt, so `phaseElapsed(at: Date())` is really "how long start()'s tail took" — a
         // machine-load-dependent 60–80 ms here, which made the old absolute ±0.05 s assertion fail
-        // intermittently. The deltas below are exact arithmetic against the same phaseEnd, so they
+        // intermittently. The deltas below are exact arithmetic against the same phaseShownAt, so they
         // pin the real contract (the refill advances 1:1 with wall-clock) with no timing race.
         let ref = Date()
         let base = p.phaseElapsed(at: ref)
@@ -1274,6 +1274,95 @@ final class PomodoroMissedBoundaryTests: XCTestCase {
         XCTAssertEqual(p.completedCycles, 0)
         XCTAssertEqual(p.remaining, 30, accuracy: 1e-6)
         XCTAssertEqual(chimes, 0)
+    }
+
+    // Value: protects=End interval / Skip break start the next phase now at its full length (a skipped focus interval still counts its round), one chime each, and do nothing when idle; fails_when=skipPhase hands advancePhase the old phase's end (the skipped time lands on the next phase) or chimes twice; why_new=no test called skipPhase, and this diff rewired it; seam=none; no_claim=the button, FocusHero's refill drawing, the notification and Live Activity
+    func testASkipStartsTheNextPhaseNowAtItsFullLength() throws {
+        let p = session()
+        defer { p.stop() }
+        let before = Date()
+        p.skipPhase()                                    // End interval, 25 min early
+        let after = Date()
+
+        XCTAssertEqual(p.phase, .rest)
+        XCTAssertEqual(p.completedCycles, 1, "a skipped interval still counts its round")
+        XCTAssertEqual(p.remaining, 300, accuracy: 1e-6, "the whole break, from the tap")
+        let end = try XCTUnwrap(p.phaseEnd)
+        XCTAssertGreaterThanOrEqual(end.timeIntervalSince(before), 300 - 1e-6)
+        XCTAssertLessThanOrEqual(end.timeIntervalSince(after), 300 + 1e-6)
+        XCTAssertEqual(chimes, 1)
+        XCTAssertEqual(phaseChanges.map { $0.0 }, [.rest])
+
+        p.skipPhase()                                    // Skip break
+        XCTAssertEqual(p.phase, .work)
+        XCTAssertEqual(p.remaining, 1500, accuracy: 1e-6)
+        XCTAssertEqual(p.completedCycles, 1)
+        XCTAssertEqual(chimes, 2)
+
+        p.stop()
+        p.skipPhase()                                    // idle: nothing to skip
+        XCTAssertFalse(p.isRunning)
+        XCTAssertEqual(chimes, 2)
+    }
+
+    // Value: protects=a Skip tapped after the phase already ended (before the catch-up tick) catches up instead of skipping from the stale phase; fails_when=skipPhase always starts the next phase at the tap; why_new=the review found the late start on the skip path; seam=skipPhase(at:); no_claim=when the first tick after unlock runs
+    func testASkipAfterThePhaseEndedCatchesUpInstead() throws {
+        let p = session()
+        defer { p.stop() }
+        let workEnd = try XCTUnwrap(p.phaseEnd)
+
+        p.skipPhase(at: workEnd.addingTimeInterval(120))   // End interval, tapped before the catch-up tick
+
+        XCTAssertEqual(p.phase, .rest)
+        XCTAssertEqual(p.completedCycles, 1)
+        XCTAssertEqual(try XCTUnwrap(p.phaseEnd).timeIntervalSince(workEnd), 300, accuracy: 1e-6, "the break still runs from the boundary")
+        XCTAssertEqual(p.remaining, 180, accuracy: 1e-6)
+        XCTAssertEqual(chimes, 1)
+    }
+
+    // Value: protects=a tick exactly on the boundary is past it; fails_when=handleTick's `r <= 0` becomes `< 0`; why_new=no tick landed exactly on a boundary; seam=handleTick(at:); no_claim=none beyond protects
+    func testATickExactlyOnTheBoundaryIsPastIt() throws {
+        let p = session()
+        defer { p.stop() }
+        let workEnd = try XCTUnwrap(p.phaseEnd)
+
+        p.handleTick(at: workEnd)
+
+        XCTAssertEqual(p.phase, .rest)
+        XCTAssertEqual(p.remaining, 300, accuracy: 1e-6)
+        XCTAssertEqual(chimes, 1)
+    }
+
+    // Value: protects=a catch-up landing exactly on a later boundary ends in the phase after it, with one chime and none a second later; fails_when=the catch-up stops on a phase that ends at the tick (its end compared with `>=` instead of `>`); why_new=no tick landed exactly on a later boundary; seam=handleTick(at:); no_claim=none beyond protects
+    func testATickExactlyOnALaterBoundaryLandsInThePhaseAfterIt() throws {
+        let p = session()
+        defer { p.stop() }
+        let breakEnd = try XCTUnwrap(p.phaseEnd).addingTimeInterval(300)
+
+        p.handleTick(at: breakEnd)
+
+        XCTAssertEqual(p.phase, .work, "a break that ended at the tick is over")
+        XCTAssertEqual(p.completedCycles, 1)
+        XCTAssertEqual(try XCTUnwrap(p.phaseEnd).timeIntervalSince(breakEnd), 1500, accuracy: 1e-6)
+        XCTAssertEqual(p.remaining, 1500, accuracy: 1e-6)
+        XCTAssertEqual(chimes, 1)
+        p.handleTick(at: breakEnd.addingTimeInterval(1))
+        XCTAssertEqual(chimes, 1, "no second chime a second later")
+    }
+
+    // Value: protects=a catch-up past a long break starts the next set: the long break is cleared and only focus intervals count; fails_when=the break-to-focus step stops clearing restIsLong, or counts a round for a break; why_new=no test passed a long break's end; seam=handleTick(at:); no_claim=CycleDots' drawing
+    func testACatchUpPastALongBreakStartsTheNextSet() throws {
+        let p = session(cycles: 2)
+        defer { p.stop() }
+        let longBreakEnd = try XCTUnwrap(p.phaseEnd).addingTimeInterval(300 + 1500 + 900)
+
+        p.handleTick(at: longBreakEnd.addingTimeInterval(60))
+
+        XCTAssertEqual(p.phase, .work)
+        XCTAssertFalse(p.restIsLong, "the long break is over")
+        XCTAssertEqual(p.completedCycles, 2)
+        XCTAssertEqual(p.remaining, 1500 - 60, accuracy: 1e-6)
+        XCTAssertEqual(chimes, 1)
     }
 }
 

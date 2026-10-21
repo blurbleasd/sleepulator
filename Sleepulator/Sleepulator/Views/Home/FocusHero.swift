@@ -25,7 +25,7 @@ struct FocusHero: View {
 
     private static let ringSize: CGFloat = 214
     private static let lineWidth: CGFloat = 6
-    /// The arc eases back in over this span at each phase boundary (grows from empty to full)
+    /// The arc eases back in over this span when a new phase comes up (grows from empty to full)
     /// instead of snapping in one frame — animated *within* the continuous model so it doesn't
     /// fight the TimelineView (an implicit `.animation` on the per-frame trim would be clobbered).
     private static let refillDuration: TimeInterval = 0.5
@@ -61,8 +61,9 @@ struct FocusHero: View {
     }
 
     /// The depleting arc + its lit leading cap at a given elapsed `progress` (0…1). `phaseElapsed`
-    /// drives the boundary refill: for the first `refillDuration` of a phase the arc grows from 0
-    /// up to its true length (smoothstep-eased), then tracks depletion normally.
+    /// drives the boundary refill: for the first `refillDuration` after a phase comes up in the app
+    /// (its start, or the late tick that found it: `PomodoroService.phaseElapsed(at:)`) the arc
+    /// grows from 0 up to its true length (smoothstep-eased), then tracks depletion normally.
     @ViewBuilder
     private func ring(progress: Double, phaseElapsed: TimeInterval) -> some View {
         let trueFrac = 1 - progress                  // remaining fraction = arc length

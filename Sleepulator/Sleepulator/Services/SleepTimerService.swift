@@ -560,10 +560,12 @@ final class PomodoroService: ObservableObject {
     var longRestMinutes: Int { didSet { UserDefaults.standard.set(longRestMinutes, forKey: "pomoLongRest") } }
     var cyclesBeforeLongBreak: Int { didSet { UserDefaults.standard.set(cyclesBeforeLongBreak, forKey: "pomoCycles") } }
 
-    /// Called at every phase boundary so the owner can play a chime.
+    /// Called when the session moves on to a new phase (a tick or a skip) so the owner can play a
+    /// chime: once per move, however many boundaries a late tick passed (`advancePhase`).
     var chimeFn: (() -> Void)?
-    /// Fired on start, every phase boundary, and stop — (newPhase, isRunning). AudioEngine
-    /// uses it to soften the ambient bed during breaks (FOCUS-MODE-SPEC R6).
+    /// Fired on start, each move to a new phase (once per move, with the phase the session is in
+    /// now), and stop — (newPhase, isRunning). AudioEngine uses it to soften the ambient bed
+    /// during breaks (FOCUS-MODE-SPEC R6).
     var phaseChangedFn: ((Phase, Bool) -> Void)?
 
     private var timer: DispatchSourceTimer?
@@ -664,23 +666,26 @@ final class PomodoroService: ObservableObject {
     }
 
     /// Skip the rest of the current phase — end a break early, or bail out of a work interval
-    /// (which still counts the cycle, matching the natural boundary's accounting).
-    func skipPhase() {
+    /// (which still counts the cycle, matching the natural boundary's accounting). A phase that
+    /// already ended is caught up to instead, as a tick would: in the moment after unlock, before
+    /// the first tick, the screen still shows it, and skipping from it started the next phase late.
+    func skipPhase(at now: Date = Date()) {
         guard isRunning else { return }
-        let now = Date()
-        advancePhase(from: now, now: now)
+        if let end = phaseEnd, end <= now {
+            advancePhase(from: end, now: now)
+        } else {
+            advancePhase(from: now, now: now)
+        }
     }
 
-    /// Starts a phase of `minutes` at `start`, as the app sees it at `now`. Returns its end.
-    @discardableResult
-    private func beginPhase(minutes: Int, at start: Date, now: Date) -> Date {
+    /// Starts a phase of `minutes` at `start`, as the app sees it at `now`.
+    private func beginPhase(minutes: Int, at start: Date, now: Date) {
         let secs = Double(minutes) * 60
         let end = start.addingTimeInterval(secs)
         phaseEnd = end
         phaseTotal = secs
         phaseShownAt = now
         remaining = max(0, end.timeIntervalSince(now))
-        return end
     }
 
     private func tick() {
@@ -712,24 +717,35 @@ final class PomodoroService: ObservableObject {
     /// Activity, while the boundary's notification had come on time. Every boundary passed by
     /// `now` is taken in turn, so each finished work interval counts and a long break comes when
     /// due. One chime and one `phaseChangedFn` for the lot: a run of bells on unlock is noise, and
-    /// the owner only acts on the phase the session is in now.
+    /// the owner only acts on the phase the session is in now. The walk runs on locals and
+    /// publishes once: a clock set forward by hand can put thousands of boundaries behind one
+    /// tick, and every published write notifies each Focus view.
     private func advancePhase(from boundary: Date, now: Date) {
         chimeFn?()
+        var next = phase, cycles = completedCycles, isLong = restIsLong
         var start = boundary
-        repeat {
-            if phase == .work {
+        while true {
+            let minutes: Int
+            if next == .work {
                 // Finished a work interval. Every Nth one earns a long break.
-                completedCycles += 1
-                let longDue = completedCycles % max(1, cyclesBeforeLongBreak) == 0
-                restIsLong = longDue
-                phase = .rest
-                start = beginPhase(minutes: longDue ? longRestMinutes : restMinutes, at: start, now: now)
+                cycles += 1
+                isLong = cycles % max(1, cyclesBeforeLongBreak) == 0
+                next = .rest
+                minutes = isLong ? longRestMinutes : restMinutes
             } else {
-                restIsLong = false
-                phase = .work
-                start = beginPhase(minutes: workMinutes, at: start, now: now)
+                isLong = false
+                next = .work
+                minutes = workMinutes
             }
-        } while start <= now && phaseTotal > 0   // a zero-length phase (no setting allows one) can't spin here
+            let end = start.addingTimeInterval(Double(minutes) * 60)
+            // A zero-length phase (no setting allows one) can't spin here.
+            if end > now || minutes <= 0 {
+                (phase, completedCycles, restIsLong) = (next, cycles, isLong)
+                beginPhase(minutes: minutes, at: start, now: now)
+                break
+            }
+            start = end
+        }
         phaseChangedFn?(phase, true)
         schedulePhaseEndNotification()
         updateLiveActivity()
