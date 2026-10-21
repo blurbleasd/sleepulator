@@ -38,7 +38,8 @@ Suites in `SleepulatorTests/` (seven files, many suites):
   the first, never popping), Fireflies' night (`FireflyNightTests`: out of step and all there at
   bedtime, in step and down to the meadow's few at the end, the nearest going first, and a jump in
   the night eased: back at most a night in two minutes, even after a lock, on at most a night in
-  30 s; `follow`, `FireflyNightFollower`), and the
+  30 s, and after 30 minutes or more out of sight the night as it is, so a new night opens on a
+  full meadow; `follow`, `FireflyNightFollower`), and the
   Podcasts-tab rules (`PodcastTextTests`, `ShowNotesPreviewTests`, `ShowNotesEdgeTests`,
   `TonightShelfTests`, `QueueMoveToHeadTests`), the player rules (`NowPlayingStateTests`,
   `NightLineCopyTests`, `PlayerQueueActionTests`, `PodcastFailureStreakTests`), Settings' rules
@@ -912,14 +913,18 @@ Green playing.
    end a few (3-8 by screen size; 5 on most phones) are left, spread over the meadow, flashing together, slower than at bedtime,
    the flash rolling left to right across them. ✅ None goes out with a pop: each fades over a
    stretch of the night. In the last two minutes tap "Still awake? +15m": ✅ the fireflies that had
-   gone out come back over several seconds, never all at once in a flash (`FireflyNight.follow`
-   eases the night back). Again near the end, lock the phone, tap +15m on the lock screen's Live
-   Activity, wait a minute and unlock: ✅ the same, they come back over seconds after the unlock,
-   none in the first frame. Mid-night, pull down Control Center and push it back: ✅ the lit
-   fireflies don't change. An All night session, woken after an hour: ✅ the same few, together.
-   Leave Home on Fireflies and start the next night after the last one ended (sound off over 30
-   minutes): ✅ it opens on a full meadow at once, not last night's few filling in. On an SE with
-   Display Zoom on, if you have one: ✅ 3 left at the end (the shortest meadow keeps the fewest).
+   gone out come back a few at a time over about a minute, never all at once in a flash
+   (`FireflyNight.follow` eases the night back, at most a night in two minutes). Again near the
+   end, lock the phone, tap +15m on the lock screen's Live Activity, wait a minute and unlock: ✅ the
+   same, they come back over about a minute after the unlock, none in the first frame. Mid-night,
+   pull down Control Center and push it back: ✅ the lit fireflies don't change. An All night
+   session, woken after an hour: ✅ the same few, together.
+   Leave Home on Fireflies, lock the phone once the night's sound has stopped, and unlock it over
+   30 minutes later to start the next night: ✅ it opens on a full meadow at once, not last night's
+   few filling in. (Left in sight instead, the meadow refills over about two minutes once the 30
+   minutes pass, by design: `FireflyNight.freshAfter` starts afresh only after that long out of
+   sight.) On an SE with Display Zoom on, if you have one: ✅ 3 left at the end (the shortest
+   meadow keeps the fewest).
 5. **Moving scenes off.** Settings → Moving scenes off, Auto-Lock Never, the veil off. ✅ A still
    meadow, some fireflies caught mid-glow and the meadow's survivors glowing steadily. Over a
    15-minute night: ✅ they thin out to the few, which always show (the still frame re-reads the
