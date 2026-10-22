@@ -13,7 +13,8 @@ using namespace metal;
 // through the night the snowfall thins to a quarter and slows, the footprints
 // fill in, and snow builds on the lamp, until the light falls on unbroken snow.
 // How far along each is is Swift's call (`SnowNight`, unit-tested); this file
-// draws it. The lamp's bowl, the one bright thing that never moves, dims most.
+// draws it. The lamp's bowl, the brightest thing and the one that holds still
+// but for the window's slow wander, dims most.
 //
 // Calm, not busy: the snow falls at the pace real snow falls (a little over
 // half a metre a second, slower as the night slows the clock), drifts with a
@@ -36,7 +37,8 @@ using namespace metal;
 // inverse-square in-scatter integral). No code copied from elsewhere.
 //
 // Driven from SwiftUI `.colorEffect` through ShaderBackdrop. Swift owns phase
-// (night-slowed integrated seconds: the fall, the breeze, the flutter), time
+// (night-slowed integrated seconds: the fall, the breeze, the flutter, the
+// window's wander), time
 // (monotonic: the dither), size (points), night, snow and settled
 // (`SnowNight`, on the eased night), gyro and scale (pixels per point).
 // Everything else is a constant below (edit + rebuild).
@@ -51,7 +53,9 @@ constant float SIN_P    = 0.198669331;   // sine and tangent, written out so the
 constant float TAN_P    = 0.202710036;   // recomputed for every pixel
 constant float TAN_HALF = 0.50;   // tan of half the horizontal field of view (~53°)
 constant float LAMP_H   = 4.4;    // a lamp's light above the street (m)
-constant float CONE     = 0.45;   // tan of a lamp's cone half-angle (~24°)
+constant float CONE     = 0.45;   // tan of a lamp's cone half-angle (~24°)...
+constant float CONE_EDGE = 1.04;  // ...and past this share of its radius its light is exactly 0
+                                  // (the early-outs rely on it)
 constant float ARM      = 0.75;   // a lamp hangs this far left of its post (m)...
 constant float CROOK_H  = 0.55;   // ...from a crook this far above its light (m)...
 constant float CROOK_W  = 0.03;   // ...this thick (half-width, m)
@@ -59,6 +63,13 @@ constant float HOOD_Y   = 0.02;   // the hood's rim above the light (m)...
 constant float HOOD_H   = 0.26;   // ...its height...
 constant float HOOD_R   = 0.24;   // ...its rim's half-width...
 constant float HOOD_TIP = 0.05;   // ...and its top's (m)
+constant float POST_FOOT = 0.055; // the post's half-width at its foot...
+constant float POST_TOP  = 0.03;  // ...and at its top (m)
+constant float HANGER_W = 0.015;  // the rod the lamp hangs from (half-width, m)
+constant float BOWL_Y   = -0.02;  // the frosted bowl under the hood: its centre below the light...
+constant float BOWL_W   = 0.17;   // ...its half-width...
+constant float BOWL_H   = 0.075;  // ...its half-height (m)...
+constant float BOWL     = 1.6;    // ...and its light, before the fog and the night's dim
 constant float FALL     = 0.55;   // the snow's fall at bedtime (m/s)
 constant float VIS      = 25.0;   // how far you see through the falling snow (m, to 1/e)
 constant float GOING    = 0.06;   // the stretch of `snow` a flake takes to stop falling (its fade)
@@ -72,8 +83,21 @@ constant float3 LIGHT   = float3(1.00, 0.68, 0.38);    // the lamps' warm light
 constant float3 GLOW    = float3(0.026, 0.021, 0.018); // the town's glow on the clouds, and the snow-fog
 constant float3 SNOW    = float3(0.040, 0.038, 0.037); // the snow on the street in that glow: lighter than
                                                        // the sky, about 10 levels, clear of OLED's black crush
+constant float3 SNOW_CAP = float3(0.060, 0.056, 0.054); // the snow building on the lamp's iron
 constant float DRIFT    = 0.04;   // the window's slow wander (m): a few points over minutes, so the
-                                  // lamp never holds the same pixels all night (OLED burn-in)
+                                  // lamp doesn't hold the same pixels all night (OLED burn-in). It
+                                  // runs on the scene's clock, so with Moving scenes off the frame,
+                                  // like every scene's, holds still (the bowl still dims)
+// A footprint: its half-length and half-width (m), how much wider it is at the toe, how far out its
+// shape reaches (a share of its size) and where its lip of pushed-aside snow peaks.
+constant float PRINT_L  = 0.15;
+constant float PRINT_W  = 0.058;
+constant float PRINT_FLARE = 0.15;
+constant float PRINT_REACH = 1.6;
+constant float PRINT_LIP   = 1.12;
+// The window's fixed tilt: which way is up on the screen, and which way is ahead.
+constant float3 UP      = float3(0.0, COS_P, SIN_P);
+constant float3 FWD     = float3(0.0, -SIN_P, COS_P);
 
 // The lamps, down the street: x (m, right), z (m, away). The first is the one outside the window.
 constant float2 LAMPS[4] = { float2(0.5, 5.2), float2(-2.6, 17.0), float2(-7.5, 28.0), float2(-14.0, 42.0) };
@@ -93,24 +117,23 @@ inline float hashCell(float2 cell, uint salt) {
     return float(h) * (1.0 / 4294967296.0);
 }
 
-// The window: where it is, which way is up and ahead on the screen, the focal length (points) and
-// the screen's centre.
+// The window: where it is (it moves with the phone's tilt and the slow wander), the focal length
+// (points) and the screen's centre. It always faces UP and FWD.
 struct Cam {
     float3 o;
-    float3 up;
-    float3 fwd;
     float f;
     float2 c;
 };
 
 // The world point on the plane `depth` metres ahead of the window, under a pixel.
 inline float3 onPlane(Cam cam, float2 plane, float depth) {
-    return cam.o + float3(plane.x, 0.0, 0.0) + cam.up * plane.y + cam.fwd * depth;
+    return cam.o + float3(plane.x, 0.0, 0.0) + UP * plane.y + FWD * depth;
 }
-inline float2 project(Cam cam, float3 w, thread float &depth) {
+// A world point on the screen (points), and how far ahead of the window it is (m).
+inline float3 project(Cam cam, float3 w) {
     float3 v = w - cam.o;
-    depth = dot(v, cam.fwd);
-    return cam.c + cam.f * float2(v.x, -dot(v, cam.up)) / depth;
+    float depth = dot(v, FWD);
+    return float3(cam.c + cam.f * float2(v.x, -dot(v, UP)) / depth, depth);
 }
 
 // A lamp's light reaching `w` (the lamp's light at `at`): inside its cone, softening toward the
@@ -119,18 +142,17 @@ inline float spot(float3 w, float3 at) {
     float3 v = w - at;
     float below = -v.y;
     if (below <= 0.0) return 0.0;
-    // Past 1.04 of the cone's radius the edge below is exactly 0.
-    float rr = dot(v.xz, v.xz), lim = 1.04 * CONE * below;
+    // Past CONE_EDGE of the cone's radius the edge below is exactly 0.
+    float rr = dot(v.xz, v.xz), lim = CONE_EDGE * CONE * below;
     if (rr >= lim * lim) return 0.0;
     float r = sqrt(rr) / (below * CONE);         // 0 on the axis, 1 at the cone's edge
-    float edge = 1.0 - smoothstep(0.62, 1.04, r);
+    float edge = 1.0 - smoothstep(0.62, CONE_EDGE, r);
     return edge * (1.0 - 0.35 * r * r) / (dot(v, v) + 0.05);
 }
 
-// The light a lamp's cone scatters toward the eye along a view ray from `o` in unit direction `d`
-// that ends at `tEnd`: the inverse-square in-scatter over the ray's chord through the cone,
-// integrated in closed form, through the cone and (to soften its edge) a narrower one inside it.
-// The inner cone shares the apex and the axis, so a ray that misses the outer one misses both.
+// Where a view ray (from `m`, its origin relative to the lamp, in unit direction `d`) runs through
+// the lamp's cone (tan of its half-angle `k`), the lower one below the lamp: `span`, clamped to the
+// ray's own [0, tEnd]. Returns 1 if it does, 0 if not.
 inline float coneChord(float3 m, float3 d, float k, float tEnd, thread float2 &span) {
     float c2 = 1.0 / (1.0 + k * k);              // cos² of the half-angle
     // Inside the cone (axis straight down) where (w·down)² ≥ cos² |w|², w = m + t d.
@@ -145,13 +167,18 @@ inline float coneChord(float3 m, float3 d, float k, float tEnd, thread float2 &s
     span = float2(max(t1, 0.0), min(t2, tEnd));
     return span.y > span.x ? 1.0 : 0.0;
 }
+// The light a lamp's cone scatters toward the eye along a view ray from `o` in unit direction `d`
+// that ends at `tEnd`: the inverse-square in-scatter over the ray's chord through the cone,
+// integrated in closed form, through the cone and (to soften its edge) a narrower one inside it.
+// The inner cone shares the apex and the axis, so a ray that misses the outer one misses both.
 inline float coneGlow(float3 o, float3 d, float3 at, float tEnd) {
     float3 m = o - at;
     float2 outer, inner;
     if (coneChord(m, d, CONE, tEnd, outer) <= 0.0) return 0.0;
     float t0 = -dot(m, d);
     float h = sqrt(max(dot(m, m) - t0 * t0, 0.0) + 0.02);
-    // ∫ dt / (h² + (t - t0)²) over the chord: (atan((t2 - t0)/h) - atan((t1 - t0)/h)) / h, as one atan2.
+    // ∫ dt / (h² + (t - t0)²) over the span: (atan((span.y - t0)/h) - atan((span.x - t0)/h)) / h, as
+    // one atan2.
     float glow = 0.6 * atan2((outer.y - outer.x) * h, h * h + (outer.y - t0) * (outer.x - t0));
     if (coneChord(m, d, CONE * 0.7, tEnd, inner) > 0.0) {
         glow += 0.4 * atan2((inner.y - inner.x) * h, h * h + (inner.y - t0) * (inner.x - t0));
@@ -172,11 +199,13 @@ inline float3 footprints(float2 g, float2 lampAt, float fill) {
     float3 out = float3(0.0);
     float2 rel = g - start;
     float along = dot(rel, dir);
-    // A print reaches 0.24 m along the walk from its centre.
-    if (along < -0.3 || along > steps * stride + 0.3) return out;
-    // A print's centre is at most 0.31 m across the walk, and its edge 0.14 m from that: past 0.46 m
-    // neither print reaches.
-    if (abs(dot(rel, side)) > 0.46) return out;
+    // How far a print's shape reaches from its centre, turned out by up to 0.14 rad (sin < 0.14), its
+    // centre at most 0.04 m along its step and 0.31 m across the walk (0.13 to the side, 0.18 wander).
+    float wide = PRINT_W * (1.0 + PRINT_FLARE);
+    float alongReach = 0.04 + PRINT_REACH * (PRINT_L + wide * 0.14);
+    float acrossReach = 0.31 + PRINT_REACH * (PRINT_L * 0.14 + wide);
+    if (along < -alongReach || along > steps * stride + alongReach) return out;
+    if (abs(dot(rel, side)) > acrossReach) return out;
     float k0 = floor(along / stride);
     float sink = pow(1.0 - fill, 1.3);                   // its depth left
     float wall = mix(0.22, 0.85, fill);                  // its walls' width, a share of its radius
@@ -189,28 +218,46 @@ inline float3 footprints(float2 g, float2 lampAt, float fill) {
         float2 centre = start + dir * (k * stride + 0.04 * foot) + side * (0.13 * foot + wander);
         float2 fdir = dir * cos(toe) + side * sin(toe), fside = float2(-fdir.y, fdir.x);
         float2 l = g - centre;
-        float a = dot(l, fdir) / 0.15, c = dot(l, fside) / (0.058 * (1.0 + 0.15 * clamp(a, -1.0, 1.0)));
+        float a = dot(l, fdir) / PRINT_L;
+        float halfW = PRINT_W * (1.0 + PRINT_FLARE * clamp(a, -1.0, 1.0));   // wider toward the toe
+        float c = dot(l, fside) / halfW;
         float r = length(float2(a, c));
-        if (r > 1.6) continue;
+        if (r > PRINT_REACH) continue;
         float x = clamp((r - (1.0 - wall)) / wall, 0.0, 1.0);
         float hollow = 1.0 - x * x * (3.0 - 2.0 * x);    // 1 on its floor, 0 outside
-        float lip = 0.18 * exp(-(r - 1.12) * (r - 1.12) / 0.05);
+        float lip = 0.18 * exp(-(r - PRINT_LIP) * (r - PRINT_LIP) / 0.05);
         // Its slope: d/dr, then along and across.
-        float dr = depth * sink * (6.0 * x * (1.0 - x) / wall - lip * 2.0 * (r - 1.12) / 0.05);
-        float2 dAC = r > 1e-4 ? dr * float2(a / 0.15, c / 0.058) / r : float2(0.0);
+        float dr = depth * sink * (6.0 * x * (1.0 - x) / wall - lip * 2.0 * (r - PRINT_LIP) / 0.05);
+        float2 dAC = r > 1e-4 ? dr * float2(a / PRINT_L, c / halfW) / r : float2(0.0);
         out += float3(hollow * sink, fdir * dAC.x + fside * dAC.y);
     }
     return out;
 }
 
+// Whether no flake in the box [lo, hi] on the plane `depth` ahead (anywhere in its slab, `slab`
+// metres deep) can be lit by the lamp at `at`: all landed, all above the lamp, or all past the
+// cone's CONE_EDGE, where its light is exactly 0. UP and FWD point up and ahead (y and z only grow
+// with the box), so the box's corners bound it; its lowest point has the widest cone.
+inline bool unlit(Cam cam, float2 lo, float2 hi, float depth, float slab, float3 at) {
+    float yLo = cam.o.y + UP.y * lo.y + FWD.y * (depth + 0.5 * slab);
+    float yHi = cam.o.y + UP.y * hi.y + FWD.y * (depth - 0.5 * slab);
+    if (yHi < 0.0 || yLo >= at.y) return true;
+    float zLo = cam.o.z + UP.z * lo.y + FWD.z * (depth - 0.5 * slab);
+    float zHi = cam.o.z + UP.z * hi.y + FWD.z * (depth + 0.5 * slab);
+    float bx = max(max(cam.o.x + lo.x - at.x, at.x - cam.o.x - hi.x), 0.0);
+    float bz = max(max(zLo - at.z, at.z - zHi), 0.0);
+    float reachR = CONE_EDGE * CONE * (at.y - yLo);
+    return bx * bx + bz * bz >= reachR * reachR;
+}
+
 // One layer of snowflakes, on the plane `depth` metres ahead of the window, lit only inside the lamp
 // at `at`. At most one flake per cell (`cell` metres), each fluttering about its place; the 2×2 cells
 // whose centres bracket the pixel are checked (a flake strays at most SWAY of a cell from its
-// centre and its glow under half a cell). Each flake has its own depth in the layer's slab
+// centre, and its glow, cut at 5 sigma, stays within 1 − SWAY of a cell, to within a level). Each flake has its own depth in the layer's slab
 // (`slab` metres) for its light, so the cone is filled through, not lit on a few sheets.
 //   presence: the share of cells with a flake; rad: the flake's glow (points); gain: its brightness
-//   cap:      the most a flake's light reaches, rolled off toward it: a flake passing right by the
-//             bowl never outshines the bowl
+//   cap:      the most a flake's light reaches (it closes on it smoothly; well under it a flake is as
+//             lit as it is): set per pixel so a flake passing right by the bowl never outshines it
 //   snow:     the share still falling (`SnowNight.snowfall`): each flake stops (fades) at its rank
 inline float3 flakes(Cam cam, float2 plane, float depth, float slab, float cell, float presence,
                      float rad, float gain, float cap, float3 at, uint salt, float2 travel, float snow,
@@ -224,24 +271,19 @@ inline float3 flakes(Cam cam, float2 plane, float depth, float slab, float cell,
     if (length(float2(w.x - at.x, dz)) - reach > (at.y - w.y + reach) * CONE) return sum;
     float2 g = (plane + travel) / cell;
     float2 id0 = floor(g - 0.5);
+    // Skip the layer here if none of the four cells' flakes can be lit (the box holding all four).
+    if (unlit(cam, (id0 + 0.5 - SWAY) * cell - travel, (id0 + 1.5 + SWAY) * cell - travel, depth, slab, at)) {
+        return sum;
+    }
     float scale = cam.f / depth;                         // points per metre on this plane
     for (int j = 0; j <= 1; j++) {
         for (int i = 0; i <= 1; i++) {
             float2 id = id0 + float2(float(i), float(j));
             if (hashCell(id, salt) >= presence) continue;
-            // Skip a cell none of whose possible flakes (anywhere it can stray, at any depth in the
-            // slab) is lit: all landed, all above the lamp, or all past the cone's 1.04, where its
-            // edge is exactly 0. The box's lowest point has the widest cone.
-            float2 lo = (id + 0.5 - SWAY) * cell - travel, hi = (id + 0.5 + SWAY) * cell - travel;
-            float yLo = cam.o.y + cam.up.y * lo.y + cam.fwd.y * (depth + 0.5 * slab);
-            float yHi = cam.o.y + cam.up.y * hi.y + cam.fwd.y * (depth - 0.5 * slab);
-            if (yHi < 0.0 || yLo >= at.y) continue;
-            float zLo = cam.o.z + cam.up.z * lo.y + cam.fwd.z * (depth - 0.5 * slab);
-            float zHi = cam.o.z + cam.up.z * hi.y + cam.fwd.z * (depth + 0.5 * slab);
-            float bx = max(max(cam.o.x + lo.x - at.x, at.x - cam.o.x - hi.x), 0.0);
-            float bz = max(max(zLo - at.z, at.z - zHi), 0.0);
-            float reachR = 1.04 * CONE * (at.y - yLo);
-            if (bx * bx + bz * bz >= reachR * reachR) continue;
+            // Skip a cell none of whose possible flakes (anywhere it can stray) is lit.
+            if (unlit(cam, (id + 0.5 - SWAY) * cell - travel, (id + 0.5 + SWAY) * cell - travel, depth, slab, at)) {
+                continue;
+            }
             float rank = (1.0 - GOING) * hashCell(id, salt + 1u);
             float alive = smoothstep(rank, rank + GOING, snow);
             if (alive <= 0.0) continue;
@@ -262,8 +304,7 @@ inline float3 flakes(Cam cam, float2 plane, float depth, float slab, float cell,
             if (fw.y < 0.0) continue;                    // landed: under the snow's surface
             float light = spot(fw, at);
             if (light <= 0.0) continue;
-            float lit = light * gain;
-            lit /= 1.0 + lit / cap;                      // the flakes passing right by the bowl don't flare
+            float lit = cap * tanh(light * gain / cap);  // the flakes passing right by the bowl don't flare
             sum += LIGHT * (exp(-0.5 * d2) * lit * alive * mix(0.6, 1.0, h2));
         }
     }
@@ -292,14 +333,12 @@ half4 lampSnowField(float2 pos, half4 color,
                                    0.5 * sin(phase * 0.023 + 0.7));
     Cam cam;
     cam.o = float3(gyro.x * 0.30 + wander.x, CAM_H - gyro.y * 0.15 + wander.y, 0.0);
-    cam.up = float3(0.0, COS_P, SIN_P);
-    cam.fwd = float3(0.0, -SIN_P, COS_P);
     cam.f = 0.5 * size.x / TAN_HALF;
     cam.c = 0.5 * size;
 
     float2 q = (pos - cam.c) / cam.f;
     float2 plane1 = float2(q.x, -q.y);                   // the pixel on the plane 1 m ahead
-    float3 ray = normalize(float3(q.x, 0.0, 0.0) + cam.up * (-q.y) + cam.fwd);
+    float3 ray = normalize(float3(q.x, 0.0, 0.0) + UP * (-q.y) + FWD);
     float tGround = ray.y < 0.0 ? -cam.o.y / ray.y : 1e4;
     float fogAt = exp(-min(tGround, 1e3) / VIS);         // how much of the ground shows through the snow
     float fogL[4];                                       // how much of each lamp shows through it
@@ -335,7 +374,8 @@ half4 lampSnowField(float2 pos, half4 color,
             if (t > 0.0 && t < 1.0) {
                 float off = length(at.xz + t * u - post);
                 float pen = min(0.04 + 0.17 * length(g.xz - post) / ARM, 0.4);
-                shade = smoothstep(0.045 - 0.5 * pen, 0.045 + 0.5 * pen, off);
+                float postW = mix(POST_FOOT, POST_TOP, 0.4);   // its width where it shades most
+                shade = smoothstep(postW - 0.5 * pen, postW + 0.5 * pen, off);
             }
             float3 l = normalize(at - g);
             lit += s * max(dot(n, l), 0.0) * shade;
@@ -346,23 +386,38 @@ half4 lampSnowField(float2 pos, half4 color,
     }
 
     // --- the cones' glow in the falling snow ---
-    float3 haze = float3(0.0);
+    float hazeK = 0.10 * mix(1.0, 0.75, 1.0 - snow);
+    float haze0 = 0.0;                                   // the first lamp's, for the flakes' cap
     for (int i = 0; i < 4; i++) {
         float3 at = float3(LAMPS[i].x, LAMP_H, LAMPS[i].y);
-        haze += LIGHT * coneGlow(cam.o, ray, at, tGround) * fogL[i];
+        float glow = coneGlow(cam.o, ray, at, tGround) * fogL[i] * hazeK;
+        col += LIGHT * glow;
+        if (i == 0) haze0 = glow;
     }
-    col += haze * 0.10 * mix(1.0, 0.75, 1.0 - snow);
 
     // --- the falling snow, lit only inside the cones ---
     float fallen = FALL * phase;
     float breeze = 0.05 * phase - 0.08 / 0.031 * cos(phase * 0.031);   // drift: a slow breeze that comes and goes
-    float2 travel = float2(-breeze, fallen);
-    // A flake never outshines the bowl it passes (its light, 1.6 x fog, at most 1.3 for the first lamp).
-    float cap = 1.2 * bowlDim;
+    // The snow belongs to the street, not the screen: shift each plane's grid by the window's own
+    // move (its tilt and wander, across and up the planes), so the flakes parallax with the lamps.
+    float3 home = float3(0.0, CAM_H, 0.0);                // the window at rest
+    float2 camOff = float2(cam.o.x, dot(cam.o - home, UP));
+    float2 travel = float2(-breeze, fallen) + camOff;
+    // A flake never outshines the bowl: it, and what it's laid over here (the first cone's glow and the
+    // bowl's glare), stay under 0.85 of the bowl's light.
     float3 at0 = float3(LAMPS[0].x, LAMP_H, LAMPS[0].y);
-    // The layers in front of the first lamp are drawn after its post and hood, which they pass before.
-    float zLamp0 = dot(at0 - cam.o, cam.fwd);
-    float3 snowFront = float3(0.0);
+    float3 a0 = project(cam, at0);
+    float r0 = length(float2(pos.x - a0.x, a0.y - pos.y) * a0.z / cam.f - float2(0.0, BOWL_Y));
+    float glare0 = (0.10 * exp(-r0 / 0.22) + 0.04 * exp(-r0 / 0.9)) * fogL[0] * bowlDim;
+    float bowl0 = BOWL * fogL[0] * bowlDim;
+    float cap = max(0.85 * bowl0 - haze0 - glare0, 0.05 * bowl0);
+    // Layers nearer than the lamp are drawn after its post and hood, which they pass in front of; the
+    // layer the post's depth runs through is drawn after them too, and hidden by the post only where
+    // the post is nearer (its foot is further away than its top: the window looks down).
+    float zLamp0 = a0.z;
+    float zFoot0 = project(cam, float3(at0.x + ARM, 0.0, at0.z)).z;
+    float3 snowFront = float3(0.0), snowMid = float3(0.0);
+    float midDepth = 0.0;
     for (int k = 0; k < NEAR_LAYERS; k++) {
         float depth = NEAR_FIRST + NEAR_STEP * float(k);
         // Nearer the window: bigger, softer (out of focus) and dimmer at the core.
@@ -371,28 +426,32 @@ half4 lampSnowField(float2 pos, half4 color,
         float gain = mix(3.0, 1.6, near);
         float3 layer = flakes(cam, plane1 * depth, depth, NEAR_STEP, 0.22, 0.55, rad, gain, cap, at0,
                               1000u + uint(k) * 17u, travel, snow, phase, px);
-        if (depth < zLamp0) snowFront += layer; else col += layer;
+        if (depth < zLamp0) snowFront += layer;
+        else if (depth < zFoot0) { snowMid += layer; midDepth = depth; }
+        else col += layer;
     }
-    // The far lamps' snow, its cells 8 points across on screen whatever the depth: smaller, and the 2x2
-    // cells checked would cut a flake's glow off square.
+    // The far lamps' snow, its cells 8 points across on screen at the lamp's depth from the window at
+    // rest (from the moving window they'd swell and shrink with the tilt, and the field with them):
+    // smaller, and the 2x2 cells checked would cut a flake's glow off square.
     for (int i = 1; i < 4; i++) {
         float3 at = float3(LAMPS[i].x, LAMP_H, LAMPS[i].y);
-        float3 v = at - cam.o;
-        float depth = dot(v, cam.fwd) + 0.6;
+        float depth = dot(at - home, FWD) + 0.6;
         col += flakes(cam, plane1 * depth, depth, 3.0, 8.0 * depth / cam.f, 0.40, 0.6, 1.6, cap, at,
                       2000u + uint(i) * 17u, travel, snow, phase, px) * fogL[i];
     }
+    // What of the first lamp is in front of the middle layer here: its hood, crook, hanger, caps and
+    // bowl always; its post where the post is nearer.
+    float lampCover0 = 0.0, postCover0 = 0.0, postZ0 = 0.0;
 
     // --- the lamps: the post, its crook, the hood and the glowing bowl beneath it ---
     for (int i = 3; i >= 0; i--) {
         float3 at = float3(LAMPS[i].x, LAMP_H, LAMPS[i].y);
         float fog = fogL[i];
-        float zl;
-        float2 a = project(cam, at, zl);
-        float s = cam.f / zl;                            // points per metre at the lamp
+        float3 a = project(cam, at);
+        float s = cam.f / a.z;                           // points per metre at the lamp
         float2 lp = float2(pos.x - a.x, a.y - pos.y) / s; // the pixel about the lamp (m, y up)
         // Glare: the frosted bowl's light scattering in the snow about it.
-        float r = length(lp - float2(0.0, -0.02));
+        float r = length(lp - float2(0.0, BOWL_Y));
         // Past 6 m the glare is under 0.05 of a level, and the lamp's shapes (within 4.9 m) are behind.
         if (r > 6.0) continue;
         col += LIGHT * (0.10 * exp(-r / 0.22) + 0.04 * exp(-r / 0.9)) * fog * bowlDim;
@@ -400,13 +459,12 @@ half4 lampSnowField(float2 pos, half4 color,
         float3 iron = mix(GLOW * 0.3, col, 1.0 - fog);   // dark iron, lost in the snow with distance
         float cover = 0.0;
         // The post: from the street up past the light, then hooked over to hang the lamp.
-        float zb, zt;
-        float2 base = project(cam, float3(at.x + ARM, 0.0, at.z), zb);
-        float2 top = project(cam, float3(at.x + ARM, LAMP_H + CROOK_H, at.z), zt);
-        float2 ba = top - base, pa = pos - base;
+        float3 base = project(cam, float3(at.x + ARM, 0.0, at.z));
+        float3 top = project(cam, float3(at.x + ARM, LAMP_H + CROOK_H, at.z));
+        float2 ba = top.xy - base.xy, pa = pos - base.xy;
         float tt = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
-        float halfW = mix(0.055, 0.03, tt) * s;
-        cover = max(cover, smoothstep(halfW + px, halfW - px, length(pa - ba * tt)));
+        float halfW = mix(POST_FOOT, POST_TOP, tt) * s;
+        float post = smoothstep(halfW + px, halfW - px, length(pa - ba * tt));
         float2 hookC = float2(0.5 * ARM, CROOK_H);
         float2 hp = lp - hookC;
         if (hp.y > 0.0) {
@@ -414,7 +472,7 @@ half4 lampSnowField(float2 pos, half4 color,
             cover = max(cover, smoothstep(CROOK_W + px / s, CROOK_W - px / s, ring));
         }
         // The hanger, the hood and the bowl.
-        float hanger = smoothstep(0.015 + px / s, 0.015 - px / s, abs(lp.x))
+        float hanger = smoothstep(HANGER_W + px / s, HANGER_W - px / s, abs(lp.x))
                      * step(HOOD_Y + HOOD_H, lp.y) * step(lp.y, CROOK_H + 0.01);
         cover = max(cover, hanger);
         float hoodT = clamp((lp.y - HOOD_Y) / HOOD_H, 0.0, 1.0);
@@ -430,12 +488,20 @@ half4 lampSnowField(float2 pos, half4 color,
         float hoodTop = lp.y - (HOOD_Y + HOOD_H * (1.0 - clamp((abs(lp.x) - HOOD_TIP) / (HOOD_R - HOOD_TIP), 0.0, 1.0)));
         float capHood = abs(lp.x) < HOOD_R ? smoothstep(capH + px / s, capH - px / s, hoodTop)
                                           * smoothstep(-px / s, px / s, hoodTop) : 0.0;
-        float bowlR = length(float2(lp.x / 0.17, (lp.y + 0.02) / 0.075));
-        float bowl = lp.y < 0.03 ? smoothstep(1.0 + 2.0 * px / s, 1.0 - 2.0 * px / s, bowlR) : 0.0;
-        col = mix(col, iron, max(cover, hood));
-        col = mix(col, float3(0.060, 0.056, 0.054) * fog + col * (1.0 - fog), max(capCrook, capHood));
-        col = mix(col, LIGHT * 1.6 * bowlDim * fog + col * (1.0 - fog), bowl);
+        // The bowl: an ellipse (its edge softened over a pixel, in its own units), cut by the hood's rim.
+        float bowlR = length(float2(lp.x / BOWL_W, (lp.y - BOWL_Y) / BOWL_H));
+        float aa = 2.0 * px / (s * BOWL_H);
+        float bowl = smoothstep(1.0 + aa, 1.0 - aa, bowlR) * smoothstep(HOOD_Y + px / s, HOOD_Y - px / s, lp.y);
+        if (i == 0) {
+            lampCover0 = max(max(cover, hood), max(max(capCrook, capHood), bowl));
+            postCover0 = post;
+            postZ0 = mix(base.z, top.z, tt);
+        }
+        col = mix(col, iron, max(max(cover, post), hood));
+        col = mix(col, SNOW_CAP * fog + col * (1.0 - fog), max(capCrook, capHood));
+        col = mix(col, LIGHT * BOWL * bowlDim * fog + col * (1.0 - fog), bowl);
     }
+    col += snowMid * (1.0 - max(lampCover0, postZ0 < midDepth ? postCover0 : 0.0));
     col += snowFront;
 
     col *= 1.0 - 0.30 * p;

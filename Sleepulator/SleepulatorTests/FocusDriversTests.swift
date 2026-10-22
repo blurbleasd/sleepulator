@@ -6,7 +6,9 @@ import simd
 @testable import Sleepulator
 
 /// Pins the Pomodoro→look mapping the Focus scenes share. The shaders and their thermals are
-/// device-verified; `FocusStillFrameTests`, below, cover the still frame's redraw.
+/// device-verified; `FocusStillFrameTests`, below, cover the still frame's redraw. The file also holds
+/// the other suite hosted in a window, `ShaderBackdropEasedNightTests` (the Sleep host), for
+/// `turnMainRunLoop`.
 final class FocusDriversTests: XCTestCase {
 
     private let acc = 1e-9
@@ -267,23 +269,12 @@ final class FocusStillFrameTests: XCTestCase {
         host.view.layoutIfNeeded()
         defer { p.stop(); window.isHidden = true; window.rootViewController = nil }
 
-        // Turns the main run loop until `done` or the budget is spent. It's spent per turn (a 20 ms
-        // turn, at most 50 ms counted), not by the wall clock: the host app's first render can hold
-        // main for 10 s or more, and a wall-clock budget ran out under it with the tick still queued.
-        func turn(for budget: TimeInterval, until done: () -> Bool = { false }) {
-            var left = budget
-            while !done(), left > 0 {
-                let t0 = Date()
-                RunLoop.main.run(until: t0.addingTimeInterval(0.02))
-                left -= min(Date().timeIntervalSince(t0), 0.05)
-            }
-        }
-        turn(for: 2) { !readings.isEmpty }
+        turnMainRunLoop(for: 2) { !readings.isEmpty }
         XCTAssertFalse(readings.isEmpty, "the frame never rendered")
         // Settle until 25 turns (about 0.5 s) pass with no draw: layout passes after the first draw
         // aren't publishes.
         var settled = readings.count, quietTurns = 0
-        turn(for: 3) {
+        turnMainRunLoop(for: 3) {
             if readings.count != settled { settled = readings.count; quietTurns = 0 } else { quietTurns += 1 }
             return quietTurns >= 25
         }
@@ -291,16 +282,16 @@ final class FocusStillFrameTests: XCTestCase {
 
         // Nothing published, nothing redrawn: so the redraws below are the Pomodoro's.
         let before = readings.count
-        turn(for: 0.2)
+        turnMainRunLoop(for: 0.2) { false }
         XCTAssertEqual(readings.count, before, "the frame redrew with nothing published")
 
         p.start()
-        turn(for: 2) { readings.last?.running == true }
+        turnMainRunLoop(for: 2) { readings.last?.running == true }
         XCTAssertEqual(readings.last?.running, true, "a start didn't redraw the frame with the session running")
 
         // The 1 Hz tick redraws it too, with the countdown lower: the reading creeps.
         let started = p.remaining
-        turn(for: 3) { (readings.last?.remaining ?? started) < started }
+        turnMainRunLoop(for: 3) { (readings.last?.remaining ?? started) < started }
         XCTAssertLessThan(readings.last?.remaining ?? started, started, "a tick didn't redraw the frame with the countdown")
     }
 
@@ -342,17 +333,6 @@ final class ShaderBackdropEasedNightTests: XCTestCase {
         timer.timerRemaining = 15 * 60
         XCTAssertEqual(timer.nightProgress, 0.5, accuracy: 1e-9)
 
-        // Turns the main run loop until `done` or the budget is spent, per turn (as in
-        // FocusStillFrameTests): the host app's first render can hold main for 10 s or more.
-        func turn(for budget: TimeInterval, until done: () -> Bool) {
-            var left = budget
-            while !done(), left > 0 {
-                let t0 = Date()
-                RunLoop.main.run(until: t0.addingTimeInterval(0.02))
-                left -= min(Date().timeIntervalSince(t0), 0.05)
-            }
-        }
-
         typealias Read = (night: Double, now: TimeInterval, inSight: Bool)
         /// Hosts one paused backdrop in its own window until it has built its shader, and returns what
         /// its hook was asked and the night its shader got, with the span the reads fell in.
@@ -382,11 +362,19 @@ final class ShaderBackdropEasedNightTests: XCTestCase {
             window.rootViewController = host
             window.isHidden = false
             host.view.layoutIfNeeded()
-            turn(for: 30) { !shader.isEmpty }
-            let to = Date.timeIntervalSinceReferenceDate
+            turnMainRunLoop(for: 30) { !shader.isEmpty }
+            let drawn = reads.count
+            // Leaving the screen (another tab, a cover) reads the night once more, out of sight.
             window.isHidden = true
             window.rootViewController = nil
-            return (reads, shader, from...to)
+            turnMainRunLoop(for: 30) { !eased || reads.count > drawn }
+            let to = Date.timeIntervalSinceReferenceDate
+            if eased {
+                XCTAssertGreaterThan(reads.count, drawn, "leaving the screen didn't read the night")
+                XCTAssertEqual(reads.last?.inSight, false, "leaving the screen was read as in sight")
+            }
+            // The reads while it was drawn; the one on leaving is checked above.
+            return (Array(reads.prefix(drawn)), shader, from...to)
         }
 
         // Out of sight (the veil, the lock screen): the hook reads the timer's night, not in sight.
@@ -421,5 +409,18 @@ final class ShaderBackdropEasedNightTests: XCTestCase {
         for night in plain.shader {
             XCTAssertEqual(night, 0.5, accuracy: 1e-6, "a scene without a hook lost the timer's night")
         }
+    }
+}
+
+/// Turns the main run loop until `done` or the budget is spent. It's spent per turn (a 20 ms turn, at
+/// most 50 ms counted), not by the wall clock: the host app's first render can hold main for 10 s or
+/// more, and a wall-clock budget ran out under it with the tick still queued.
+@MainActor
+private func turnMainRunLoop(for budget: TimeInterval, until done: () -> Bool) {
+    var left = budget
+    while !done(), left > 0 {
+        let t0 = Date()
+        RunLoop.main.run(until: t0.addingTimeInterval(0.02))
+        left -= min(Date().timeIntervalSince(t0), 0.05)
     }
 }

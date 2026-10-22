@@ -3502,8 +3502,9 @@ final class EasedNightTests: XCTestCase {
                        "a minute with no frame drawn brought the night back at once")
     }
 
-    // Value: protects=an unwatched gap going on counts in full: after a suspend, or the veil lifted
-    //   under freshAfter, the scene shows the later night at once (thinner snow, fewer fireflies);
+    // Value: protects=an unwatched gap going on counts in full, at onRate: after a suspend, or the
+    //   veil lifted under freshAfter, a long enough gap shows the later night at once (thinner snow,
+    //   fewer fireflies);
     //   fails_when=the on step is capped like the back step (a bright slide at the wake);
     //   why_new=the only long going-on read above is over freshAfter and takes the fresh branch;
     //   seam=none; no_claim=none beyond protects (pure rule)
@@ -3527,8 +3528,8 @@ final class EasedNightTests: XCTestCase {
     // Value: protects=the first read after an out-of-sight frame, however soon, counts at most
     //   maxBackStep coming back, and a clock set back after one holds; fails_when=watched keeps only
     //   `dt <= watchedGap` (an unlock within 21 s of the veil's frame brings back up to 0.175 of a
-    //   night in one frame), or a negative gap moves it; why_new=every tested read after an
-    //   out-of-sight frame comes a minute or more later; seam=none; no_claim=none beyond protects
+    //   night in one frame), or a negative gap moves it; why_new=every tested read coming back after
+    //   an out-of-sight frame comes a minute or more later; seam=none; no_claim=none beyond protects
     func testAReadJustAfterAnOutOfSightFrameIsUnwatched() {
         let follower = EasedNightFollower()
         let t0 = 800_000_000.0
@@ -3554,10 +3555,15 @@ final class EasedNightTests: XCTestCase {
         let follower = EasedNightFollower()
         let t0 = 800_000_000.0
         XCTAssertEqual(follower.night(0.93, now: t0), 0.93)
-        XCTAssertEqual(follower.night(0.62, now: t0 + interval), 0.93 - interval * EasedNight.backRate,
-                       accuracy: 1e-12)
-        // The next re-read would pass the bumped night; it stops there.
-        XCTAssertEqual(follower.night(0.62, now: t0 + 2 * interval), 0.62, accuracy: 1e-12)
+        // Each re-read comes back by the whole interval's worth, until it reaches the bumped night and
+        // stops there.
+        var expected = 0.93, reads = 0
+        while expected > 0.62 {
+            reads += 1
+            expected = max(0.62, expected - interval * EasedNight.backRate)
+            XCTAssertEqual(follower.night(0.62, now: t0 + Double(reads) * interval), expected, accuracy: 1e-12,
+                           "re-read \(reads)")
+        }
     }
 
     // Value: protects=after the night is over (sound off past its resume window) the next bedtime
@@ -3586,7 +3592,7 @@ final class SnowNightTests: XCTestCase {
         XCTAssertEqual(SnowNight.settled(night: 0), 0)
     }
 
-    func testAtTheEndAQuarterOfTheSnowFallsOverUnbrokenSnow() {
+    func testAtTheEndEnoughSnowFallsToLightAFlake() {
         // All night holds the night at 1, so this is what waking at 3am shows: still snowing.
         XCTAssertEqual(SnowNight.snowfall(night: 1), SnowNight.snowfallAtEnd, accuracy: 1e-9)
         // LamplightShader.metal fades a flake over GOING (0.06) of the snowfall from its rank: below

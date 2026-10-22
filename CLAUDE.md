@@ -103,8 +103,10 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   `BackupControllerTests` for the Backup page's controller, which await the Task each controller
   call returns: the hosted app's first render can hold the main actor 10 s or more mid-test, and
   a 5 s poll ran out under it);
-  `FocusDriversTests.swift` (also `FocusStillFrameTests`, one hosted in a window, and
-  `ContourLightTests`: the radius whose disc covers the interval's share of the screen);
+  `FocusDriversTests.swift` (also `FocusStillFrameTests`, one hosted in a window,
+  `ContourLightTests`: the radius whose disc covers the interval's share of the screen, and
+  `ShaderBackdropEasedNightTests`, hosted too: the Sleep host hands its shader the scene's eased
+  night and marks leaving the screen as out of sight);
   `GenerativeAudioEngineTests.swift` (`GenerativeMediaResetTests`);
   `TipStoreTests.swift` (`TipFlowTests`, pure; `TipStoreTests`, StoreKitTest against
   `Tips.storekit`). On iOS 26 simulators a command-line run (xcodebuild, CI) hits an Apple bug,

@@ -69,8 +69,10 @@ Suites in `SleepulatorTests/` (seven files, many suites):
   Undo, and the queued writes landing first.
 - `FocusDriversTests.swift` — the Pomodoro → Focus-scene look mapping, `FocusStillFrameTests`
   (with Moving scenes off, a Focus scene's still frame redraws on each Pomodoro publish and reads
-  it afresh; one test hosts it in a window), and Contour's light (`ContourLightTests`: the radius
-  whose disc covers the interval's share of the screen).
+  it afresh; one test hosts it in a window), Contour's light (`ContourLightTests`: the radius
+  whose disc covers the interval's share of the screen), and `ShaderBackdropEasedNightTests`
+  (hosted: ShaderBackdrop hands Fireflies' and Lamplight's shaders their eased night, asks with
+  the in-sight flag, and reads once more, out of sight, when it leaves the screen).
 - `GenerativeAudioEngineTests.swift` — generative-bed rebuild after a media-services reset.
 - `TipStoreTests.swift` — `TipFlowTests` (every StoreKit outcome to what the tip rows show) and
   `TipStoreTests` (StoreKitTest against `Tips.storekit`). On iOS 26 simulators a command-line run
@@ -966,7 +968,8 @@ night, Lamplight selected (Build mix → Backdrop), Brown playing.
    steady pace (several seconds to cross the cone), drifting a little in a breeze that changes over
    minutes, each flake swaying gently. ✅ Flakes passing right by the bowl brighten as they pass but
    never outshine the bowl; none pops on or off at the cone's edge. ✅ Over several minutes the view
-   wanders by a few points (it keeps the lamp off the same pixels all night): you shouldn't notice it.
+   wanders by a few points (it keeps the lamp off the same pixels all night while the scene moves;
+   with Moving scenes off the frame holds still, like every scene's): you shouldn't notice it.
 3. **Visible at night brightness.** ✅ The cone, the pool, the footprints and the far lamps are
    visible to dark-adapted eyes, and the snow on the street is a shade lighter than the sky (about
    10 levels above black against the sky's 4-7). ✅ The bowl is the brightest thing on screen and
