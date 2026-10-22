@@ -10,7 +10,7 @@ archived the web-PWA-era `audio-rebuild-design` and the superseded `device-test-
 |-----|--------|-----------|
 | AUDIO-LIMITER-SPEC | ✅ shipped + device-verified (pre-refactor) | Re-verify per TESTING.md §3D before re-enabling default-on |
 | SLEEP-MODE-SPEC | ✅ ~80% (moon, starfield, screensaver, settle) | P1 audio-bed softening, history |
-| SCREENSAVER-LIBRARY-SPEC | ✅ framework (registry + scenes); §5 motion toggle **done** (P6a, branch) | Full live-preview picker UI still deferred. Depth-host + a 2nd depth scene (ocean) landed via the visual-moat arc. Contour (Focus, built 2026-10-12): full device pass owed, TESTING.md §V. Fireflies (Sleep, built 2026-10-21): device pass owed, TESTING.md §W. Lamplight (Sleep, built 2026-10-21): device pass owed, TESTING.md §X |
+| SCREENSAVER-LIBRARY-SPEC | ✅ framework (registry + scenes); §5 motion toggle **done** (P6a, branch) | Full live-preview picker UI still deferred. Depth-host + a 2nd depth scene (ocean) landed via the visual-moat arc. Contour (Focus, built 2026-10-12): full device pass owed, TESTING.md §V. Fireflies (Sleep, built 2026-10-21): device pass owed, TESTING.md §W. Lamplight (Sleep, built 2026-10-21): device pass owed, TESTING.md §Y |
 | docs/shipped/ARCHITECTURE-REFACTOR-PLAN | ✅ shipped 2026-06-21 (all slices A1–A4, B1–B3) | Device verification only |
 | REFACTOR-PLAN-observation-slices | 🔶 Phases 1–3 in code | On-device re-render audit; Phase 4 skipped deliberately |
 | APPLE-MUSIC-FOCUS-SPEC / -HANDOFF | 🔶 code complete | MusicKit on App ID (portal, manual); full device pass. 2026-10-11: hidden in 1.0 (`AppConfig.appleMusicEnabled`), back in 1.1 (APP-STORE-LAUNCH-1.0 AM-1) |

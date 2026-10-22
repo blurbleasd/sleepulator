@@ -57,7 +57,7 @@ Tags: **⚙︎** generative (cheap, recommended) · **✦** time-reactive · **�
 - **Snowfall** ⚙︎✦🔊 — gentle snow over a faint treeline silhouette. _Built 2026-10-21 as
   "Lamplight": snow seen only inside a street lamp's light from an upstairs window, thinning
   through the night as the footprints in the lamp's pool fill in (`SnowNight`); pairs with Brown
-  (TESTING.md §X)._
+  (TESTING.md §Y)._
 - **Fireflies** ⚙︎✦🔊 — drifting warm points over a dark forest silhouette. _Built 2026-10-21 as
   "Fireflies": a meadow at a wood's edge whose fireflies fall into step through the night and go
   out one by one until a few are left pulsing together (`FireflyNight`); pairs with Forest and

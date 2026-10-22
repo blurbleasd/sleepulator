@@ -636,7 +636,7 @@ need the phone. Room dark, phone on the nightstand, brightness where you'd leave
    edge (not meteors), Deep space a faint rust nebula. Embers churns slowly; Breathe's glow sits
    on the ring and swells more than it brightens; Fireflies is warm yellow-green points over a
    warm dark meadow, no blue in its sky or mist (its own pass is §W); Lamplight is amber light and
-   snow over dark snow, no blue anywhere (its own pass is §X). ✅ No identical stars
+   snow over dark snow, no blue anywhere (its own pass is §Y). ✅ No identical stars
    repeating down the screen in Deep space, Aurora or Still water, and no firefly pattern
    repeating in Fireflies.
 2. **Night sky and Breathe actually move on ProMotion.** Watch each for a minute in the
@@ -923,8 +923,9 @@ Green playing.
    stretch of the night. In the last two minutes tap "Still awake? +15m": ✅ the fireflies that had
    gone out come back a few at a time over about a minute, never all at once in a flash
    (`EasedNight.follow` eases the night back, at most a night in two minutes, and the flashes'
-   pace eases with it, never jumping in a frame). Again near the end, go to the Podcasts tab, tap +15m
-   on the Live Activity, and come back to Home within 20 s: ✅ the same, none in the first frame back.
+   pace eases with it, never jumping in a frame). Again near the end, go to the Podcasts tab, pull down
+   Notification Center, tap +15m on the Live Activity there, push it back up, and come back to
+   Home within 20 s: ✅ the same, none in the first frame back.
    Again near the
    end, lock the phone, tap +15m on the lock screen's Live Activity, wait a minute and unlock: ✅ the
    same, they come back over about a minute after the unlock, none in the first frame. Mid-night,
@@ -945,7 +946,7 @@ Green playing.
    stalls. Overnight with the veil on: ✅ battery comparable to Night sky (a full-screen shader at
    30 fps while the meadow is in sight; nothing renders under the veil).
 
-### X. Lamplight: snow in a street lamp's light (added 2026-10-21, offline-checked only)
+### Y. Lamplight: snow in a street lamp's light (added 2026-10-21, offline-checked only)
 A new Sleep scene (`LamplightShader.metal`, `LamplightMetalView`): from an upstairs window, a
 street lamp on a crook post in falling snow. The snow shows only inside the lamp's cone, and the
 cone glows faintly in the snow-filled air over a pool of light on the snow; three more lamps
@@ -986,8 +987,9 @@ night, Lamplight selected (Build mix → Backdrop), Brown playing.
    never in a frame (`EasedNight.follow` eases the night back, at most a night in two minutes,
    and ShaderBackdrop's `easedNight` paces the clock by it). The footprints come back too, to
    about a third of their depth over that minute, by design: the whole scene follows the night (on a
-   long timer a +15m barely moves them). Again in the last two minutes, go to the Podcasts tab, tap
-   +15m on the lock screen's Live Activity or in Control Center's, and come back to Home within 20 s:
+   long timer a +15m barely moves them). Again in the last two minutes, go to the Podcasts tab, pull down
+   Notification Center, tap +15m on the Live Activity there, push it back up, and come back to
+   Home within 20 s:
    ✅ the snow thickens back over about a minute after the return, nothing in the first frame (the
    backdrop counts its time off screen as unwatched). Repeat from Breathe's screen if you use it (log
    it if the snow jumps back there: a cover may not count as leaving Home). Again near the end,
