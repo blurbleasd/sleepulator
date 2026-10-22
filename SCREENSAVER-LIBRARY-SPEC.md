@@ -54,7 +54,10 @@ Tags: **⚙︎** generative (cheap, recommended) · **✦** time-reactive · **�
 - **Aurora** ⚙︎ — slow ribbons of red / rose (oxygen) aurora over a dark horizon (Metal shader). The "wow."
 - **Moonlit ocean** ⚙︎✦ — gentle swells with a moon-glint path; the moon can set with the timer.
 - **Drifting clouds** ⚙︎✦ — clouds crossing the moon; thickens (darkens) as the night ends.
-- **Snowfall** ⚙︎🔊 — gentle snow over a faint treeline silhouette.
+- **Snowfall** ⚙︎✦🔊 — gentle snow over a faint treeline silhouette. _Built 2026-10-21 as
+  "Lamplight": snow seen only inside a street lamp's light from an upstairs window, thinning
+  through the night as the footprints in the lamp's pool fill in (`SnowNight`); pairs with Brown
+  (TESTING.md §X)._
 - **Fireflies** ⚙︎✦🔊 — drifting warm points over a dark forest silhouette. _Built 2026-10-21 as
   "Fireflies": a meadow at a wood's edge whose fireflies fall into step through the night and go
   out one by one until a few are left pulsing together (`FireflyNight`); pairs with Forest and
@@ -126,7 +129,7 @@ Every scene must honour:
 - **`paused`** — settle to static when the screen is out of sight or Moving scenes is off (an
   all-night screen shouldn't animate under the veil), as `ShaderBackdrop` does. A still frame in
   sight should keep its scene's reading live and stop redrawing only when `SceneContext.occluded`.
-  Today Night sky, Fireflies and Rain on glass re-read the night, and Current, Tide, Sandfall
+  Today Night sky, Fireflies, Lamplight and Rain on glass re-read the night, and Current, Tide, Sandfall
   and Contour follow the Pomodoro (`FocusStillFrame`); the other Sleep scenes' still frames don't yet darken.
   Under the screensaver itself scenes keep moving, but hold back transients
   (`SceneContext.screensaver`).
@@ -161,7 +164,8 @@ There's no queue and no deadline: build the next scene whenever the itch hits.
 
 - _Settled since:_ continuously animated scenes swap a still frame for a `TimelineView` (never
   `TimelineView(.animation(paused:))`, CLAUDE.md). `ShaderBackdrop` is the shared host for the
-  Metal Sleep scenes (Night sky, Aurora, Embers, Still water, Deep space, Fireflies); Current, Tide,
+  Metal Sleep scenes (Night sky, Aurora, Embers, Still water, Deep space, Fireflies, Lamplight);
+  Current, Tide,
   Sandfall and Contour are Metal but do their own swap, Rain on glass is a `TimelineView` + `Canvas` loop, and
   Breathe is blurred gradients on a `TimelineView`. The app-level motion toggle shipped as
   Settings ▸ Moving scenes (§5).
