@@ -17,8 +17,9 @@ struct SceneContext {
     /// See `HomeView.scenesFrozen` / the `nightDimmed → audio.screenDimmed` hand-off.
     let paused: Bool
     /// The out-of-sight part of `paused`: the veil, backgrounded, low luminance. NightFade and Night
-    /// sky's and Fireflies' still frames (`ShaderBackdrop.occluded`) stop their periodic re-reads only
-    /// then, so with Moving scenes off Night sky, Fireflies and Rain on glass still follow the night.
+    /// sky's, Fireflies' and Lamplight's still frames (`ShaderBackdrop.occluded`) stop their periodic
+    /// re-reads only then, so with Moving scenes off Night sky, Fireflies, Lamplight and Rain on glass
+    /// still follow the night.
     /// Likewise the Focus scenes' still
     /// frames (`FocusStillFrame`) stop following the Pomodoro only then, so with Moving scenes off
     /// their readings still move.
@@ -309,6 +310,23 @@ struct FirefliesScene: AmbientScene {
     }
 }
 
+/// "Lamplight" (Sleep): snow falling through a street lamp's light, seen from an upstairs window, the
+/// flakes lit only inside the lamp's cone, further lamps receding into the snowfall
+/// (`LamplightShader.metal` `lampSnowField` via `LamplightMetalView`). The night is in the
+/// structure: the snowfall thins and the footprints across the lamp's pool fill in (`SnowNight`).
+/// Dark (mean luma about 10 of 255 at bedtime, 7 at the night's end); pairs with Brown.
+struct LamplightScene: AmbientScene {
+    let id = "lamplight"
+    let title = "Lamplight"
+    let mood = SceneMood.sleep
+    var usesMotion: Bool { true }   // tilt moves the window: the whole street parallaxes by depth
+
+    func makeBackdrop(_ ctx: SceneContext) -> AnyView {
+        AnyView(LamplightMetalView(paused: ctx.paused, occluded: ctx.occluded,
+                                   sleepTimer: ctx.sleepTimer, tilt: ctx.tilt))
+    }
+}
+
 /// "Sandfall" (Focus): an hourglass whose bottom bulb's fill IS the interval, draining across a
 /// work interval and running back on a break (`SandfallShader.metal` `sandField` via
 /// `SandfallMetalView`). At rest its sand lies settled in the bottom bulb. Promoted 2026-09-21
@@ -355,7 +373,7 @@ enum SceneRegistry {
         #endif
         scenes.append(contentsOf: [
             BreathingBloomScene(), AuroraScene(), EmbersScene(), StillWaterScene(), DeepSpaceScene(),
-            FirefliesScene(),
+            FirefliesScene(), LamplightScene(),
             CurrentScene(), TideScene(), SandfallScene(), ContourScene()
         ] as [any AmbientScene])
         return scenes

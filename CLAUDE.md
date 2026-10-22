@@ -88,7 +88,8 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   `StorageManagerTests`, `NetRetryTests`, `CacheEvictionTests`, the sleep-timer suites, the
   Pomodoro's clock (`PomodoroProgressTests`, `PomodoroMissedBoundaryTests`), Home's
   pure UI rules (`SessionGuardsTests`, `NightRingMathTests`, `MiniPlayerClearanceTests`,
-  `HomeScreensaverPolicyTests`, `NightSkyMotionTests`, `FireflyNightTests`), the podcast rules (`PodcastTextTests`, `ShowNotesPreviewTests`,
+  `HomeScreensaverPolicyTests`, `NightSkyMotionTests`, `FireflyNightTests`, `SnowNightTests`,
+  `EasedNightTests`), the podcast rules (`PodcastTextTests`, `ShowNotesPreviewTests`,
   `ShowNotesEdgeTests`, `TonightShelfTests`, `QueueMoveToHeadTests`), the player rules
   (`NowPlayingStateTests`, `NightLineCopyTests`, `PlayerQueueActionTests`,
   `PodcastFailureStreakTests`), Settings' rules (`SettingsRulesTests`) and a restore's engine
@@ -104,8 +105,10 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   `BackupControllerTests` for the Backup page's controller, which await the Task each controller
   call returns: the hosted app's first render can hold the main actor 10 s or more mid-test, and
   a 5 s poll ran out under it);
-  `FocusDriversTests.swift` (also `FocusStillFrameTests`, one hosted in a window, and
-  `ContourLightTests`: the radius whose disc covers the interval's share of the screen);
+  `FocusDriversTests.swift` (also `FocusStillFrameTests`, one hosted in a window,
+  `ContourLightTests`: the radius whose disc covers the interval's share of the screen, and
+  `ShaderBackdropEasedNightTests`, hosted too: the Sleep host hands its shader the scene's eased
+  night and marks leaving the screen, and passes on another tab, as out of sight);
   `GenerativeAudioEngineTests.swift` (`GenerativeMediaResetTests`);
   `TipStoreTests.swift` (`TipFlowTests`, pure; `TipStoreTests`, StoreKitTest against
   `Tips.storekit`). On iOS 26 simulators a command-line run (xcodebuild, CI) hits an Apple bug,
@@ -234,8 +237,8 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   (`noteSessionEdge`) and a switch to Focus ends it. It's visual only (scenes darken and still,
   comets and meteors retire past 0.4, the orb calms); the audio fade never reads it. Views that
   observe the timer for darkening (`NightDarken`, `NightFade`) also re-read it every 20 s while
-  the screen is in sight (`SceneContext.occluded`; with "Moving scenes" off, Night sky, Fireflies
-  and Rain on glass still darken),
+  the screen is in sight (`SceneContext.occluded`; with "Moving scenes" off, Night sky, Fireflies,
+  Lamplight and Rain on glass still darken),
   since an untimed night publishes nothing. The night never brightens on its own at a timer
   boundary: a timer started mid-night settles on from where the night already is
   (`SleepTimerService.timedBase`), the ambient tail re-bases instead of dropping back, a cancel

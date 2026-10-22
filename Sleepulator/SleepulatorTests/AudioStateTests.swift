@@ -3365,30 +3365,11 @@ final class FireflyNightTests: XCTestCase {
         }
     }
 
-    func testABumpBackEasesTheNightInsteadOfJumping() {
-        // "Still awake? +15m" near the end of a 30-minute timer moves the night from about 0.93 to
-        // 0.62 at once. Shown as is, the fireflies that had gone out would relight in one frame.
-        let frame = 1.0 / 30
-        var shown = FireflyNight.follow(shown: 0.93, target: 0.62, dt: frame)
-        XCTAssertEqual(shown, 0.93 - FireflyNight.backRate * frame, accuracy: 1e-12)
-        for _ in 0..<(30 * 30) { shown = FireflyNight.follow(shown: shown, target: 0.62, dt: frame) }
-        XCTAssertGreaterThan(shown, 0.62, "it took the jump in under 31 s")
-        for _ in 0..<(30 * 10) { shown = FireflyNight.follow(shown: shown, target: 0.62, dt: frame) }
-        XCTAssertEqual(shown, 0.62, accuracy: 1e-9, "it never reached the bumped night")
-
-        // Value: protects=a jump forward (a seek ahead under "Stop after this episode", which runs on
-        //   the playback clock) eases too; fails_when=follow caps only the bump back: the fireflies
-        //   left go out in one frame, a third of them mid-flash; why_new=the rows above jump back
-        //   only; seam=none; no_claim=none beyond protects (pure rule; TESTING.md §W on device)
-        XCTAssertEqual(FireflyNight.follow(shown: 0.2, target: 0.9, dt: frame),
-                       0.2 + FireflyNight.onRate * frame, accuracy: 1e-12, "a jump forward wasn't eased")
-    }
-
     func testAFireflyGoingOutNeverVanishesInAFrame() {
         // At the fastest it may go on, no layer's share moves a fifteenth of a firefly's fade (GOING,
         // 0.06, in FirefliesShader.metal) in one 30 fps frame: a jump ahead fades them out over half a
         // second or more, never in a frame.
-        let frame = FireflyNight.onRate / 30
+        let frame = EasedNight.onRate / 30
         for n in sweep {
             let a = FireflyNight.remaining(night: n), b = FireflyNight.remaining(night: min(n + frame, 1))
             XCTAssertLessThan(abs(b.far - a.far), 0.004, "far at \(n)")
@@ -3400,7 +3381,7 @@ final class FireflyNightTests: XCTestCase {
     func testAFireflyComingBackFadesInOverSeconds() {
         // FirefliesShader.metal fades a firefly in or out over GOING (0.06) of its layer's share. At
         // the capped pace coming back no layer's share moves that far in 2 s, anywhere in the night.
-        let twoSeconds = 2 * FireflyNight.backRate
+        let twoSeconds = 2 * EasedNight.backRate
         for n in sweep {
             let a = FireflyNight.remaining(night: n), b = FireflyNight.remaining(night: min(n + twoSeconds, 1))
             XCTAssertLessThan(abs(b.far - a.far), 0.06, "far at \(n)")
@@ -3409,101 +3390,271 @@ final class FireflyNightTests: XCTestCase {
         }
     }
 
-    func testARealNightIsShownAsItIs() {
-        // "Stop after this episode" with a minute left (startEndOfEpisode(remaining: 60)) moves the night
-        // 1/60 a second, under onRate: followed frame by frame, not left thinning after the stop. (One
-        // set with under 30 s left moves faster and trails the stop by up to 30 s, accepted.)
-        let frame = 1.0 / 30
-        var shown = FireflyNight.follow(shown: nil, target: 0, dt: 0)
-        for i in 1...(60 * 30) { shown = FireflyNight.follow(shown: shown, target: Double(i) / (60 * 30), dt: frame) }
-        XCTAssertEqual(shown, 1, accuracy: 1e-9, "the meadow lagged a minute-long night")
-        // The scene appearing mid-night shows that night, not a slide from bedtime.
-        XCTAssertEqual(FireflyNight.follow(shown: nil, target: 0.62, dt: 0), 0.62)
-        // Two reads at one instant don't move it.
-        XCTAssertEqual(FireflyNight.follow(shown: 0.93, target: 0.62, dt: 0), 0.93)
-    }
-
     func testANightOutsideItsRangeIsClamped() {
         XCTAssertEqual(FireflyNight.remaining(night: -0.5), FireflyNight.remaining(night: 0))
         XCTAssertEqual(FireflyNight.remaining(night: 1.5), FireflyNight.remaining(night: 1))
         XCTAssertEqual(FireflyNight.sync(night: 1.5), 1)
         XCTAssertEqual(FireflyNight.sync(night: .nan), 0)
         XCTAssertEqual(FireflyNight.remaining(night: .nan), FireflyNight.remaining(night: 0))
+    }
+}
 
+/// The night a scene shows, eased toward the timer's (`EasedNight`, `EasedNightFollower`): Fireflies'
+/// and Lamplight's, whose nights add and take away things a jump would pop.
+final class EasedNightTests: XCTestCase {
+    func testABumpBackEasesTheNightInsteadOfJumping() {
+        // "Still awake? +15m" near the end of a 30-minute timer moves the night from about 0.93 to
+        // 0.62 at once. Shown as is, what the night took away would come back in one frame (Fireflies'
+        // fireflies, Lamplight's snow).
+        let frame = 1.0 / 30
+        var shown = EasedNight.follow(shown: 0.93, target: 0.62, dt: frame)
+        XCTAssertEqual(shown, 0.93 - EasedNight.backRate * frame, accuracy: 1e-12)
+        for _ in 0..<(30 * 30) { shown = EasedNight.follow(shown: shown, target: 0.62, dt: frame) }
+        XCTAssertGreaterThan(shown, 0.62, "it took the jump in under 31 s")
+        for _ in 0..<(30 * 10) { shown = EasedNight.follow(shown: shown, target: 0.62, dt: frame) }
+        XCTAssertEqual(shown, 0.62, accuracy: 1e-9, "it never reached the bumped night")
+
+        // Value: protects=a jump forward (a seek ahead under "Stop after this episode", which runs on
+        //   the playback clock) eases too; fails_when=follow caps only the bump back: what's left goes
+        //   in one frame (a third of Fireflies' fireflies mid-flash); why_new=the rows above jump back
+        //   only; seam=none; no_claim=none beyond protects (pure rule; TESTING.md §W on device)
+        XCTAssertEqual(EasedNight.follow(shown: 0.2, target: 0.9, dt: frame),
+                       0.2 + EasedNight.onRate * frame, accuracy: 1e-12, "a jump forward wasn't eased")
+    }
+
+    func testARealNightIsShownAsItIs() {
+        // "Stop after this episode" with a minute left (startEndOfEpisode(remaining: 60)) moves the night
+        // 1/60 a second, under onRate: followed frame by frame, not left thinning after the stop. (One
+        // set with under 30 s left moves faster and trails the stop by up to 30 s, accepted.)
+        let frame = 1.0 / 30
+        var shown = EasedNight.follow(shown: nil, target: 0, dt: 0)
+        for i in 1...(60 * 30) { shown = EasedNight.follow(shown: shown, target: Double(i) / (60 * 30), dt: frame) }
+        XCTAssertEqual(shown, 1, accuracy: 1e-9, "the scene lagged a minute-long night")
+        // The scene appearing mid-night shows that night, not a slide from bedtime.
+        XCTAssertEqual(EasedNight.follow(shown: nil, target: 0.62, dt: 0), 0.62)
+        // Two reads at one instant don't move it.
+        XCTAssertEqual(EasedNight.follow(shown: 0.93, target: 0.62, dt: 0), 0.93)
+    }
+
+    func testANightOutsideItsRangeIsClamped() {
         // Value: protects=follow's night, stored and fed back each frame, stays a real night in 0…1
         //   whatever the timer reads; fails_when=follow stops clamping its target: one NaN read sticks
-        //   the eased night at NaN (the meadow shows bedtime all night) or it eases past 1;
-        //   why_new=the rows above check remaining and sync, not follow; seam=none; no_claim=that
+        //   the eased night at NaN (the scene shows bedtime all night) or it eases past 1;
+        //   why_new=the scenes' own clamp rows check their rules, not follow; seam=none; no_claim=that
         //   SleepTimerService ever reads NaN or out of range (pure rule only)
-        XCTAssertEqual(FireflyNight.follow(shown: nil, target: 1.5, dt: 0), 1)
-        XCTAssertEqual(FireflyNight.follow(shown: nil, target: -0.5, dt: 0), 0)
-        XCTAssertEqual(FireflyNight.follow(shown: nil, target: .nan, dt: 0), 0)
-        XCTAssertEqual(FireflyNight.follow(shown: 0.995, target: 1.5, dt: 1), 1, accuracy: 1e-12, "eased past 1")
-        let afterNaN = FireflyNight.follow(shown: 0.5, target: .nan, dt: 1)
+        XCTAssertEqual(EasedNight.follow(shown: nil, target: 1.5, dt: 0), 1)
+        XCTAssertEqual(EasedNight.follow(shown: nil, target: -0.5, dt: 0), 0)
+        XCTAssertEqual(EasedNight.follow(shown: nil, target: .nan, dt: 0), 0)
+        XCTAssertEqual(EasedNight.follow(shown: 0.995, target: 1.5, dt: 1), 1, accuracy: 1e-12, "eased past 1")
+        let afterNaN = EasedNight.follow(shown: 0.5, target: .nan, dt: 1)
         XCTAssertTrue(afterNaN.isFinite && (0...1).contains(afterNaN), "a NaN read stuck the night at \(afterNaN)")
     }
 
-    // Value: protects=the meadow eases from the night it last drew, by the time since that frame (at
-    //   most maxBackStep of it bringing fireflies back); a clock set back holds it a frame; after an
+    // Value: protects=the shown night eases from the night it last drew, by the time since that frame
+    //   (at most maxBackStep of it bringing back what had gone); a clock set back holds it a frame; after an
     //   unseen hour going on it shows the night as it is; fails_when=the follower drops shown/last,
     //   times from its first frame or backwards, counts a lock's whole gap toward a relight (the
-    //   lock-screen "+15m" relit them all at unlock), or clamps the gap going on (a bright slide at a
-    //   3am wake); why_new=follow is tested alone, nothing drives the class carrying its state;
-    //   seam=none; no_claim=that FirefliesMetalView calls it each frame with the timer's night, or the
-    //   shader's response (TESTING.md §W on device)
-    func testTheMeadowEasesFromTheNightItLastDrew() {
-        let follower = FireflyNightFollower()
+    //   lock-screen "+15m" relit them all at unlock); why_new=follow is tested alone, nothing drives
+    //   the class carrying its state;
+    //   seam=none; no_claim=that FirefliesMetalView and LamplightMetalView call it each frame with the
+    //   timer's night, or the shaders' response (TESTING.md §W on device)
+    func testTheFollowerEasesFromTheNightItLastDrew() {
+        let follower = EasedNightFollower()
         let t0 = 800_000_000.0   // seconds since the reference date, as the view passes them
-        let back = FireflyNight.backRate * FireflyNight.maxBackStep   // the most an unwatched gap brings back
+        let back = EasedNight.backRate * EasedNight.maxBackStep   // the most an unwatched gap brings back
         // Its first frame (the scene just appeared at 2am) is the night as it is.
         XCTAssertEqual(follower.night(0.93, now: t0), 0.93)
         // "+15m": each frame steps by the time since the frame before, from where it last drew.
-        XCTAssertEqual(follower.night(0.62, now: t0 + 0.25), 0.93 - FireflyNight.backRate / 4, accuracy: 1e-12)
-        XCTAssertEqual(follower.night(0.62, now: t0 + 0.25), 0.93 - FireflyNight.backRate / 4, accuracy: 1e-12,
+        XCTAssertEqual(follower.night(0.62, now: t0 + 0.25), 0.93 - EasedNight.backRate / 4, accuracy: 1e-12)
+        XCTAssertEqual(follower.night(0.62, now: t0 + 0.25), 0.93 - EasedNight.backRate / 4, accuracy: 1e-12,
                        "a second read at the same instant moved it")
         // The screen goes out of sight (its last frame drawn there), and a lock-screen "+15m" a minute
-        // later: the first frame back counts half a second, not the minute, so the fireflies come back
-        // over seconds on screen, never all at unlock.
-        XCTAssertEqual(follower.night(0.62, now: t0 + 0.5, inSight: false), 0.93 - FireflyNight.backRate / 2,
+        // later: the first frame back counts half a second, not the minute, so what had gone comes back
+        // over seconds on screen, never all at unlock (Fireflies' fireflies relit).
+        XCTAssertEqual(follower.night(0.62, now: t0 + 0.5, inSight: false), 0.93 - EasedNight.backRate / 2,
                        accuracy: 1e-12)
-        XCTAssertEqual(follower.night(0.62, now: t0 + 60.5), 0.93 - FireflyNight.backRate / 2 - back,
-                       accuracy: 1e-12, "the locked minute relit the meadow at once")
+        XCTAssertEqual(follower.night(0.62, now: t0 + 60.5), 0.93 - EasedNight.backRate / 2 - back,
+                       accuracy: 1e-12, "the locked minute brought the night back at once")
         // The wall clock set back (the view reads Date): it holds, then goes on from the new time.
-        XCTAssertEqual(follower.night(0.62, now: t0 - 600), 0.93 - FireflyNight.backRate / 2 - back,
+        XCTAssertEqual(follower.night(0.62, now: t0 - 600), 0.93 - EasedNight.backRate / 2 - back,
                        accuracy: 1e-12, "a clock set back moved the night")
         XCTAssertEqual(follower.night(0.62, now: t0 - 599.75),
-                       0.93 - FireflyNight.backRate * 0.75 - back, accuracy: 1e-12)
+                       0.93 - EasedNight.backRate * 0.75 - back, accuracy: 1e-12)
         // The veil lifted an hour on, the night gone on meanwhile: the 3am night at once, not a
-        // slide from a brighter meadow.
+        // slide from an earlier one.
         XCTAssertEqual(follower.night(1.0, now: t0 + 3600), 1.0, accuracy: 1e-12)
     }
 
-    // Value: protects=with Moving scenes off the still frame's 20 s re-reads count in full, so after a
+    // Value: protects=two in-sight reads over watchedGap apart (no frame drew out of sight before a
+    //   suspend) count at most maxBackStep coming back; fails_when=watched drops `dt <= watchedGap`,
+    //   trusting the in-sight flag alone: a lock that drew no out-of-sight frame, then a "+15m",
+    //   relights all at unlock; why_new=every other long gap follows an out-of-sight read or goes on,
+    //   where the clause changes nothing; seam=none; no_claim=whether iOS draws an out-of-sight
+    //   frame at lock (TESTING.md §W.4/§Y.4 on device)
+    func testInSightReadsOverAWatchedGapApartCountOnlyAStep() {
+        let follower = EasedNightFollower()
+        let t0 = 800_000_000.0
+        XCTAssertEqual(follower.night(1.0, now: t0, inSight: true), 1.0)
+        // Its last frame drawn in sight, then none for a minute (the app suspended before Home drew it
+        // out of sight), "+15m" pressed meanwhile: still only half a second counts toward coming back.
+        XCTAssertEqual(follower.night(0.62, now: t0 + 60, inSight: true),
+                       1.0 - EasedNight.backRate * EasedNight.maxBackStep, accuracy: 1e-12,
+                       "a minute with no frame drawn brought the night back at once")
+    }
+
+    // Value: protects=an unwatched gap going on counts in full, at onRate: after a suspend, or the
+    //   veil lifted under freshAfter, a long enough gap shows the later night at once (thinner snow,
+    //   fewer fireflies);
+    //   fails_when=the on step is capped like the back step (a bright slide at the wake);
+    //   why_new=the only long going-on read above is over freshAfter and takes the fresh branch;
+    //   seam=none; no_claim=none beyond protects (pure rule)
+    func testAnUnwatchedGapGoingOnCountsInFull() {
+        let t0 = 800_000_000.0
+        // In sight, then no frame for 22 s (suspended), the night gone on.
+        let suspended = EasedNightFollower()
+        XCTAssertEqual(suspended.night(0.3, now: t0), 0.3)
+        XCTAssertEqual(suspended.night(0.9, now: t0 + 22), 0.9, accuracy: 1e-12)
+        // Out of sight (the veil), then 20 minutes on, under freshAfter: the night as it is.
+        let veiled = EasedNightFollower()
+        XCTAssertEqual(veiled.night(0.4, now: t0, inSight: false), 0.4)
+        XCTAssertEqual(veiled.night(0.7, now: t0 + 20 * 60), 0.7, accuracy: 1e-12,
+                       "the gap going on was capped: a bright slide at the wake")
+        // Out of sight, then a read 6 s later with the night ahead: those 6 s count in full.
+        let glanced = EasedNightFollower()
+        XCTAssertEqual(glanced.night(0.2, now: t0, inSight: false), 0.2)
+        XCTAssertEqual(glanced.night(0.9, now: t0 + 6), 0.2 + 6 * EasedNight.onRate, accuracy: 1e-12)
+    }
+
+    // Value: protects=the first read after an out-of-sight frame, however soon, counts at most
+    //   maxBackStep coming back, and a clock set back after one holds; fails_when=watched keeps only
+    //   `dt <= watchedGap` (an unlock within 21 s of the veil's frame brings back up to 0.175 of a
+    //   night in one frame), or a negative gap moves it; why_new=every tested read coming back after
+    //   an out-of-sight frame comes a minute or more later; seam=none; no_claim=none beyond protects
+    func testAReadJustAfterAnOutOfSightFrameIsUnwatched() {
+        let follower = EasedNightFollower()
+        let t0 = 800_000_000.0
+        XCTAssertEqual(follower.night(0.93, now: t0, inSight: false), 0.93)
+        XCTAssertEqual(follower.night(0.62, now: t0 + 5),
+                       0.93 - EasedNight.backRate * EasedNight.maxBackStep, accuracy: 1e-12,
+                       "five unwatched seconds counted in full")
+        let clockBack = EasedNightFollower()
+        XCTAssertEqual(clockBack.night(0.93, now: t0, inSight: false), 0.93)
+        XCTAssertEqual(clockBack.night(0.62, now: t0 - 600), 0.93, accuracy: 1e-12, "a clock set back moved the night")
+        XCTAssertEqual(clockBack.night(0.62, now: t0 - 599.75), 0.93 - EasedNight.backRate * 0.25, accuracy: 1e-12)
+    }
+
+    // Value: protects=with Moving scenes off the still frame's re-reads count in full, so after a
     //   "+15m" it relights at its own pace; fails_when=every read is capped like the first one after
-    //   a lock (the still meadow barely relit for minutes); why_new=the follower test above times
-    //   frames and a lock, not the still frame's cadence; seam=none; no_claim=that ShaderBackdrop
-    //   re-reads every 20 s (TESTING.md §W.5 on device)
-    func testTheStillMeadowFollowsABumpAtItsOwnPace() {
-        let follower = FireflyNightFollower()
+    //   a lock (the still frame barely followed for minutes), or ShaderBackdrop's re-read interval
+    //   grows past watchedGap; why_new=the follower test above times frames and a lock, not the still
+    //   frame's cadence; seam=none; no_claim=that ShaderBackdrop's TimelineView fires on that
+    //   interval (TESTING.md §W.5, §Y.5 on device)
+    func testTheStillFrameFollowsABumpAtItsOwnPace() {
+        let interval = ShaderBackdrop.stillRereadInterval
+        XCTAssertLessThan(interval, EasedNight.watchedGap, "the still frame's re-reads would count as unwatched")
+        let follower = EasedNightFollower()
         let t0 = 800_000_000.0
         XCTAssertEqual(follower.night(0.93, now: t0), 0.93)
-        XCTAssertEqual(follower.night(0.62, now: t0 + 20), 0.93 - 20 * FireflyNight.backRate, accuracy: 1e-12)
-        // The next re-read would pass the bumped night; it stops there.
-        XCTAssertEqual(follower.night(0.62, now: t0 + 40), 0.62, accuracy: 1e-12)
+        // Each re-read comes back by the whole interval's worth, until it reaches the bumped night and
+        // stops there.
+        var expected = 0.93, reads = 0
+        while expected > 0.62 {
+            reads += 1
+            expected = max(0.62, expected - interval * EasedNight.backRate)
+            XCTAssertEqual(follower.night(0.62, now: t0 + Double(reads) * interval), expected, accuracy: 1e-12,
+                           "re-read \(reads)")
+        }
     }
 
     // Value: protects=after the night is over (sound off past its resume window) the next bedtime
-    //   opens on a full meadow; fails_when=the follower eases back from last night's few over two
-    //   minutes, or its window drifts from the night's own; why_new=no test drives a new night after
-    //   a long unseen gap; seam=none; no_claim=that SleepTimerService resets nightProgress (its own tests)
+    //   opens as bedtime (Fireflies' meadow full); fails_when=the follower eases back from last night's
+    //   end over two minutes, or its window drifts from the night's own; why_new=no test drives a new
+    //   night after a long unseen gap; seam=none; no_claim=that SleepTimerService resets nightProgress
+    //   (its own tests)
     func testANewNightOpensAsItIs() {
-        XCTAssertEqual(FireflyNight.freshAfter, UntimedNight.resumeWindow)
-        let follower = FireflyNightFollower()
+        XCTAssertEqual(EasedNight.freshAfter, UntimedNight.resumeWindow)
+        let follower = EasedNightFollower()
         let t0 = 800_000_000.0
         XCTAssertEqual(follower.night(1.0, now: t0), 1.0)
         _ = follower.night(1.0, now: t0 + 1, inSight: false)        // the veil drops at 3am
-        XCTAssertEqual(follower.night(0, now: t0 + 1 + FireflyNight.freshAfter), 0,
-                       "the next bedtime eased back from last night's few")
+        XCTAssertEqual(follower.night(0, now: t0 + 1 + EasedNight.freshAfter), 0,
+                       "the next bedtime eased back from last night's end")
+    }
+
+    // Value: protects=the fresh start is timed from the last read in sight, so reads made out of sight
+    //   (Home re-evaluated on another tab, under the veil) don't hold it off; fails_when=every read
+    //   restarts the 30 minutes: an app left open on Podcasts, the engine publishing every few minutes,
+    //   opens Home on last night's end and rewinds it over two minutes (thin snow and filled footprints
+    //   at bedtime); why_new=the new-night test above has one out-of-sight read, then none;
+    //   seam=none; no_claim=how often TabView re-evaluates a hidden tab (ShaderBackdropEasedNightTests
+    //   shows it does)
+    func testReadsOutOfSightDontHoldOffANewNight() {
+        let follower = EasedNightFollower()
+        let t0 = 800_000_000.0
+        XCTAssertEqual(follower.night(1.0, now: t0), 1.0)                    // Home at the night's end
+        _ = follower.night(1.0, now: t0 + 1, inSight: false)                 // off to Podcasts
+        // Home re-evaluated there every five minutes; the night over 31 minutes on (the timer's night
+        // back to 0).
+        for minute in stride(from: 5, through: 45, by: 5) {
+            _ = follower.night(minute < 31 ? 1.0 : 0, now: t0 + Double(minute * 60), inSight: false)
+        }
+        XCTAssertEqual(follower.night(0, now: t0 + 47 * 60), 0,
+                       "reads out of sight held off the fresh start: last night's end came back")
+        // A scene first drawn out of sight (Home built under the veil) is timed from that first read.
+        let unseen = EasedNightFollower()
+        XCTAssertEqual(unseen.night(1.0, now: t0, inSight: false), 1.0)
+        _ = unseen.night(1.0, now: t0 + 20 * 60, inSight: false)
+        XCTAssertEqual(unseen.night(0, now: t0 + 31 * 60), 0, "never seen, it never started afresh")
+    }
+}
+
+/// Lamplight's night (`SnowNight`): steady snow over crisp footprints at bedtime; thinning and
+/// settling through the night, never stopping.
+final class SnowNightTests: XCTestCase {
+    private let sweep = (0...200).map { Double($0) / 200 }
+
+    func testAtBedtimeTheSnowFallsOverFreshFootprints() {
+        XCTAssertEqual(SnowNight.snowfall(night: 0), 1)
+        XCTAssertEqual(SnowNight.settled(night: 0), 0)
+    }
+
+    func testAtTheEndEnoughSnowFallsToLightAFlakeOverUnbrokenSnow() {
+        // All night holds the night at 1, so this is what waking at 3am shows: still snowing.
+        XCTAssertEqual(SnowNight.snowfall(night: 1), SnowNight.snowfallAtEnd, accuracy: 1e-9)
+        // LamplightShader.metal fades a flake over GOING (0.06) of the snowfall from its rank: below
+        // that no flake would be fully lit, and the 3am street would show almost no snow.
+        XCTAssertGreaterThanOrEqual(SnowNight.snowfallAtEnd, 0.06, "the snow stopped")
+        XCTAssertEqual(SnowNight.settled(night: 1), 1)
+        // Settled well before the end, so the late night's street is unbroken.
+        XCTAssertEqual(SnowNight.settled(night: 0.85), 1)
+    }
+
+    func testTheSnowThinsAndSettlesWithoutTurningBack() {
+        var previous = (fall: 1.0, settled: 0.0)
+        for n in sweep.dropFirst() {
+            let fall = SnowNight.snowfall(night: n), settled = SnowNight.settled(night: n)
+            XCTAssertLessThanOrEqual(fall, previous.fall, "the snow thickened at \(n)")
+            XCTAssertGreaterThanOrEqual(settled, previous.settled, "a footprint deepened at \(n)")
+            previous = (fall, settled)
+        }
+    }
+
+    func testAFlakeStoppingNeverVanishesInAFrame() {
+        // LamplightShader.metal fades a flake out over GOING (0.06) of the snowfall. At the fastest the
+        // eased night goes on, the snowfall moves under a fifteenth of that in one 30 fps frame.
+        let frame = EasedNight.onRate / 30
+        for n in sweep {
+            let a = SnowNight.snowfall(night: n), b = SnowNight.snowfall(night: min(n + frame, 1))
+            XCTAssertLessThan(abs(b - a), 0.004, "at \(n)")
+        }
+    }
+
+    func testANightOutsideItsRangeIsClamped() {
+        XCTAssertEqual(SnowNight.snowfall(night: -0.5), 1)
+        XCTAssertEqual(SnowNight.snowfall(night: 1.5), SnowNight.snowfallAtEnd, accuracy: 1e-9)
+        XCTAssertEqual(SnowNight.snowfall(night: .nan), 1)
+        XCTAssertEqual(SnowNight.settled(night: .nan), 0)
+        XCTAssertEqual(SnowNight.settled(night: 1.5), 1)
     }
 }
 

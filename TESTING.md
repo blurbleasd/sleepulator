@@ -39,7 +39,10 @@ Suites in `SleepulatorTests/` (seven files, many suites):
   bedtime, in step and down to the meadow's few at the end, the nearest going first, and a jump in
   the night eased: back at most a night in two minutes, even after a lock, on at most a night in
   30 s, and after 30 minutes or more out of sight the night as it is, so a new night opens on a
-  full meadow; `follow`, `FireflyNightFollower`), and the
+  full meadow: `EasedNightTests`, the eased night Fireflies and Lamplight share, `EasedNight.follow`
+  and `EasedNightFollower`), Lamplight's night (`SnowNightTests`: steady snow over fresh
+  footprints at bedtime, thinning to a quarter and settled well before the end, never stopping,
+  no flake gone in a frame), and the
   Podcasts-tab rules (`PodcastTextTests`, `ShowNotesPreviewTests`, `ShowNotesEdgeTests`,
   `TonightShelfTests`, `QueueMoveToHeadTests`), the player rules (`NowPlayingStateTests`,
   `NightLineCopyTests`, `PlayerQueueActionTests`, `PodcastFailureStreakTests`), Settings' rules
@@ -67,8 +70,11 @@ Suites in `SleepulatorTests/` (seven files, many suites):
   Undo, and the queued writes landing first.
 - `FocusDriversTests.swift` — the Pomodoro → Focus-scene look mapping, `FocusStillFrameTests`
   (with Moving scenes off, a Focus scene's still frame redraws on each Pomodoro publish and reads
-  it afresh; one test hosts it in a window), and Contour's light (`ContourLightTests`: the radius
-  whose disc covers the interval's share of the screen).
+  it afresh; one test hosts it in a window), Contour's light (`ContourLightTests`: the radius
+  whose disc covers the interval's share of the screen), and `ShaderBackdropEasedNightTests`
+  (hosted: ShaderBackdrop hands Fireflies' and Lamplight's shaders their eased night, asks with
+  the in-sight flag, reads once more, out of sight, when it leaves the screen, and reads a pass
+  SwiftUI makes on another tab out of sight too).
 - `GenerativeAudioEngineTests.swift` — generative-bed rebuild after a media-services reset.
 - `TipStoreTests.swift` — `TipFlowTests` (every StoreKit outcome to what the tip rows show) and
   `TipStoreTests` (StoreKitTest against `Tips.storekit`). On iOS 26 simulators a command-line run
@@ -206,8 +212,9 @@ everything below is display-link / render behavior only a device shows.
    navigator (or Instruments → Core Animation), FPS ≈ 0 and no CA commits from the app while
    the veil is up, beyond a 1 Hz commit from the timer's observers on a timed night (NightDarken,
    NightFade, the ring); on All night ≈ 0. Repeat with each of: Night sky, Aurora, Embers, Still water, Deep space,
-   Fireflies, Breathe, Rain on glass. ✅ No redraws, no meteor wakeups (Night sky), gyro off (Aurora /
-   Deep space / Fireflies — check with the Energy Log that CoreMotion isn't running).
+   Fireflies, Lamplight, Breathe, Rain on glass. ✅ No redraws, no meteor wakeups (Night sky), gyro
+   off (Aurora / Deep space / Fireflies / Lamplight — check with the Energy Log that CoreMotion isn't
+   running).
 2. **Freeze-in-place, not reset.** Tap to wake after ≥ 10 min under the veil. ✅ Every scene
    resumes from the pose it froze at — no snap to a birth pose, no burst of catch-up motion.
    Repeat via the lock/unlock path (scenePhase) and the app switcher.
@@ -624,12 +631,13 @@ From the screensaver critique (24/40). The simulator showed every scene, the Foc
 both glances, but brightness, colour at 2am, motion on ProMotion and anything over 45 minutes
 need the phone. Room dark, phone on the nightstand, brightness where you'd leave it at night.
 
-1. **Every Sleep scene is warm and dim.** Swipe through all eight at bedtime. ✅ No scene throws
+1. **Every Sleep scene is warm and dim.** Swipe through all nine at bedtime. ✅ No scene throws
    blue light: Night sky's stars and glow are warm, Aurora is red curtains, Still water a small round amber moon (not a tall
    oval) with flat ripples, Rain on glass shows drops that cling and slip with a bright lower
    edge (not meteors), Deep space a faint rust nebula. Embers churns slowly; Breathe's glow sits
    on the ring and swells more than it brightens; Fireflies is warm yellow-green points over a
-   warm dark meadow, no blue in its sky or mist (its own pass is §W). ✅ No identical stars
+   warm dark meadow, no blue in its sky or mist (its own pass is §W); Lamplight is amber light and
+   snow over dark snow, no blue anywhere (its own pass is §Y). ✅ No identical stars
    repeating down the screen in Deep space, Aurora or Still water, and no firefly pattern
    repeating in Fireflies.
 2. **Night sky and Breathe actually move on ProMotion.** Watch each for a minute in the
@@ -916,7 +924,11 @@ Green playing.
    the flash rolling left to right across them. ✅ None goes out with a pop: each fades over a
    stretch of the night. In the last two minutes tap "Still awake? +15m": ✅ the fireflies that had
    gone out come back a few at a time over about a minute, never all at once in a flash
-   (`FireflyNight.follow` eases the night back, at most a night in two minutes). Again near the
+   (`EasedNight.follow` eases the night back, at most a night in two minutes, and the flashes'
+   pace eases with it, never jumping in a frame). Again near the end, go to the Podcasts tab, pull down
+   Notification Center, tap +15m on the Live Activity there, push it back up, and come back to
+   Home within 20 s: ✅ the same, none in the first frame back.
+   Again near the
    end, lock the phone, tap +15m on the lock screen's Live Activity, wait a minute and unlock: ✅ the
    same, they come back over about a minute after the unlock, none in the first frame. Mid-night,
    pull down Control Center and push it back: ✅ the lit fireflies don't change. An All night
@@ -924,7 +936,7 @@ Green playing.
    Leave Home on Fireflies, lock the phone once the night's sound has stopped, and unlock it over
    30 minutes later to start the next night: ✅ it opens on a full meadow at once, not last night's
    few filling in. (Left in sight instead, the meadow refills over about two minutes once the 30
-   minutes pass, by design: `FireflyNight.freshAfter` starts afresh only after that long out of
+   minutes pass, by design: `EasedNight.freshAfter` starts afresh only after that long out of
    sight.) On an SE with Display Zoom on, if you have one: ✅ 3 left at the end (the shortest
    meadow keeps the fewest).
 5. **Moving scenes off.** Settings → Moving scenes off, Auto-Lock Never, the veil off. ✅ A still
@@ -969,6 +981,65 @@ at 05:00 and 18:00, and when a paused session's 30 minutes run out.
    rest: ✅ the card shows in the band and the line doesn't; ✅ tap No thanks: the card goes and
    the line shows under the night line.
 7. **VoiceOver.** ✅ It reads "Last night, 30 minutes, eased out at …", units in words.
+
+### Y. Lamplight: snow in a street lamp's light (added 2026-10-21, offline-checked only)
+A new Sleep scene (`LamplightShader.metal`, `LamplightMetalView`): from an upstairs window, a
+street lamp on a crook post in falling snow. The snow shows only inside the lamp's cone, and the
+cone glows faintly in the snow-filled air over a pool of light on the snow; three more lamps
+recede down the street into the snowfall. Through the night the snow thins and the footprints
+across the pool fill in (`SnowNight`). Offline frames of the shader showed the look and the end
+of the night (mean luma about 10 of 255 at bedtime, 6.6 at the end); it was installed on the phone
+2026-10-21 but not yet watched there. Motion feel, black level on OLED at 2am, ProMotion and a
+full night need the phone. Room dark, phone on the nightstand, brightness where you'd leave it at
+night, Lamplight selected (Build mix → Backdrop), Brown playing.
+
+1. **It has depth.** At bedtime with the controls faded. ✅ It reads as a street seen from a
+   window, not a spotlight on a screen: the lamp's bowl glowing under its hood, the cone fanning
+   down from it, a pool of light on the snow with the post's shadow running away from the post's
+   foot and a line of footprints crossing it, and three more lamps down the street to the left,
+   each smaller and fainter in the snow. ✅ The snow shows only inside the light, none in the dark
+   around it; flakes nearer the window are bigger and softer and cross the screen faster. ✅ The
+   far lamps' pools read as lit snow down the street, not flat discs floating in the dark (log it if
+   they do: it's the scene's one known risk), a few flakes glinting in each far lamp's light. ✅ The
+   nearest, biggest flakes pass in front of the post, never behind it. Hold the phone and tilt it:
+   ✅ the near lamp and its snow shift more than the far lamps, and the whole street moves the same
+   way.
+2. **Alive but calm; nothing blinks.** Watch two minutes. ✅ The snow falls at an unhurried,
+   steady pace (several seconds to cross the cone), drifting a little in a breeze that changes over
+   minutes, each flake swaying gently. ✅ Flakes passing right by the bowl brighten as they pass but
+   never outshine the bowl; none pops on or off at the cone's edge. ✅ Over several minutes the view
+   wanders by a few points (it keeps the lamp off the same pixels all night while the scene moves;
+   with Moving scenes off the frame holds still, like every scene's): you shouldn't notice it.
+3. **Visible at night brightness.** ✅ The cone, the pool, the footprints and the far lamps are
+   visible to dark-adapted eyes, and the snow on the street is a shade lighter than the sky (about
+   10 levels above black against the sky's 4-7). ✅ The bowl is the brightest thing on screen and
+   small; it doesn't light the room. ✅ No banding in the cone's glow or the sky.
+4. **The night arc.** A 15-minute timer, Auto-Lock Never and the veil off in Settings so you can
+   watch. ✅ The snowfall thins through the night, to about a quarter at the end, and slows; the
+   footprints grow shallow and soft and are gone by about four-fifths of the way; snow builds on the
+   crook and the lamp's hood; the bowl dims to well under half its bedtime brightness. ✅ No flake
+   vanishes with a pop: each fades. In the last two minutes tap "Still awake? +15m": ✅ the snow
+   thickens back over about a minute, never all at once, and its fall speeds up just as gently,
+   never in a frame (`EasedNight.follow` eases the night back, at most a night in two minutes,
+   and ShaderBackdrop's `easedNight` paces the clock by it). The footprints come back too, to
+   about a third of their depth over that minute, by design: the whole scene follows the night (on a
+   long timer a +15m barely moves them). Again in the last two minutes, go to the Podcasts tab, pull down
+   Notification Center, tap +15m on the Live Activity there, push it back up, and come back to
+   Home within 20 s:
+   ✅ the snow thickens back over about a minute after the return, nothing in the first frame (the
+   backdrop counts its time off screen as unwatched). Repeat from Breathe's screen if you use it (log
+   it if the snow jumps back there: a cover may not count as leaving Home). Again near the end,
+   lock the phone, tap +15m on the lock screen's Live Activity, wait a minute and unlock: ✅ the
+   same, nothing at once in the first frame. An All night session, woken after an hour: ✅ snow
+   still falling, thinly, over unbroken snow. Leave Home on Lamplight, lock the phone once the
+   night's sound has stopped, and unlock it over 30 minutes later to start the next night: ✅ it
+   opens on steady snow and fresh footprints at once.
+5. **Moving scenes off.** Settings → Moving scenes off, Auto-Lock Never, the veil off. ✅ A still
+   street, flakes caught mid-fall in the cone. Over a 15-minute night: ✅ the flakes thin and the
+   footprints fill in (the still frame re-reads the night every 20 s while in sight).
+6. **ProMotion and battery.** Watch a minute on a 120 Hz phone. ✅ A smooth fall, no stalls.
+   Overnight with the veil on: ✅ battery comparable to Night sky (a full-screen shader at 30 fps
+   while the street is in sight; nothing renders under the veil).
 
 ---
 

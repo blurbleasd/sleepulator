@@ -6,7 +6,9 @@ import simd
 @testable import Sleepulator
 
 /// Pins the Pomodoro→look mapping the Focus scenes share. The shaders and their thermals are
-/// device-verified; `FocusStillFrameTests`, below, cover the still frame's redraw.
+/// device-verified; `FocusStillFrameTests`, below, cover the still frame's redraw. The file also holds
+/// the other suite hosted in a window, `ShaderBackdropEasedNightTests` (the Sleep host), for
+/// `turnMainRunLoop`.
 final class FocusDriversTests: XCTestCase {
 
     private let acc = 1e-9
@@ -267,23 +269,12 @@ final class FocusStillFrameTests: XCTestCase {
         host.view.layoutIfNeeded()
         defer { p.stop(); window.isHidden = true; window.rootViewController = nil }
 
-        // Turns the main run loop until `done` or the budget is spent. It's spent per turn (a 20 ms
-        // turn, at most 50 ms counted), not by the wall clock: the host app's first render can hold
-        // main for 10 s or more, and a wall-clock budget ran out under it with the tick still queued.
-        func turn(for budget: TimeInterval, until done: () -> Bool = { false }) {
-            var left = budget
-            while !done(), left > 0 {
-                let t0 = Date()
-                RunLoop.main.run(until: t0.addingTimeInterval(0.02))
-                left -= min(Date().timeIntervalSince(t0), 0.05)
-            }
-        }
-        turn(for: 2) { !readings.isEmpty }
+        turnMainRunLoop(for: 2) { !readings.isEmpty }
         XCTAssertFalse(readings.isEmpty, "the frame never rendered")
         // Settle until 25 turns (about 0.5 s) pass with no draw: layout passes after the first draw
         // aren't publishes.
         var settled = readings.count, quietTurns = 0
-        turn(for: 3) {
+        turnMainRunLoop(for: 3) {
             if readings.count != settled { settled = readings.count; quietTurns = 0 } else { quietTurns += 1 }
             return quietTurns >= 25
         }
@@ -291,16 +282,16 @@ final class FocusStillFrameTests: XCTestCase {
 
         // Nothing published, nothing redrawn: so the redraws below are the Pomodoro's.
         let before = readings.count
-        turn(for: 0.2)
+        turnMainRunLoop(for: 0.2) { false }
         XCTAssertEqual(readings.count, before, "the frame redrew with nothing published")
 
         p.start()
-        turn(for: 2) { readings.last?.running == true }
+        turnMainRunLoop(for: 2) { readings.last?.running == true }
         XCTAssertEqual(readings.last?.running, true, "a start didn't redraw the frame with the session running")
 
         // The 1 Hz tick redraws it too, with the countdown lower: the reading creeps.
         let started = p.remaining
-        turn(for: 3) { (readings.last?.remaining ?? started) < started }
+        turnMainRunLoop(for: 3) { (readings.last?.remaining ?? started) < started }
         XCTAssertLessThan(readings.last?.remaining ?? started, started, "a tick didn't redraw the frame with the countdown")
     }
 
@@ -323,5 +314,183 @@ final class FocusStillFrameTests: XCTestCase {
         before = publishes
         p.stop()
         XCTAssertGreaterThan(publishes, before, "a stop didn't publish")
+    }
+}
+
+/// The night `ShaderBackdrop` hands its shader, hosted in a window as the scenes are. Only the paused
+/// branches (the still frame out of sight, and in sight with Moving scenes off), which draw one frame
+/// with no redraw loop, so nothing here waits on frame timing.
+@MainActor
+final class ShaderBackdropEasedNightTests: XCTestCase {
+
+    // Value: protects=the eased night reaches the shader, read with the timer's night and inSight = !occluded, scenes without a hook keep the timer's night, and leaving the screen reads the night once more out of sight, as does a pass made while it's gone; fails_when=field() passes the raw timer night (the "+15m" pop comes back for Fireflies and Lamplight), passes occluded or a constant as inSight, the nil path stops reading the timer (the other Sleep scenes stop darkening), or ShaderBackdrop drops its onDisappear read, hands it a wrong night or time, or reads an off-screen pass as in sight (a "+15m" pending on another tab comes back in one frame on return); why_new=EasedNightTests hand the follower its flag directly and nothing hosts ShaderBackdrop; seam=none; no_claim=the animated branch and the clock's rate, that the two scenes pass follower.night (TESTING §W.4/§Y.4), that a TabView switch or a fullScreenCover calls onDisappear (device), what the shader draws
+    func testShaderBackdropHandsItsShaderTheScenesEasedNight() throws {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first,
+                                  "no window scene in the test host")
+        // Halfway through a 30-minute timer, set directly: no tick is armed, so it holds there.
+        let timer = SleepTimerService()
+        timer.timerTotal = 30 * 60
+        timer.timerRemaining = 15 * 60
+        XCTAssertEqual(timer.nightProgress, 0.5, accuracy: 1e-9)
+
+        typealias Read = (night: Double, now: TimeInterval, inSight: Bool)
+        /// Hosts one paused backdrop in its own window until it has built its shader, and returns what
+        /// its hook was asked while drawn and the night its shader got, with the span those reads fell
+        /// in. It checks the read on leaving the screen itself.
+        func render(occluded: Bool, eased: Bool) -> (reads: [Read], shader: [Float], span: ClosedRange<TimeInterval>) {
+            var reads: [Read] = []
+            var shader: [Float] = []
+            var hook: ((Double, TimeInterval, Bool) -> Double)?
+            if eased {
+                // The scene's own reading, unlike the timer's, so the test can tell which one arrived.
+                hook = { night, now, inSight in
+                    reads.append((night, now, inSight))
+                    return 0.8
+                }
+            }
+            let view = ShaderBackdrop(paused: true, nightSlowdown: 0.4, sleepTimer: timer, audioLevel: nil,
+                                      occluded: occluded, easedNight: hook) { s in
+                shader.append(s.night)
+                return ShaderLibrary.lampSnowField(
+                    .float(s.phase), .float(s.elapsed), .float2(s.size), .float(s.night),
+                    .float(1), .float(0), .float2(0, 0), .float(3))
+            }
+            let from = Date.timeIntervalSinceReferenceDate
+            let host = UIHostingController(rootView: view)
+            // Shown in its own window over the test host's, not made key.
+            let window = UIWindow(windowScene: scene)
+            window.frame = scene.coordinateSpace.bounds
+            window.rootViewController = host
+            window.isHidden = false
+            host.view.layoutIfNeeded()
+            turnMainRunLoop(for: 30) { !shader.isEmpty }
+            let drawn = reads.count
+            let to = Date.timeIntervalSinceReferenceDate
+            // Leaving the screen (another tab, a cover) reads the night once more, out of sight.
+            window.isHidden = true
+            window.rootViewController = nil
+            turnMainRunLoop(for: 30) { !eased || reads.count > drawn }
+            let left = Date.timeIntervalSinceReferenceDate
+            if eased {
+                XCTAssertGreaterThan(reads.count, drawn, "leaving the screen didn't read the night")
+                if let leave = reads.last {
+                    XCTAssertFalse(leave.inSight, "leaving the screen was read as in sight")
+                    XCTAssertEqual(leave.night, 0.5, accuracy: 1e-9, "leaving the screen didn't hand the timer's night")
+                    XCTAssertTrue((to...left).contains(leave.now), "leaving the screen didn't hand the clock's now")
+                }
+            }
+            // The reads while it was drawn; the one on leaving is checked above.
+            return (Array(reads.prefix(drawn)), shader, from...to)
+        }
+
+        // Out of sight (the veil, the lock screen): the hook reads the timer's night, not in sight.
+        let veiled = render(occluded: true, eased: true)
+        XCTAssertFalse(veiled.shader.isEmpty, "the occluded still frame never built its shader")
+        XCTAssertFalse(veiled.reads.isEmpty, "the occluded still frame never asked the scene for its night")
+        for read in veiled.reads {
+            XCTAssertEqual(read.night, 0.5, accuracy: 1e-9, "the hook wasn't handed the timer's night")
+            XCTAssertFalse(read.inSight, "a frame out of sight was read as in sight")
+            XCTAssertTrue(veiled.span.contains(read.now), "the hook wasn't handed the clock's now: \(read.now)")
+        }
+        for night in veiled.shader {
+            XCTAssertEqual(night, 0.8, accuracy: 1e-6, "the shader got the timer's night, not the scene's")
+        }
+
+        // In sight with Moving scenes off: the same night, read as watched.
+        let still = render(occluded: false, eased: true)
+        XCTAssertFalse(still.shader.isEmpty, "the still frame in sight never built its shader")
+        XCTAssertFalse(still.reads.isEmpty, "the still frame in sight never asked the scene for its night")
+        for read in still.reads {
+            XCTAssertEqual(read.night, 0.5, accuracy: 1e-9, "the hook wasn't handed the timer's night")
+            XCTAssertTrue(read.inSight, "a frame in sight was read as out of sight")
+            XCTAssertTrue(still.span.contains(read.now), "the hook wasn't handed the clock's now: \(read.now)")
+        }
+        for night in still.shader {
+            XCTAssertEqual(night, 0.8, accuracy: 1e-6, "the shader got the timer's night, not the scene's")
+        }
+
+        // No hook (Night sky, Aurora, Embers, Still water, Deep space): the timer's night as it is.
+        let plain = render(occluded: true, eased: false)
+        XCTAssertFalse(plain.shader.isEmpty, "the backdrop without a hook never built its shader")
+        for night in plain.shader {
+            XCTAssertEqual(night, 0.5, accuracy: 1e-6, "a scene without a hook lost the timer's night")
+        }
+    }
+}
+
+/// What the hidden-tab test drives: which tab shows, and an input of the backdrop's, so changing it
+/// makes SwiftUI evaluate the backdrop again while its tab is hidden.
+private final class TabBox: ObservableObject {
+    @Published var tab = 0
+    @Published var slowdown = 0.4
+    // Explicitly nonisolated: the implicit MainActor-isolated deinit aborts on iOS 18.4–26.3
+    // runtimes (CLAUDE.md, "Isolated deinits"). Only releases stored properties.
+    nonisolated deinit {}
+}
+
+private struct TabbedBackdrop: View {
+    @ObservedObject var box: TabBox
+    let backdrop: (Double) -> ShaderBackdrop
+    var body: some View {
+        TabView(selection: $box.tab) {
+            backdrop(box.slowdown).tag(0)
+            Color.clear.tag(1)
+        }
+    }
+}
+
+extension ShaderBackdropEasedNightTests {
+    // Value: protects=a pass SwiftUI makes over the backdrop while its tab is hidden reads the night out of sight; fails_when=field() reads inSight from !occluded alone (occluded knows nothing of tabs): one engine publish on Podcasts undoes the read on leaving, and a "+15m" pending there comes back in one frame on return; why_new=the test above leaves by taking the window away, where nothing is evaluated again; seam=none; no_claim=that HomeView's own TabView re-evaluates Home off screen as this one does (device)
+    func testAPassMadeOnAnotherTabReadsOutOfSight() throws {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first,
+                                  "no window scene in the test host")
+        let timer = SleepTimerService()
+        timer.timerTotal = 30 * 60
+        timer.timerRemaining = 15 * 60
+        var reads: [Bool] = []
+        let box = TabBox()
+        let host = UIHostingController(rootView: TabbedBackdrop(box: box) { slowdown in
+            ShaderBackdrop(paused: true, nightSlowdown: slowdown, sleepTimer: timer, audioLevel: nil,
+                           occluded: false, easedNight: { night, _, inSight in reads.append(inSight); return night }) { s in
+                ShaderLibrary.lampSnowField(
+                    .float(s.phase), .float(s.elapsed), .float2(s.size), .float(s.night),
+                    .float(1), .float(0), .float2(0, 0), .float(3))
+            }
+        })
+        let window = UIWindow(windowScene: scene)
+        window.frame = scene.coordinateSpace.bounds
+        window.rootViewController = host
+        window.isHidden = false
+        host.view.layoutIfNeeded()
+        defer { window.isHidden = true; window.rootViewController = nil }
+
+        turnMainRunLoop(for: 30) { !reads.isEmpty }
+        XCTAssertEqual(reads.last, true, "the backdrop on its own tab wasn't read in sight")
+        // To the other tab: the read on leaving, out of sight.
+        let shown = reads.count
+        box.tab = 1
+        turnMainRunLoop(for: 30) { reads.count > shown }
+        XCTAssertEqual(reads.last, false, "leaving for the other tab wasn't read out of sight")
+        // An input changes while the tab is hidden: SwiftUI evaluates the backdrop again.
+        let left = reads.count
+        box.slowdown = 0.41
+        turnMainRunLoop(for: 5) { reads.count > left }
+        XCTAssertGreaterThan(reads.count, left, "the hidden tab wasn't evaluated again (nothing to check)")
+        for inSight in reads.dropFirst(left) {
+            XCTAssertFalse(inSight, "a pass made on another tab was read as in sight")
+        }
+    }
+}
+
+/// Turns the main run loop until `done` or the budget is spent. It's spent per turn (a 20 ms turn, at
+/// most 50 ms counted), not by the wall clock: the host app's first render can hold main for 10 s or
+/// more, and a wall-clock budget ran out under it with the tick still queued.
+@MainActor
+private func turnMainRunLoop(for budget: TimeInterval, until done: () -> Bool) {
+    var left = budget
+    while !done(), left > 0 {
+        let t0 = Date()
+        RunLoop.main.run(until: t0.addingTimeInterval(0.02))
+        left -= min(Date().timeIntervalSince(t0), 0.05)
     }
 }
