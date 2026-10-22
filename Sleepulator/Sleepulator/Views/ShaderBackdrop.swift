@@ -61,7 +61,8 @@ struct SceneShaderInputs {
     /// Monotonic elapsed time — use for cyclic terms (breath, twinkle, dither, comet cycle).
     var elapsed: Float
     var size: CGSize
-    /// `sleepTimer.nightProgress`, 0 start → 1 timer end.
+    /// The timer's night (`sleepTimer.nightProgress`, 0 bedtime → 1 settled), or the scene's eased
+    /// reading of it when the scene passes `easedNight` (Fireflies, Lamplight).
     var night: Float
     /// Smoothed audio level, ~0…1.
     var audio: Float
@@ -73,9 +74,9 @@ struct SceneShaderInputs {
 }
 
 /// The shared host for the full-screen Metal Sleep scenes (Night sky, Aurora, Embers, Still water,
-/// Deep space, Fireflies) —
-/// they differ only in shader function, uniform list, and how hard the night slows them, so the
-/// redraw loop, the settle, and the `SceneClock` integration live here once.
+/// Deep space, Fireflies, Lamplight): they differ only in shader function, uniform list, how hard
+/// the night slows them, and whether they read the night through their own eased reading of it
+/// (`easedNight`), so the redraw loop, the settle, and the `SceneClock` integration live here once.
 ///
 /// `SceneContext` values are sampled *live* each tick (never observed) so the per-tick redraw
 /// can't trigger the `@Published` re-render storm CLAUDE.md warns about.
@@ -84,20 +85,36 @@ struct SceneShaderInputs {
 /// frozen `SceneClock` pose, no redraw loop on the all-night occluded screen.
 struct ShaderBackdrop: View {
     var paused: Bool
-    /// How hard the night settles this scene: phase rate = `1 − nightSlowdown × nightProgress`.
+    /// How hard the night settles this scene: phase rate = `1 − nightSlowdown × night`, the night
+    /// being `easedNight`'s reading when the scene passes one, else `sleepTimer.nightProgress`.
     var nightSlowdown: Double
     var sleepTimer: SleepTimerService?
     var audioLevel: (() -> Double)?
     var tilt: (() -> SIMD2<Float>)? = nil
-    /// The screen is out of sight (veil, background, low luminance). Only read while `paused`: a
-    /// scene that passes it keeps darkening with Moving scenes off, its still frame re-read every
-    /// 20 s while in sight (an untimed night publishes nothing). Defaults to true: no re-reads.
+    /// The screen is out of sight (veil, background, low luminance). Read while `paused`: a scene
+    /// that passes it keeps darkening with Moving scenes off, its still frame re-read every
+    /// `stillRereadInterval` while in sight (an untimed night publishes nothing). And, for a scene
+    /// with `easedNight`, on every frame as that reading's in-sight flag, so such a scene must pass
+    /// it too. Defaults to true: no re-reads (and every read out of sight).
     var occluded: Bool = true
+    /// The scene's own reading of the timer's night (`EasedNightFollower.night`: the night, the wall
+    /// clock, whether this read is in sight), for scenes whose night is in their structure. When set,
+    /// it drives both the shader's `night` and the clock's slowdown, so the pace of the motion eases
+    /// with the scene instead of jumping on a "+15m" (the snow's fall, a firefly's flash).
+    var easedNight: ((Double, TimeInterval, Bool) -> Double)? = nil
     /// Builds the scene's shader from this frame's inputs.
     var makeShader: (SceneShaderInputs) -> Shader
 
+    /// How often the still frame in sight (Moving scenes off) re-reads the night. Under
+    /// `EasedNight.watchedGap`, so those re-reads count as watched (pinned by a test).
+    nonisolated static let stillRereadInterval: TimeInterval = 20
+
     /// Random start so the field opens at a fresh pose each appearance (see `SceneClock.init`).
     @State private var clock = SceneClock(start: .random(in: 0...2048))
+    /// Whether the backdrop is on screen. TabView keeps Home installed on another tab and re-evaluates
+    /// it there (an engine publish), and `occluded` doesn't know about tabs: those reads must count as
+    /// out of sight too, or one of them undoes the read on leaving.
+    @State private var onScreen = true
 
     var body: some View {
         GeometryReader { geo in
@@ -110,7 +127,7 @@ struct ShaderBackdrop: View {
             // the swap; the clock, not the branch, owns the pose).
             if paused && !occluded {
                 // Still but in sight (Moving scenes off): the pose holds, the night is re-read.
-                TimelineView(.periodic(from: .now, by: 20)) { _ in
+                TimelineView(.periodic(from: .now, by: Self.stillRereadInterval)) { _ in
                     field(size: size, now: nil)
                 }
             } else if paused {
@@ -124,10 +141,21 @@ struct ShaderBackdrop: View {
         .ignoresSafeArea()
         .allowsHitTesting(false)
         .accessibilityHidden(true)
+        // Leaving the screen without being occluded (another tab; a cover over Home, if SwiftUI calls
+        // this under it) is out of sight too: one read marks it, and reads until it's back stay out of
+        // sight, or the first frame back within watchedGap would count the time away as watched and
+        // bring a "+15m" back in one frame.
+        .onAppear { onScreen = true }
+        .onDisappear {
+            onScreen = false
+            _ = easedNight?(sleepTimer?.nightProgress ?? 0, Date.timeIntervalSinceReferenceDate, false)
+        }
     }
 
     private func field(size: CGSize, now: TimeInterval?) -> some View {
-        let night = sleepTimer?.nightProgress ?? 0
+        let timerNight = sleepTimer?.nightProgress ?? 0
+        let night = easedNight?(timerNight, Date.timeIntervalSinceReferenceDate, onScreen && !occluded)
+            ?? timerNight
         if let now {
             clock.tick(now: now, rate: 1.0 - nightSlowdown * night)
             SceneDiagnostics.shared.frame(now: now)          // F3: per-scene fps / thermal / battery
