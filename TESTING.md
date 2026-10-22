@@ -48,8 +48,9 @@ Suites in `SleepulatorTests/` (seven files, many suites):
   (an episode's end is filed under its own item). The night journal and the asks:
   `NightRulesTests`, `NightJournalTests` (pauses, lapsed windows, late news filed by time,
   recovery after a kill, the soft cap, force-quit), `NightJournalWiringTests` (session edges,
-  interruptions, the timer's stop, a podcast failure), `AskRulesTests`, `CoachmarkTipCardTests`,
-  `RateRowRuleTests`, `FeedbackMessageTests`.
+  interruptions, the timer's stop, a podcast failure), `AskRulesTests`, `MorningReadbackTests`
+  (the read-back's window, wording, re-read times and which sessions are last night; two through
+  the real journal), `CoachmarkTipCardTests`, `RateRowRuleTests`, `FeedbackMessageTests`.
 - `PersistenceTests.swift` — legacy `SavedMix` → `SoundPreset` migration, library seeding,
   position-map coercion, `MixStore` reloads.
 - `BackupRoundTripTests.swift` — the backup's export → restore round-trip, its typed allowlist
@@ -756,7 +757,8 @@ real night, a real kill and the real App Store do. Before the tip steps: the thr
 App Store Connect (`app.sleepulator.Sleepulator.tip.small` / `.kind` / `.generous`, consumable),
 the Paid Apps agreement is active, and the phone is signed in to a Sandbox Apple Account
 (Settings ▸ Developer ▸ Sandbox Apple Account). To read a night's file, Send feedback and share it
-to Files: each night is a `.jsonl` file, one event per line.
+to Files: each Sleep session is a `.jsonl` file, one event per line (usually one a night; a pause
+past 30 minutes or a restart after a kill starts another).
 
 1. **A killed night stays open.** Run from Xcode. Sleep, All night, play a mix, lock, wait 10+
    minutes, then Product ▸ Stop in Xcode (a kill, like iOS ending the app: no notice reaches it).
@@ -878,7 +880,7 @@ phone at your desk.
 the night line. Unit tests pin the window, the wording and which sessions are last night; only a
 real night proves the journal records it as one that held. The line is re-read when the app comes
 forward, the veil lifts, a sheet closes, Settings is left, play starts or stops, the clock changes,
-and at 05:00 and 18:00.
+at 05:00 and 18:00, and when a paused session's 30 minutes run out.
 
 1. **A timed night reads back.** Sleep, a 30-minute night on the ring, play, lock, sleep. In the
    morning (after 05:00), open the app. ✅ Under the night line: "Last night · 30 min, eased out
@@ -900,10 +902,11 @@ and at 05:00 and 18:00.
    timer ends): open it in the morning. ✅ The line is there on the first screen. (b) Auto-Lock off,
    the app left on the night veil all night: tap the veil awake after 05:00. ✅ The line is there.
    (c) Settings ▸ Accessibility ▸ Larger Text at the largest size, on the smallest phone you have:
-   ✅ the line wraps but never reaches Build mix.
+   ✅ the line wraps but never reaches Build mix. (d) All night, Auto-Lock off: pause in the
+   morning with Home on screen and leave it. ✅ About 30 minutes later the line appears by itself.
 6. **The tip card takes the morning.** On the card's day (5 clean nights, as §U), Sleep Home at
-   rest: ✅ the card shows in the band and the line doesn't; ✅ tap No thanks: the line comes back
-   in the card's place.
+   rest: ✅ the card shows in the band and the line doesn't; ✅ tap No thanks: the card goes and
+   the line shows under the night line.
 7. **VoiceOver.** ✅ It reads "Last night, 30 minutes, eased out at …", units in words.
 
 ---

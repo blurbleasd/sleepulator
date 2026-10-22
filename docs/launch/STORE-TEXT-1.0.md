@@ -27,8 +27,9 @@ data from the app.
 - A short record of your recent nights: when sound started and stopped, when it was interrupted
   (a call or an alarm) or the audio output changed (headphones out), and whether playback ran
   into a problem. The last two nights are kept in detail and the last 30 as a one-line result.
-  It never contains web addresses. The app uses it to decide when to ask for a rating or show
-  the tip card, and to attach to feedback you choose to send.
+  It never contains web addresses. The app uses it to show a one-line note on the Sleep screen
+  the morning after a night that played without a problem, to decide when to ask for a rating or
+  show the tip card, and to attach to feedback you choose to send.
 - The battery and crash reports iOS provides to the app (Settings ▸ Backup & support ▸ Reports
   from iOS).
 
