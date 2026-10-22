@@ -24,7 +24,7 @@ struct HomeView: View {
     /// The one-time tip card is due (ContentView's ask rules; design D3, D6, D10). It shows in
     /// the coachmark band, after any first-run or night-ring tip, never over a playing session.
     var tipCardDue: Bool = false
-    /// The morning after a clean night, how it went (ContentView reads the night journal at the
+    /// The morning after a night that held, how it went (ContentView reads the night journal at the
     /// asks' moments; `MorningReadback`). Nil the rest of the time.
     var morningLine: MorningReadback.Line? = nil
     /// "Leave a tip" on the card: ContentView opens the tip sheet.
@@ -575,7 +575,7 @@ struct HomeView: View {
                         if !activeLayers.isEmpty {
                             LayerPills(layers: activeLayers, pal: pal)
                         } else if let morningLine, currentTip == nil {
-                            // At rest the pills' slot is free: the morning after a clean night, it
+                            // At rest the pills' slot is free: the morning after a night that held, it
                             // says how the night went. Play swaps it for the pills, so the orb
                             // barely moves; a card in the band below takes the morning instead.
                             MorningReadbackLine(line: morningLine, pal: pal)

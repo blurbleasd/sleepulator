@@ -4,16 +4,16 @@ import SwiftUI
 /// night line says how it went ("Last night · 1 hr 30 min, eased out at 12:41 AM"). The app's best
 /// work happens while the person is asleep; this is the one place they hear that it held.
 ///
-/// Pure, so the tests pin every case. A night is every Sleep session that started in it (18:00 to
-/// before 05:00), not the newest one: a morning Play is never last night, and a night the app died
-/// in stays broken after the person restarts the sound. Any session that broke silences the line.
+/// Pure, so the tests pin every case. A night is every Sleep session that played into it (18:00 to
+/// 05:00), not the newest one: a morning Play is never last night, and a night the app died in
+/// stays broken after the person restarts the sound. Any session that broke silences the line.
 /// It reads only what the night journal already keeps, on this phone.
 nonisolated enum MorningReadback {
     /// The line shows from 05:00 to 18:00 local, when "last night" means the night just gone.
     static let showsFromHour = 5
     static let hidesAtHour = 18
-    /// A session that started from 18:00 to before 05:00 belongs to that evening's night; any
-    /// other start (a morning Play, a nap after a night shift, an afternoon rest) isn't a night.
+    /// Last night runs from 18:00 yesterday to 05:00 today. A session that played into it belongs
+    /// to it; one wholly outside (a morning Play, a nap after a night shift) doesn't.
     static let nightFromHour = 18
     static let nightUntilHour = 5
     /// A clean timed night needs only a minute of live audio; a line about one minute reads as a
@@ -29,24 +29,29 @@ nonisolated enum MorningReadback {
 
         static let lead = "Last night"
         static let separator = " · "
+        /// The line as plain text, for the tests; the view draws the same parts, the lead weighted.
         var text: String { Self.lead + Self.separator + record }
     }
 
     /// - `nights`: the journal's closed sessions (`NightJournal.verdicts`), oldest first.
     /// - `openSince`: when the journal's open session started (playing, or paused under the resume
-    ///   window). One that started last night means the night hasn't ended; a morning one doesn't.
+    ///   window). One that started by 05:00 today means last night hasn't ended; a morning one doesn't.
     /// - `playing`: anything plays or is starting; the layer pills have the slot then.
     static func line(nights: [NightVerdict], openSince: Date?, focusMode: Bool, playing: Bool,
                      now: Date, calendar: Calendar = .current) -> Line? {
         guard !focusMode, !playing else { return nil }
         let hourNow = calendar.component(.hour, from: now)
-        guard hourNow >= showsFromHour, hourNow < hidesAtHour else { return nil }
-        if let openSince, isLastNight(openSince, now: now, calendar: calendar) { return nil }
-        let sessions = nights.filter { isLastNight($0.start, now: now, calendar: calendar) }
+        guard hourNow >= showsFromHour, hourNow < hidesAtHour,
+              let night = lastNight(before: now, calendar: calendar) else { return nil }
+        if let openSince, openSince < night.end { return nil }
+        let sessions = nights.filter { $0.end > night.start && $0.start < night.end }
         guard let final = sessions.max(by: { $0.end < $1.end }), final.end <= now,
               !sessions.contains(where: broke) else { return nil }
-        // Rounded once, so the screen and VoiceOver can't disagree by a minute.
-        let minutes = Int((sessions.reduce(0) { $0 + $1.live } / 60).rounded())
+        // Rounded once, so the screen and VoiceOver can't disagree by a minute. Clamped first, as
+        // PlayerClock clamps: a corrupt verdict file must not trap the conversion.
+        let total = sessions.reduce(0) { $0 + $1.live }
+        guard total.isFinite else { return nil }
+        let minutes = Int((min(total, 999 * 3600) / 60).rounded())
         guard minutes >= minimumMinutes else { return nil }
 
         let locale = calendar.locale ?? .current
@@ -64,20 +69,33 @@ nonisolated enum MorningReadback {
                     spoken: "\(Line.lead), \(PlayerClock.spoken(span, locale: locale)), \(ending)")
     }
 
-    /// A session that started in the night just gone: yesterday from 18:00, or today before 05:00.
-    static func isLastNight(_ start: Date, now: Date, calendar: Calendar) -> Bool {
-        let hour = calendar.component(.hour, from: start)
-        guard hour >= nightFromHour || hour < nightUntilHour else { return false }
-        let eveningOf = hour < nightUntilHour
-            ? calendar.date(byAdding: .day, value: -1, to: start) ?? start : start
-        guard let yesterday = calendar.date(byAdding: .day, value: -1, to: calendar.startOfDay(for: now))
-        else { return false }
-        return calendar.isDate(eveningOf, inSameDayAs: yesterday)
+    /// The night just gone: 18:00 yesterday to 05:00 today.
+    static func lastNight(before now: Date, calendar: Calendar) -> DateInterval? {
+        let today = calendar.startOfDay(for: now)
+        guard let yesterday = calendar.date(byAdding: .day, value: -1, to: today),
+              let start = calendar.date(bySettingHour: nightFromHour, minute: 0, second: 0, of: yesterday),
+              let end = calendar.date(bySettingHour: nightUntilHour, minute: 0, second: 0, of: today),
+              start < end else { return nil }
+        return DateInterval(start: start, end: end)
+    }
+
+    /// When the line's window next opens or closes (05:00 or 18:00), so Home re-reads it there.
+    static func nextEdge(after now: Date, calendar: Calendar = .current) -> Date {
+        let today = calendar.startOfDay(for: now)
+        let edges = [0, 1].flatMap { day in
+            [showsFromHour, hidesAtHour].compactMap { hour -> Date? in
+                guard let date = calendar.date(byAdding: .day, value: day, to: today) else { return nil }
+                return calendar.date(bySettingHour: hour, minute: 0, second: 0, of: date)
+            }
+        }
+        return edges.filter { $0 > now }.min() ?? now.addingTimeInterval(12 * 3600)
     }
 
     /// A session that spoils the night's claim: it died, something failed while it played, or its
     /// timer end can't be trusted (a deadline reconciled on the morning foreground, or under a
-    /// minute of sound: `NightRules.isClean`). A session the person ended early is not a failure.
+    /// minute of sound: `NightRules.isClean`). One that stopped early without a failure doesn't:
+    /// the person's pause, or an interruption that never resumed (an alarm, a call), which the
+    /// journal closes as `.person` where it paused. The line then says when the sound stopped.
     static func broke(_ session: NightVerdict) -> Bool {
         switch session.endedBy {
         case .died: return true

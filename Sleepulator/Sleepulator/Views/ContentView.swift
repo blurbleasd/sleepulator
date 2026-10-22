@@ -19,6 +19,8 @@ struct ContentView: View {
     @State private var tipCardDue = false
     /// Sleep Home's morning read-back of the night just gone, re-read with the asks.
     @State private var morningLine: MorningReadback.Line?
+    /// The re-read at the line's next window edge (05:00 or 18:00), rescheduled on every read.
+    @State private var morningLineEdge: DispatchWorkItem?
     @State private var showTipSheet = false
     #if DEBUG
     /// The card's UI test answers it in memory only (see `spendTipCard`).
@@ -375,7 +377,15 @@ struct ContentView: View {
             // Freeze the backdrop scene only when the veil actually occludes the screen —
             // it keeps animating through the lighter controls-faded screensaver.
             audio.screenDimmed = dimmed
-            if !dimmed { endGlance() }
+            if !dimmed {
+                endGlance()
+                // The veil's own user may never leave the app overnight: waking it is the morning.
+                refreshAsks()
+            }
+        }
+        // A clock or time-zone change moves the morning line's window.
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.significantTimeChangeNotification)) { _ in
+            refreshAsks()
         }
         .onChange(of: scenePhase) { _, phase in
             // Fail-safe: if iOS suspended us through a duration timer's deadline, the in-process
@@ -464,6 +474,13 @@ struct ContentView: View {
                                         openSince: audio.nightJournal.open?.start,
                                         focusMode: audio.focusMode, playing: sessionBusy, now: now)
         if line != morningLine { morningLine = line }
+        // And again at the window's next edge, so the line arrives at 05:00 and leaves at 18:00
+        // with Home on screen.
+        morningLineEdge?.cancel()
+        let edge = DispatchWorkItem { refreshAsks() }
+        morningLineEdge = edge
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + MorningReadback.nextEdge(after: now).timeIntervalSince(now) + 1, execute: edge)
     }
 
     /// A sheet just closed or the person just left Settings: maybe Apple's rating prompt

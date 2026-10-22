@@ -127,10 +127,11 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   Focus Pomodoro. `AudioMath` holds the fade curve.
 - `PodcastQueueManager`, `MixStore`, `PersistenceMigrator`, `StorageManager` (JSON file store),
   `AudioDownloader` (offline cache), `PodcastParser` / `OPMLParser` / `ITunesSearchManager`.
-- `NightJournal` — one record per Sleep night, on this phone only: per-night `.jsonl` event files
+- `NightJournal` — one record per Sleep session (a night can hold several: a pause past the resume
+  window, a restart after the app died), on this phone only: per-session `.jsonl` event files
   (the last 2, in Application Support/Sleepulator/nights, excluded from backup) and a verdict list
   (`night-verdicts.json`, the last 30). Clean nights pace the rating ask and the tip card; Send
-  feedback attaches the files.
+  feedback attaches the files; the morning read-back reads every session of last night.
 - `TipStore` — StoreKit 2 consumable tips, started at launch (`SleepulatorApp`): listens to
   `Transaction.updates`, finishes every transaction, and maps each outcome through the pure
   `TipFlow`. Nothing is unlocked by a tip.
@@ -291,16 +292,20 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   (`tipCardSpent`, `ratingAskedVersion`, `ratingAskedOn`, `tipCardShownOn`, `tippedOnThisPhone`,
   `tipTransactionsHandled`) is device-only: keep these keys OUT of `Backup.kinds`.
 - **The morning read-back speaks only for a night that held.** Sleep Home at rest, 05:00–18:00.
-  Last night is every journal session that started in it (18:00 to before 05:00, last evening or
-  after midnight), never just the newest: a morning Play isn't last night, and a night the app died
-  in stays broken after the sound is restarted. Any session that died, was tainted or ended on an
-  untrusted timer (`NightRules.isClean` false: reconciled, under a minute) silences it; one the
-  person ended early doesn't. Sound is summed, 10+ min as the line rounds it, and a session of
-  last night's still open (paused) holds it back (`MorningReadback`, unit-tested, one test through
-  the real journal). A card in the coachmark band takes the morning instead: that gate is
-  HomeView's (`currentTip == nil`), checked on device (TESTING.md §X.5), not in the rule.
-  ContentView reads it with the asks (`refreshAsks`, also on appear) and hands Home a plain value,
-  never `@Published`.
+  Last night is every journal session that played into 18:00 yesterday to 05:00 today (by span,
+  so an early bedtime at 17:50 counts), never just the newest: a morning Play isn't last night, and
+  a night the app died in stays broken after the sound is restarted. Any session that died, was
+  tainted or ended on an untrusted timer (`NightRules.isClean` false: reconciled, under a minute)
+  silences it. One that stopped early without a failure doesn't: the person's pause, or an
+  interruption that never resumed (an alarm, a call), which the journal closes as `.person` where
+  it paused; the line says when the sound stopped, not why (a 7:00 alarm is the common All-night
+  morning). Sound is summed, 10+ min as the line rounds it, and a session of last night's still
+  open (paused) holds it back (`MorningReadback`, unit-tested, two tests through the real
+  journal). A card in the coachmark band takes the morning instead: that gate is HomeView's
+  (`currentTip == nil`), checked on device (TESTING.md §X.6), not in the rule. ContentView reads it
+  with the asks (`refreshAsks`: on appear, scene activation, play edges, mode and store changes,
+  natural breaks, the veil lifting, a clock change, and the window's next edge via
+  `MorningReadback.nextEdge`) and hands Home a plain value, never `@Published`.
 - **Isolated deinits.** Under `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor` a class with no explicit
   `deinit` gets an implicit MainActor-*isolated* one (an explicit `deinit` is nonisolated). On the
   iOS 18.4–26.3 Swift runtimes that path aborts ("pointer being freed was not allocated" in
