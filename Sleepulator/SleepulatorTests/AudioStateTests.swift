@@ -3490,7 +3490,7 @@ final class EasedNightTests: XCTestCase {
     //   trusting the in-sight flag alone: a lock that drew no out-of-sight frame, then a "+15m",
     //   relights all at unlock; why_new=every other long gap follows an out-of-sight read or goes on,
     //   where the clause changes nothing; seam=none; no_claim=whether iOS draws an out-of-sight
-    //   frame at lock (TESTING.md §W.4/§X.4 on device)
+    //   frame at lock (TESTING.md §W.4/§Y.4 on device)
     func testInSightReadsOverAWatchedGapApartCountOnlyAStep() {
         let follower = EasedNightFollower()
         let t0 = 800_000_000.0
@@ -3548,7 +3548,7 @@ final class EasedNightTests: XCTestCase {
     //   a lock (the still frame barely followed for minutes), or ShaderBackdrop's re-read interval
     //   grows past watchedGap; why_new=the follower test above times frames and a lock, not the still
     //   frame's cadence; seam=none; no_claim=that ShaderBackdrop's TimelineView fires on that
-    //   interval (TESTING.md §W.5, §X.5 on device)
+    //   interval (TESTING.md §W.5, §Y.5 on device)
     func testTheStillFrameFollowsABumpAtItsOwnPace() {
         let interval = ShaderBackdrop.stillRereadInterval
         XCTAssertLessThan(interval, EasedNight.watchedGap, "the still frame's re-reads would count as unwatched")

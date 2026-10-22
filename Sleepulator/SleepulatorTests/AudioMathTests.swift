@@ -323,7 +323,7 @@ final class SceneSwipeLoopTests: XCTestCase {
     //   line Fireflies' PR edits too), its id is renamed or its mood isn't Sleep: falls back to Night
     //   sky; why_new=the registry walks above still pass with it gone; the Fireflies row pins only
     //   "fireflies"; seam=none; no_claim=the chip UI, the @AppStorage write and the shader's render
-    //   (registry resolution only; TESTING.md §X on device)
+    //   (registry resolution only; TESTING.md §Y on device)
     func testASavedLamplightPickReopensOnLamplight() {
         XCTAssertEqual(SceneRegistry.scene(id: "lamplight", mood: .sleep).id, "lamplight")
     }
