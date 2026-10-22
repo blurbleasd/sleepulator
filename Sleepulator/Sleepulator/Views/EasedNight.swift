@@ -11,6 +11,10 @@ final class EasedNightFollower {
     /// Whether the last read was drawn in sight (an animated frame, or the still frame with Moving
     /// scenes off), so the time since was watched.
     private var lastInSight = false
+    /// When the scene was last read in sight (or first read): where the time no one has watched
+    /// starts. Reads out of sight (Home re-evaluated on another tab, under the veil) don't move it, or
+    /// they'd keep restarting `EasedNight.freshAfter`'s 30 minutes.
+    private var lastSeen: TimeInterval?
 
     // Explicitly nonisolated: the implicit MainActor-isolated deinit aborts on iOS 18.4–26.3
     // runtimes (CLAUDE.md, "Isolated deinits"). Only releases stored properties.
@@ -20,10 +24,12 @@ final class EasedNightFollower {
     func night(_ target: Double, now: TimeInterval, inSight: Bool = true) -> Double {
         let dt = last.map { now - $0 } ?? 0
         let next = EasedNight.follow(shown: shown, target: target, dt: dt,
-                                     watched: lastInSight && dt <= EasedNight.watchedGap)
+                                     watched: lastInSight && dt <= EasedNight.watchedGap,
+                                     unseen: lastSeen.map { now - $0 } ?? 0)
         shown = next
         last = now
         lastInSight = inSight
+        if inSight || lastSeen == nil { lastSeen = now }
         return next
     }
 }
@@ -53,20 +59,23 @@ nonisolated enum EasedNight {
     /// Longer, or after a read out of sight, the gap wasn't watched.
     static let watchedGap = 21.0
 
-    /// An unwatched gap this long starts afresh, the night as it is: the night's own resume window
-    /// (`UntimedNight.resumeWindow`, pinned by a test), past which it is over or a new one has begun,
-    /// so the next bedtime opens as bedtime rather than easing back from last night's end.
+    /// Unseen this long (since the last read in sight), a scene starts afresh, the night as it is: the
+    /// night's own resume window (`UntimedNight.resumeWindow`, pinned by a test), past which it is
+    /// over or a new one has begun, so the next bedtime opens as bedtime rather than easing back from
+    /// last night's end.
     static let freshAfter: TimeInterval = 30 * 60
 
     /// The night to show after `dt` seconds, moving toward `target` no faster than `onRate` going on
     /// and `backRate` coming back, over the whole of `dt` if it was `watched` (both reads in sight)
     /// and at most `maxBackStep` of it if not. Nothing shown yet (the scene just appeared), or an
-    /// unwatched gap of `freshAfter` or more: the night as it is.
-    static func follow(shown: Double?, target: Double, dt: Double, watched: Bool = true) -> Double {
+    /// unwatched read `unseen` `freshAfter` or more since the scene was last in sight (nil: `dt`):
+    /// the night as it is.
+    static func follow(shown: Double?, target: Double, dt: Double, watched: Bool = true,
+                       unseen: Double? = nil) -> Double {
         let goal = clamped(target)
         guard let shown else { return goal }
         let elapsed = max(dt, 0)
-        if !watched && elapsed >= freshAfter { return goal }
+        if !watched && (unseen ?? elapsed) >= freshAfter { return goal }
         if goal >= shown { return min(goal, shown + onRate * elapsed) }
         return max(goal, shown - backRate * (watched ? elapsed : min(elapsed, maxBackStep)))
     }

@@ -3580,6 +3580,32 @@ final class EasedNightTests: XCTestCase {
         XCTAssertEqual(follower.night(0, now: t0 + 1 + EasedNight.freshAfter), 0,
                        "the next bedtime eased back from last night's end")
     }
+
+    // Value: protects=the fresh start is timed from the last read in sight, so reads made out of sight
+    //   (Home re-evaluated on another tab, under the veil) don't hold it off; fails_when=every read
+    //   restarts the 30 minutes: an app left open on Podcasts, the engine publishing every few minutes,
+    //   opens Home on last night's end and rewinds it over two minutes (thin snow and filled footprints
+    //   at bedtime); why_new=the new-night test above has one out-of-sight read, then none;
+    //   seam=none; no_claim=how often TabView re-evaluates a hidden tab (ShaderBackdropEasedNightTests
+    //   shows it does)
+    func testReadsOutOfSightDontHoldOffANewNight() {
+        let follower = EasedNightFollower()
+        let t0 = 800_000_000.0
+        XCTAssertEqual(follower.night(1.0, now: t0), 1.0)                    // Home at the night's end
+        _ = follower.night(1.0, now: t0 + 1, inSight: false)                 // off to Podcasts
+        // Home re-evaluated there every five minutes; the night over 31 minutes on (the timer's night
+        // back to 0).
+        for minute in stride(from: 5, through: 45, by: 5) {
+            _ = follower.night(minute < 31 ? 1.0 : 0, now: t0 + Double(minute * 60), inSight: false)
+        }
+        XCTAssertEqual(follower.night(0, now: t0 + 47 * 60), 0,
+                       "reads out of sight held off the fresh start: last night's end came back")
+        // A scene first drawn out of sight (Home built under the veil) is timed from that first read.
+        let unseen = EasedNightFollower()
+        XCTAssertEqual(unseen.night(1.0, now: t0, inSight: false), 1.0)
+        _ = unseen.night(1.0, now: t0 + 20 * 60, inSight: false)
+        XCTAssertEqual(unseen.night(0, now: t0 + 31 * 60), 0, "never seen, it never started afresh")
+    }
 }
 
 /// Lamplight's night (`SnowNight`): steady snow over crisp footprints at bedtime; thinning and
