@@ -29,8 +29,8 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
     `ModeSwitcher`, `MixDrawer`, `TimerSelectionSheet`, `Backdrops` (Night sky's meteor:
     `ShootingStarView` and its pure, unit-tested `NightSkyMotion` rules; the sky itself is
     `Views/NightSkyMetalView.swift` + `NightSkyShader.metal`), and the pure, unit-tested rules
-    `SessionGuards`, `HomeScreensaverPolicy` and `MorningReadback` (the morning after a clean
-    night, one dim line in the pills' slot: "Last night · 1 hr 30 min, eased out at 12:41 AM").
+    `SessionGuards`, `HomeScreensaverPolicy` and `MorningReadback` (the morning after a night that
+    held, one dim line in the pills' slot: "Last night · 1 hr 30 min, eased out at 12:41 AM").
     `Views/TonightShelfView.swift`
     is the Podcasts tab's "Tonight" (Focus: "Continue") shelf. `Views/NowPlayingState.swift` holds
     the player views' pure, unit-tested rules: `NowPlayingState` (hero, Up Next, phase),
@@ -290,11 +290,17 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   `SessionGuards` (`mayAskForRating`, `tipCardDue`), unit-tested. The asks' memory
   (`tipCardSpent`, `ratingAskedVersion`, `ratingAskedOn`, `tipCardShownOn`, `tippedOnThisPhone`,
   `tipTransactionsHandled`) is device-only: keep these keys OUT of `Backup.kinds`.
-- **The morning read-back speaks only for a clean night.** Sleep Home at rest, 05:00–18:00, for
-  the night just gone (started 18:00 to before 05:00, last evening or after midnight), 10+ min of
-  live audio, never while a session is open or a card is in the band (`MorningReadback`,
-  unit-tested). A night that hiccupped never claims it went well. ContentView reads it with the
-  asks (`refreshAsks`, also on appear) and hands Home a plain value, never `@Published`.
+- **The morning read-back speaks only for a night that held.** Sleep Home at rest, 05:00–18:00.
+  Last night is every journal session that started in it (18:00 to before 05:00, last evening or
+  after midnight), never just the newest: a morning Play isn't last night, and a night the app died
+  in stays broken after the sound is restarted. Any session that died, was tainted or ended on an
+  untrusted timer (`NightRules.isClean` false: reconciled, under a minute) silences it; one the
+  person ended early doesn't. Sound is summed, 10+ min as the line rounds it, and a session of
+  last night's still open (paused) holds it back (`MorningReadback`, unit-tested, one test through
+  the real journal). A card in the coachmark band takes the morning instead: that gate is
+  HomeView's (`currentTip == nil`), checked on device (TESTING.md §X.5), not in the rule.
+  ContentView reads it with the asks (`refreshAsks`, also on appear) and hands Home a plain value,
+  never `@Published`.
 - **Isolated deinits.** Under `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor` a class with no explicit
   `deinit` gets an implicit MainActor-*isolated* one (an explicit `deinit` is nonisolated). On the
   iOS 18.4–26.3 Swift runtimes that path aborts ("pointer being freed was not allocated" in

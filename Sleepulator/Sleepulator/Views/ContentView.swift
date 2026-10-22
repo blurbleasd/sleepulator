@@ -332,7 +332,8 @@ struct ContentView: View {
             // Any touch is interaction: restart the countdown. On the veil itself, its own tap
             // wakes (and re-arms) instead.
             windowActivity.onTouch = { if !nightDimmed { scheduleDim() } }
-            // A cold launch may never report a scene-phase change: read the morning line now.
+            // A cold launch may never report a scene-phase change: read the asks and the morning
+            // line now.
             refreshAsks()
         }
         // Pausing drops the pending dim (never forces the screen bright); resuming re-arms it.
@@ -436,9 +437,9 @@ struct ContentView: View {
         tipCardSpent = true
     }
 
-    /// Whether the tip card is due, re-read at scene activation, natural breaks and when the
-    /// store, the mode or the session changes. A plain value to Home, never @Published on
-    /// AudioEngine (eng run 2, Section 1 #2).
+    /// Whether the tip card is due, and Home's morning read-back: re-read on appear, at scene
+    /// activation, natural breaks and when the store, the mode or the session changes. Plain
+    /// values to Home, never @Published on AudioEngine (eng run 2, Section 1 #2).
     private func refreshAsks() {
         audio.nightJournal.closeLapsedPause()
         let now = Date()
@@ -459,8 +460,8 @@ struct ContentView: View {
         // due on another tab, or behind another card, it was never seen.
         if due != tipCardDue { tipCardDue = due }
         // The morning read-back looks at the same moments, after the lapsed pause is closed.
-        let line = MorningReadback.line(last: audio.nightJournal.verdicts.last,
-                                        nightOpen: audio.nightJournal.open != nil,
+        let line = MorningReadback.line(nights: audio.nightJournal.verdicts,
+                                        openSince: audio.nightJournal.open?.start,
                                         focusMode: audio.focusMode, playing: sessionBusy, now: now)
         if line != morningLine { morningLine = line }
     }

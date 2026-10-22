@@ -874,23 +874,28 @@ phone at your desk.
    once, not at the next redraw.
 
 ### X. Morning read-back: how last night went (added 2026-10-21, simulator-checked only)
-`MorningReadback`: the morning after a clean night, Sleep Home at rest shows one dim line under
-the night line. Unit tests pin the window and the wording; only a real night proves the journal
-calls it clean.
+`MorningReadback`: the morning after a night that held, Sleep Home at rest shows one dim line under
+the night line. Unit tests pin the window, the wording and which sessions are last night; only a
+real night proves the journal records it as one that held. The line is re-read when the app comes
+forward, a sheet closes, Settings is left, or play starts or stops: to re-read it, lock and unlock.
 
 1. **A timed night reads back.** Sleep, a 30-minute night on the ring, play, lock, sleep. In the
    morning (after 05:00), open the app. ✅ Under the night line: "Last night · 30 min, eased out
    at …" with the time the fade ended. ✅ Smaller and dimmer than the night line, one line on the
    phone at default text size.
-2. **All night reads back.** All night, play for 3+ hours, then pause in the morning and wait 30
-   minutes (or stop it). ✅ "Last night · 7 hr 12 min, until 6:40 AM" style, the hours matching
-   the sound you heard.
-3. **It steps aside.** ✅ Tap Play: the line goes and the layer pills take its place; the orb
-   doesn't jump. Switch to Focus: ✅ no line. Back to Sleep at rest: ✅ it's back. After 18:00:
-   ✅ gone (reopen the app to re-read).
-4. **A broken night says nothing.** A night the app died in (Xcode ▸ Stop mid-night, as §U.1).
-   ✅ No line the next morning.
-5. **VoiceOver.** ✅ It reads "Last night, 30 minutes, eased out at …", units in words.
+2. **All night reads back.** All night, play for 3+ hours, then pause in the morning. A pause
+   ends the night 30 minutes later (stopping is the same pause); then lock and unlock. ✅ "Last
+   night · 7 hr 12 min, until 6:40 AM" style, the hours matching the sound you heard.
+3. **It steps aside, and comes back.** ✅ Tap Play: the line goes and the layer pills take its
+   place; the orb doesn't jump. Pause: ✅ it's back (a morning session is never last night). Play
+   again, then switch to Focus: ✅ no line. Back to Sleep at rest: ✅ it's back. After 18:00, lock
+   and unlock: ✅ gone.
+4. **A broken night says nothing.** A night the app died in (Xcode ▸ Stop mid-night, as §U.1),
+   even after you restart the sound and let it run to the morning. ✅ No line the next morning.
+5. **The tip card takes the morning.** On the card's day (5 clean nights, as §U), Sleep Home at
+   rest: ✅ the card shows in the band and the line doesn't; ✅ tap No thanks: the line comes back
+   in the card's place.
+6. **VoiceOver.** ✅ It reads "Last night, 30 minutes, eased out at …", units in words.
 
 ---
 
