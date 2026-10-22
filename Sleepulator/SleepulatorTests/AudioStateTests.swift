@@ -3320,6 +3320,193 @@ final class NightSkyMotionTests: XCTestCase {
     }
 }
 
+/// Fireflies' night (`FireflyNight`): out of step and all there at bedtime, falling into step and
+/// going out (the nearest first) through the night, never all gone.
+final class FireflyNightTests: XCTestCase {
+    private let sweep = (0...200).map { Double($0) / 200 }
+
+    func testAtBedtimeEachKeepsItsOwnTimeAndAllAreThere() {
+        XCTAssertEqual(FireflyNight.sync(night: 0), 0)
+        XCTAssertEqual(FireflyNight.sync(night: 0.1), 0, "out of step through the first stretch")
+        XCTAssertEqual(FireflyNight.remaining(night: 0), FireflyNight.Left(far: 1, meadow: 1, near: 1))
+    }
+
+    func testAtTheEndAFewArePulsingTogether() {
+        // All night holds the night at 1, so this is what waking at 3am shows.
+        XCTAssertEqual(FireflyNight.sync(night: 1), 1)
+        let left = FireflyNight.remaining(night: 1)
+        XCTAssertEqual(left.far, 0)
+        XCTAssertEqual(left.near, 0)
+        XCTAssertEqual(left.meadow, FireflyNight.meadowAtEnd, accuracy: 1e-9)
+        // FirefliesShader.metal: the meadow's survivors are fully lit from 0.06, the rest are out
+        // below LAST (0.10). Outside that window the end of the night shows none, or too many.
+        XCTAssertGreaterThanOrEqual(left.meadow, 0.06)
+        XCTAssertLessThan(left.meadow, 0.10)
+    }
+
+    func testTheyFallIntoStepAndGoOutWithoutTurningBack() {
+        var previous = (sync: 0.0, left: FireflyNight.remaining(night: 0))
+        for n in sweep.dropFirst() {
+            let sync = FireflyNight.sync(night: n), left = FireflyNight.remaining(night: n)
+            XCTAssertGreaterThanOrEqual(sync, previous.sync, "sync fell back at \(n)")
+            XCTAssertLessThanOrEqual(left.far, previous.left.far, "a far one came back at \(n)")
+            XCTAssertLessThanOrEqual(left.meadow, previous.left.meadow, "a meadow one came back at \(n)")
+            XCTAssertLessThanOrEqual(left.near, previous.left.near, "a near one came back at \(n)")
+            previous = (sync, left)
+        }
+    }
+
+    func testTheNearestGoFirstAndTheMeadowLast() {
+        // The big out-of-focus ones are the most light, so they leave first; the meadow keeps a few.
+        for n in sweep {
+            let left = FireflyNight.remaining(night: n)
+            XCTAssertLessThanOrEqual(left.near, left.far, "at \(n)")
+            XCTAssertLessThanOrEqual(left.far, left.meadow, "at \(n)")
+        }
+    }
+
+    func testABumpBackEasesTheNightInsteadOfJumping() {
+        // "Still awake? +15m" near the end of a 30-minute timer moves the night from about 0.93 to
+        // 0.62 at once. Shown as is, the fireflies that had gone out would relight in one frame.
+        let frame = 1.0 / 30
+        var shown = FireflyNight.follow(shown: 0.93, target: 0.62, dt: frame)
+        XCTAssertEqual(shown, 0.93 - FireflyNight.backRate * frame, accuracy: 1e-12)
+        for _ in 0..<(30 * 30) { shown = FireflyNight.follow(shown: shown, target: 0.62, dt: frame) }
+        XCTAssertGreaterThan(shown, 0.62, "it took the jump in under 31 s")
+        for _ in 0..<(30 * 10) { shown = FireflyNight.follow(shown: shown, target: 0.62, dt: frame) }
+        XCTAssertEqual(shown, 0.62, accuracy: 1e-9, "it never reached the bumped night")
+
+        // Value: protects=a jump forward (a seek ahead under "Stop after this episode", which runs on
+        //   the playback clock) eases too; fails_when=follow caps only the bump back: the fireflies
+        //   left go out in one frame, a third of them mid-flash; why_new=the rows above jump back
+        //   only; seam=none; no_claim=none beyond protects (pure rule; TESTING.md §W on device)
+        XCTAssertEqual(FireflyNight.follow(shown: 0.2, target: 0.9, dt: frame),
+                       0.2 + FireflyNight.onRate * frame, accuracy: 1e-12, "a jump forward wasn't eased")
+    }
+
+    func testAFireflyGoingOutNeverVanishesInAFrame() {
+        // At the fastest it may go on, no layer's share moves a fifteenth of a firefly's fade (GOING,
+        // 0.06, in FirefliesShader.metal) in one 30 fps frame: a jump ahead fades them out over half a
+        // second or more, never in a frame.
+        let frame = FireflyNight.onRate / 30
+        for n in sweep {
+            let a = FireflyNight.remaining(night: n), b = FireflyNight.remaining(night: min(n + frame, 1))
+            XCTAssertLessThan(abs(b.far - a.far), 0.004, "far at \(n)")
+            XCTAssertLessThan(abs(b.meadow - a.meadow), 0.004, "meadow at \(n)")
+            XCTAssertLessThan(abs(b.near - a.near), 0.004, "near at \(n)")
+        }
+    }
+
+    func testAFireflyComingBackFadesInOverSeconds() {
+        // FirefliesShader.metal fades a firefly in or out over GOING (0.06) of its layer's share. At
+        // the capped pace coming back no layer's share moves that far in 2 s, anywhere in the night.
+        let twoSeconds = 2 * FireflyNight.backRate
+        for n in sweep {
+            let a = FireflyNight.remaining(night: n), b = FireflyNight.remaining(night: min(n + twoSeconds, 1))
+            XCTAssertLessThan(abs(b.far - a.far), 0.06, "far at \(n)")
+            XCTAssertLessThan(abs(b.meadow - a.meadow), 0.06, "meadow at \(n)")
+            XCTAssertLessThan(abs(b.near - a.near), 0.06, "near at \(n)")
+        }
+    }
+
+    func testARealNightIsShownAsItIs() {
+        // "Stop after this episode" with a minute left (startEndOfEpisode(remaining: 60)) moves the night
+        // 1/60 a second, under onRate: followed frame by frame, not left thinning after the stop. (One
+        // set with under 30 s left moves faster and trails the stop by up to 30 s, accepted.)
+        let frame = 1.0 / 30
+        var shown = FireflyNight.follow(shown: nil, target: 0, dt: 0)
+        for i in 1...(60 * 30) { shown = FireflyNight.follow(shown: shown, target: Double(i) / (60 * 30), dt: frame) }
+        XCTAssertEqual(shown, 1, accuracy: 1e-9, "the meadow lagged a minute-long night")
+        // The scene appearing mid-night shows that night, not a slide from bedtime.
+        XCTAssertEqual(FireflyNight.follow(shown: nil, target: 0.62, dt: 0), 0.62)
+        // Two reads at one instant don't move it.
+        XCTAssertEqual(FireflyNight.follow(shown: 0.93, target: 0.62, dt: 0), 0.93)
+    }
+
+    func testANightOutsideItsRangeIsClamped() {
+        XCTAssertEqual(FireflyNight.remaining(night: -0.5), FireflyNight.remaining(night: 0))
+        XCTAssertEqual(FireflyNight.remaining(night: 1.5), FireflyNight.remaining(night: 1))
+        XCTAssertEqual(FireflyNight.sync(night: 1.5), 1)
+        XCTAssertEqual(FireflyNight.sync(night: .nan), 0)
+        XCTAssertEqual(FireflyNight.remaining(night: .nan), FireflyNight.remaining(night: 0))
+
+        // Value: protects=follow's night, stored and fed back each frame, stays a real night in 0…1
+        //   whatever the timer reads; fails_when=follow stops clamping its target: one NaN read sticks
+        //   the eased night at NaN (the meadow shows bedtime all night) or it eases past 1;
+        //   why_new=the rows above check remaining and sync, not follow; seam=none; no_claim=that
+        //   SleepTimerService ever reads NaN or out of range (pure rule only)
+        XCTAssertEqual(FireflyNight.follow(shown: nil, target: 1.5, dt: 0), 1)
+        XCTAssertEqual(FireflyNight.follow(shown: nil, target: -0.5, dt: 0), 0)
+        XCTAssertEqual(FireflyNight.follow(shown: nil, target: .nan, dt: 0), 0)
+        XCTAssertEqual(FireflyNight.follow(shown: 0.995, target: 1.5, dt: 1), 1, accuracy: 1e-12, "eased past 1")
+        let afterNaN = FireflyNight.follow(shown: 0.5, target: .nan, dt: 1)
+        XCTAssertTrue(afterNaN.isFinite && (0...1).contains(afterNaN), "a NaN read stuck the night at \(afterNaN)")
+    }
+
+    // Value: protects=the meadow eases from the night it last drew, by the time since that frame (at
+    //   most maxBackStep of it bringing fireflies back); a clock set back holds it a frame; after an
+    //   unseen hour going on it shows the night as it is; fails_when=the follower drops shown/last,
+    //   times from its first frame or backwards, counts a lock's whole gap toward a relight (the
+    //   lock-screen "+15m" relit them all at unlock), or clamps the gap going on (a bright slide at a
+    //   3am wake); why_new=follow is tested alone, nothing drives the class carrying its state;
+    //   seam=none; no_claim=that FirefliesMetalView calls it each frame with the timer's night, or the
+    //   shader's response (TESTING.md §W on device)
+    func testTheMeadowEasesFromTheNightItLastDrew() {
+        let follower = FireflyNightFollower()
+        let t0 = 800_000_000.0   // seconds since the reference date, as the view passes them
+        let back = FireflyNight.backRate * FireflyNight.maxBackStep   // the most an unwatched gap brings back
+        // Its first frame (the scene just appeared at 2am) is the night as it is.
+        XCTAssertEqual(follower.night(0.93, now: t0), 0.93)
+        // "+15m": each frame steps by the time since the frame before, from where it last drew.
+        XCTAssertEqual(follower.night(0.62, now: t0 + 0.25), 0.93 - FireflyNight.backRate / 4, accuracy: 1e-12)
+        XCTAssertEqual(follower.night(0.62, now: t0 + 0.25), 0.93 - FireflyNight.backRate / 4, accuracy: 1e-12,
+                       "a second read at the same instant moved it")
+        // The screen goes out of sight (its last frame drawn there), and a lock-screen "+15m" a minute
+        // later: the first frame back counts half a second, not the minute, so the fireflies come back
+        // over seconds on screen, never all at unlock.
+        XCTAssertEqual(follower.night(0.62, now: t0 + 0.5, inSight: false), 0.93 - FireflyNight.backRate / 2,
+                       accuracy: 1e-12)
+        XCTAssertEqual(follower.night(0.62, now: t0 + 60.5), 0.93 - FireflyNight.backRate / 2 - back,
+                       accuracy: 1e-12, "the locked minute relit the meadow at once")
+        // The wall clock set back (the view reads Date): it holds, then goes on from the new time.
+        XCTAssertEqual(follower.night(0.62, now: t0 - 600), 0.93 - FireflyNight.backRate / 2 - back,
+                       accuracy: 1e-12, "a clock set back moved the night")
+        XCTAssertEqual(follower.night(0.62, now: t0 - 599.75),
+                       0.93 - FireflyNight.backRate * 0.75 - back, accuracy: 1e-12)
+        // The veil lifted an hour on, the night gone on meanwhile: the 3am night at once, not a
+        // slide from a brighter meadow.
+        XCTAssertEqual(follower.night(1.0, now: t0 + 3600), 1.0, accuracy: 1e-12)
+    }
+
+    // Value: protects=with Moving scenes off the still frame's 20 s re-reads count in full, so after a
+    //   "+15m" it relights at its own pace; fails_when=every read is capped like the first one after
+    //   a lock (the still meadow barely relit for minutes); why_new=the follower test above times
+    //   frames and a lock, not the still frame's cadence; seam=none; no_claim=that ShaderBackdrop
+    //   re-reads every 20 s (TESTING.md §W.5 on device)
+    func testTheStillMeadowFollowsABumpAtItsOwnPace() {
+        let follower = FireflyNightFollower()
+        let t0 = 800_000_000.0
+        XCTAssertEqual(follower.night(0.93, now: t0), 0.93)
+        XCTAssertEqual(follower.night(0.62, now: t0 + 20), 0.93 - 20 * FireflyNight.backRate, accuracy: 1e-12)
+        // The next re-read would pass the bumped night; it stops there.
+        XCTAssertEqual(follower.night(0.62, now: t0 + 40), 0.62, accuracy: 1e-12)
+    }
+
+    // Value: protects=after the night is over (sound off past its resume window) the next bedtime
+    //   opens on a full meadow; fails_when=the follower eases back from last night's few over two
+    //   minutes, or its window drifts from the night's own; why_new=no test drives a new night after
+    //   a long unseen gap; seam=none; no_claim=that SleepTimerService resets nightProgress (its own tests)
+    func testANewNightOpensAsItIs() {
+        XCTAssertEqual(FireflyNight.freshAfter, UntimedNight.resumeWindow)
+        let follower = FireflyNightFollower()
+        let t0 = 800_000_000.0
+        XCTAssertEqual(follower.night(1.0, now: t0), 1.0)
+        _ = follower.night(1.0, now: t0 + 1, inSight: false)        // the veil drops at 3am
+        XCTAssertEqual(follower.night(0, now: t0 + 1 + FireflyNight.freshAfter), 0,
+                       "the next bedtime eased back from last night's few")
+    }
+}
+
 /// Pure text rules behind the podcast screens (`PodcastText`): show-notes cleanup, counts, and
 /// placeholder show names.
 final class PodcastTextTests: XCTestCase {

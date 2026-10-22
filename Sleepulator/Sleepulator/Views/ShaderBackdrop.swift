@@ -72,7 +72,8 @@ struct SceneShaderInputs {
     var frozen: Bool
 }
 
-/// The shared host for the full-screen Metal scenes (Aurora, Embers, Still water, Deep space) —
+/// The shared host for the full-screen Metal Sleep scenes (Night sky, Aurora, Embers, Still water,
+/// Deep space, Fireflies) —
 /// they differ only in shader function, uniform list, and how hard the night slows them, so the
 /// redraw loop, the settle, and the `SceneClock` integration live here once.
 ///
