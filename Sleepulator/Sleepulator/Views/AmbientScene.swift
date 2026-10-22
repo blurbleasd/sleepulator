@@ -314,7 +314,7 @@ struct FirefliesScene: AmbientScene {
 /// flakes lit only inside the lamp's cone, further lamps receding into the snowfall
 /// (`LamplightShader.metal` `lampSnowField` via `LamplightMetalView`). The night is in the
 /// structure: the snowfall thins and the footprints across the lamp's pool fill in (`SnowNight`).
-/// Dark (mean luma about 8 of 255 at bedtime, 5 at the night's end); pairs with Brown.
+/// Dark (mean luma about 10 of 255 at bedtime, 7 at the night's end); pairs with Brown.
 struct LamplightScene: AmbientScene {
     let id = "lamplight"
     let title = "Lamplight"

@@ -919,7 +919,8 @@ Green playing.
    the flash rolling left to right across them. ✅ None goes out with a pop: each fades over a
    stretch of the night. In the last two minutes tap "Still awake? +15m": ✅ the fireflies that had
    gone out come back a few at a time over about a minute, never all at once in a flash
-   (`FireflyNight.follow` eases the night back, at most a night in two minutes). Again near the
+   (`EasedNight.follow` eases the night back, at most a night in two minutes, and the flashes'
+   pace eases with it, never jumping in a frame). Again near the
    end, lock the phone, tap +15m on the lock screen's Live Activity, wait a minute and unlock: ✅ the
    same, they come back over about a minute after the unlock, none in the first frame. Mid-night,
    pull down Control Center and push it back: ✅ the lit fireflies don't change. An All night
@@ -927,7 +928,7 @@ Green playing.
    Leave Home on Fireflies, lock the phone once the night's sound has stopped, and unlock it over
    30 minutes later to start the next night: ✅ it opens on a full meadow at once, not last night's
    few filling in. (Left in sight instead, the meadow refills over about two minutes once the 30
-   minutes pass, by design: `FireflyNight.freshAfter` starts afresh only after that long out of
+   minutes pass, by design: `EasedNight.freshAfter` starts afresh only after that long out of
    sight.) On an SE with Display Zoom on, if you have one: ✅ 3 left at the end (the shortest
    meadow keeps the fewest).
 5. **Moving scenes off.** Settings → Moving scenes off, Auto-Lock Never, the veil off. ✅ A still
@@ -945,7 +946,7 @@ street lamp on a crook post in falling snow. The snow shows only inside the lamp
 cone glows faintly in the snow-filled air over a pool of light on the snow; three more lamps
 recede down the street into the snowfall. Through the night the snow thins and the footprints
 across the pool fill in (`SnowNight`). Offline frames of the shader showed the look and the end
-of the night (mean luma about 8 of 255 at bedtime, 5.6 at the end); it was installed on the phone
+of the night (mean luma about 10 of 255 at bedtime, 6.6 at the end); it was installed on the phone
 2026-10-21 but not yet watched there. Motion feel, black level on OLED at 2am, ProMotion and a
 full night need the phone. Room dark, phone on the nightstand, brightness where you'd leave it at
 night, Lamplight selected (Build mix → Backdrop), Brown playing.
@@ -957,22 +958,28 @@ night, Lamplight selected (Build mix → Backdrop), Brown playing.
    each smaller and fainter in the snow. ✅ The snow shows only inside the light, none in the dark
    around it; flakes nearer the window are bigger and softer and cross the screen faster. ✅ The
    far lamps' pools read as lit snow down the street, not flat discs floating in the dark (log it if
-   they do: it's the scene's one known risk). Hold the phone and tilt it: ✅ the near lamp and its
-   snow shift more than the far lamps, and the whole street moves the same way.
+   they do: it's the scene's one known risk), a few flakes glinting in each far lamp's light. ✅ The
+   nearest, biggest flakes pass in front of the post, never behind it. Hold the phone and tilt it:
+   ✅ the near lamp and its snow shift more than the far lamps, and the whole street moves the same
+   way.
 2. **Alive but calm; nothing blinks.** Watch two minutes. ✅ The snow falls at an unhurried,
    steady pace (several seconds to cross the cone), drifting a little in a breeze that changes over
-   minutes, each flake swaying gently. ✅ Flakes passing right by the bowl brighten as they pass,
-   never flare; none pops on or off at the cone's edge.
+   minutes, each flake swaying gently. ✅ Flakes passing right by the bowl brighten as they pass but
+   never outshine the bowl; none pops on or off at the cone's edge. ✅ Over several minutes the view
+   wanders by a few points (it keeps the lamp off the same pixels all night): you shouldn't notice it.
 3. **Visible at night brightness.** ✅ The cone, the pool, the footprints and the far lamps are
-   visible to dark-adapted eyes, and the snow on the street is a shade lighter than the sky. ✅ The
-   bowl is the brightest thing on screen and small; it doesn't light the room. ✅ No banding in the
-   cone's glow or the sky.
+   visible to dark-adapted eyes, and the snow on the street is a shade lighter than the sky (about
+   10 levels above black against the sky's 4-7). ✅ The bowl is the brightest thing on screen and
+   small; it doesn't light the room. ✅ No banding in the cone's glow or the sky.
 4. **The night arc.** A 15-minute timer, Auto-Lock Never and the veil off in Settings so you can
    watch. ✅ The snowfall thins through the night, to about a quarter at the end, and slows; the
    footprints grow shallow and soft and are gone by about four-fifths of the way; snow builds on the
-   crook and the lamp's hood. ✅ No flake vanishes with a pop: each fades. In the last two minutes
-   tap "Still awake? +15m": ✅ the snow thickens back over about a minute, never all at once
-   (`EasedNight.follow` eases the night back, at most a night in two minutes). Again near the end,
+   crook and the lamp's hood; the bowl dims to well under half its bedtime brightness. ✅ No flake
+   vanishes with a pop: each fades. In the last two minutes tap "Still awake? +15m": ✅ the snow
+   thickens back over about a minute, never all at once, and its fall speeds up just as gently,
+   never in a frame (`EasedNight.follow` eases the night back, at most a night in two minutes,
+   and ShaderBackdrop's `easedNight` paces the clock by it). The footprints come back a little
+   too, by design: the whole scene follows the night. Again near the end,
    lock the phone, tap +15m on the lock screen's Live Activity, wait a minute and unlock: ✅ the
    same, nothing at once in the first frame. An All night session, woken after an hour: ✅ snow
    still falling, thinly, over unbroken snow. Leave Home on Lamplight, lock the phone once the

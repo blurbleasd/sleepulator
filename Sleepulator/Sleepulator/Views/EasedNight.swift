@@ -49,7 +49,8 @@ nonisolated enum EasedNight {
     static let maxBackStep = 0.5
 
     /// The longest gap between reads that were both in sight: the still frame (Moving scenes off)
-    /// re-reads every 20 s. Longer, or after a read out of sight, the gap wasn't watched.
+    /// re-reads every `ShaderBackdrop.stillRereadInterval` (20 s, pinned under this by a test).
+    /// Longer, or after a read out of sight, the gap wasn't watched.
     static let watchedGap = 21.0
 
     /// An unwatched gap this long starts afresh, the night as it is: the night's own resume window

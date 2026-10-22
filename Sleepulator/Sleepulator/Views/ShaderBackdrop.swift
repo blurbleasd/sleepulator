@@ -91,10 +91,20 @@ struct ShaderBackdrop: View {
     var tilt: (() -> SIMD2<Float>)? = nil
     /// The screen is out of sight (veil, background, low luminance). Only read while `paused`: a
     /// scene that passes it keeps darkening with Moving scenes off, its still frame re-read every
-    /// 20 s while in sight (an untimed night publishes nothing). Defaults to true: no re-reads.
+    /// `stillRereadInterval` while in sight (an untimed night publishes nothing). Defaults to true:
+    /// no re-reads.
     var occluded: Bool = true
+    /// The scene's own reading of the timer's night (`EasedNightFollower.night`: the night, the wall
+    /// clock, whether this read is in sight), for scenes whose night is in their structure. When set,
+    /// it drives both the shader's `night` and the clock's slowdown, so the pace of the motion eases
+    /// with the scene instead of jumping on a "+15m" (the snow's fall, a firefly's flash).
+    var easedNight: ((Double, TimeInterval, Bool) -> Double)? = nil
     /// Builds the scene's shader from this frame's inputs.
     var makeShader: (SceneShaderInputs) -> Shader
+
+    /// How often the still frame in sight (Moving scenes off) re-reads the night. Under
+    /// `EasedNight.watchedGap`, so those re-reads count as watched (pinned by a test).
+    nonisolated static let stillRereadInterval: TimeInterval = 20
 
     /// Random start so the field opens at a fresh pose each appearance (see `SceneClock.init`).
     @State private var clock = SceneClock(start: .random(in: 0...2048))
@@ -110,7 +120,7 @@ struct ShaderBackdrop: View {
             // the swap; the clock, not the branch, owns the pose).
             if paused && !occluded {
                 // Still but in sight (Moving scenes off): the pose holds, the night is re-read.
-                TimelineView(.periodic(from: .now, by: 20)) { _ in
+                TimelineView(.periodic(from: .now, by: Self.stillRereadInterval)) { _ in
                     field(size: size, now: nil)
                 }
             } else if paused {
@@ -127,7 +137,8 @@ struct ShaderBackdrop: View {
     }
 
     private func field(size: CGSize, now: TimeInterval?) -> some View {
-        let night = sleepTimer?.nightProgress ?? 0
+        let timerNight = sleepTimer?.nightProgress ?? 0
+        let night = easedNight?(timerNight, Date.timeIntervalSinceReferenceDate, !occluded) ?? timerNight
         if let now {
             clock.tick(now: now, rate: 1.0 - nightSlowdown * night)
             SceneDiagnostics.shared.frame(now: now)          // F3: per-scene fps / thermal / battery

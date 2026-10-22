@@ -12,8 +12,9 @@ import SwiftUI
 /// through the night the snowfall thins and the footprints fill in (`SnowNight`). A thin wrapper over
 /// `ShaderBackdrop`, which owns the redraw loop, the freeze and the `SceneClock`
 /// (`nightSlowdown: 0.4`: the fall, the breeze and the flutter ease to 60% as the night deepens):
-///   - `sleepTimer.nightProgress`, eased (`EasedNight.follow`), sets the snowfall and how settled
-///     the snow is, and dims the scene;
+///   - `sleepTimer.nightProgress`, eased (`EasedNight.follow`, through ShaderBackdrop's `easedNight`,
+///     so the fall's pace eases with it), sets the snowfall and how settled the snow is, and dims the
+///     scene (the bowl most);
 ///   - `tilt` moves the window, so the scene parallaxes by depth;
 ///   - `occluded` keeps the still street following the night with Moving scenes off.
 struct LamplightMetalView: View {
@@ -31,8 +32,9 @@ struct LamplightMetalView: View {
 
     var body: some View {
         ShaderBackdrop(paused: paused, nightSlowdown: 0.4,
-                       sleepTimer: sleepTimer, audioLevel: nil, tilt: tilt, occluded: occluded) { s in
-            let night = follower.night(Double(s.night), now: Date.timeIntervalSinceReferenceDate, inSight: !occluded)
+                       sleepTimer: sleepTimer, audioLevel: nil, tilt: tilt, occluded: occluded,
+                       easedNight: follower.night) { s in
+            let night = Double(s.night)
             return ShaderLibrary.lampSnowField(
                 .float(s.phase),
                 .float(s.elapsed),
@@ -49,9 +51,10 @@ struct LamplightMetalView: View {
 
 /// How the snow changes over the night, the scene's reading of it: at bedtime it falls steadily and
 /// footprints cross the lamp's pool; through the night it thins, and what has fallen settles (the
-/// footprints fill in, snow builds on the lamp), until a few flakes drift through the light over
-/// unbroken snow. It never stops, so waking at 3am (an All night session holds `nightProgress` at 1)
-/// still shows snow falling. Pure, so it's unit-tested; the shader turns the snowfall into which
+/// footprints fill in, snow builds on the lamp), until a quarter of the snow drifts through the light
+/// over unbroken snow. It never stops, so waking at 3am (an All night session holds `nightProgress`
+/// at 1) still shows snow falling. A "+15m" winds it back a little, footprints too: the whole scene
+/// follows the night. Pure, so it's unit-tested; the shader turns the snowfall into which
 /// flakes fall, each fading out over a short stretch.
 nonisolated enum SnowNight {
     /// The share of flakes still falling at the end of the night.

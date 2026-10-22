@@ -10,8 +10,8 @@ import SwiftUI
 /// by one until a few are left pulsing together (`FireflyNight`). A thin wrapper over
 /// `ShaderBackdrop`, which owns the redraw loop, the freeze and the `SceneClock`
 /// (`nightSlowdown: 0.3`: the flashes, the drift and the sway ease to 70% as the night deepens):
-///   - `sleepTimer.nightProgress`, eased (`EasedNight.follow`), sets the sync and the fireflies
-///     left, and dims the scene;
+///   - `sleepTimer.nightProgress`, eased (`EasedNight.follow`, through ShaderBackdrop's `easedNight`,
+///     so the flashes' pace eases with it), sets the sync and the fireflies left, and dims the scene;
 ///   - `tilt` parallaxes the layers by depth;
 ///   - `occluded` keeps the still meadow following the night with Moving scenes off. Only then does
 ///     the frame hold each firefly's flash where it froze and keep the survivors glowing (the
@@ -34,8 +34,9 @@ struct FirefliesMetalView: View {
 
     var body: some View {
         ShaderBackdrop(paused: paused, nightSlowdown: 0.3,
-                       sleepTimer: sleepTimer, audioLevel: nil, tilt: tilt, occluded: occluded) { s in
-            let night = follower.night(Double(s.night), now: Date.timeIntervalSinceReferenceDate, inSight: !occluded)
+                       sleepTimer: sleepTimer, audioLevel: nil, tilt: tilt, occluded: occluded,
+                       easedNight: follower.night) { s in
+            let night = Double(s.night)
             let left = FireflyNight.remaining(night: night)
             return ShaderLibrary.fireflyField(
                 .float(s.phase),

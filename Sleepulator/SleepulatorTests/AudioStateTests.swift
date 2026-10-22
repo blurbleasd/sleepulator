@@ -3454,8 +3454,8 @@ final class EasedNightTests: XCTestCase {
     //   (at most maxBackStep of it bringing back what had gone); a clock set back holds it a frame; after an
     //   unseen hour going on it shows the night as it is; fails_when=the follower drops shown/last,
     //   times from its first frame or backwards, counts a lock's whole gap toward a relight (the
-    //   lock-screen "+15m" relit them all at unlock), or clamps the gap going on (a bright slide at a
-    //   3am wake); why_new=follow is tested alone, nothing drives the class carrying its state;
+    //   lock-screen "+15m" relit them all at unlock); why_new=follow is tested alone, nothing drives
+    //   the class carrying its state;
     //   seam=none; no_claim=that FirefliesMetalView and LamplightMetalView call it each frame with the
     //   timer's night, or the shaders' response (TESTING.md §W on device)
     func testTheFollowerEasesFromTheNightItLastDrew() {
@@ -3485,18 +3485,79 @@ final class EasedNightTests: XCTestCase {
         XCTAssertEqual(follower.night(1.0, now: t0 + 3600), 1.0, accuracy: 1e-12)
     }
 
-    // Value: protects=with Moving scenes off the still frame's 20 s re-reads count in full, so after a
+    // Value: protects=two in-sight reads over watchedGap apart (no frame drew out of sight before a
+    //   suspend) count at most maxBackStep coming back; fails_when=watched drops `dt <= watchedGap`,
+    //   trusting the in-sight flag alone: a lock that drew no out-of-sight frame, then a "+15m",
+    //   relights all at unlock; why_new=every other long gap follows an out-of-sight read or goes on,
+    //   where the clause changes nothing; seam=none; no_claim=whether iOS draws an out-of-sight
+    //   frame at lock (TESTING.md §W.4/§X.4 on device)
+    func testInSightReadsOverAWatchedGapApartCountOnlyAStep() {
+        let follower = EasedNightFollower()
+        let t0 = 800_000_000.0
+        XCTAssertEqual(follower.night(1.0, now: t0, inSight: true), 1.0)
+        // Its last frame drawn in sight, then none for a minute (the app suspended before Home drew it
+        // out of sight), "+15m" pressed meanwhile: still only half a second counts toward coming back.
+        XCTAssertEqual(follower.night(0.62, now: t0 + 60, inSight: true),
+                       1.0 - EasedNight.backRate * EasedNight.maxBackStep, accuracy: 1e-12,
+                       "a minute with no frame drawn brought the night back at once")
+    }
+
+    // Value: protects=an unwatched gap going on counts in full: after a suspend, or the veil lifted
+    //   under freshAfter, the scene shows the later night at once (thinner snow, fewer fireflies);
+    //   fails_when=the on step is capped like the back step (a bright slide at the wake);
+    //   why_new=the only long going-on read above is over freshAfter and takes the fresh branch;
+    //   seam=none; no_claim=none beyond protects (pure rule)
+    func testAnUnwatchedGapGoingOnCountsInFull() {
+        let t0 = 800_000_000.0
+        // In sight, then no frame for 22 s (suspended), the night gone on.
+        let suspended = EasedNightFollower()
+        XCTAssertEqual(suspended.night(0.3, now: t0), 0.3)
+        XCTAssertEqual(suspended.night(0.9, now: t0 + 22), 0.9, accuracy: 1e-12)
+        // Out of sight (the veil), then 20 minutes on, under freshAfter: the night as it is.
+        let veiled = EasedNightFollower()
+        XCTAssertEqual(veiled.night(0.4, now: t0, inSight: false), 0.4)
+        XCTAssertEqual(veiled.night(0.7, now: t0 + 20 * 60), 0.7, accuracy: 1e-12,
+                       "the gap going on was capped: a bright slide at the wake")
+        // Out of sight, then a read 6 s later with the night ahead: those 6 s count in full.
+        let glanced = EasedNightFollower()
+        XCTAssertEqual(glanced.night(0.2, now: t0, inSight: false), 0.2)
+        XCTAssertEqual(glanced.night(0.9, now: t0 + 6), 0.2 + 6 * EasedNight.onRate, accuracy: 1e-12)
+    }
+
+    // Value: protects=the first read after an out-of-sight frame, however soon, counts at most
+    //   maxBackStep coming back, and a clock set back after one holds; fails_when=watched keeps only
+    //   `dt <= watchedGap` (an unlock within 21 s of the veil's frame brings back up to 0.175 of a
+    //   night in one frame), or a negative gap moves it; why_new=every tested read after an
+    //   out-of-sight frame comes a minute or more later; seam=none; no_claim=none beyond protects
+    func testAReadJustAfterAnOutOfSightFrameIsUnwatched() {
+        let follower = EasedNightFollower()
+        let t0 = 800_000_000.0
+        XCTAssertEqual(follower.night(0.93, now: t0, inSight: false), 0.93)
+        XCTAssertEqual(follower.night(0.62, now: t0 + 5),
+                       0.93 - EasedNight.backRate * EasedNight.maxBackStep, accuracy: 1e-12,
+                       "five unwatched seconds counted in full")
+        let clockBack = EasedNightFollower()
+        XCTAssertEqual(clockBack.night(0.93, now: t0, inSight: false), 0.93)
+        XCTAssertEqual(clockBack.night(0.62, now: t0 - 600), 0.93, accuracy: 1e-12, "a clock set back moved the night")
+        XCTAssertEqual(clockBack.night(0.62, now: t0 - 599.75), 0.93 - EasedNight.backRate * 0.25, accuracy: 1e-12)
+    }
+
+    // Value: protects=with Moving scenes off the still frame's re-reads count in full, so after a
     //   "+15m" it relights at its own pace; fails_when=every read is capped like the first one after
-    //   a lock (the still frame barely followed for minutes); why_new=the follower test above times
-    //   frames and a lock, not the still frame's cadence; seam=none; no_claim=that ShaderBackdrop
-    //   re-reads every 20 s (TESTING.md §W.5 on device)
+    //   a lock (the still frame barely followed for minutes), or ShaderBackdrop's re-read interval
+    //   grows past watchedGap; why_new=the follower test above times frames and a lock, not the still
+    //   frame's cadence; seam=none; no_claim=that ShaderBackdrop's TimelineView fires on that
+    //   interval (TESTING.md §W.5, §X.5 on device)
     func testTheStillFrameFollowsABumpAtItsOwnPace() {
+        let interval = ShaderBackdrop.stillRereadInterval
+        XCTAssertLessThan(interval, EasedNight.watchedGap, "the still frame's re-reads would count as unwatched")
         let follower = EasedNightFollower()
         let t0 = 800_000_000.0
         XCTAssertEqual(follower.night(0.93, now: t0), 0.93)
-        XCTAssertEqual(follower.night(0.62, now: t0 + 20), 0.93 - 20 * EasedNight.backRate, accuracy: 1e-12)
+        XCTAssertEqual(follower.night(0.62, now: t0 + interval), 0.93 - interval * EasedNight.backRate,
+                       accuracy: 1e-12)
         // The next re-read would pass the bumped night; it stops there.
-        XCTAssertEqual(follower.night(0.62, now: t0 + 40), 0.62, accuracy: 1e-12)
+        XCTAssertEqual(follower.night(0.62, now: t0 + 2 * interval), 0.62, accuracy: 1e-12)
     }
 
     // Value: protects=after the night is over (sound off past its resume window) the next bedtime
@@ -3525,10 +3586,12 @@ final class SnowNightTests: XCTestCase {
         XCTAssertEqual(SnowNight.settled(night: 0), 0)
     }
 
-    func testAtTheEndAFewFlakesFallOverUnbrokenSnow() {
+    func testAtTheEndAQuarterOfTheSnowFallsOverUnbrokenSnow() {
         // All night holds the night at 1, so this is what waking at 3am shows: still snowing.
         XCTAssertEqual(SnowNight.snowfall(night: 1), SnowNight.snowfallAtEnd, accuracy: 1e-9)
-        XCTAssertGreaterThan(SnowNight.snowfallAtEnd, 0, "the snow stopped")
+        // LamplightShader.metal fades a flake over GOING (0.06) of the snowfall from its rank: below
+        // that no flake would be fully lit, and the 3am street would show almost no snow.
+        XCTAssertGreaterThanOrEqual(SnowNight.snowfallAtEnd, 0.06, "the snow stopped")
         XCTAssertEqual(SnowNight.settled(night: 1), 1)
         // Settled well before the end, so the late night's street is unbroken.
         XCTAssertEqual(SnowNight.settled(night: 0.85), 1)

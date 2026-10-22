@@ -317,4 +317,14 @@ final class SceneSwipeLoopTests: XCTestCase {
         // The id is stored, so it's a contract: an unknown one falls back to the mood's first scene.
         XCTAssertEqual(SceneRegistry.scene(id: "fireflies", mood: .sleep).id, "fireflies")
     }
+
+    // Value: protects=a saved "lamplight" pick (sceneSleep, a mix preset's sceneId, a restored
+    //   backup) reopens on Lamplight in Sleep; fails_when=a registry merge drops LamplightScene() (the
+    //   line Fireflies' PR edits too), its id is renamed or its mood isn't Sleep: falls back to Night
+    //   sky; why_new=the registry walks above still pass with it gone; the Fireflies row pins only
+    //   "fireflies"; seam=none; no_claim=the chip UI, the @AppStorage write and the shader's render
+    //   (registry resolution only; TESTING.md §X on device)
+    func testASavedLamplightPickReopensOnLamplight() {
+        XCTAssertEqual(SceneRegistry.scene(id: "lamplight", mood: .sleep).id, "lamplight")
+    }
 }
