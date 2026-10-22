@@ -19,8 +19,6 @@ struct ContentView: View {
     @State private var tipCardDue = false
     /// Sleep Home's morning read-back of the night just gone, re-read with the asks.
     @State private var morningLine: MorningReadback.Line?
-    /// The re-read at the line's next window edge (05:00 or 18:00), rescheduled on every read.
-    @State private var morningLineEdge: DispatchWorkItem?
     @State private var showTipSheet = false
     #if DEBUG
     /// The card's UI test answers it in memory only (see `spendTipCard`).
@@ -448,8 +446,9 @@ struct ContentView: View {
     }
 
     /// Whether the tip card is due, and Home's morning read-back: re-read on appear, at scene
-    /// activation, natural breaks and when the store, the mode or the session changes. Plain
-    /// values to Home, never @Published on AudioEngine (eng run 2, Section 1 #2).
+    /// activation, natural breaks, when the store, the mode or the session changes, when the veil
+    /// lifts, on a clock or time-zone change, and at the line's next window edge (scheduled here).
+    /// Plain values to Home, never @Published on AudioEngine (eng run 2, Section 1 #2).
     private func refreshAsks() {
         audio.nightJournal.closeLapsedPause()
         let now = Date()
@@ -476,9 +475,9 @@ struct ContentView: View {
         if line != morningLine { morningLine = line }
         // And again at the window's next edge, so the line arrives at 05:00 and leaves at 18:00
         // with Home on screen.
-        morningLineEdge?.cancel()
+        windowActivity.pendingMorningEdge?.cancel()
         let edge = DispatchWorkItem { refreshAsks() }
-        morningLineEdge = edge
+        windowActivity.pendingMorningEdge = edge
         DispatchQueue.main.asyncAfter(
             deadline: .now() + MorningReadback.nextEdge(after: now).timeIntervalSince(now) + 1, execute: edge)
     }

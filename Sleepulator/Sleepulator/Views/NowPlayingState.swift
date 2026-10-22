@@ -86,7 +86,7 @@ nonisolated enum PlayerClock {
     /// Longest span shown: 999 hours. Anything past it is a bad value, not an episode.
     private static let ceiling: Double = 999 * 3600
 
-    private static func clamped(_ seconds: Double) -> Double {
+    static func clamped(_ seconds: Double) -> Double {
         seconds.isFinite ? min(max(0, seconds), ceiling) : 0
     }
 

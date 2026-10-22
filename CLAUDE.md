@@ -292,8 +292,9 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   (`tipCardSpent`, `ratingAskedVersion`, `ratingAskedOn`, `tipCardShownOn`, `tippedOnThisPhone`,
   `tipTransactionsHandled`) is device-only: keep these keys OUT of `Backup.kinds`.
 - **The morning read-back speaks only for a night that held.** Sleep Home at rest, 05:00–18:00.
-  Last night is every journal session that played into 18:00 yesterday to 05:00 today (by span,
-  so an early bedtime at 17:50 counts), never just the newest: a morning Play isn't last night, and
+  Last night is every journal session with at least half its span inside 18:00 yesterday to
+  05:00 today (an early bedtime at 17:50 counts; an afternoon rest that ran past 18:00 doesn't),
+  never just the newest: a morning Play isn't last night, and
   a night the app died in stays broken after the sound is restarted. Any session that died, was
   tainted or ended on an untrusted timer (`NightRules.isClean` false: reconciled, under a minute)
   silences it. One that stopped early without a failure doesn't: the person's pause, or an

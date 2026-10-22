@@ -5199,8 +5199,8 @@ final class AskRulesTests: XCTestCase {
     }
 }
 
-/// Sleep Home's morning read-back (`MorningReadback`): last night is every session that played into
-/// it, any session that broke silences the line, and it shows only the morning after, at rest in Sleep.
+/// Sleep Home's morning read-back (`MorningReadback`): last night is every session mostly inside it,
+/// any session that broke silences the line, and it shows only the morning after, at rest in Sleep.
 final class MorningReadbackTests: XCTestCase {
     private var calendar: Calendar = {
         var c = Calendar(identifier: .gregorian)
@@ -5336,14 +5336,30 @@ final class MorningReadbackTests: XCTestCase {
         XCTAssertNil(line([night()], open: at(day: 11, 17, 50)))        // still open from 17:50
     }
 
-    /// Last night is 18:00 to 05:00: a session that played into it counts, one wholly outside doesn't.
-    func testTheNightIsEverySessionThatPlayedIntoIt() {
+    /// Last night is 18:00 to 05:00: a session with at least half its span inside counts.
+    func testASessionBelongsWhenMostOfItIsInsideTheNight() {
         XCTAssertNotNil(line([night(start: at(day: 11, 18), end: at(day: 11, 21), live: 3 * 3600, by: .person)]))
         XCTAssertNotNil(line([night(start: at(day: 11, 17, 59), end: at(day: 11, 21), live: 3 * 3600, by: .person)]))
         XCTAssertNil(line([night(start: at(day: 11, 17), end: at(day: 11, 17, 59), live: 59 * 60, by: .person)]))
-        XCTAssertNotNil(line([night(start: at(4, 59), end: at(6, 15))]))
+        XCTAssertNotNil(line([night(start: at(4), end: at(5, 30))]))  // woke at 4, mostly night
+        XCTAssertNil(line([night(start: at(4, 59), end: at(6, 15))])) // mostly morning
         XCTAssertNil(line([night(start: at(5), end: at(6, 30))]))    // up for the day
         XCTAssertNil(line([night(start: at(day: 11, 14), end: at(day: 11, 15))]))   // afternoon rest
+        // An afternoon session that ran a few minutes past 18:00 is not last night...
+        let afternoon = night(start: at(day: 11, 12), end: at(day: 11, 18, 5), live: 6 * 3600 + 5 * 60, by: .person)
+        XCTAssertNil(line([afternoon]))
+        // ...and isn't added to the night that follows.
+        let nap = night(start: at(day: 11, 16, 30), end: at(day: 11, 18, 15), live: 105 * 60, by: .person)
+        let short = night(start: at(day: 11, 23), end: at(day: 11, 23, 45), live: 45 * 60)
+        XCTAssertEqual(line([nap, short])?.text, "Last night · 45 min, eased out at \(clock(at(day: 11, 23, 45)))")
+    }
+
+    /// A corrupt verdict file can't trap the minutes: PlayerClock's clamp, both ends.
+    func testACorruptVerdictCannotTrapTheMinutes() {
+        XCTAssertTrue(line([night(live: 1e300)])?.record.hasPrefix("999 hr") == true)
+        XCTAssertNil(line([night(live: -1e300)]))
+        XCTAssertNil(line([night(live: .infinity)]))
+        XCTAssertNil(line([night(live: .nan)]))
     }
 
     /// Home re-reads the line where its window opens and closes, with nothing else to prompt it.

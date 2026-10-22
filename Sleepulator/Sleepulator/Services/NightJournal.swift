@@ -2,9 +2,10 @@ import Foundation
 import UIKit
 import os
 
-// The night journal: one record per Sleep night, kept on this phone. Its folder (the night files
-// and the verdicts) is excluded from iCloud and computer backups, and the app's Backup file never
-// carries it.
+// The night journal: one record per Sleep session (a night can hold several: a pause past the
+// resume window, a restart after the app died), kept on this phone. The asks, Send feedback and
+// the morning read-back read it. Its folder (the night files and the verdicts) is excluded from
+// iCloud and computer backups, and the app's Backup file never carries it.
 //
 //   AudioEngine.noteSessionEdge ──── opened / paused / resumed ───┐
 //   RMS tap + player clock (main) ── live audio, counted ──────────┤

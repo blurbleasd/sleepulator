@@ -4,16 +4,17 @@ import SwiftUI
 /// night line says how it went ("Last night · 1 hr 30 min, eased out at 12:41 AM"). The app's best
 /// work happens while the person is asleep; this is the one place they hear that it held.
 ///
-/// Pure, so the tests pin every case. A night is every Sleep session that played into it (18:00 to
-/// 05:00), not the newest one: a morning Play is never last night, and a night the app died in
-/// stays broken after the person restarts the sound. Any session that broke silences the line.
+/// Pure, so the tests pin every case. A night is every Sleep session that mostly played inside it
+/// (18:00 to 05:00), not the newest one: a morning Play is never last night, and a night the app
+/// died in stays broken after the person restarts the sound. Any session that broke silences it.
 /// It reads only what the night journal already keeps, on this phone.
 nonisolated enum MorningReadback {
     /// The line shows from 05:00 to 18:00 local, when "last night" means the night just gone.
     static let showsFromHour = 5
     static let hidesAtHour = 18
-    /// Last night runs from 18:00 yesterday to 05:00 today. A session that played into it belongs
-    /// to it; one wholly outside (a morning Play, a nap after a night shift) doesn't.
+    /// Last night runs from 18:00 yesterday to 05:00 today. A session with at least half its span
+    /// inside belongs to it (an early bedtime at 17:50); one mostly outside (a morning Play, an
+    /// afternoon rest that ran past 18:00, a nap after a night shift) doesn't.
     static let nightFromHour = 18
     static let nightUntilHour = 5
     /// A clean timed night needs only a minute of live audio; a line about one minute reads as a
@@ -44,14 +45,12 @@ nonisolated enum MorningReadback {
         guard hourNow >= showsFromHour, hourNow < hidesAtHour,
               let night = lastNight(before: now, calendar: calendar) else { return nil }
         if let openSince, openSince < night.end { return nil }
-        let sessions = nights.filter { $0.end > night.start && $0.start < night.end }
+        let sessions = nights.filter { belongs($0, to: night) }
         guard let final = sessions.max(by: { $0.end < $1.end }), final.end <= now,
               !sessions.contains(where: broke) else { return nil }
-        // Rounded once, so the screen and VoiceOver can't disagree by a minute. Clamped first, as
-        // PlayerClock clamps: a corrupt verdict file must not trap the conversion.
-        let total = sessions.reduce(0) { $0 + $1.live }
-        guard total.isFinite else { return nil }
-        let minutes = Int((min(total, 999 * 3600) / 60).rounded())
+        // Rounded once, so the screen and VoiceOver can't disagree by a minute. Clamped first, by
+        // PlayerClock's own clamp: a corrupt verdict file must not trap the conversion.
+        let minutes = Int((PlayerClock.clamped(sessions.reduce(0) { $0 + $1.live }) / 60).rounded())
         guard minutes >= minimumMinutes else { return nil }
 
         let locale = calendar.locale ?? .current
@@ -77,6 +76,12 @@ nonisolated enum MorningReadback {
               let end = calendar.date(bySettingHour: nightUntilHour, minute: 0, second: 0, of: today),
               start < end else { return nil }
         return DateInterval(start: start, end: end)
+    }
+
+    /// At least half of the session's span lies inside the night.
+    static func belongs(_ session: NightVerdict, to night: DateInterval) -> Bool {
+        let overlap = min(session.end, night.end).timeIntervalSince(max(session.start, night.start))
+        return overlap > 0 && overlap * 2 >= session.end.timeIntervalSince(session.start)
     }
 
     /// When the line's window next opens or closes (05:00 or 18:00), so Home re-reads it there.
