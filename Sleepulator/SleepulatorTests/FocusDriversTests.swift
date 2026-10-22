@@ -323,7 +323,7 @@ final class FocusStillFrameTests: XCTestCase {
 @MainActor
 final class ShaderBackdropEasedNightTests: XCTestCase {
 
-    // Value: protects=the eased night reaches the shader, read with the timer's night and inSight = !occluded, and scenes without a hook keep the timer's night; fails_when=field() passes the raw timer night (the "+15m" pop comes back for Fireflies and Lamplight), passes occluded or a constant as inSight, or the nil path stops reading the timer (the other Sleep scenes stop darkening); why_new=EasedNightTests hand the follower its flag directly and nothing hosts ShaderBackdrop; seam=none; no_claim=the animated branch and the clock's rate, that the two scenes pass follower.night (TESTING §W.4/§X.4), what the shader draws
+    // Value: protects=the eased night reaches the shader, read with the timer's night and inSight = !occluded, scenes without a hook keep the timer's night, and leaving the screen reads the night once more out of sight, as does a pass made while it's gone; fails_when=field() passes the raw timer night (the "+15m" pop comes back for Fireflies and Lamplight), passes occluded or a constant as inSight, the nil path stops reading the timer (the other Sleep scenes stop darkening), or ShaderBackdrop drops its onDisappear read, hands it a wrong night or time, or reads an off-screen pass as in sight (a "+15m" pending on another tab comes back in one frame on return); why_new=EasedNightTests hand the follower its flag directly and nothing hosts ShaderBackdrop; seam=none; no_claim=the animated branch and the clock's rate, that the two scenes pass follower.night (TESTING §W.4/§X.4), that a TabView switch or a fullScreenCover calls onDisappear (device), what the shader draws
     func testShaderBackdropHandsItsShaderTheScenesEasedNight() throws {
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first,
                                   "no window scene in the test host")
@@ -335,7 +335,8 @@ final class ShaderBackdropEasedNightTests: XCTestCase {
 
         typealias Read = (night: Double, now: TimeInterval, inSight: Bool)
         /// Hosts one paused backdrop in its own window until it has built its shader, and returns what
-        /// its hook was asked and the night its shader got, with the span the reads fell in.
+        /// its hook was asked while drawn and the night its shader got, with the span those reads fell
+        /// in. It checks the read on leaving the screen itself.
         func render(occluded: Bool, eased: Bool) -> (reads: [Read], shader: [Float], span: ClosedRange<TimeInterval>) {
             var reads: [Read] = []
             var shader: [Float] = []
@@ -364,14 +365,19 @@ final class ShaderBackdropEasedNightTests: XCTestCase {
             host.view.layoutIfNeeded()
             turnMainRunLoop(for: 30) { !shader.isEmpty }
             let drawn = reads.count
+            let to = Date.timeIntervalSinceReferenceDate
             // Leaving the screen (another tab, a cover) reads the night once more, out of sight.
             window.isHidden = true
             window.rootViewController = nil
             turnMainRunLoop(for: 30) { !eased || reads.count > drawn }
-            let to = Date.timeIntervalSinceReferenceDate
+            let left = Date.timeIntervalSinceReferenceDate
             if eased {
                 XCTAssertGreaterThan(reads.count, drawn, "leaving the screen didn't read the night")
-                XCTAssertEqual(reads.last?.inSight, false, "leaving the screen was read as in sight")
+                if let leave = reads.last {
+                    XCTAssertFalse(leave.inSight, "leaving the screen was read as in sight")
+                    XCTAssertEqual(leave.night, 0.5, accuracy: 1e-9, "leaving the screen didn't hand the timer's night")
+                    XCTAssertTrue((to...left).contains(leave.now), "leaving the screen didn't hand the clock's now")
+                }
             }
             // The reads while it was drawn; the one on leaving is checked above.
             return (Array(reads.prefix(drawn)), shader, from...to)
@@ -408,6 +414,70 @@ final class ShaderBackdropEasedNightTests: XCTestCase {
         XCTAssertFalse(plain.shader.isEmpty, "the backdrop without a hook never built its shader")
         for night in plain.shader {
             XCTAssertEqual(night, 0.5, accuracy: 1e-6, "a scene without a hook lost the timer's night")
+        }
+    }
+}
+
+/// What the hidden-tab test drives: which tab shows, and an input of the backdrop's, so changing it
+/// makes SwiftUI evaluate the backdrop again while its tab is hidden.
+private final class TabBox: ObservableObject {
+    @Published var tab = 0
+    @Published var slowdown = 0.4
+    // Explicitly nonisolated: the implicit MainActor-isolated deinit aborts on iOS 18.4–26.3
+    // runtimes (CLAUDE.md, "Isolated deinits"). Only releases stored properties.
+    nonisolated deinit {}
+}
+
+private struct TabbedBackdrop: View {
+    @ObservedObject var box: TabBox
+    let backdrop: (Double) -> ShaderBackdrop
+    var body: some View {
+        TabView(selection: $box.tab) {
+            backdrop(box.slowdown).tag(0)
+            Color.clear.tag(1)
+        }
+    }
+}
+
+extension ShaderBackdropEasedNightTests {
+    // Value: protects=a pass SwiftUI makes over the backdrop while its tab is hidden reads the night out of sight; fails_when=field() reads inSight from !occluded alone (occluded knows nothing of tabs): one engine publish on Podcasts undoes the read on leaving, and a "+15m" pending there comes back in one frame on return; why_new=the test above leaves by taking the window away, where nothing is evaluated again; seam=none; no_claim=that HomeView's own TabView re-evaluates Home off screen as this one does (device)
+    func testAPassMadeOnAnotherTabReadsOutOfSight() throws {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first,
+                                  "no window scene in the test host")
+        let timer = SleepTimerService()
+        timer.timerTotal = 30 * 60
+        timer.timerRemaining = 15 * 60
+        var reads: [Bool] = []
+        let box = TabBox()
+        let host = UIHostingController(rootView: TabbedBackdrop(box: box) { slowdown in
+            ShaderBackdrop(paused: true, nightSlowdown: slowdown, sleepTimer: timer, audioLevel: nil,
+                           occluded: false, easedNight: { night, _, inSight in reads.append(inSight); return night }) { s in
+                ShaderLibrary.lampSnowField(
+                    .float(s.phase), .float(s.elapsed), .float2(s.size), .float(s.night),
+                    .float(1), .float(0), .float2(0, 0), .float(3))
+            }
+        })
+        let window = UIWindow(windowScene: scene)
+        window.frame = scene.coordinateSpace.bounds
+        window.rootViewController = host
+        window.isHidden = false
+        host.view.layoutIfNeeded()
+        defer { window.isHidden = true; window.rootViewController = nil }
+
+        turnMainRunLoop(for: 30) { !reads.isEmpty }
+        XCTAssertEqual(reads.last, true, "the backdrop on its own tab wasn't read in sight")
+        // To the other tab: the read on leaving, out of sight.
+        let shown = reads.count
+        box.tab = 1
+        turnMainRunLoop(for: 30) { reads.count > shown }
+        XCTAssertEqual(reads.last, false, "leaving for the other tab wasn't read out of sight")
+        // An input changes while the tab is hidden: SwiftUI evaluates the backdrop again.
+        let left = reads.count
+        box.slowdown = 0.41
+        turnMainRunLoop(for: 5) { reads.count > left }
+        XCTAssertGreaterThan(reads.count, left, "the hidden tab wasn't evaluated again (nothing to check)")
+        for inSight in reads.dropFirst(left) {
+            XCTAssertFalse(inSight, "a pass made on another tab was read as in sight")
         }
     }
 }

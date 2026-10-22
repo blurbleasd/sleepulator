@@ -106,7 +106,7 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   `FocusDriversTests.swift` (also `FocusStillFrameTests`, one hosted in a window,
   `ContourLightTests`: the radius whose disc covers the interval's share of the screen, and
   `ShaderBackdropEasedNightTests`, hosted too: the Sleep host hands its shader the scene's eased
-  night and marks leaving the screen as out of sight);
+  night and marks leaving the screen, and passes on another tab, as out of sight);
   `GenerativeAudioEngineTests.swift` (`GenerativeMediaResetTests`);
   `TipStoreTests.swift` (`TipFlowTests`, pure; `TipStoreTests`, StoreKitTest against
   `Tips.storekit`). On iOS 26 simulators a command-line run (xcodebuild, CI) hits an Apple bug,

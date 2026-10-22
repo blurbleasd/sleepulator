@@ -72,7 +72,8 @@ Suites in `SleepulatorTests/` (seven files, many suites):
   it afresh; one test hosts it in a window), Contour's light (`ContourLightTests`: the radius
   whose disc covers the interval's share of the screen), and `ShaderBackdropEasedNightTests`
   (hosted: ShaderBackdrop hands Fireflies' and Lamplight's shaders their eased night, asks with
-  the in-sight flag, and reads once more, out of sight, when it leaves the screen).
+  the in-sight flag, reads once more, out of sight, when it leaves the screen, and reads a pass
+  SwiftUI makes on another tab out of sight too).
 - `GenerativeAudioEngineTests.swift` — generative-bed rebuild after a media-services reset.
 - `TipStoreTests.swift` — `TipFlowTests` (every StoreKit outcome to what the tip rows show) and
   `TipStoreTests` (StoreKitTest against `Tips.storekit`). On iOS 26 simulators a command-line run
@@ -922,7 +923,9 @@ Green playing.
    stretch of the night. In the last two minutes tap "Still awake? +15m": ✅ the fireflies that had
    gone out come back a few at a time over about a minute, never all at once in a flash
    (`EasedNight.follow` eases the night back, at most a night in two minutes, and the flashes'
-   pace eases with it, never jumping in a frame). Again near the
+   pace eases with it, never jumping in a frame). Again near the end, go to the Podcasts tab, tap +15m
+   on the Live Activity, and come back to Home within 20 s: ✅ the same, none in the first frame back.
+   Again near the
    end, lock the phone, tap +15m on the lock screen's Live Activity, wait a minute and unlock: ✅ the
    same, they come back over about a minute after the unlock, none in the first frame. Mid-night,
    pull down Control Center and push it back: ✅ the lit fireflies don't change. An All night
@@ -981,8 +984,13 @@ night, Lamplight selected (Build mix → Backdrop), Brown playing.
    vanishes with a pop: each fades. In the last two minutes tap "Still awake? +15m": ✅ the snow
    thickens back over about a minute, never all at once, and its fall speeds up just as gently,
    never in a frame (`EasedNight.follow` eases the night back, at most a night in two minutes,
-   and ShaderBackdrop's `easedNight` paces the clock by it). The footprints come back a little
-   too, by design: the whole scene follows the night. Again near the end,
+   and ShaderBackdrop's `easedNight` paces the clock by it). The footprints come back too, to
+   about a third of their depth over that minute, by design: the whole scene follows the night (on a
+   long timer a +15m barely moves them). Again in the last two minutes, go to the Podcasts tab, tap
+   +15m on the lock screen's Live Activity or in Control Center's, and come back to Home within 20 s:
+   ✅ the snow thickens back over about a minute after the return, nothing in the first frame (the
+   backdrop counts its time off screen as unwatched). Repeat from Breathe's screen if you use it (log
+   it if the snow jumps back there: a cover may not count as leaving Home). Again near the end,
    lock the phone, tap +15m on the lock screen's Live Activity, wait a minute and unlock: ✅ the
    same, nothing at once in the first frame. An All night session, woken after an hour: ✅ snow
    still falling, thinly, over unbroken snow. Leave Home on Lamplight, lock the phone once the

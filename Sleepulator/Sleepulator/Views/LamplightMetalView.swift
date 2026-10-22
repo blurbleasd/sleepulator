@@ -11,12 +11,14 @@ import SwiftUI
 /// The night is in the structure: at bedtime the snow falls steadily and footprints cross the pool;
 /// through the night the snowfall thins and the footprints fill in (`SnowNight`). A thin wrapper over
 /// `ShaderBackdrop`, which owns the redraw loop, the freeze and the `SceneClock`
-/// (`nightSlowdown: 0.4`: the fall, the breeze and the flutter ease to 60% as the night deepens):
+/// (`nightSlowdown: 0.4`: the fall, the breeze, the flutter and the window's wander ease to 60% as
+/// the night deepens):
 ///   - `sleepTimer.nightProgress`, eased (`EasedNight.follow`, through ShaderBackdrop's `easedNight`,
 ///     so the fall's pace eases with it), sets the snowfall and how settled the snow is, and dims the
 ///     scene (the bowl most);
 ///   - `tilt` moves the window, so the scene parallaxes by depth;
-///   - `occluded` keeps the still street following the night with Moving scenes off.
+///   - `occluded` keeps the still street following the night with Moving scenes off, and tells the
+///     eased night whether it was watched.
 struct LamplightMetalView: View {
     var paused: Bool = false
     var occluded: Bool = true

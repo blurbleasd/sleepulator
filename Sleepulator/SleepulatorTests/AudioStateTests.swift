@@ -3592,7 +3592,7 @@ final class SnowNightTests: XCTestCase {
         XCTAssertEqual(SnowNight.settled(night: 0), 0)
     }
 
-    func testAtTheEndEnoughSnowFallsToLightAFlake() {
+    func testAtTheEndEnoughSnowFallsToLightAFlakeOverUnbrokenSnow() {
         // All night holds the night at 1, so this is what waking at 3am shows: still snowing.
         XCTAssertEqual(SnowNight.snowfall(night: 1), SnowNight.snowfallAtEnd, accuracy: 1e-9)
         // LamplightShader.metal fades a flake over GOING (0.06) of the snowfall from its rank: below
