@@ -292,8 +292,9 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   (`tipCardSpent`, `ratingAskedVersion`, `ratingAskedOn`, `tipCardShownOn`, `tippedOnThisPhone`,
   `tipTransactionsHandled`) is device-only: keep these keys OUT of `Backup.kinds`.
 - **The morning read-back speaks only for a night that held.** Sleep Home at rest, 05:00–18:00.
-  Last night is every journal session with at least half its span inside 18:00 yesterday to
-  05:00 today (an early bedtime at 17:50 counts; an afternoon rest that ran past 18:00 doesn't),
+  Last night is every journal session that started inside 18:00 yesterday to 05:00 today (a 1:00
+  bedtime that played to 9:30, a session the app died in a minute after Play) or has at least half
+  its span inside (an early bedtime at 17:50; an afternoon rest that ran past 18:00 doesn't),
   never just the newest: a morning Play isn't last night, and
   a night the app died in stays broken after the sound is restarted. Any session that died, was
   tainted or ended on an untrusted timer (`NightRules.isClean` false: reconciled, under a minute)
@@ -305,8 +306,10 @@ that drives most decisions: **installed on iPhone, screen locked, playing all ni
   journal). A card in the coachmark band takes the morning instead: that gate is HomeView's
   (`currentTip == nil`), checked on device (TESTING.md §X.6), not in the rule. ContentView reads it
   with the asks (`refreshAsks`: on appear, scene activation, play edges, mode and store changes,
-  natural breaks, the veil lifting, a clock change, and the window's next edge via
-  `MorningReadback.nextEdge`) and hands Home a plain value, never `@Published`.
+  natural breaks, the veil lifting, a clock change, and the next moment it can change, the
+  window's edge or a paused session lapsing, via `MorningReadback.nextReread`, held on
+  `WindowActivity` and rescheduled only when that moment moves) and hands Home a plain value,
+  never `@Published`.
 - **Isolated deinits.** Under `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor` a class with no explicit
   `deinit` gets an implicit MainActor-*isolated* one (an explicit `deinit` is nonisolated). On the
   iOS 18.4–26.3 Swift runtimes that path aborts ("pointer being freed was not allocated" in

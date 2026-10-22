@@ -5199,8 +5199,9 @@ final class AskRulesTests: XCTestCase {
     }
 }
 
-/// Sleep Home's morning read-back (`MorningReadback`): last night is every session mostly inside it,
-/// any session that broke silences the line, and it shows only the morning after, at rest in Sleep.
+/// Sleep Home's morning read-back (`MorningReadback`): last night is every session that started in it
+/// or mostly played inside it, any session that broke silences the line, and it shows only the
+/// morning after, at rest in Sleep.
 final class MorningReadbackTests: XCTestCase {
     private var calendar: Calendar = {
         var c = Calendar(identifier: .gregorian)
@@ -5334,16 +5335,23 @@ final class MorningReadbackTests: XCTestCase {
         let diedEarly = night(start: at(day: 11, 17, 50), end: at(2), live: 8 * 3600, clean: false, by: .died)
         XCTAssertNil(line([diedEarly, restarted]))
         XCTAssertNil(line([night()], open: at(day: 11, 17, 50)))        // still open from 17:50
+        // The app died a minute after Play: a zero-length record, still last night's.
+        let diedAtOnce = night(start: at(day: 11, 23, 3), end: at(day: 11, 23, 3), live: 0, clean: false, by: .died)
+        XCTAssertNil(line([diedAtOnce, night()]))
     }
 
-    /// Last night is 18:00 to 05:00: a session with at least half its span inside counts.
-    func testASessionBelongsWhenMostOfItIsInsideTheNight() {
+    /// Last night is 18:00 to 05:00: a session that started inside it, or with half its span inside,
+    /// counts.
+    func testASessionBelongsByItsStartOrMostOfItsSpan() {
         XCTAssertNotNil(line([night(start: at(day: 11, 18), end: at(day: 11, 21), live: 3 * 3600, by: .person)]))
         XCTAssertNotNil(line([night(start: at(day: 11, 17, 59), end: at(day: 11, 21), live: 3 * 3600, by: .person)]))
         XCTAssertNil(line([night(start: at(day: 11, 17), end: at(day: 11, 17, 59), live: 59 * 60, by: .person)]))
-        XCTAssertNotNil(line([night(start: at(4), end: at(5, 30))]))  // woke at 4, mostly night
-        XCTAssertNil(line([night(start: at(4, 59), end: at(6, 15))])) // mostly morning
+        XCTAssertNotNil(line([night(start: at(4), end: at(5, 30))]))  // woke at 4
+        XCTAssertNotNil(line([night(start: at(4, 59), end: at(6, 15))]))  // started inside
         XCTAssertNil(line([night(start: at(5), end: at(6, 30))]))    // up for the day
+        // A late bedtime: most of it falls after 05:00, but it started in the night.
+        let late = night(start: at(1), end: at(9, 30), live: 8 * 3600 + 30 * 60, by: .person)
+        XCTAssertEqual(line([late], now: at(10))?.text, "Last night · 8 hr 30 min, until \(clock(at(9, 30)))")
         XCTAssertNil(line([night(start: at(day: 11, 14), end: at(day: 11, 15))]))   // afternoon rest
         // An afternoon session that ran a few minutes past 18:00 is not last night...
         let afternoon = night(start: at(day: 11, 12), end: at(day: 11, 18, 5), live: 6 * 3600 + 5 * 60, by: .person)
@@ -5367,6 +5375,10 @@ final class MorningReadbackTests: XCTestCase {
         XCTAssertEqual(MorningReadback.nextEdge(after: at(4), calendar: calendar), at(5))
         XCTAssertEqual(MorningReadback.nextEdge(after: at(7, 30), calendar: calendar), at(18))
         XCTAssertEqual(MorningReadback.nextEdge(after: at(18), calendar: calendar), at(day: 13, 5))
+        // Sooner when a paused session's resume window lapses (the veil's user never locks the phone).
+        XCTAssertEqual(MorningReadback.nextReread(after: at(6, 40), pauseLapsesAt: at(7), calendar: calendar), at(7))
+        XCTAssertEqual(MorningReadback.nextReread(after: at(6, 40), pauseLapsesAt: nil, calendar: calendar), at(18))
+        XCTAssertEqual(MorningReadback.nextReread(after: at(7, 30), pauseLapsesAt: at(7), calendar: calendar), at(18))
     }
 
     func testANightTwoDaysOldIsNotLastNight() {

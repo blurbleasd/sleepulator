@@ -473,13 +473,18 @@ struct ContentView: View {
                                         openSince: audio.nightJournal.open?.start,
                                         focusMode: audio.focusMode, playing: sessionBusy, now: now)
         if line != morningLine { morningLine = line }
-        // And again at the window's next edge, so the line arrives at 05:00 and leaves at 18:00
-        // with Home on screen.
-        windowActivity.pendingMorningEdge?.cancel()
-        let edge = DispatchWorkItem { refreshAsks() }
-        windowActivity.pendingMorningEdge = edge
-        DispatchQueue.main.asyncAfter(
-            deadline: .now() + MorningReadback.nextEdge(after: now).timeIntervalSince(now) + 1, execute: edge)
+        // And again at the next moment it can change with Home on screen: 05:00, 18:00, or a morning
+        // pause lapsing (the veil's user never locks the phone). Rescheduled only when that moves:
+        // a cancelled item stays queued until its deadline.
+        let lapse = audio.nightJournal.open?.pausedAt.map { $0.addingTimeInterval(UntimedNight.resumeWindow) }
+        let next = MorningReadback.nextReread(after: now, pauseLapsesAt: lapse)
+        if next != windowActivity.pendingMorningEdgeAt || windowActivity.pendingMorningEdge?.isCancelled != false {
+            windowActivity.pendingMorningEdge?.cancel()
+            let reread = DispatchWorkItem { refreshAsks() }
+            windowActivity.pendingMorningEdge = reread
+            windowActivity.pendingMorningEdgeAt = next
+            DispatchQueue.main.asyncAfter(deadline: .now() + next.timeIntervalSince(now) + 1, execute: reread)
+        }
     }
 
     /// A sheet just closed or the person just left Settings: maybe Apple's rating prompt

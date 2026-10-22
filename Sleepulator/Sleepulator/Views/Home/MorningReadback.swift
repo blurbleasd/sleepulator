@@ -4,17 +4,19 @@ import SwiftUI
 /// night line says how it went ("Last night · 1 hr 30 min, eased out at 12:41 AM"). The app's best
 /// work happens while the person is asleep; this is the one place they hear that it held.
 ///
-/// Pure, so the tests pin every case. A night is every Sleep session that mostly played inside it
-/// (18:00 to 05:00), not the newest one: a morning Play is never last night, and a night the app
-/// died in stays broken after the person restarts the sound. Any session that broke silences it.
+/// Pure, so the tests pin every case. A night is every Sleep session that started in it (18:00 to
+/// 05:00) or mostly played inside it, not the newest one: a morning Play is never last night, and a
+/// night the app died in stays broken after the person restarts the sound. Any session that broke
+/// silences it.
 /// It reads only what the night journal already keeps, on this phone.
 nonisolated enum MorningReadback {
     /// The line shows from 05:00 to 18:00 local, when "last night" means the night just gone.
     static let showsFromHour = 5
     static let hidesAtHour = 18
-    /// Last night runs from 18:00 yesterday to 05:00 today. A session with at least half its span
-    /// inside belongs to it (an early bedtime at 17:50); one mostly outside (a morning Play, an
-    /// afternoon rest that ran past 18:00, a nap after a night shift) doesn't.
+    /// Last night runs from 18:00 yesterday to 05:00 today. A session belongs to it if it started
+    /// inside (a 1:00 bedtime that played to 9:30, or one the app died in a minute after Play) or
+    /// has at least half its span inside (an early bedtime at 17:50). One that started outside and
+    /// mostly stayed there (a morning Play, an afternoon rest that ran past 18:00) doesn't.
     static let nightFromHour = 18
     static let nightUntilHour = 5
     /// A clean timed night needs only a minute of live audio; a line about one minute reads as a
@@ -78,10 +80,19 @@ nonisolated enum MorningReadback {
         return DateInterval(start: start, end: end)
     }
 
-    /// At least half of the session's span lies inside the night.
+    /// The session started inside the night, or at least half its span lies inside it.
     static func belongs(_ session: NightVerdict, to night: DateInterval) -> Bool {
+        if session.start >= night.start && session.start < night.end { return true }
         let overlap = min(session.end, night.end).timeIntervalSince(max(session.start, night.start))
         return overlap > 0 && overlap * 2 >= session.end.timeIntervalSince(session.start)
+    }
+
+    /// When Home should next re-read the line with nothing else to prompt it: the window's next edge,
+    /// or sooner, when a paused session's resume window lapses and the journal closes it.
+    static func nextReread(after now: Date, pauseLapsesAt: Date?, calendar: Calendar = .current) -> Date {
+        let edge = nextEdge(after: now, calendar: calendar)
+        guard let lapse = pauseLapsesAt, lapse > now, lapse < edge else { return edge }
+        return lapse
     }
 
     /// When the line's window next opens or closes (05:00 or 18:00), so Home re-reads it there.
