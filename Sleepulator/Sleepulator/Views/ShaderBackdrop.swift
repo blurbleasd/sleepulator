@@ -61,7 +61,8 @@ struct SceneShaderInputs {
     /// Monotonic elapsed time — use for cyclic terms (breath, twinkle, dither, comet cycle).
     var elapsed: Float
     var size: CGSize
-    /// `sleepTimer.nightProgress`, 0 start → 1 timer end.
+    /// The timer's night (`sleepTimer.nightProgress`, 0 bedtime → 1 settled), or the scene's eased
+    /// reading of it when the scene passes `easedNight` (Fireflies, Lamplight).
     var night: Float
     /// Smoothed audio level, ~0…1.
     var audio: Float

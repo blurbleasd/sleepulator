@@ -325,3 +325,101 @@ final class FocusStillFrameTests: XCTestCase {
         XCTAssertGreaterThan(publishes, before, "a stop didn't publish")
     }
 }
+
+/// The night `ShaderBackdrop` hands its shader, hosted in a window as the scenes are. Only the paused
+/// branches (the still frame out of sight, and in sight with Moving scenes off), which draw one frame
+/// with no redraw loop, so nothing here waits on frame timing.
+@MainActor
+final class ShaderBackdropEasedNightTests: XCTestCase {
+
+    // Value: protects=the eased night reaches the shader, read with the timer's night and inSight = !occluded, and scenes without a hook keep the timer's night; fails_when=field() passes the raw timer night (the "+15m" pop comes back for Fireflies and Lamplight), passes occluded or a constant as inSight, or the nil path stops reading the timer (the other Sleep scenes stop darkening); why_new=EasedNightTests hand the follower its flag directly and nothing hosts ShaderBackdrop; seam=none; no_claim=the animated branch and the clock's rate, that the two scenes pass follower.night (TESTING §W.4/§X.4), what the shader draws
+    func testShaderBackdropHandsItsShaderTheScenesEasedNight() throws {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first,
+                                  "no window scene in the test host")
+        // Halfway through a 30-minute timer, set directly: no tick is armed, so it holds there.
+        let timer = SleepTimerService()
+        timer.timerTotal = 30 * 60
+        timer.timerRemaining = 15 * 60
+        XCTAssertEqual(timer.nightProgress, 0.5, accuracy: 1e-9)
+
+        // Turns the main run loop until `done` or the budget is spent, per turn (as in
+        // FocusStillFrameTests): the host app's first render can hold main for 10 s or more.
+        func turn(for budget: TimeInterval, until done: () -> Bool) {
+            var left = budget
+            while !done(), left > 0 {
+                let t0 = Date()
+                RunLoop.main.run(until: t0.addingTimeInterval(0.02))
+                left -= min(Date().timeIntervalSince(t0), 0.05)
+            }
+        }
+
+        typealias Read = (night: Double, now: TimeInterval, inSight: Bool)
+        /// Hosts one paused backdrop in its own window until it has built its shader, and returns what
+        /// its hook was asked and the night its shader got, with the span the reads fell in.
+        func render(occluded: Bool, eased: Bool) -> (reads: [Read], shader: [Float], span: ClosedRange<TimeInterval>) {
+            var reads: [Read] = []
+            var shader: [Float] = []
+            var hook: ((Double, TimeInterval, Bool) -> Double)?
+            if eased {
+                // The scene's own reading, unlike the timer's, so the test can tell which one arrived.
+                hook = { night, now, inSight in
+                    reads.append((night, now, inSight))
+                    return 0.8
+                }
+            }
+            let view = ShaderBackdrop(paused: true, nightSlowdown: 0.4, sleepTimer: timer, audioLevel: nil,
+                                      occluded: occluded, easedNight: hook) { s in
+                shader.append(s.night)
+                return ShaderLibrary.lampSnowField(
+                    .float(s.phase), .float(s.elapsed), .float2(s.size), .float(s.night),
+                    .float(1), .float(0), .float2(0, 0), .float(3))
+            }
+            let from = Date.timeIntervalSinceReferenceDate
+            let host = UIHostingController(rootView: view)
+            // Shown in its own window over the test host's, not made key.
+            let window = UIWindow(windowScene: scene)
+            window.frame = scene.coordinateSpace.bounds
+            window.rootViewController = host
+            window.isHidden = false
+            host.view.layoutIfNeeded()
+            turn(for: 30) { !shader.isEmpty }
+            let to = Date.timeIntervalSinceReferenceDate
+            window.isHidden = true
+            window.rootViewController = nil
+            return (reads, shader, from...to)
+        }
+
+        // Out of sight (the veil, the lock screen): the hook reads the timer's night, not in sight.
+        let veiled = render(occluded: true, eased: true)
+        XCTAssertFalse(veiled.shader.isEmpty, "the occluded still frame never built its shader")
+        XCTAssertFalse(veiled.reads.isEmpty, "the occluded still frame never asked the scene for its night")
+        for read in veiled.reads {
+            XCTAssertEqual(read.night, 0.5, accuracy: 1e-9, "the hook wasn't handed the timer's night")
+            XCTAssertFalse(read.inSight, "a frame out of sight was read as in sight")
+            XCTAssertTrue(veiled.span.contains(read.now), "the hook wasn't handed the clock's now: \(read.now)")
+        }
+        for night in veiled.shader {
+            XCTAssertEqual(night, 0.8, accuracy: 1e-6, "the shader got the timer's night, not the scene's")
+        }
+
+        // In sight with Moving scenes off: the same night, read as watched.
+        let still = render(occluded: false, eased: true)
+        XCTAssertFalse(still.shader.isEmpty, "the still frame in sight never built its shader")
+        XCTAssertFalse(still.reads.isEmpty, "the still frame in sight never asked the scene for its night")
+        for read in still.reads {
+            XCTAssertEqual(read.night, 0.5, accuracy: 1e-9, "the hook wasn't handed the timer's night")
+            XCTAssertTrue(read.inSight, "a frame in sight was read as out of sight")
+            XCTAssertTrue(still.span.contains(read.now), "the hook wasn't handed the clock's now: \(read.now)")
+        }
+        for night in still.shader {
+            XCTAssertEqual(night, 0.8, accuracy: 1e-6, "the shader got the timer's night, not the scene's")
+        }
+
+        // No hook (Night sky, Aurora, Embers, Still water, Deep space): the timer's night as it is.
+        let plain = render(occluded: true, eased: false)
+        XCTAssertFalse(plain.shader.isEmpty, "the backdrop without a hook never built its shader")
+        for night in plain.shader {
+            XCTAssertEqual(night, 0.5, accuracy: 1e-6, "a scene without a hook lost the timer's night")
+        }
+    }
+}
