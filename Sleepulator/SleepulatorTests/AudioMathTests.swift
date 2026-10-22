@@ -306,4 +306,15 @@ final class SceneSwipeLoopTests: XCTestCase {
             XCTAssertEqual(SceneRegistry.scene(id: scene.id, mood: scene.mood).title, scene.title, scene.id)
         }
     }
+
+    // Value: protects=a saved "fireflies" pick (sceneSleep, a mix preset's sceneId, a restored
+    //   backup) reopens on Fireflies in Sleep; fails_when=a registry merge drops FirefliesScene(),
+    //   its id is renamed or its mood isn't Sleep: the pick falls back to Night sky; why_new=the
+    //   tests above check the registry against itself, so a scene missing from it or renamed passes;
+    //   seam=none; no_claim=the chip UI, the @AppStorage write and the shader's render (registry
+    //   resolution only; TESTING.md §W on device)
+    func testASavedFirefliesPickReopensOnFireflies() {
+        // The id is stored, so it's a contract: an unknown one falls back to the mood's first scene.
+        XCTAssertEqual(SceneRegistry.scene(id: "fireflies", mood: .sleep).id, "fireflies")
+    }
 }
