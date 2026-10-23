@@ -2,9 +2,10 @@ import Foundation
 import UIKit
 import os
 
-// The night journal: one record per Sleep night, kept on this phone. Its folder (the night files
-// and the verdicts) is excluded from iCloud and computer backups, and the app's Backup file never
-// carries it.
+// The night journal: one record per Sleep session (a night can hold several: a pause past the
+// resume window, a restart after the app died), kept on this phone. The asks, Send feedback and
+// the morning read-back read it. Its folder (the night files and the verdicts) is excluded from
+// iCloud and computer backups, and the app's Backup file never carries it.
 //
 //   AudioEngine.noteSessionEdge ──── opened / paused / resumed ───┐
 //   RMS tap + player clock (main) ── live audio, counted ──────────┤
@@ -60,7 +61,8 @@ nonisolated struct NightSummary: Codable, Equatable {
     var lastEventAt: Date
 }
 
-/// What the asks and the feedback summary need from a closed night.
+/// What the asks, the feedback summary and the morning read-back need from a closed session (a
+/// night can hold several: a pause past the resume window, or a restart after the app died).
 nonisolated struct NightVerdict: Codable, Equatable {
     let id: String
     let start: Date
@@ -107,7 +109,7 @@ nonisolated enum NightRules {
     static let keptNightFiles = 2
     /// Past this, a night's file takes only the lines that decide its verdict.
     static let fileSoftCap = 128 * 1024
-    /// Verdicts kept for the asks and the feedback summary.
+    /// Verdicts kept for the asks, the feedback summary and the morning read-back.
     static let keptVerdicts = 30
 
     static func isClean(_ s: NightSummary) -> Bool {

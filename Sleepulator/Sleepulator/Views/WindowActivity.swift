@@ -13,6 +13,10 @@ final class WindowActivity {
     /// The veil's pending countdown. Held here, not in ContentView's @State: it's replaced on
     /// every touch, and a @State write re-renders the whole tab tree each time.
     var pendingDim: DispatchWorkItem?
+    /// The morning line's next re-read (its window's edge, or a pause lapsing) and when it's due:
+    /// re-checked on every read, so kept off @State for the same reason.
+    var pendingMorningEdge: DispatchWorkItem?
+    var pendingMorningEdgeAt: Date?
 
     /// A sheet, dialog or full-screen cover is up (see `SessionGuards.veilTimeout`).
     var isPresenting: Bool { window?.rootViewController?.presentedViewController != nil }

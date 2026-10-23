@@ -17,6 +17,8 @@ struct ContentView: View {
     @AppStorage("hasCompletedFirstRun") private var hasCompletedFirstRun = false
     @AppStorage("hasSeenNightRingTip") private var hasSeenNightRingTip = false
     @State private var tipCardDue = false
+    /// Sleep Home's morning read-back of the night just gone, re-read with the asks.
+    @State private var morningLine: MorningReadback.Line?
     @State private var showTipSheet = false
     #if DEBUG
     /// The card's UI test answers it in memory only (see `spendTipCard`).
@@ -198,7 +200,7 @@ struct ContentView: View {
             TabView(selection: $selectedTab) {
                 HomeView(audio: audio, mixStore: audio.mixStore, selectedTab: $selectedTab,
                          nowPlayingPresented: showNowPlaying, miniPlayerTouches: miniPlayerTouches,
-                         orbCenter: $orbCenter, tipCardDue: tipCardDue,
+                         orbCenter: $orbCenter, tipCardDue: tipCardDue, morningLine: morningLine,
                          onLeaveTip: { showTipSheet = true },
                          onTipCardDeclined: { spendTipCard(); refreshAsks() },
                          onTipCardShown: markTipCardShown)
@@ -330,6 +332,9 @@ struct ContentView: View {
             // Any touch is interaction: restart the countdown. On the veil itself, its own tap
             // wakes (and re-arms) instead.
             windowActivity.onTouch = { if !nightDimmed { scheduleDim() } }
+            // A cold launch may never report a scene-phase change: read the asks and the morning
+            // line now.
+            refreshAsks()
         }
         // Pausing drops the pending dim (never forces the screen bright); resuming re-arms it.
         .onChange(of: audio.isAnythingPlaying) { _, playing in
@@ -370,7 +375,15 @@ struct ContentView: View {
             // Freeze the backdrop scene only when the veil actually occludes the screen —
             // it keeps animating through the lighter controls-faded screensaver.
             audio.screenDimmed = dimmed
-            if !dimmed { endGlance() }
+            if !dimmed {
+                endGlance()
+                // The veil's own user may never leave the app overnight: waking it is the morning.
+                refreshAsks()
+            }
+        }
+        // A clock or time-zone change moves the morning line's window.
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.significantTimeChangeNotification)) { _ in
+            refreshAsks()
         }
         .onChange(of: scenePhase) { _, phase in
             // Fail-safe: if iOS suspended us through a duration timer's deadline, the in-process
@@ -432,9 +445,10 @@ struct ContentView: View {
         tipCardSpent = true
     }
 
-    /// Whether the tip card is due, re-read at scene activation, natural breaks and when the
-    /// store, the mode or the session changes. A plain value to Home, never @Published on
-    /// AudioEngine (eng run 2, Section 1 #2).
+    /// Whether the tip card is due, and Home's morning read-back: re-read on appear, at scene
+    /// activation, natural breaks, when the store, the mode or the session changes, when the veil
+    /// lifts, on a clock or time-zone change, and at the line's next window edge (scheduled here).
+    /// Plain values to Home, never @Published on AudioEngine (eng run 2, Section 1 #2).
     private func refreshAsks() {
         audio.nightJournal.closeLapsedPause()
         let now = Date()
@@ -454,6 +468,23 @@ struct ContentView: View {
         // "Shown today" is stamped when the card renders (HomeView's onTipCardShown), not here:
         // due on another tab, or behind another card, it was never seen.
         if due != tipCardDue { tipCardDue = due }
+        // The morning read-back looks at the same moments, after the lapsed pause is closed.
+        let line = MorningReadback.line(nights: audio.nightJournal.verdicts,
+                                        openSince: audio.nightJournal.open?.start,
+                                        focusMode: audio.focusMode, playing: sessionBusy, now: now)
+        if line != morningLine { morningLine = line }
+        // And again at the next moment it can change with Home on screen: 05:00, 18:00, or a morning
+        // pause lapsing (the veil's user never locks the phone). Rescheduled only when that moves:
+        // a cancelled item stays queued until its deadline.
+        let lapse = audio.nightJournal.open?.pausedAt.map { $0.addingTimeInterval(UntimedNight.resumeWindow) }
+        let next = MorningReadback.nextReread(after: now, pauseLapsesAt: lapse)
+        if next != windowActivity.pendingMorningEdgeAt || windowActivity.pendingMorningEdge?.isCancelled != false {
+            windowActivity.pendingMorningEdge?.cancel()
+            let reread = DispatchWorkItem { refreshAsks() }
+            windowActivity.pendingMorningEdge = reread
+            windowActivity.pendingMorningEdgeAt = next
+            DispatchQueue.main.asyncAfter(deadline: .now() + next.timeIntervalSince(now) + 1, execute: reread)
+        }
     }
 
     /// A sheet just closed or the person just left Settings: maybe Apple's rating prompt
