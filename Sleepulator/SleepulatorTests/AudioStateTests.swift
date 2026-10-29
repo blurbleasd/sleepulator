@@ -486,6 +486,7 @@ final class AudioEngineBehaviorTests: XCTestCase {
 
     func testResumeMixKeepsNowValidNoiseType() {
         let engine = AudioEngine()
+        engine.focusMode = false    // green is Sleep-only: resume in Focus snaps it (a run can leave Focus persisted)
         let mix = SavedMix(name: "old", noiseOn: true, noiseVolume: 0.4, noiseType: "green",
                            binauralOn: false, binVolume: 0.3, binauralPreset: "delta",
                            podVolume: 0.7, podcastUrl: nil, podcastId: nil)
@@ -1522,9 +1523,8 @@ final class PomodoroLiveActivityTests: XCTestCase {
 // MARK: - Resume / persistence integrity
 
 /// "Resume Last Night" must restore the exact recipe faithfully — including a muted extra layer,
-/// which the four rebuild maps used to drop. Resume deliberately does NOT reconcile to the current
-/// mode (see resumeMix's NOTE): a SavedMix carries no mode, so snapping would corrupt a cross-mode
-/// mix. These tests use Sleep-valid inputs so "faithful" is unambiguous.
+/// which the four rebuild maps used to drop. A cross-mode mix snaps into the current palette, the
+/// same snap Home's "Resume ·" label shows (FOCUS-MODE-SPEC R2); a sound that belongs is kept.
 @MainActor
 final class ResumeIntegrityTests: XCTestCase {
     private func lastNight(noiseType: String, layers: [ExtraNoiseLayer]) -> SavedMix {
@@ -1544,12 +1544,32 @@ final class ResumeIntegrityTests: XCTestCase {
     }
 
     func testResumeRestoresSoundFaithfully() {
-        // Resume is faithful: it restores the saved sound as-is and does NOT reconcile to the
-        // current mode (a SavedMix carries no mode; snapping would corrupt a cross-mode mix).
+        // Same mode: the snap keeps every sound that belongs, so resume restores the mix as saved.
         let engine = AudioEngine()
         engine.focusMode = false
         engine.resumeMix(lastNight(noiseType: "green", layers: []))   // green is a valid Sleep sound
         XCTAssertEqual(engine.noiseType, "green")
+    }
+
+    func testResumeInFocusSnapsASleepMixIntoTheFocusPalette() {
+        // Home read "Resume · Pink + Alpha" in Focus, and tapping played Last Night's Brown + Delta.
+        let engine = AudioEngine()
+        engine.focusMode = true
+        defer { engine.noiseOn = false; engine.focusMode = false }
+        engine.resumeMix(lastNight(noiseType: "brown",
+                                   layers: [ExtraNoiseLayer(id: "L1", type: "rain", volume: 0.5, muted: false)]))
+        XCTAssertEqual(engine.noiseType, AudioEngine.focusNoises.first, "what the label shows")
+        XCTAssertEqual(engine.binauralPreset, AudioEngine.focusBinaurals.first, "what the label shows")
+        XCTAssertTrue(engine.extraLayers.isEmpty, "a Sleep-only layer can't follow the mix into Focus")
+        XCTAssertTrue(engine.noiseOn)
+    }
+
+    func testResumeInFocusKeepsASoundBothPalettesShare() {
+        let engine = AudioEngine()
+        engine.focusMode = true
+        defer { engine.noiseOn = false; engine.focusMode = false }
+        engine.resumeMix(lastNight(noiseType: "pink", layers: []))   // Pink is in both palettes
+        XCTAssertEqual(engine.noiseType, "pink")
     }
 }
 

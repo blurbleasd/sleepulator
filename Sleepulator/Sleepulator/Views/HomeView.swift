@@ -283,8 +283,9 @@ struct HomeView: View {
     }
 
     // R2 (FOCUS-MODE-SPEC): the label must show what tapping will *actually* resume.
-    // `resumeMix` snaps cross-mode sounds into the current palette (reconcileSoundsToMode),
-    // so mirror that snap here instead of echoing a stale Sleep mix's sound names in Focus.
+    // `resumeMix` snaps cross-mode sounds into the current palette (reconcileSoundsToMode: a
+    // sound that belongs stays, anything else lands on the palette's first), so mirror that snap
+    // here instead of echoing a stale Sleep mix's sound names in Focus.
     private func resumeDisplayName(noise: String) -> String {
         let palette = audio.focusMode ? AudioEngine.focusNoises : AudioEngine.sleepNoises
         return SoundNames.noise(palette.contains(noise) ? noise : (palette.first ?? noise))

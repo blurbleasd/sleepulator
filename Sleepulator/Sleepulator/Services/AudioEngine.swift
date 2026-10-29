@@ -1179,19 +1179,21 @@ final class AudioEngine: ObservableObject {
         self.extraLayers = (mix.extraLayers ?? []).prefix(Self.maxExtraLayers).map {
             ExtraNoiseLayer(id: $0.id, type: NoiseType.migrate($0.type), volume: $0.volume, muted: $0.muted)
         }
-        self.noiseOn = mix.noiseOn
-        
         self.binauralPreset = mix.binauralPreset
         self.binVolume = mix.binVolume
-        self.binauralOn = mix.binauralOn
-        
-        self.podVolume = mix.podVolume
 
-        // NOTE: resume deliberately does NOT reconcileSoundsToMode() — resume must faithfully
-        // restore exactly what was playing (a tested contract), and a SavedMix carries no mode,
-        // so snapping to the *current* mode would corrupt a mix made for the other one. A truly
-        // mode-aware resume needs a `mode` field on SavedMix (a backward-compatible schema add);
-        // until then, restoring the sound as-saved is the honest behavior.
+        // Snap a cross-mode mix into this mode's palette (FOCUS-MODE-SPEC R2) — Home's "Resume ·"
+        // label already shows the snapped names, and playing Last Night's Brown + Delta in Focus
+        // broke the mode-scoped palettes. A same-mode mix is untouched: reconcile keeps any sound
+        // that belongs, so resume stays faithful without a `mode` field on SavedMix. Snap before
+        // the sounds turn on: a type change while the bed is audible soft-swaps it, and Brown
+        // would play for a moment before dipping into Pink.
+        reconcileSoundsToMode()
+
+        self.noiseOn = mix.noiseOn
+        self.binauralOn = mix.binauralOn
+
+        self.podVolume = mix.podVolume
 
         if let urlStr = mix.podcastUrl {
             // Seek straight to the snapshot's stored position; fall back to the saved-position map
