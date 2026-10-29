@@ -486,6 +486,7 @@ final class AudioEngineBehaviorTests: XCTestCase {
 
     func testResumeMixKeepsNowValidNoiseType() {
         let engine = AudioEngine()
+        engine.focusMode = false    // green is Sleep-only: resume in Focus snaps it (a run can leave Focus persisted)
         let mix = SavedMix(name: "old", noiseOn: true, noiseVolume: 0.4, noiseType: "green",
                            binauralOn: false, binVolume: 0.3, binauralPreset: "delta",
                            podVolume: 0.7, podcastUrl: nil, podcastId: nil)
