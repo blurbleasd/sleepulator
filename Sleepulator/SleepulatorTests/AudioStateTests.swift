@@ -3804,11 +3804,6 @@ final class TonightShelfTests: XCTestCase {
                        "last night's episode barely started")
     }
 
-    func testBackUpLabelsFollowTheInterval() {
-        XCTAssertEqual(TonightShelf.backUpLabel, "Back \(Int(TonightShelf.backUpInterval / 60)) min")
-        XCTAssertEqual(TonightShelf.backUpPosition(from: TonightShelf.backUpInterval + 1), 1)
-    }
-
     func testABarelyStartedEpisodeIsOfferedAsNext() {
         let lib = [show([ep("new", daysAgo: 1), ep("cued", daysAgo: 2)])]
         let plan = TonightShelf.plan(library: lib, lastEpisodeId: "cued", lastPosition: 10, savedPositions: [:], finished: [])
@@ -3830,9 +3825,7 @@ final class TonightShelfTests: XCTestCase {
         XCTAssertNil(TonightShelf.latestUnplayed(in: show([ep("x")]), finished: ["x"], excluding: nil))
     }
 
-    func testBackUpAndRemaining() {
-        XCTAssertEqual(TonightShelf.backUpPosition(from: 1_000), 700)
-        XCTAssertEqual(TonightShelf.backUpPosition(from: 120), 0)
+    func testRemaining() {
         XCTAssertNil(TonightShelf.remaining(duration: nil, position: 10))
         XCTAssertEqual(TonightShelf.remaining(duration: 100, position: 140), 0)
     }

@@ -646,17 +646,6 @@ enum Backup {
         if replacing { absent.forEach { defaults.removeObject(forKey: $0) } }
     }
 
-    /// The UserDefaults side of a restore in one call: `restorePlan` then `apply`, the two steps
-    /// `write` runs (with a hand-off between threads in between). A test convenience; the
-    /// app's restore goes through `write`. Returns (restored, skipped) for the UserDefaults keys.
-    nonisolated static func restoreUserDefaults(from dict: [String: Any], into defaults: UserDefaults,
-                                                replacing: Bool = false) -> (restored: Int, skipped: Int) {
-        // Replacing is Undo, which trusts its own copy (`write` does the same).
-        let plan = restorePlan(from: dict, currentFocus: defaults.bool(forKey: modeKey), trusted: replacing)
-        apply(plan.values, absent: plan.absent, into: defaults, replacing: replacing)
-        return (plan.values.count, plan.skipped)
-    }
-
     /// The whole backup dictionary: defaults, the file-backed collections' JSON, and the marker.
     nonisolated static func exportDictionary(defaults: UserDefaults, files: [String: Data], at date: Date) -> [String: Any] {
         adding(files: files, at: date, to: userDefaults(from: defaults))

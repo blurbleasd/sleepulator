@@ -66,10 +66,6 @@ nonisolated enum TonightShelf {
         return true
     }
 
-    static func backUpPosition(from position: TimeInterval) -> TimeInterval {
-        max(0, position - backUpInterval)
-    }
-
     static func remaining(duration: TimeInterval?, position: TimeInterval) -> TimeInterval? {
         guard let duration, duration > 0 else { return nil }
         return max(0, duration - position)

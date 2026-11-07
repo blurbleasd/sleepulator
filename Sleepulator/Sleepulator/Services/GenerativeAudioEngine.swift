@@ -580,12 +580,6 @@ final class GenerativeAudioEngine {
         }
     }
 
-    /// Single-layer convenience (layer 0 only); clears the others. Kept so existing single-noise
-    /// call sites compile unchanged.
-    func setNoise(on: Bool, volume: Double, type: String) {
-        setNoiseLayers([(type, volume)], on: on)
-    }
-
     func setBinaural(on: Bool, volume: Double, preset: String) {
         updateParams { p in
             p.binGain = on ? Float(volume) * Self.binauralMaxGain : 0.0
