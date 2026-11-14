@@ -70,7 +70,7 @@ final class HomeLayoutUITests: XCTestCase {
 
         // A tap on the shown bar reaches it. ContentView's wrapper switches the bar's hit testing
         // off while it's hidden; on the wrong side of that gate every bar control is dead while the
-        // bar still exists and sits in place. "Nothing playing" leads to Podcasts; an "Up next" bar
+        // bar still exists and sits in place. "No episode playing" leads to Podcasts; an "Up next" bar
         // (a queue an earlier run left behind) opens Now Playing. Over Focus Home a tap that falls
         // through lands on the backdrop, so a failure here changes nothing.
         // Value: protects=a tap on the shown mini-player acts through ContentView's hiding wrapper;

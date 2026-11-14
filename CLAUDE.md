@@ -142,6 +142,9 @@ code a rule protects. If the two disagree, this file wins.
   person's pick resets the count.
 - **Downloads live in Application Support**, not Documents (Apple 2.5.x), `isExcludedFromBackup`,
   ~2 GB LRU cap (`AudioDownloader`).
+- **Dead tracking prefixes are unwrapped at playback** (`PodcastText.playableAudioUrl`, in
+  `AudioEngine.resolveAudioUrl`, so loads and the gapless preload): Chartable's `chtbl.com/track/…`
+  404s since it shut down. Stored episodes keep their original address.
 - **Persistence is per-key JSON** via `StorageManager`; one oversized write must not abort the
   rest. `PersistenceMigrator` owns the fragile launch-time legacy reads.
 - **Sound palettes are mode-scoped.** Sleep and Focus share only Pink
@@ -152,8 +155,9 @@ code a rule protects. If the two disagree, this file wins.
   night, the default). Any Sleep session starting from rest starts the timer at that length
   (`AudioEngine.noteSessionEdge`, on the idle→playing edge of `noiseOn`/`binauralOn`/`isPodPlaying`),
   however it started: orb, mixer, podcasts, lock screen/AirPods, Siri, widget. Never in Focus, for
-  All night, or while a countdown runs. The timer sheet syncs the ring; its "Play all night" sets
-  All night, and with nothing playing its commit is "Play & start timer". The pure rules
+  All night, or while a countdown runs. The timer sheet opens on the ring's value, All night
+  included (an All night chip), and its commit sets the ring: "Play all night" (no timer, or turns
+  one off) or a length, "Play & start timer" with nothing playing (`timerCommitTitle`). The pure rules
   (`timerOnPlay`, the mode-switch confirm over a live session, "the night veil only drops over
   sound") live in `SessionGuards`: change them there, not in view code. Tests that start sessions
   set `engine.nightLengthProvider`.
@@ -273,8 +277,9 @@ code a rule protects. If the two disagree, this file wins.
   `resumeEpisode` also
   continues an already-loaded, settled (`!isLoadingItem`) episode from the live player, starting it
   over if it's spent, and re-heads the queue in one write (`moveToHead`). Resume positions come
-  from the player's in-memory map (`savedEpisodePositions`), not the Last Night snapshot.
-  LibraryView reads library.json once; its state is the source of truth.
+  from the player's in-memory map (`savedEpisodePositions`), not the Last Night snapshot; Home's
+  Resume (`resumeMix`) too, which also moves past a snapshot episode finished since (no saved
+  place + in `finishedEpisodes`). LibraryView reads library.json once; its state is the source of truth.
 - **Keep row-visible fields in `Podcast.==`** (it hashes by id; SwiftUI drops a state update whose
   new value `==` the old). Keep `==` O(1).
 - **In `List` rows, build icon + text from an `HStack`, not `Label`.** A sheet's data reaches it

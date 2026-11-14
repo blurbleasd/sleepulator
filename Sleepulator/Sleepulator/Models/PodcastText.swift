@@ -5,6 +5,29 @@ import Foundation
 /// `nonisolated` so the parser can flatten show-notes off the main actor.
 nonisolated enum PodcastText {
 
+    // MARK: - Audio addresses
+
+    /// The address to stream an episode from. Chartable (`chtbl.com/track/<id>/<host>/<path>`)
+    /// was a pass-through tracking prefix in front of the real file; the service has shut down
+    /// and every such address now returns 404, so an episode queued or saved with one failed
+    /// to load ("podcast failed" in the night records, 2026-11-13: 13 of 777 queued episodes).
+    /// The real address is the part after the prefix. Anything else comes back unchanged.
+    static func playableAudioUrl(_ urlStr: String) -> String {
+        guard let comps = URLComponents(string: urlStr),
+              comps.host?.lowercased() == "chtbl.com" else { return urlStr }
+        let parts = comps.percentEncodedPath.split(separator: "/", omittingEmptySubsequences: true)
+        guard parts.count >= 3, parts[0] == "track" else { return urlStr }
+        var rest = parts.dropFirst(2).joined(separator: "/")
+        if let query = comps.percentEncodedQuery { rest += "?" + query }
+        // Usually the inner address has no scheme ("traffic.megaphone.fm/…"); now and then the
+        // whole original URL was appended, scheme and all.
+        if rest.hasPrefix("http:/") || rest.hasPrefix("https:/") {
+            let fixed = rest.replacingOccurrences(of: #"^(https?):/+"#, with: "$1://", options: .regularExpression)
+            return fixed
+        }
+        return "https://" + rest
+    }
+
     // MARK: - Show notes
 
     /// Stored show-notes are capped here: past this it's sponsor reads and link lists, and a

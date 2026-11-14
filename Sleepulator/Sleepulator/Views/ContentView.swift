@@ -285,7 +285,10 @@ struct ContentView: View {
                         // only lit element on screen — a fixed, dim-white string held for eight
                         // hours a night is a textbook OLED burn-in anchor, and fading it lets
                         // the panel go true black. VoiceOver keeps the label below regardless.
-                        Text("Tap to wake")
+                        // It says what a tap does: the first only glances (VeilGlance). "Tap to
+                        // wake" was true only under VoiceOver or Switch Control, where one tap
+                        // wakes and the label below already says so.
+                        Text("Tap once to glance, twice to wake")
                             .font(.caption)
                             .foregroundColor(.white.opacity(0.16))
                             .opacity(veilCaptionShown ? 1 : 0)

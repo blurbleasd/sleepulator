@@ -188,7 +188,7 @@ struct NightRing: View {
             if !live { endDrag() }
         }
         .accessibilityElement()
-        .accessibilityLabel("Night length")
+        .accessibilityLabel("Sleep timer")   // the sheet's name for the same setting
         .accessibilityValue(spokenValue)
         .accessibilityHint(locked ? "Locked while the night fades out."
                                   : "Swipe up or down to change. Play uses this length.")

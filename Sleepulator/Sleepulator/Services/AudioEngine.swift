@@ -946,7 +946,15 @@ final class AudioEngine: ObservableObject {
     }
     
     func togglePodcast() {
-        if isPodPlaying { podPlayer.pause() } else { resumePodcast() }
+        if isPodPlaying {
+            // A person's pause that leaves nothing playing ends a podcast-only session: save it as
+            // Last Night now, as Pause All does. Before this, the snapshot kept an older bed, so
+            // Home said "Resume · Brown" and Play brought that back instead of this episode.
+            if !noiseOn && !binauralOn && !appleMusic.isPlaying { saveLastMix() }
+            podPlayer.pause()
+        } else {
+            resumePodcast()
+        }
     }
 
     /// The player's Next: skip to the next queued episode. Safe by construction: it never deletes
@@ -1194,10 +1202,29 @@ final class AudioEngine: ObservableObject {
         // until then, restoring the sound as-saved is the honest behavior.
 
         if let urlStr = mix.podcastUrl {
-            // Seek straight to the snapshot's stored position; fall back to the saved-position map
-            // (resume: true) for older snapshots that predate podcastPosition.
-            loadPodcast(urlStr, id: mix.podcastId ?? urlStr, resume: true, startAt: mix.podcastPosition,
-                        fallbackTitle: "Last night\u{2019}s episode")
+            let id = mix.podcastId ?? urlStr
+            let savedPlace = savedEpisodePositions[id]
+            if savedPlace == nil, finishedEpisodes.contains(id) {
+                // Finished since the snapshot was taken: the player drops an episode's saved place
+                // when it plays to the end (PodcastPlayer.finishItem). Loading it at the snapshot's
+                // position replayed an episode you'd finished, from wherever it stood when the
+                // snapshot was taken (a bedtime lock, say): "half an hour back" in the morning,
+                // 2026-11-13. Move on to what's next, as the player's own resume does.
+                if queueManager.queue.first?.id == id {
+                    queueManager.advanceQueue(finishedEpId: id, suppressAutoPlay: true)
+                }
+                if let head = queueManager.queue.first {
+                    podTitle = head.title
+                    loadPodcast(head.audioUrl, id: head.id)
+                }
+            } else {
+                // The player's own saved place wins over the snapshot's position (as for
+                // resumeEpisode): it's updated every second while playing, the snapshot only when
+                // something saves it. The snapshot's position is the fallback for an episode the
+                // player has no place for.
+                loadPodcast(urlStr, id: id, resume: true, startAt: savedPlace == nil ? mix.podcastPosition : nil,
+                            fallbackTitle: "Last night\u{2019}s episode")
+            }
         }
     }
     
@@ -1379,7 +1406,9 @@ final class AudioEngine: ObservableObject {
         if let origUrl = URL(string: urlStr), let cached = AudioDownloader.shared.getCachedUrl(for: origUrl) {
             return cached.absoluteString
         }
-        return urlStr
+        // A dead tracking prefix in front of the real file (PodcastText.playableAudioUrl). Both
+        // the load and the gapless preload resolve through here.
+        return PodcastText.playableAudioUrl(urlStr)
     }
 
     /// `fallbackTitle`: what to call an episode that isn't in the queue (Resume Last Night after

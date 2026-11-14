@@ -2033,6 +2033,14 @@ final class SessionGuardsTests: XCTestCase {
         XCTAssertEqual(SessionGuards.timerCommitTitle(playing: true, timerActive: false), "Start timer")
         XCTAssertEqual(SessionGuards.timerCommitTitle(playing: true, timerActive: true), "Restart timer")
     }
+
+    // Value: protects=All night in the timer sheet plays with no timer, or turns a running one off; fails_when=the allNight branch is dropped and the sheet offers a countdown while the ring says All night; why_new=the sheet had no All night commit, only a cancel button while a timer ran; seam=none; no_claim=the sheet's wiring of that choice (view code)
+    func testTimerCommitForAllNight() {
+        XCTAssertEqual(SessionGuards.timerCommitTitle(playing: false, timerActive: false, allNight: true), "Play all night")
+        XCTAssertEqual(SessionGuards.timerCommitTitle(playing: true, timerActive: true, allNight: true), "Play all night")
+        XCTAssertEqual(SessionGuards.timerCommitTitle(playing: true, timerActive: false, allNight: true), "Done",
+                       "already playing all night: nothing to change")
+    }
 }
 
 /// One name per sound, and timer copy that matches the real fade (the last 600 s).
@@ -3661,6 +3669,18 @@ final class SnowNightTests: XCTestCase {
 /// Pure text rules behind the podcast screens (`PodcastText`): show-notes cleanup, counts, and
 /// placeholder show names.
 final class PodcastTextTests: XCTestCase {
+
+    // Value: protects=an episode saved with a dead Chartable prefix streams from its real address; fails_when=the unwrap is dropped, or it mangles the inner path, query or an ordinary address; why_new=13 queued episodes 404'd and failed the night (2026-11-13); seam=none; no_claim=the host serving the inner file (checked live once: all 13 returned 200)
+    func testDeadChartablePrefixesUnwrapToTheRealAddress() {
+        XCTAssertEqual(PodcastText.playableAudioUrl("https://chtbl.com/track/E2288/traffic.megaphone.fm/ABC123.mp3?updated=1700000000"),
+                       "https://traffic.megaphone.fm/ABC123.mp3?updated=1700000000")
+        XCTAssertEqual(PodcastText.playableAudioUrl("http://chtbl.com/track/9G/https://dts.podtrac.com/redirect.mp3/x.com/a.mp3"),
+                       "https://dts.podtrac.com/redirect.mp3/x.com/a.mp3", "a whole URL appended after the prefix keeps its scheme")
+        XCTAssertEqual(PodcastText.playableAudioUrl("https://traffic.libsyn.com/show/ep.mp3"),
+                       "https://traffic.libsyn.com/show/ep.mp3", "anything else is untouched")
+        XCTAssertEqual(PodcastText.playableAudioUrl("https://chtbl.com/track/E2288"),
+                       "https://chtbl.com/track/E2288", "no inner address: nothing to unwrap")
+    }
 
     func testShowNotesStripTagsAndKeepParagraphs() {
         let html = "<p>A sleepy stroll down <strong>memory</strong> lane.</p><p>Get <a href=\"https://x.com/a\">SleepPhones</a> &amp; more.</p>"
@@ -5827,5 +5847,105 @@ final class FeedbackMessageTests: XCTestCase {
     func testTheShareTextCarriesTheAddress() {
         XCTAssertTrue(FeedbackMessage.shareText(address: "help@example.com", body: "x").hasPrefix("Please send this to help@example.com"))
         XCTAssertEqual(FeedbackMessage.shareText(address: nil, body: "x"), "x")
+    }
+}
+
+/// A person's pause that leaves nothing playing ends a podcast-only session, and it's saved as
+/// Last Night right then, as Pause All does. Home's "Resume · …" line and Play read that snapshot,
+/// so before this they offered an older bed instead of the episode just paused. Real AVPlayer on
+/// a quiet local WAV; the queue writes, the night journal and the shared "lastMix" default are
+/// kept away from the app's own data.
+// Value: protects=pausing a podcast-only session saves it as Last Night; fails_when=togglePodcast's pause stops saving the snapshot or its nothing-else-playing guard inverts; why_new=only Pause All, Stop and backgrounding saved it; seam=none; no_claim=a pause under playing noise (Pause All's job) and the orb's resume itself (resumeMix), on-device audio
+@MainActor
+final class PodcastOnlyPauseSnapshotTests: XCTestCase {
+    private var dir: URL!
+    private var savedLastMix: Data?
+
+    override func setUp() {
+        super.setUp()
+        dir = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("pops-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        savedLastMix = UserDefaults.standard.data(forKey: "lastMix")   // the snapshot lives in shared defaults
+    }
+
+    override func tearDown() {
+        if let savedLastMix { UserDefaults.standard.set(savedLastMix, forKey: "lastMix") }
+        else { UserDefaults.standard.removeObject(forKey: "lastMix") }
+        try? FileManager.default.removeItem(at: dir)
+        super.tearDown()
+    }
+
+    func testPausingAPodcastOnlySessionSavesItAsLastNight() async throws {
+        let wav = dir.appendingPathComponent("solo.wav")
+        try PodcastPlayerRebuildTests.quietWav(seconds: 20).write(to: wav)
+        let engine = AudioEngine(storage: StorageManager(directory: dir))
+        engine.nightLengthProvider = { 0 }                    // All night: no timer starts
+        engine.nightJournal = NightJournal(directory: dir, storage: StorageManager(directory: dir), observeTermination: false)
+        defer { engine.stopAll(); engine.nightJournal.drain() }
+
+        let ep = Episode(id: "solo-\(UUID().uuidString)", title: "Solo", audioUrl: wav.absoluteString)
+        engine.queueManager.queue = [ep]
+        engine.queueManager.playEpisode(ep)
+        let deadline = Date().addingTimeInterval(8)
+        while !engine.isPodPlaying && Date() < deadline { try await Task.sleep(nanoseconds: 50_000_000) }
+        XCTAssertTrue(engine.isPodPlaying, "the episode never started")
+        XCTAssertFalse(engine.noiseOn || engine.binauralOn, "a podcast-only session")
+
+        engine.togglePodcast()                                 // the mini-player's or Now Playing's pause
+        XCTAssertEqual(engine.lastMix?.podcastId, ep.id, "Play must bring back the episode just paused")
+        XCTAssertEqual(engine.lastMix?.noiseOn, false, "and not a bed that wasn't playing")
+    }
+}
+
+/// Home's Resume restores the Last Night snapshot. When the snapshot's episode has been finished
+/// since (the player drops a finished episode's saved place), Resume moves on to what's next
+/// instead of replaying it from the snapshot's old position: the "half an hour back" morning of
+/// 2026-11-13, an episode finished overnight replayed from its bedtime position. Loads go to file
+/// addresses that don't exist (no network); the queue, the night journal, and the shared
+/// finished list and snapshot are kept away from the app's own data.
+// Value: protects=Resume skips an episode finished since the snapshot; fails_when=resumeMix loads the snapshot's episode regardless of the finished list; why_new=resumeMix had no finished check; seam=none; no_claim=the saved-place-over-snapshot preference (needs a real load) and on-device playback
+@MainActor
+final class ResumeSkipsFinishedEpisodeTests: XCTestCase {
+    private var dir: URL!
+    private var savedFinished: Any?
+    private var savedLastMix: Data?
+
+    override func setUp() {
+        super.setUp()
+        dir = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("rsf-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        savedFinished = UserDefaults.standard.object(forKey: "finishedEpisodes")
+        savedLastMix = UserDefaults.standard.data(forKey: "lastMix")
+    }
+
+    override func tearDown() {
+        if let savedFinished { UserDefaults.standard.set(savedFinished, forKey: "finishedEpisodes") }
+        else { UserDefaults.standard.removeObject(forKey: "finishedEpisodes") }
+        if let savedLastMix { UserDefaults.standard.set(savedLastMix, forKey: "lastMix") }
+        else { UserDefaults.standard.removeObject(forKey: "lastMix") }
+        try? FileManager.default.removeItem(at: dir)
+        super.tearDown()
+    }
+
+    private func ep(_ id: String) -> Episode {
+        Episode(id: id, title: id, audioUrl: dir.appendingPathComponent("\(id).mp3").absoluteString)
+    }
+
+    func testResumeMovesPastAnEpisodeFinishedSinceTheSnapshot() {
+        let engine = AudioEngine(storage: StorageManager(directory: dir))
+        engine.nightLengthProvider = { 0 }
+        engine.nightJournal = NightJournal(directory: dir, storage: StorageManager(directory: dir), observeTermination: false)
+        defer { engine.stopAll(); engine.nightJournal.drain() }
+
+        let finished = ep("done-\(UUID().uuidString)"), next = ep("next-\(UUID().uuidString)")
+        engine.queueManager.queue = [finished, next]
+        engine.queueManager.markFinished(finished.id)
+        let snapshot = SavedMix(name: "Last Night", noiseOn: false, noiseVolume: 0.5, noiseType: "brown",
+                                binauralOn: false, binVolume: 0.5, binauralPreset: "delta", podVolume: 0.7,
+                                podcastUrl: finished.audioUrl, podcastId: finished.id, podcastPosition: 1920)
+
+        engine.resumeMix(snapshot)
+        XCTAssertEqual(engine.loadedEpisode?.id, next.id, "Resume must move on, not replay the finished episode")
+        XCTAssertEqual(engine.queueManager.queue.first?.id, next.id, "the finished episode leaves the head")
     }
 }

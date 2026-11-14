@@ -333,13 +333,14 @@ struct HomeView: View {
     /// "Play & start timer" from the timer sheet: begin the mix (through the breathing on-ramp
     /// when it's on), then the countdown — so a sleep timer never runs over silence. With the
     /// on-ramp, the countdown starts when the mix does, not while you're still breathing.
-    private func playAndStartTimer(minutes: Int) {
+    private func playAndStartTimer(minutes: Int?) {
         let begin = resolveBegin()
         let session = {
-            // The sheet has already set the ring to `minutes`, so the engine's session-start rule
-            // times the night as the mix begins; start it here only if that didn't (no churn).
+            // The sheet has already set the ring to `minutes` (or All night when nil), so the
+            // engine's session-start rule times the night as the mix begins; start it here only if
+            // that didn't (no churn). All night starts no timer.
             begin()
-            if audio.sleepTimer.timerRemaining <= 0 { audio.sleepTimer.startSleepTimer(minutes: minutes) }
+            if let minutes, audio.sleepTimer.timerRemaining <= 0 { audio.sleepTimer.startSleepTimer(minutes: minutes) }
         }
         if breathingOnRamp && !audio.focusMode {
             pendingStart = session
