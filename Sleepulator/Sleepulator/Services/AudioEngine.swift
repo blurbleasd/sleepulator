@@ -20,6 +20,15 @@ enum AppConfig {
     /// It comes back in 1.1 after both (docs/designs/APP-STORE-LAUNCH-1.0.md, AM-1). The player
     /// code stays; only the mixer's entry point is hidden.
     static let appleMusicEnabled = false
+
+    /// Whether Focus mode is offered at all. Off from 2026-11-27, on the user's phone too: Sleep
+    /// comes first, and a Sleep-only app is half as much to prove on a real phone before
+    /// publishing. All of Focus (the Pomodoro, its scenes, its Live Activity) stays built and
+    /// unit-tested. With this off, Home has no mode switcher, Settings no Focus section, and a
+    /// phone left in Focus opens in Sleep (`AudioEngine.leaveHiddenFocus`). UI tests turn it back
+    /// on (`AppInfo.isUITestRun`, Debug only): they cover Focus's layout and readout. To bring
+    /// Focus back, make this `true`.
+    static var focusModeEnabled: Bool { AppInfo.isUITestRun }
 }
 
 /// Network reachability as its own tiny observable, so views that only care about online/offline
@@ -517,7 +526,10 @@ final class AudioEngine: ObservableObject {
         self.binauralPreset = UserDefaults.standard.string(forKey: "binauralPreset") ?? "delta"
         self.playbackSpeed = UserDefaults.standard.object(forKey: "playbackSpeed") as? Double ?? 1.0
         self.masterVolume = UserDefaults.standard.object(forKey: "masterVolume") as? Double ?? 1.0
-        self.focusMode = UserDefaults.standard.object(forKey: "focusMode") as? Bool ?? false
+        // While Focus is hidden (AppConfig.focusModeEnabled), a phone left in Focus opens in Sleep:
+        // `leaveHiddenFocus()`, at the end of init, does what a switch to Sleep would.
+        let savedFocus = UserDefaults.standard.object(forKey: "focusMode") as? Bool ?? false
+        self.focusMode = savedFocus && AppConfig.focusModeEnabled
         // skipInterval / stereoWidth / nightLimiter / limiterByMode / sleepEQ / sleepEQIntensity /
         // beatRouting are loaded by the `settings` child (PlaybackSettings.init) and reached via
         // computed passthroughs; their side-effect callbacks are wired below.
@@ -832,8 +844,29 @@ final class AudioEngine: ObservableObject {
         syncGenEngine()
         genEngine.setWidth(stereoWidth)
         syncAllVolumes()
-        reconcileSoundsToMode()
+        if savedFocus && !focusMode {
+            leaveHiddenFocus()
+        } else {
+            reconcileSoundsToMode()
+        }
         applyLimiterForMode()
+    }
+
+    /// A phone left in Focus while Focus is hidden opens in Sleep, as a switch to Sleep would leave
+    /// it: Focus's picks remembered for when it comes back, Sleep's own picks restored, any
+    /// Pomodoro stopped. It runs in `init`, where property observers don't fire, so it saves what
+    /// they would have: without that, the next launch would read Focus's sound back and land on
+    /// the palette's first sound instead of Sleep's pick.
+    private func leaveHiddenFocus() {
+        let d = UserDefaults.standard
+        d.set(false, forKey: "focusMode")
+        d.set(noiseType, forKey: Self.pickKey("noise", focus: true))
+        d.set(binauralPreset, forKey: Self.pickKey("binaural", focus: true))
+        pomodoro.stop()
+        reconcileSoundsToMode(restoringPicks: true)
+        d.set(noiseType, forKey: "noiseType")
+        d.set(binauralPreset, forKey: "binauralPreset")
+        if let data = try? JSONEncoder().encode(extraLayers) { d.set(data, forKey: "extraLayers") }
     }
 
     deinit {

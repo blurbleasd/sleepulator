@@ -113,7 +113,10 @@ enum SettingsOrder {
               : [.sleep, .nightPodcasts, .podcasts, .sound, .display]
     }
 
-    static func folded(focus: Bool) -> [SettingsSection] {
-        focus ? [.sleep, .nightPodcasts] : [.focus]
+    /// With Focus hidden (`AppConfig.focusModeEnabled`), Sleep folds nothing: there is no other
+    /// mode to set up, so no "Focus settings" row. Focus still folds Sleep's, the way back.
+    static func folded(focus: Bool, focusAvailable: Bool) -> [SettingsSection] {
+        if focus { return [.sleep, .nightPodcasts] }
+        return focusAvailable ? [.focus] : []
     }
 }

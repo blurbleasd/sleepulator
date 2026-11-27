@@ -13,7 +13,13 @@ code a rule protects. If the two disagree, this file wins.
   Apple's iTunes Search (`ITunesSearchManager`) and StoreKit (tips). The PWA in `archive_webapp/`
   is archived. The server "Sleep Safe" proxy is replaced by the on-device Night Limiter
   (`AUDIO-LIMITER-SPEC.md`). `AppConfig` holds `nightLimiterEnabled` and `appleMusicEnabled`, off
-  for 1.0.
+  for 1.0, and `focusModeEnabled`.
+- **Focus is hidden** (`AppConfig.focusModeEnabled`, off since 2026-11-27, on the user's phone too):
+  no mode switcher on Home, no Focus fold in Settings (`SettingsOrder.folded(focus:focusAvailable:)`),
+  and a phone left in Focus opens in Sleep with Sleep's picks back and saved
+  (`AudioEngine.leaveHiddenFocus`). All of Focus stays built and unit-tested; keep it compiling.
+  UI tests turn it back on (`AppInfo.isUITestRun`), so they still cover Focus but not the
+  switcher-less Home (TESTING.md §AB). Bring Focus back by making the flag `true`.
 - **1.0 plan:** free with a tip jar, iPhone only, portrait (`TARGETED_DEVICE_FAMILY = 1`). Plan and
   its decisions: `docs/designs/APP-STORE-LAUNCH-1.0.md` (device gate TESTING.md §3A, §3B, §3C, §3E,
   §3P, §3U). Privacy, support, App Review and listing drafts: `docs/launch/STORE-TEXT-1.0.md`. On
