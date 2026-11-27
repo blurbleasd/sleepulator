@@ -466,10 +466,14 @@ extension ShaderBackdropEasedNightTests {
 
         turnMainRunLoop(for: 30) { !reads.isEmpty }
         XCTAssertEqual(reads.last, true, "the backdrop on its own tab wasn't read in sight")
-        // To the other tab: the read on leaving, out of sight.
+        // To the other tab: the read on leaving, out of sight. Wait for that read itself, not for the
+        // first read after the switch: SwiftUI can draw the backdrop once more during the switch,
+        // before onDisappear, and that pass is rightly in sight (the tab still shows). On CI's iOS 26.2
+        // simulator it came first once (2026-11-27), and the check took it for the read on leaving.
+        // A pass in sight after onDisappear still fails here (the wait runs out on it) or below.
         let shown = reads.count
         box.tab = 1
-        turnMainRunLoop(for: 30) { reads.count > shown }
+        turnMainRunLoop(for: 30) { reads.count > shown && reads.last == false }
         XCTAssertEqual(reads.last, false, "leaving for the other tab wasn't read out of sight")
         // An input changes while the tab is hidden: SwiftUI evaluates the backdrop again.
         let left = reads.count
