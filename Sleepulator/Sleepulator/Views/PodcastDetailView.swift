@@ -158,10 +158,11 @@ struct PodcastDetailView: View {
         .navigationTitle(podcast.name)
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $episodeSearch, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search episodes")
-        .confirmationDialog("Replace your queue?",
-                            isPresented: Binding(get: { pendingPlayAll != nil }, set: { if !$0 { pendingPlayAll = nil } }),
-                            titleVisibility: .visible,
-                            presenting: pendingPlayAll) { episodes in
+        // An alert, not a confirmation dialog: iOS 26 draws that as a popover with no Cancel, so
+        // the way back was a tap outside it. Home's confirms are alerts for the same reason.
+        .alert("Replace your queue?",
+               isPresented: Binding(get: { pendingPlayAll != nil }, set: { if !$0 { pendingPlayAll = nil } }),
+               presenting: pendingPlayAll) { episodes in
             Button("Replace Queue") { audio.playAll(episodes) }
             Button("Add to End") { _ = audio.queueManager.addAllToQueue(episodes) }
             Button("Cancel", role: .cancel) {}

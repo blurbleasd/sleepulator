@@ -131,8 +131,10 @@ struct MixDrawer: View {
             }
             Button("Cancel", role: .cancel) { }
         }
+        // No red: the mixer is a night surface, and red is the loudest light in the room at 2am
+        // (Home's mode-switch alert says the same). The question and Cancel carry the caution.
         .alert("Replace this mix?", isPresented: $showOverwriteConfirm) {
-            Button("Replace", role: .destructive) {
+            Button("Replace") {
                 audio.savePreset(named: pendingPresetName)
                 UIImpactFeedbackGenerator(style: .medium).impactOccurred()
             }
