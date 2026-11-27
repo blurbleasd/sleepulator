@@ -29,6 +29,18 @@ enum AppInfo {
         #endif
     }
 
+    /// `-showFirstRunTips YES` (Debug builds only) brings Home's first-run card back, for checking
+    /// it on a phone that retired it long ago (TESTING §AA.1). It clears the two "seen" flags once,
+    /// at launch, from the app's own defaults. Passing the flags themselves as launch arguments
+    /// would pin them for the whole launch, so the card could never be seen to leave.
+    static func resetFirstRunTipsIfAsked(_ defaults: UserDefaults = .standard) {
+        #if DEBUG
+        guard defaults.bool(forKey: "showFirstRunTips") else { return }
+        defaults.removeObject(forKey: "hasCompletedFirstRun")
+        defaults.removeObject(forKey: "hasSeenNightRingTip")
+        #endif
+    }
+
     /// Where "Send feedback" mails and the support page points. Open input (set before the first
     /// TestFlight build; docs/designs/APP-STORE-LAUNCH-1.0.md, Launch sequence). While nil, Send
     /// feedback opens the share sheet with no address.

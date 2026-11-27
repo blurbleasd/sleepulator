@@ -22,6 +22,9 @@ struct SleepulatorApp: App {
         // expired one, and only Backup & support read it: a library-sized copy sat in Application
         // Support for as long as nobody opened that page.
         _ = Backup.undoDate()
+
+        // Debug only: `-showFirstRunTips YES` shows Home's first-run card again (TESTING §AA.1).
+        AppInfo.resetFirstRunTipsIfAsked()
     }
 
     var body: some Scene {

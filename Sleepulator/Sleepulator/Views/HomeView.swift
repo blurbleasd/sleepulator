@@ -311,7 +311,16 @@ struct HomeView: View {
         }
     }
 
+    /// The first-run card asked for this start ("Tap the orb to begin"): retire it, as Got it does.
+    private func retireFirstRunOnStart(beginsFromRest: Bool) {
+        guard CoachmarkContent.startRetiresFirstRun(showing: currentTip, beginsFromRest: beginsFromRest) else { return }
+        withAnimation(.easeInOut(duration: 0.3)) { retireFirstRunTip() }
+    }
+
     private func heroTap() {
+        // A tap that begins retires the first-run card at the tap, before the breathing on-ramp
+        // (if it's on) holds the start: the card's one ask was this tap. A pause leaves it.
+        retireFirstRunOnStart(beginsFromRest: !audio.isAnythingPlaying)
         // Already playing → just toggle (pause). The on-ramp is only for *beginning* a session.
         if audio.isAnythingPlaying {
             audio.toggleMasterTransport()
@@ -335,6 +344,9 @@ struct HomeView: View {
     /// when it's on), then the countdown — so a sleep timer never runs over silence. With the
     /// on-ramp, the countdown starts when the mix does, not while you're still breathing.
     private func playAndStartTimer(minutes: Int?) {
+        // The sheet only offers this with nothing playing; a Play that leaves the ring where it was
+        // (All night again) doesn't reach the ring's own retire, so this start does it.
+        retireFirstRunOnStart(beginsFromRest: !audio.isAnythingPlaying)
         let begin = resolveBegin()
         let session = {
             // The sheet has already set the ring to `minutes` (or All night when nil), so the

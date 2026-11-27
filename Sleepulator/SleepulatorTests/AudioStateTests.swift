@@ -5900,6 +5900,40 @@ final class CoachmarkTipCardTests: XCTestCase {
         XCTAssertNil(CoachmarkContent.current(focusMode: false, hasCompletedFirstRun: true,
                                               hasSeenNightRingTip: true, tipCardDue: false))
     }
+
+    // Value: protects="Tap the orb to begin" leaves once the orb begins a session; fails_when=the
+    // start stops retiring it (it stayed up over the playing session), a pause retires it, or the
+    // night-ring note or tip card is spent by a start; why_new=heroTap never retired the card
+    // (critique 2026-11-07, issue 5); seam=none; no_claim=HomeView's wiring (TESTING §AA.1)
+    func testOnlyAStartFromRestRetiresTheFirstRunCard() {
+        XCTAssertTrue(CoachmarkContent.startRetiresFirstRun(showing: .firstRun, beginsFromRest: true))
+        XCTAssertFalse(CoachmarkContent.startRetiresFirstRun(showing: .firstRun, beginsFromRest: false),
+                       "a pause: the session was begun elsewhere, and at rest the card is right again")
+        XCTAssertFalse(CoachmarkContent.startRetiresFirstRun(showing: .nightRing, beginsFromRest: true))
+        XCTAssertFalse(CoachmarkContent.startRetiresFirstRun(showing: .tip, beginsFromRest: true))
+        XCTAssertFalse(CoachmarkContent.startRetiresFirstRun(showing: nil, beginsFromRest: true),
+                       "Focus, or no card: nothing to retire")
+    }
+
+    // Value: protects=-showFirstRunTips brings the first-run card back for the phone check;
+    // fails_when=the reset leaves a seen flag set, or clears them without the argument; why_new=a
+    // used install had no way to see the card again; seam=a suite-named UserDefaults;
+    // no_claim=the launch-argument domain itself, nor release builds (compiled out)
+    func testShowFirstRunTipsClearsBothSeenFlagsOnlyWhenAsked() {
+        let name = "FirstRunTipsReset-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: name)!
+        defer { defaults.removePersistentDomain(forName: name) }
+        defaults.set(true, forKey: "hasCompletedFirstRun")
+        defaults.set(true, forKey: "hasSeenNightRingTip")
+
+        AppInfo.resetFirstRunTipsIfAsked(defaults)
+        XCTAssertTrue(defaults.bool(forKey: "hasCompletedFirstRun"), "not asked: nothing cleared")
+
+        defaults.set(true, forKey: "showFirstRunTips")
+        AppInfo.resetFirstRunTipsIfAsked(defaults)
+        XCTAssertNil(defaults.object(forKey: "hasCompletedFirstRun"))
+        XCTAssertNil(defaults.object(forKey: "hasSeenNightRingTip"))
+    }
 }
 
 /// The Rate row shows only where it works (design D8).
