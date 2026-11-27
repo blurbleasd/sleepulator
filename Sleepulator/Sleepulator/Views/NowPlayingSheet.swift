@@ -265,16 +265,13 @@ struct NowPlayingSheet: View {
         let artSize: CGFloat = (night ? 150 : 250) * (typeSize.isAccessibilitySize ? 0.6 : 1)
         ScrollView {
             VStack(spacing: UI.xxl) {
-                // The system's drag indicator (ContentView) replaces a hand-drawn one; Done is
-                // the way out for anyone who doesn't swipe.
+                // The system's drag indicator (ContentView) replaces a hand-drawn one; the close at
+                // the top right is the way out for anyone who doesn't swipe, as on every sheet.
                 HStack {
                     Spacer()
-                    Button("Done") { onInteraction(); isPresented = false }
-                        .font(.body.weight(.semibold))
-                        .foregroundColor(pal.accent)
-                        .frame(minWidth: 44, minHeight: 44)
+                    SheetCloseButton(pal: pal) { onInteraction(); isPresented = false }
                 }
-                .padding(.horizontal, UI.xl)
+                .padding(.horizontal, UI.md)
 
                 // Sleep: a smaller, desaturated cover under a dark scrim, so the show's (often
                 // near-white) art no longer outshines everything else at 2am. Focus keeps it full.
@@ -334,6 +331,28 @@ struct NowPlayingSheet: View {
                         playButton
                         skipButton(forward: true)
                     }
+
+                    // The podcast's level, the setting reached for most at night. It lived only in
+                    // Build mix on Home, so changing it meant leaving the player. The same setting
+                    // as the mixer's podcast row (podVolume); the phone's buttons still move
+                    // everything at once, so this is how the voice sits against the sounds.
+                    HStack(spacing: UI.md) {
+                        Image(systemName: "speaker.fill")
+                            .font(.caption)
+                            .foregroundColor(pal.dim)
+                            .accessibilityHidden(true)
+                        VolumeBar(value: $audio.podVolume,
+                                  accent: pal.warm ? pal.accent.opacity(0.75) : pal.accent,
+                                  thumbColor: pal.warm ? pal.dim : pal.text,
+                                  style: .parameter,
+                                  onEditingChanged: { _ in onInteraction() })
+                            .accessibilityLabel("Podcast volume")
+                        Image(systemName: "speaker.wave.3.fill")
+                            .font(.caption)
+                            .foregroundColor(pal.dim)
+                            .accessibilityHidden(true)
+                    }
+                    .padding(.horizontal, UI.xxl)
                 }
 
                 // Speed: a Picker inside the menu, so the current speed carries a checkmark.
@@ -401,7 +420,7 @@ struct NowPlayingSheet: View {
             // keeps the length chosen here rather than the ring's.
             TimerSelectionSheet(audio: audio, isPresented: $showTimerOptions, pal: pal,
                                 playAndStart: { minutes in
-                                    audio.sleepTimer.startSleepTimer(minutes: minutes)
+                                    if let minutes { audio.sleepTimer.startSleepTimer(minutes: minutes) }
                                     audio.resumePodcast()
                                 })
                 .presentationDetents([.medium, .large])

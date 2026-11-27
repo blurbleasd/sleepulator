@@ -13,7 +13,7 @@ final class GenerativeMediaResetTests: XCTestCase {
     /// A running engine with a noise layer on, or a skip when the host has no audio output.
     private func makeRunningEngine() throws -> GenerativeAudioEngine {
         let gen = GenerativeAudioEngine()
-        gen.setNoise(on: true, volume: 0.5, type: "brown")
+        gen.setNoiseLayers([(type: "brown", volume: 0.5)], on: true)
         gen.resumeIfNeeded()
         try XCTSkipUnless(gen.isRunning, "AVAudioEngine can't start here (no audio output)")
         return gen

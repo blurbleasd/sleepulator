@@ -60,6 +60,17 @@ struct CoachmarkContent: Equatable {
         if !hasSeenNightRingTip { return .nightRing }
         return tipCardDue && !sessionActive ? .tip : nil
     }
+
+    /// Whether a start from Home retires the first-run card. Its title asks for one thing, "Tap the
+    /// orb to begin", so a session begun from rest while that card shows (the orb, or the timer
+    /// sheet's Play) has done it; the card used to stay up after that tap (critique 2026-11-07).
+    /// A pause doesn't: that session was begun somewhere else (Podcasts, the lock screen), the
+    /// card's ring and Build mix lines are still untaught, and at rest its title is right again.
+    /// No other card retires this way: the night-ring note is about the ring, and the tip card
+    /// waits for an answer. In Focus no card shows, so nothing retires there.
+    static func startRetiresFirstRun(showing: CoachmarkContent?, beginsFromRest: Bool) -> Bool {
+        showing == .firstRun && beginsFromRest
+    }
 }
 
 struct FirstRunCoachmark: View {

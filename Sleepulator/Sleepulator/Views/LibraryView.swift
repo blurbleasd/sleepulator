@@ -546,12 +546,9 @@ struct AddPodcastSheet: View {
             }
             .navigationTitle("Add Podcast")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                // The sheet could only be swiped away before.
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                }
-            }
+            // The sheet could only be swiped away before; then a Cancel on the left. Now the close
+            // every sheet has: each add is its own commit, so there is nothing here to cancel.
+            .toolbar { SheetCloseToolbarItem(pal: pal) { dismiss() } }
         }
         .tint(pal.accent)
         .onAppear { fieldFocused = true }
@@ -780,6 +777,31 @@ struct EpisodeRowView: View {
     // Whether this episode is already marked played — precomputed by the parent from the
     // engine's finishedEpisodes set, so the row needn't observe the engine (scroll-storm fix).
     var initiallyPlayed: Bool = false
+    /// Set only on the episode the player has loaded (`AudioEngine.loadedEpisode`), worked out by
+    /// the parent, which observes the engine, so the row still doesn't. Without it the list gave
+    /// no sign of which episode was playing.
+    var nowPlaying: NowPlayingMark? = nil
+
+    enum NowPlayingMark {
+        case loading, playing, paused, failed
+
+        var label: String {
+            switch self {
+            case .loading: return "Loading"
+            case .playing: return "Playing"
+            case .paused: return "Paused"
+            case .failed: return "Couldn't play"
+            }
+        }
+
+        var symbol: String {
+            switch self {
+            case .playing: return "speaker.wave.2.fill"
+            case .failed: return "exclamationmark.circle"
+            case .loading, .paused: return "speaker.fill"
+            }
+        }
+    }
 
     /// Mode-aware like Home: Focus is cool everywhere, not just on Home. Read from the persisted
     /// "focusMode" key (AudioEngine writes it) so this view needn't observe the whole engine.
@@ -884,14 +906,20 @@ struct EpisodeRowView: View {
 
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 7) {
-                        // Unplayed dot (hidden once played) — the conventional podcast cue.
-                        if !isPlayed {
+                        // The loaded episode shows the player's state in place of the unplayed dot
+                        // (hidden once played, the conventional podcast cue).
+                        if let nowPlaying {
+                            Image(systemName: nowPlaying.symbol)
+                                .font(.caption)
+                                .foregroundColor(pal.accent)
+                                .accessibilityHidden(true)
+                        } else if !isPlayed {
                             Circle().fill(pal.accent).frame(width: 7, height: 7)
                                 .accessibilityHidden(true)
                         }
                         Text(ep.title)
                             .font(.system(.headline, design: .rounded))
-                            .foregroundColor(pal.text.opacity(isPlayed ? 0.5 : 1.0))
+                            .foregroundColor(pal.text.opacity(isPlayed && nowPlaying == nil ? 0.5 : 1.0))
                             .multilineTextAlignment(.leading)
                             .lineLimit(typeSize.isAccessibilitySize ? 5 : 2)
                     }
@@ -900,6 +928,11 @@ struct EpisodeRowView: View {
                         ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
                         : AnyLayout(HStackLayout(spacing: 8))
                     metadata {
+                        if let nowPlaying {
+                            Text(nowPlaying.label)
+                                .font(.system(.caption2, design: .rounded).weight(.semibold))
+                                .foregroundColor(pal.accent)
+                        }
                         if let pubDate = ep.pubDate {
                             Text(relativeDate(pubDate))
                                 .font(.system(.caption2, design: .rounded))
@@ -933,7 +966,7 @@ struct EpisodeRowView: View {
                 // explicit chevron below, exposed to VoiceOver as a named action.
                 .accessibilityElement(children: .combine)
                 .accessibilityAddTraits(.isButton)
-                .accessibilityValue(playedState)
+                .accessibilityValue(nowPlaying?.label ?? playedState)
                 .accessibilityHint("Plays the episode")
                 .accessibilityAction { queueManager.playEpisode(ep) }
                 .accessibilityAction(named: Text(isExpanded ? "Hide notes" : "Show notes")) {

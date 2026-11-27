@@ -25,8 +25,9 @@
 			<array>
 				<!-- C617.1: timestamps, size or other metadata of files inside the app's own
 				     container. AudioDownloader reads the cached episodes' access/modification
-				     dates and sizes for its LRU eviction, and MetricsCollector sorts the iOS reports
-				     it stored by creation date. -->
+				     dates and sizes for its LRU eviction, MetricsCollector sorts the iOS reports
+				     it stored by creation date, and LogFile ages and orders the playback log's
+				     own files by size and modification date. -->
 				<string>C617.1</string>
 				<!-- DDA9.1: file timestamps shown to the person: the Reports from iOS list's dates
 				     and Settings' "Built …" line (AppInfo.builtAt). -->

@@ -24,6 +24,7 @@ struct MixDrawer: View {
     /// mixer opens. Retired on that first open, but held for the whole visit.
     @AppStorage("hasSeenMixHint") private var hasSeenMixHint = false
     @State private var showsMixHint = false
+    @Environment(\.dismiss) private var dismiss
 
     private var currentMode: String { audio.focusMode ? "focus" : "sleep" }
     private var modePresets: [SoundPreset] { mixStore.savedPresets.filter { $0.mode == currentMode } }
@@ -33,9 +34,15 @@ struct MixDrawer: View {
         ScrollView {
             VStack(spacing: UI.lg) {
                 VStack(alignment: .leading, spacing: UI.xs) {
-                    Text("Your mix")
-                        .font(.system(.headline, design: .rounded).bold())
-                        .foregroundColor(pal.text)
+                    // Swipe-only before: the close every sheet has, at the top right.
+                    HStack {
+                        Text("Your mix")
+                            .font(.system(.headline, design: .rounded).bold())
+                            .foregroundColor(pal.text)
+                        Spacer(minLength: UI.sm)
+                        SheetCloseButton(pal: pal) { dismiss() }
+                            .padding(.trailing, -UI.sm)   // the disc, not its tap frame, on the margin
+                    }
                     if showsMixHint {
                         // The last slider (HomeBottomBar's master) carries no label of its own.
                         Text("Turn on as many sounds as you like. Each slider sets one sound; the last sets the whole mix.")
@@ -131,8 +138,10 @@ struct MixDrawer: View {
             }
             Button("Cancel", role: .cancel) { }
         }
+        // No red: the mixer is a night surface, and red is the loudest light in the room at 2am
+        // (Home's mode-switch alert says the same). The question and Cancel carry the caution.
         .alert("Replace this mix?", isPresented: $showOverwriteConfirm) {
-            Button("Replace", role: .destructive) {
+            Button("Replace") {
                 audio.savePreset(named: pendingPresetName)
                 UIImpactFeedbackGenerator(style: .medium).impactOccurred()
             }

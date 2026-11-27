@@ -295,7 +295,7 @@ final class NightVeilUITests: XCTestCase {
     }
 
     /// Whether the glance is lit: its night line is the dim tone at 55% (about 100 of 255) on the
-    /// veil's black. The veil's "Tap to wake" caption (white at 16%, about 41) stays under the
+    /// veil's black. The veil's caption (white at 16%, about 41) stays under the
     /// threshold, and so does the ember (8%). The tenths at each end are skipped: a touch can bring
     /// the home indicator back for a moment.
     @MainActor

@@ -67,6 +67,15 @@ struct PodcastDetailView: View {
         return min(1.0, pos / dur)
     }
 
+    /// The player's state, for the one row whose episode is loaded (now playing is
+    /// `loadedEpisode`, never the queue head).
+    private func nowPlayingMark(for ep: Episode) -> EpisodeRowView.NowPlayingMark? {
+        guard audio.loadedEpisode?.id == ep.id else { return nil }
+        if audio.podcastFailed { return .failed }
+        if audio.episodeLoading { return .loading }
+        return audio.isPodPlaying ? .playing : .paused
+    }
+
     private var visibleEpisodes: [Episode] {
         podcast.episodes.filter { ep in
             let notHidden = !audio.hideFinishedEpisodes || !audio.finishedEpisodes.contains(ep.id)
@@ -131,7 +140,8 @@ struct PodcastDetailView: View {
                                                    podcast: podcast,
                                                    savedProgress: progress(for: ep),
                                                    initiallyDownloaded: downloadedUrls.contains(ep.audioUrl),
-                                                   initiallyPlayed: audio.finishedEpisodes.contains(ep.id))
+                                                   initiallyPlayed: audio.finishedEpisodes.contains(ep.id),
+                                                   nowPlaying: nowPlayingMark(for: ep))
                                         .listRowBackground(pal.text.opacity(0.05))
                                         .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
                                         .listRowSeparator(.hidden)
@@ -148,10 +158,11 @@ struct PodcastDetailView: View {
         .navigationTitle(podcast.name)
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $episodeSearch, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search episodes")
-        .confirmationDialog("Replace your queue?",
-                            isPresented: Binding(get: { pendingPlayAll != nil }, set: { if !$0 { pendingPlayAll = nil } }),
-                            titleVisibility: .visible,
-                            presenting: pendingPlayAll) { episodes in
+        // An alert, not a confirmation dialog: iOS 26 draws that as a popover with no Cancel, so
+        // the way back was a tap outside it. Home's confirms are alerts for the same reason.
+        .alert("Replace your queue?",
+               isPresented: Binding(get: { pendingPlayAll != nil }, set: { if !$0 { pendingPlayAll = nil } }),
+               presenting: pendingPlayAll) { episodes in
             Button("Replace Queue") { audio.playAll(episodes) }
             Button("Add to End") { _ = audio.queueManager.addAllToQueue(episodes) }
             Button("Cancel", role: .cancel) {}

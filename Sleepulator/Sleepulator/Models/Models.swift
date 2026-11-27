@@ -83,9 +83,9 @@ nonisolated struct SavedMix: Codable, Identifiable {
     var podVolume: Double
     var podcastUrl: String?
     var podcastId: String?
-    /// Elapsed seconds of the captured episode, stored in the snapshot so "Resume Last Night" seeks
-    /// here directly instead of depending on positions.json. Optional → old snapshots decode as nil
-    /// and fall back to the saved-position map.
+    /// Elapsed seconds of the captured episode at the moment the snapshot was taken. Resume uses
+    /// it only when the player has no saved place for the episode (the player's, updated every
+    /// second while playing, wins: AudioEngine.resumeMix). Optional → old snapshots decode as nil.
     var podcastPosition: Double? = nil
     /// Extra stacked noise layers active at capture. Optional → snapshots from before layering
     /// decode as nil (no extra layers).

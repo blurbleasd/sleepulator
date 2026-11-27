@@ -57,7 +57,13 @@ Suites in `SleepulatorTests/` (seven files, many suites):
   recovery after a kill, the soft cap, force-quit), `NightJournalWiringTests` (session edges,
   interruptions, the timer's stop, a podcast failure), `AskRulesTests`, `MorningReadbackTests`
   (the read-back's window, wording, re-read times and which sessions are last night; two through
-  the real journal), `CoachmarkTipCardTests`, `RateRowRuleTests`, `FeedbackMessageTests`.
+  the real journal), `CoachmarkTipCardTests`, `RateRowRuleTests`, `FeedbackMessageTests`,
+  `RecentNightsTests` (Recent nights' wording: each ending, clean or what spoiled it, every taint
+  key in plain words, sessions grouped by the evening their night began). The playback log's files:
+  `LogFileTests` (lines stamped and scrubbed of URLs, a relaunch keeping the lines before it, a new
+  part past the size cap and a new file each day, files past 3 days or 1 MB dropped, a backed-up
+  writer counting what it drops) and `LogMessageTests` (`Log`'s interpolation keeps `Logger`'s
+  privacy; a `Log` line reaches the test host's own file).
 - `PersistenceTests.swift` — legacy `SavedMix` → `SoundPreset` migration, library seeding,
   position-map coercion, `MixStore` reloads.
 - `BackupRoundTripTests.swift` — the backup's export → restore round-trip, its typed allowlist
@@ -1040,6 +1046,78 @@ night, Lamplight selected (Build mix → Backdrop), Brown playing.
 6. **ProMotion and battery.** Watch a minute on a 120 Hz phone. ✅ A smooth fall, no stalls.
    Overnight with the veil on: ✅ battery comparable to Night sky (a full-screen shader at 30 fps
    while the street is in sight; nothing renders under the veil).
+
+### Z. Recent nights and a playback log that survives a relaunch (added 2026-11-27, unit-tested only)
+Two ways a night reports on itself, read in the morning on the phone, no cable. **Recent nights**
+(Settings ▸ Backup & support, under Send feedback) lists the night journal's verdicts in plain words
+(`RecentNights`). **The playback log** is now also written to files in Application
+Support/Sleepulator/logs (`LogFile`: a file per day, the last 3 days, 1 MB at most, excluded from
+backups), so "Export the playback log" and Send feedback carry the lines from before a relaunch.
+Unit tests pin the wording, the files' rolling and the URL scrub; only the phone shows a locked
+night's lines landing, and a real interruption marked as one.
+
+1. **Last night is listed.** After a timed night that ended by the timer, Settings ▸ Backup &
+   support ▸ Recent nights. ✅ The top section is that night's evening ("Wed, Nov 26" for a 23:00 or
+   a 01:00 bedtime), one row: "30 min of sound", "11:04 PM – 11:34 PM · the timer eased it out",
+   "Clean". ✅ Cream and dim tones on the warm black, no amber. ✅ VoiceOver reads a row as one
+   sentence ("30 minutes of sound. 11:04 PM to 11:34 PM, the timer eased it out. Clean.").
+2. **An interruption reads as one.** All night, noise playing: set a Clock alarm a couple of
+   minutes ahead, let it ring, stop it on the lock screen and leave the sound off past 30 minutes.
+   ✅ Its row ends "· interrupted, and the sound didn't come back". A night you paused yourself and
+   left: ✅ "· stopped". (Nights recorded before this build say "stopped" either way.)
+3. **A failure is said in words.** A night the app died in (Product ▸ Stop in Xcode mid-night, as
+   §U.1): ✅ after the relaunch its row says "the app stopped while playing" and "Not clean", a step
+   brighter than the clean rows. If a real night had a player rebuild or a lost stream: ✅ "Not
+   clean: the podcast player restarted …", never a key like "player rebuilt" or "pipeline died".
+4. **The log survives a relaunch.** Play a podcast a minute, pause, then swipe the app away (or
+   Product ▸ Stop). Reopen; Export the playback log, save to Files, open it. ✅ The lines from before
+   the relaunch, then "[app] notice: launch: Sleepulator …", then the new run's. ✅ Each line starts
+   with the date and time; the header names the time zone.
+5. **The overnight trail, locked.** The morning after a real locked night (§3C or §3E), export the
+   log with no cable. ✅ The night's lines from bedtime to the terminal stop or the morning (any
+   `rebuilding the AVPlayer`, `interruption began`/`ended`, `route change` lines too), at the
+   night's times: writes while locked land. If tethered, Console shows no `playback log write
+   failed`.
+6. **No web addresses.** Play from any feed (a private one if you have it), then export. Search the
+   file for "://": ✅ none; addresses read "[link]".
+7. **Send feedback carries it.** With Mail set up, Send feedback. ✅ The draft attaches the night
+   files and `playback-YYYY-MM-DD.log` files; the body says "the playback log (up to 3 days)" and "No
+   web addresses in the events or the log."
+8. **It stays small.** After a week's use, export. ✅ The first line is no more than about 3 days
+   old, and the file is under 1 MB.
+
+### AA. Sleep conventions: the first-run card, confirms, closing a sheet, switches, the layer line (added 2026-11-27, unit-tested only)
+The last two issues of the Sleep usability critique (2026-11-07, 27/40). The first-run card ("Tap
+the orb to begin") now leaves when the orb begins a session (`CoachmarkContent.startRetiresFirstRun`);
+a pause leaves it. Night confirms have no red button and none is a popover. Every sheet closes the
+same way: swipe down, or an xmark in a faint disc at the top right (`SheetCloseButton`; Import Shows
+puts it on the left, since Import has the right). Every switch is copper in Sleep. The sounds under
+the orb are a dim line, not pills that looked tappable. Nothing here was looked at on a screen; unit
+tests and the Home UI tests cover the rules. Sleep mode, room dim, brightness as at night.
+
+1. **The first-run card leaves on Play.** It's long retired on a used phone, so bring it back for
+   one launch: in Xcode, Edit Scheme ▸ Run ▸ Arguments, add `-showFirstRunTips YES`, run, then take
+   the argument out again (Debug builds only). With nothing playing, ✅ the card shows under the
+   night line. Tap the orb. ✅ The card fades out as the sound starts, and ✅ it stays gone after
+   pausing and after a relaunch without the argument. With Settings' "Start with a minute of
+   breathing" on, ✅ it leaves at the tap, before the breathing minute.
+2. **A pause doesn't spend it.** Again with the argument: start a podcast from the Podcasts tab, go
+   back to Home. ✅ The card is up. Tap the orb to pause. ✅ The card stays; tap it again to play
+   and ✅ it leaves.
+3. **No red at night.** Build mix ▸ Save mix, name it the same as a saved mix. ✅ "Replace this
+   mix?" has Replace and Cancel, neither in red. On a show page, Play All with episodes already
+   queued: ✅ "Replace your queue?" is a centred alert, not a popover, with Replace Queue, Add to End
+   and Cancel.
+4. **One way to close.** Open each in turn: Build mix, the timer sheet (the night line), Now
+   Playing (the mini-player), Add Podcast, the tip sheet if it's due. ✅ Each has the same dim xmark
+   at the top right, and swiping down still closes it. In the timer sheet, pick 45m and tap the
+   xmark: ✅ the night line still shows the length it had (only the commit keeps a choice). At the
+   largest text size, ✅ the xmark doesn't overlap "Sleep timer" or "Your mix".
+5. **One switch colour.** ✅ The mixer's layer switches (Build mix) and Settings' switches are the
+   same copper when on; in Focus ✅ both are the blue accent.
+6. **The sounds under the orb read as a status.** Play Brown + Deep. ✅ Under the night line, a dim
+   "Brown · Deep" with no capsule around it, a step quieter than the night line and its chevron.
+   With VoiceOver on, ✅ it reads "Active sounds: Brown, Deep" as one stop, not a button.
 
 ---
 

@@ -1,6 +1,19 @@
 import XCTest
 @testable import Sleepulator
 
+extension Backup {
+    /// The UserDefaults side of a restore in one call: `restorePlan` then `apply`, the two steps
+    /// `write` runs (with a hand-off between threads in between). Test-only; the app's restore
+    /// goes through `write`. Returns (restored, skipped) for the UserDefaults keys.
+    nonisolated static func restoreUserDefaults(from dict: [String: Any], into defaults: UserDefaults,
+                                                replacing: Bool = false) -> (restored: Int, skipped: Int) {
+        // Replacing is Undo, which trusts its own copy (`write` does the same).
+        let plan = restorePlan(from: dict, currentFocus: defaults.bool(forKey: modeKey), trusted: replacing)
+        apply(plan.values, absent: plan.absent, into: defaults, replacing: replacing)
+        return (plan.values.count, plan.skipped)
+    }
+}
+
 /// Export → (JSON file) → import fidelity for the settings backup. The picker can't be scripted,
 /// so the round trips drive the export's `Backup.userDefaults` and the restore's two steps
 /// (`restoreUserDefaults`, a convenience over `restorePlan` + `apply`, the steps `write` runs) with

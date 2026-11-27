@@ -146,8 +146,10 @@ enum SessionGuards {
     }
 
     /// The timer sheet's commit button. With nothing playing it starts the mix as well, so the
-    /// timer can never be set against silence.
-    static func timerCommitTitle(playing: Bool, timerActive: Bool) -> String {
+    /// timer can never be set against silence. With All night chosen it plays with no timer, or
+    /// turns a running timer off; already playing all night, it has nothing to change.
+    static func timerCommitTitle(playing: Bool, timerActive: Bool, allNight: Bool = false) -> String {
+        if allNight { return !playing || timerActive ? "Play all night" : "Done" }
         if !playing { return "Play & start timer" }
         return timerActive ? "Restart timer" : "Start timer"
     }

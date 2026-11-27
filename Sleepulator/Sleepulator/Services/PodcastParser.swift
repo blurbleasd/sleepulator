@@ -205,31 +205,34 @@ class PodcastParser: NSObject, XMLParserDelegate {
         currentElement = ""
     }
     
+    // RFC-822 variants: numeric offset (Z) and named zone (zzz, e.g. GMT/EST), with and without
+    // seconds / a leading-zero day. Many real feeds use named zones, which the Z formats miss.
+    // Built once and shared across feeds: parseDate runs for every <item> on the main actor, and
+    // a fresh DateFormatter (plus an ISO8601DateFormatter) per episode added up on 750-item feeds.
+    private static let rfc822Formatters: [DateFormatter] = [
+        "EEE, dd MMM yyyy HH:mm:ss Z",
+        "EEE, d MMM yyyy HH:mm:ss Z",
+        "EEE, dd MMM yyyy HH:mm:ss zzz",
+        "EEE, d MMM yyyy HH:mm:ss zzz",
+        "EEE, dd MMM yyyy HH:mm Z",
+        "EEE, dd MMM yyyy HH:mm zzz"
+    ].map { fmt in
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = fmt
+        return formatter
+    }
+    // Atom / ISO-8601 (e.g. 2026-06-23T09:00:00Z).
+    private static let iso8601Formatter = ISO8601DateFormatter()
+
     private func parseDate(_ dateStr: String) -> Date? {
         let cleanStr = dateStr.trimmingCharacters(in: .whitespacesAndNewlines)
         if cleanStr.isEmpty { return nil }
-        
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        // RFC-822 variants: numeric offset (Z) and named zone (zzz, e.g. GMT/EST), with and without
-        // seconds / a leading-zero day. Many real feeds use named zones, which the Z formats miss.
-        let formats = [
-            "EEE, dd MMM yyyy HH:mm:ss Z",
-            "EEE, d MMM yyyy HH:mm:ss Z",
-            "EEE, dd MMM yyyy HH:mm:ss zzz",
-            "EEE, d MMM yyyy HH:mm:ss zzz",
-            "EEE, dd MMM yyyy HH:mm Z",
-            "EEE, dd MMM yyyy HH:mm zzz"
-        ]
-        for fmt in formats {
-            formatter.dateFormat = fmt
+
+        for formatter in Self.rfc822Formatters {
             if let d = formatter.date(from: cleanStr) { return d }
         }
-
-        // Atom / ISO-8601 (e.g. 2026-06-23T09:00:00Z).
-        if let d = ISO8601DateFormatter().date(from: cleanStr) { return d }
-
-        return nil
+        return Self.iso8601Formatter.date(from: cleanStr)
     }
     
     private func parseDuration(_ durationStr: String) -> TimeInterval? {

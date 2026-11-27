@@ -217,14 +217,18 @@ struct MiniPlayerView: View {
                 idleContent(leads: true).contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Nothing playing")
+            .accessibilityLabel(Self.idleTitle)
             .accessibilityHint("Opens Podcasts")
         } else {
             idleContent(leads: false)
                 .accessibilityElement(children: .ignore)
-                .accessibilityLabel("Nothing playing")
+                .accessibilityLabel(Self.idleTitle)
         }
     }
+
+    /// This bar is the podcast's, so it speaks for the podcast only. "Nothing playing" was wrong
+    /// whenever noise played under it.
+    static let idleTitle = "No episode playing"
 
     private func idleContent(leads: Bool) -> some View {
         HStack(spacing: UI.sm) {
@@ -234,11 +238,11 @@ struct MiniPlayerView: View {
                 .frame(minWidth: 44, minHeight: 44)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text("Nothing playing")
+                Text(Self.idleTitle)
                     .font(.subheadline)
                     .foregroundColor(pal.dim)
                 if leads {
-                    Text("Find an episode in Podcasts")
+                    Text("Find one in Podcasts")
                         .font(.caption2)
                         .foregroundColor(pal.dim)
                 }

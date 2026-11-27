@@ -128,9 +128,10 @@ struct WarmMixerRow: View {
             }
         ))
         .labelsHidden()
-        // Sleep dims the "on" track: full amber switches were the brightest things in the mixer
-        // at night. ~60% still reads clearly as on (and clears 3:1 against the card).
-        .toggleStyle(SwitchToggleStyle(tint: pal.warm ? pal.accent.opacity(0.6) : pal.accent))
+        // Every switch in the app takes one tint: copper in Sleep, where full amber switches were
+        // the brightest things in the mixer at night, the accent in Focus. This one was amber at
+        // 60% while Settings' were copper, two colours for one control (critique 2026-11-07).
+        .toggleStyle(SwitchToggleStyle(tint: pal.controlTint))
         .accessibilityLabel(Text(title))   // VoiceOver: identify which layer this switch is
     }
 

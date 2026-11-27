@@ -581,6 +581,34 @@ struct LivePomodoroActivities: PomodoroActivityHosting {
 }
 #endif
 
+/// Where the Pomodoro's phase-end notification goes. Injected so the unit tests stay off
+/// UNUserNotificationCenter, and a test can read what a session schedules. PomodoroService builds
+/// the request; this only hands it to the system.
+protocol PomodoroNotifying {
+    /// Quiet provisional authorization: granted with no permission prompt.
+    func requestProvisionalAuthorization()
+    func add(_ request: UNNotificationRequest)
+    func removePending(_ ids: [String])
+    func removeDelivered(_ ids: [String])
+}
+
+/// The real one: `UNUserNotificationCenter.current()`.
+struct LivePomodoroNotifications: PomodoroNotifying {
+    func requestProvisionalAuthorization() {
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .provisional]) { _, _ in }
+    }
+
+    func add(_ request: UNNotificationRequest) { UNUserNotificationCenter.current().add(request) }
+
+    func removePending(_ ids: [String]) {
+        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: ids)
+    }
+
+    func removeDelivered(_ ids: [String]) {
+        UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: ids)
+    }
+}
+
 /// A looping work/break timer for Focus mode. Unlike the sleep timer it never fades
 /// or stops the audio — it just marks interval boundaries with a chime. Ambient and
 /// binaural keep playing the whole time.
@@ -615,7 +643,9 @@ final class PomodoroService: ObservableObject {
     /// boundary. That tick can come minutes after the phase began (`advancePhase`), and the ring's
     /// refill eases in from here, not from the phase's start.
     private var phaseShownAt: Date?
-    private static let phaseNotifId = "app.sleepulator.pomodoro.phase"
+    static let phaseNotifId = "app.sleepulator.pomodoro.phase"
+    /// The phase-end notification's center. Injected so a test can stand in for it.
+    var notifications: PomodoroNotifying = LivePomodoroNotifications()
     private var requestedNotifAuth = false
     #if canImport(ActivityKit)
     /// The Live Activities this drives. Injected so a test can see which ones a start or a stop ends.
@@ -801,12 +831,11 @@ final class PomodoroService: ObservableObject {
     // active users just hear the chime. Provisional auth: quiet, no permission prompt.
 
     private func schedulePhaseEndNotification() {
-        let center = UNUserNotificationCenter.current()
         if !requestedNotifAuth {
             requestedNotifAuth = true
-            center.requestAuthorization(options: [.alert, .provisional]) { _, _ in }
+            notifications.requestProvisionalAuthorization()
         }
-        center.removePendingNotificationRequests(withIdentifiers: [Self.phaseNotifId])
+        notifications.removePending([Self.phaseNotifId])
         guard let end = phaseEnd else { return }
         let secs = end.timeIntervalSinceNow
         guard secs > 1 else { return }
@@ -821,7 +850,7 @@ final class PomodoroService: ObservableObject {
         }
         content.sound = nil   // the in-app chime covers foreground; keep the net quiet
         let trigger = UNTimeIntervalNotificationTrigger(timeInterval: max(1, secs), repeats: false)
-        center.add(UNNotificationRequest(identifier: Self.phaseNotifId, content: content, trigger: trigger))
+        notifications.add(UNNotificationRequest(identifier: Self.phaseNotifId, content: content, trigger: trigger))
     }
 
     /// Whether the break that FOLLOWS the current work interval will be a long one.
@@ -830,9 +859,8 @@ final class PomodoroService: ObservableObject {
     }
 
     private func cancelPhaseEndNotification() {
-        let center = UNUserNotificationCenter.current()
-        center.removePendingNotificationRequests(withIdentifiers: [Self.phaseNotifId])
-        center.removeDeliveredNotifications(withIdentifiers: [Self.phaseNotifId])
+        notifications.removePending([Self.phaseNotifId])
+        notifications.removeDelivered([Self.phaseNotifId])
     }
 
     // MARK: Live Activity (lock screen / Dynamic Island ring for the running session)
