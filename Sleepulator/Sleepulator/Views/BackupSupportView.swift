@@ -20,6 +20,7 @@ struct BackupSupportView: View {
     @State private var logName = "sleepulator-log"
 
     private static let recentNightsNote = "How long each night played and how it ended."
+    private static let logNote = "What played and what went wrong over the last 3 days."
 
     var body: some View {
         List {
@@ -50,16 +51,15 @@ struct BackupSupportView: View {
                     .accessibilityLabel("Reports from iOS")
                     .accessibilityHint("Battery and crash reports, about one a day. Kept on this iPhone.")
                     Button { exportLog() } label: {
-                        // It's the process's own log (OSLogStore, current process): what played
-                        // since the app last opened, capped at 12 hours. "Last night's" overpromised.
+                        // The playback log's files (LogFile): every launch's lines for up to 3 days,
+                        // so last night's are still there after the app was closed or died.
                         SettingActionRow(title: "Export the playback log", systemImage: "doc.text",
-                                         note: "What played and what went wrong since the app opened, up to 12 hours.",
-                                         pal: pal) {
+                                         note: Self.logNote, pal: pal) {
                             if collectingLog { ProgressView() }
                         }
                     }
                     .accessibilityLabel("Export the playback log")
-                    .accessibilityHint("What played and what went wrong since the app opened, up to 12 hours.")
+                    .accessibilityHint(Self.logNote)
                     // Gathering the log lines takes a moment; a second tap mustn't start another.
                     .disabled(collectingLog)
                 } header: {
@@ -126,7 +126,7 @@ struct BackupSupportView: View {
                         }
                     }
                 }
-                // Up to 12 hours of log lines; nothing reads them once the exporter has closed.
+                // Up to 1 MB of log lines; nothing reads them once the exporter has closed.
                 .onChange(of: isExportingLog) { if !isExportingLog { logDocument = nil } }
         }
         .alert("Couldn't save the log", isPresented: $logExportFailed) {

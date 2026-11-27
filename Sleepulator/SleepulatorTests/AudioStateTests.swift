@@ -5919,10 +5919,11 @@ final class RateRowRuleTests: XCTestCase {
 @MainActor
 final class FeedbackMessageTests: XCTestCase {
     func testTheBodyListsWhatsAttachedWithoutLinks() {
-        let body = FeedbackMessage.body(nightSummary: "Last 2 nights: 1 clean.", nightFiles: 2,
+        let body = FeedbackMessage.body(nightSummary: "Last 2 nights: 1 clean.", nightFiles: 2, logFiles: 2,
                                         reportsSince: Date(timeIntervalSince1970: 1_800_000_000),
                                         version: "1.0", build: "7", iOS: "26.3", device: "iPhone")
-        XCTAssertTrue(body.contains("Attached: the last 2 nights' playback events (no web addresses) and iOS reports since"))
+        XCTAssertTrue(body.contains("Attached: the last 2 nights' playback events, the playback log (up to 3 days) and iOS reports since"), body)
+        XCTAssertTrue(body.contains(". No web addresses in the events or the log."), body)
         XCTAssertTrue(body.contains("Last 2 nights: 1 clean."))
         XCTAssertTrue(body.contains("Sleepulator 1.0 (7) · iOS 26.3 · iPhone"))
         XCTAssertFalse(body.contains("://"))
@@ -5930,10 +5931,18 @@ final class FeedbackMessageTests: XCTestCase {
     }
 
     func testNothingAttachedYet() {
-        let body = FeedbackMessage.body(nightSummary: "No night recorded yet.", nightFiles: 0, reportsSince: nil,
-                                        version: "1.0", build: "1", iOS: "26", device: "iPhone")
+        let body = FeedbackMessage.body(nightSummary: "No night recorded yet.", nightFiles: 0, logFiles: 0,
+                                        reportsSince: nil, version: "1.0", build: "1", iOS: "26", device: "iPhone")
         XCTAssertTrue(body.contains("Attached: nothing yet."))
+        XCTAssertFalse(body.contains("web addresses"))
         XCTAssertTrue(body.contains("No night recorded yet."))
+    }
+
+    /// The playback log alone (no night recorded yet, no reports): said, with its no-links note.
+    func testTheLogAloneIsNamed() {
+        let body = FeedbackMessage.body(nightSummary: "No night recorded yet.", nightFiles: 0, logFiles: 1,
+                                        reportsSince: nil, version: "1.0", build: "1", iOS: "26", device: "iPhone")
+        XCTAssertTrue(body.contains("Attached: the playback log (up to 3 days). No web addresses in the log."), body)
     }
 
     func testTheShareTextCarriesTheAddress() {
@@ -6278,5 +6287,191 @@ extension NightJournalWiringTests {
         XCTAssertNotNil(engine.nightJournal.open?.pausedAt)
         XCTAssertEqual(engine.nightJournal.open?.pauseWasInterruption, false)
         engine.nightJournal.drain()
+    }
+}
+
+/// The playback log's files: lines from every launch, a file per day, scrubbed of URLs, rolled by
+/// size and age, written off the caller's thread with a bounded backlog.
+// Value: protects=last night's log lines survive a relaunch, carry no URL, and the files stay within 3 days and 1 MB; fails_when=lines don't reach the file, a URL or secret is written, a relaunch truncates, rotation or pruning breaks, or a backed-up writer grows without bound; why_new=the export only read the running process's unified log; seam=LogFile(directory:limits:calendar:now:), suspendWriter; no_claim=writes while the phone is locked, on a device
+final class LogFileTests: XCTestCase {
+    private var dir: URL!
+    private let utc: Calendar = {
+        var c = Calendar(identifier: .gregorian)
+        c.timeZone = TimeZone(identifier: "UTC")!
+        return c
+    }()
+
+    /// A clock the writer's queue can read and the test can move (moved only between flushes).
+    private final class Clock: @unchecked Sendable {
+        var now: Date
+        init(_ now: Date) { self.now = now }
+    }
+
+    override func setUp() {
+        super.setUp()
+        dir = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("log-\(UUID().uuidString)")
+    }
+
+    override func tearDown() {
+        try? FileManager.default.removeItem(at: dir)
+        super.tearDown()
+    }
+
+    private func at(day: Int, _ hour: Int, _ minute: Int = 0, _ second: Int = 0) -> Date {
+        utc.date(from: DateComponents(year: 2026, month: 11, day: day, hour: hour, minute: minute, second: second))!
+    }
+
+    private func log(_ clock: Clock, limits: LogRetention.Limits = .standard) -> LogFile {
+        LogFile(directory: dir, limits: limits, calendar: utc, now: { clock.now })
+    }
+
+    private func names() -> [String] {
+        ((try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []).sorted()
+    }
+
+    func testLinesLandInTheDaysFileStampedAndScrubbed() throws {
+        let clock = Clock(at(day: 27, 3, 12, 45))
+        let f = log(clock)
+        f.append(.error, category: "audio", "stream lost at https://feeds.example.com/p?token=secret, advancing")
+        f.append(.notice, category: "timer", "two\nlines")
+        f.flush()
+        XCTAssertEqual(names(), ["playback-2026-11-27.log"])
+        let text = try String(contentsOf: dir.appendingPathComponent("playback-2026-11-27.log"), encoding: .utf8)
+        XCTAssertEqual(text, """
+            2026-11-27 03:12:45.000 [audio] error: stream lost at [link] advancing
+            2026-11-27 03:12:45.000 [timer] notice: two lines
+
+            """)
+        XCTAssertFalse(text.contains("secret"))
+        XCTAssertEqual(try dir.resourceValues(forKeys: [.isExcludedFromBackupKey]).isExcludedFromBackup, true)
+    }
+
+    /// The point of the files: a relaunch keeps last night's lines, and the export reads both.
+    func testARelaunchKeepsTheLinesBeforeIt() {
+        let clock = Clock(at(day: 27, 3))
+        let before = log(clock)
+        before.append(.error, category: "audio", "podcast stream lost")
+        before.flush()
+        clock.now = at(day: 27, 7)
+        let after = log(clock)
+        after.append(.notice, category: "app", "launch: Sleepulator 1.0 (1)")
+        let text = after.exportText() ?? ""
+        let lost = text.range(of: "podcast stream lost"), launch = text.range(of: "launch: Sleepulator")
+        XCTAssertNotNil(lost, text)
+        XCTAssertNotNil(launch, text)
+        if let lost, let launch { XCTAssertLessThan(lost.lowerBound, launch.lowerBound) }
+        XCTAssertEqual(names(), ["playback-2026-11-27.log"])
+    }
+
+    func testAFullFileStartsANewPartAndANewDayANewFile() {
+        let clock = Clock(at(day: 27, 3))
+        var limits = LogRetention.Limits.standard
+        limits.maxFileBytes = 200
+        let f = log(clock, limits: limits)
+        for i in 0..<6 {
+            f.append(.notice, category: "timer", "line \(i) with some words to fill the file")
+            f.flush()
+        }
+        XCTAssertTrue(names().contains("playback-2026-11-27.log"))
+        XCTAssertTrue(names().contains("playback-2026-11-27.2.log"), "\(names())")
+        clock.now = at(day: 28, 0, 5)
+        f.append(.notice, category: "timer", "after midnight")
+        f.flush()
+        XCTAssertTrue(names().contains("playback-2026-11-28.log"), "\(names())")
+        XCTAssertTrue(f.files().last?.lastPathComponent == "playback-2026-11-28.log")
+    }
+
+    /// Files past 3 days go when a new file starts (here, the first write of a launch).
+    func testOldFilesGoOnTheDisk() throws {
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let old = dir.appendingPathComponent("playback-2026-11-20.log")
+        try Data("old\n".utf8).write(to: old)
+        try FileManager.default.setAttributes([.modificationDate: at(day: 20, 23)], ofItemAtPath: old.path)
+        let notOurs = dir.appendingPathComponent("notes.txt")
+        try Data("keep\n".utf8).write(to: notOurs)
+        try FileManager.default.setAttributes([.modificationDate: at(day: 1, 0)], ofItemAtPath: notOurs.path)
+        let f = log(Clock(at(day: 27, 3)))
+        f.append(.notice, category: "app", "launch")
+        f.flush()
+        XCTAssertEqual(names(), ["notes.txt", "playback-2026-11-27.log"])
+    }
+
+    /// A writer that can't keep up keeps at most `maxPending` lines and says how many it dropped,
+    /// rather than growing all night.
+    func testABackedUpWriterCountsWhatItDrops() throws {
+        var limits = LogRetention.Limits.standard
+        limits.maxPending = 3
+        let f = log(Clock(at(day: 27, 3)), limits: limits)
+        f.suspendWriter()
+        for i in 0..<5 { f.append(.notice, category: "scene", "line \(i)") }
+        f.resumeWriter()
+        let text = f.exportText() ?? ""
+        XCTAssertTrue(text.contains("line 2"), text)
+        XCTAssertFalse(text.contains("line 3"), text)
+        XCTAssertTrue(text.contains("[log] notice: 2 lines dropped: the log fell behind"), text)
+    }
+
+    func testFileNamesParseAndTheTargetRolls() {
+        XCTAssertEqual(LogRetention.name(day: "2026-11-27", part: 1), "playback-2026-11-27.log")
+        XCTAssertEqual(LogRetention.name(day: "2026-11-27", part: 3), "playback-2026-11-27.3.log")
+        XCTAssertEqual(LogRetention.parse("playback-2026-11-27.log")?.part, 1)
+        XCTAssertEqual(LogRetention.parse("playback-2026-11-27.3.log")?.part, 3)
+        XCTAssertEqual(LogRetention.parse("playback-2026-11-27.3.log")?.day, "2026-11-27")
+        XCTAssertNil(LogRetention.parse("playback-2026-11-27.1.log"))
+        XCTAssertNil(LogRetention.parse("notes.log"))
+        XCTAssertNil(LogRetention.parse("playback-2026-11-27.txt"))
+
+        var limits = LogRetention.Limits.standard
+        limits.maxFileBytes = 200
+        let t = Date()
+        func file(_ name: String, _ bytes: Int) -> LogRetention.FileInfo { .init(name: name, bytes: bytes, modified: t) }
+        XCTAssertEqual(LogRetention.target(day: "2026-11-27", existing: [], adding: 50, limits: limits),
+                       "playback-2026-11-27.log")
+        let day = [file("playback-2026-11-26.log", 10), file("playback-2026-11-27.log", 100)]
+        XCTAssertEqual(LogRetention.target(day: "2026-11-27", existing: day, adding: 100, limits: limits),
+                       "playback-2026-11-27.log")
+        XCTAssertEqual(LogRetention.target(day: "2026-11-27", existing: day, adding: 101, limits: limits),
+                       "playback-2026-11-27.2.log")
+        // An empty file takes even an oversized batch, rather than starting part after part.
+        XCTAssertEqual(LogRetention.target(day: "2026-11-27", existing: [file("playback-2026-11-27.log", 0)],
+                                           adding: 500, limits: limits), "playback-2026-11-27.log")
+    }
+
+    func testExpiryTakesTheOldThenTheOldestPastTheCap() {
+        let now = at(day: 27, 7)
+        let kb = 1024
+        func file(_ name: String, _ bytes: Int, daysAgo: Double) -> LogRetention.FileInfo {
+            .init(name: name, bytes: bytes, modified: now.addingTimeInterval(-daysAgo * 86_400))
+        }
+        let files = [file("playback-2026-11-22.log", 10 * kb, daysAgo: 5),       // past 3 days
+                     file("playback-2026-11-25.log", 600 * kb, daysAgo: 2),
+                     file("playback-2026-11-26.log", 300 * kb, daysAgo: 1),
+                     file("playback-2026-11-27.log", 300 * kb, daysAgo: 0),
+                     file("notes.txt", 5000 * kb, daysAgo: 30)]                  // not the log's
+        XCTAssertEqual(LogRetention.expired(files, now: now, keep: "playback-2026-11-27.log", limits: .standard),
+                       ["playback-2026-11-22.log", "playback-2026-11-25.log"])
+        // The file being written is never taken, however old.
+        XCTAssertEqual(LogRetention.expired([file("playback-2026-11-22.log", 10, daysAgo: 5)], now: now,
+                                            keep: "playback-2026-11-22.log", limits: .standard), [])
+    }
+}
+
+/// `Log`'s lines keep `Logger`'s call syntax and privacy, and reach the playback log's files.
+// Value: protects=a value not marked public never reaches the log in clear, and a Log call lands in the (test host's own) file; fails_when=the interpolation changes privacy defaults or formats, or LogChannel stops feeding LogFile, or the test host writes the phone's real log; why_new=Log was bare Loggers; seam=LogFile.shared in the test host's temp folder; no_claim=the unified log's own output (Console)
+final class LogMessageTests: XCTestCase {
+    func testInterpolationKeepsLoggersPrivacy() {
+        let token = "feed-token"
+        let m: LogMessage = "a=\(token) b=\(token, privacy: .public) n=\(42) on=\(true) d=\(0.5) f=\(Float(0.25)) x=\(Optional(1) as Int?)"
+        XCTAssertEqual(m.text, "a=<private> b=feed-token n=42 on=true d=0.5 f=0.25 x=<private>")
+        let plain: LogMessage = "no values"
+        XCTAssertEqual(plain.text, "no values")
+    }
+
+    func testALogLineReachesTheTestHostsOwnFile() {
+        XCTAssertTrue(LogFile.shared.directory.path.contains("sleepulator-test-logs"), LogFile.shared.directory.path)
+        let marker = UUID().uuidString
+        Log.audio.notice("marker \(marker, privacy: .public) https://example.com/secret")
+        let text = LogFile.shared.exportText() ?? ""
+        XCTAssertTrue(text.contains("[audio] notice: marker \(marker) [link]"), String(text.suffix(400)))
     }
 }

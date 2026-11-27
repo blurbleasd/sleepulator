@@ -13,9 +13,9 @@ nonisolated struct OPMLFeed: Identifiable {
 /// which made `OPMLParser().parse(...)` a cross-actor (async) call from the detached context — an
 /// error under Swift 6 mode. It's a self-contained, single-shot XML parser with no UI state.
 nonisolated class OPMLParser: NSObject, XMLParserDelegate {
-    /// Own logger rather than `Log.storage`: this class is `nonisolated` (it runs inside
-    /// `Task.detached`), and `Log`'s statics are main-actor-isolated by the module default.
-    private static let log = Logger(subsystem: "app.sleepulator", category: "storage")
+    /// `Log.storage` (nonisolated, so usable from `Task.detached`), so an import's failure lands
+    /// in the playback log's files too.
+    private static let log = Log.storage
 
     private var feeds: [OPMLFeed] = []
     private var seen = Set<String>()
