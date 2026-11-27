@@ -45,6 +45,9 @@ code a rule protects. If the two disagree, this file wins.
     the shared files.
   - Hosted tests await the Task a controller call returns (`BackupControllerTests`); never a short
     poll on the main actor.
+  - A test that starts a Pomodoro puts it on fakes first (`PomodoroService.onFakes()`): `start()`
+    otherwise posts a real notification and requests a real Live Activity, and `Activity.request`
+    can stall about 3 s in the test host.
   - `TipStoreTests` (StoreKitTest, `Tips.storekit`) skip in command-line runs on iOS 26 sims and CI
     skips them outright (`SLEEPULATOR_CI`); run them from Xcode (⌘U).
 - **UI tests** `SleepulatorUITests/` (XCUITest, in the shared scheme, run on CI): `HomeLayoutUITests`,

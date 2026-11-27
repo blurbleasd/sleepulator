@@ -2,6 +2,7 @@ import XCTest
 import AVFoundation
 import SwiftUI
 import Combine
+import UserNotifications
 #if canImport(ActivityKit)
 import ActivityKit
 #endif
@@ -1114,6 +1115,55 @@ final class SleepTimerTailTests: XCTestCase {
     }
 }
 
+// MARK: - Pomodoro test doubles
+
+#if canImport(ActivityKit)
+/// ActivityKit's stand-in: activities are ids, put up and ended at once.
+final class FakePomodoroActivities: PomodoroActivityHosting {
+    var up: [String]
+    var ended: [String] = []
+    private var made = 0
+    init(up: [String] = []) { self.up = up }
+    var enabled: Bool { true }
+    func listed() -> [String] { up }
+    func request(_ content: ActivityContent<PomodoroAttributes.ContentState>) -> String? {
+        made += 1
+        up.append("session-\(made)")
+        return up.last
+    }
+    func update(_ id: String, _ content: ActivityContent<PomodoroAttributes.ContentState>) {}
+    func end(_ ids: [String], _ content: ActivityContent<PomodoroAttributes.ContentState>) {
+        ended += ids
+        up.removeAll { ids.contains($0) }
+    }
+}
+#endif
+
+/// UNUserNotificationCenter's stand-in: what a session leaves pending, by identifier.
+final class FakePomodoroNotifications: PomodoroNotifying {
+    var pending: [String: UNNotificationRequest] = [:]
+    var removedDelivered: [String] = []
+    var authorizationRequests = 0
+    func requestProvisionalAuthorization() { authorizationRequests += 1 }
+    func add(_ request: UNNotificationRequest) { pending[request.identifier] = request }
+    func removePending(_ ids: [String]) { for id in ids { pending[id] = nil } }
+    func removeDelivered(_ ids: [String]) { removedDelivered += ids }
+}
+
+extension PomodoroService {
+    /// This service on fakes for its notification center and Live Activities. start() schedules a
+    /// phase-end notification and requests a Live Activity: real ones are IPC in the test host,
+    /// and `Activity.request` can stall there about 3 s, which broke tests timed around a start.
+    @discardableResult
+    func onFakes() -> PomodoroService {
+        notifications = FakePomodoroNotifications()
+        #if canImport(ActivityKit)
+        activities = FakePomodoroActivities()
+        #endif
+        return self
+    }
+}
+
 // MARK: - Pomodoro continuous ring progress
 
 /// The Focus ring depletes off the phase end-date via `progress(at:)` (smooth) rather than the
@@ -1121,7 +1171,7 @@ final class SleepTimerTailTests: XCTestCase {
 /// inert when idle.
 final class PomodoroProgressTests: XCTestCase {
     func testContinuousProgressTracksElapsed() {
-        let p = PomodoroService()
+        let p = PomodoroService().onFakes()
         p.workMinutes = 10          // 600 s work phase
         p.start()
         defer { p.stop() }          // cancel the real GCD timer
@@ -1133,7 +1183,7 @@ final class PomodoroProgressTests: XCTestCase {
     }
 
     func testContinuousProgressClampsAndIdles() {
-        let p = PomodoroService()
+        let p = PomodoroService().onFakes()
         p.workMinutes = 10
         // Idle: no phase running → 0, and it must not read a stale phaseEnd.
         XCTAssertEqual(p.progress(at: Date().addingTimeInterval(9999)), 0.0, accuracy: 1e-9)
@@ -1145,7 +1195,7 @@ final class PomodoroProgressTests: XCTestCase {
     }
 
     func testPhaseElapsedDrivesTheBoundaryRefill() {
-        let p = PomodoroService()
+        let p = PomodoroService().onFakes()
         p.workMinutes = 10
         // Idle → 0 (no refill outside a session).
         XCTAssertEqual(p.phaseElapsed(at: Date().addingTimeInterval(5)), 0.0, accuracy: 1e-9)
@@ -1153,11 +1203,13 @@ final class PomodoroProgressTests: XCTestCase {
         p.start()
         defer { p.stop() }
         // Anchor to a reference taken AFTER start() returns, and assert on DELTAS from it.
-        // `start()` schedules a local notification + a Live Activity (both IPC) after stamping
-        // phaseShownAt, so `phaseElapsed(at: Date())` is really "how long start()'s tail took" — a
-        // machine-load-dependent 60–80 ms here, which made the old absolute ±0.05 s assertion fail
-        // intermittently. The deltas below are exact arithmetic against the same phaseShownAt, so they
-        // pin the real contract (the refill advances 1:1 with wall-clock) with no timing race.
+        // `start()` schedules a local notification + a Live Activity after stamping phaseShownAt,
+        // so `phaseElapsed(at: Date())` is really "how long start()'s tail took". With the real
+        // ones, that tail was IPC: 60–80 ms under load, which made the old absolute ±0.05 s
+        // assertion fail intermittently, and `Activity.request` can stall about 3 s. The fakes
+        // (`onFakes()`) take the IPC out. The deltas below are exact arithmetic against the same
+        // phaseShownAt, so they pin the real contract (the refill advances 1:1 with wall-clock)
+        // with no timing race.
         let ref = Date()
         let base = p.phaseElapsed(at: ref)
         // Arc starts empty at the boundary — small, not exactly 0 (see above); a loose bound still
@@ -1189,7 +1241,7 @@ final class PomodoroMissedBoundaryTests: XCTestCase {
         addTeardownBlock {
             for (key, value) in zip(keys, saved) { if let value { d.set(value, forKey: key) } else { d.removeObject(forKey: key) } }
         }
-        let p = PomodoroService()
+        let p = PomodoroService().onFakes()
         (p.workMinutes, p.restMinutes, p.longRestMinutes, p.cyclesBeforeLongBreak) = (work, rest, longRest, cycles)
         p.chimeFn = { [unowned self] in self.chimes += 1 }
         p.phaseChangedFn = { [unowned self] phase, running in self.phaseChanges.append((phase, running)) }
@@ -1462,26 +1514,6 @@ final class PomodoroMissedBoundaryTests: XCTestCase {
 /// held the new session's activity too and ended it as soon as it went up.
 @MainActor
 final class PomodoroLiveActivityTests: XCTestCase {
-    /// ActivityKit's stand-in: activities are ids, put up and ended at once.
-    private final class FakeActivities: PomodoroActivityHosting {
-        var up: [String]
-        var ended: [String] = []
-        private var made = 0
-        init(up: [String]) { self.up = up }
-        var enabled: Bool { true }
-        func listed() -> [String] { up }
-        func request(_ content: ActivityContent<PomodoroAttributes.ContentState>) -> String? {
-            made += 1
-            up.append("session-\(made)")
-            return up.last
-        }
-        func update(_ id: String, _ content: ActivityContent<PomodoroAttributes.ContentState>) {}
-        func end(_ ids: [String], _ content: ActivityContent<PomodoroAttributes.ContentState>) {
-            ended += ids
-            up.removeAll { ids.contains($0) }
-        }
-    }
-
     /// Value: protects=a Focus session's Live Activity stays up once start() returns, while what
     /// was up before (a previous run's orphan, the last session's) is ended; fails_when=
     /// endLiveActivity reads the activity list in a task again, or startLiveActivity ends a list it
@@ -1489,8 +1521,8 @@ final class PomodoroLiveActivityTests: XCTestCase {
     /// seam=PomodoroService.activities; no_claim=ActivityKit itself (LivePomodoroActivities), the
     /// Lock Screen and Dynamic Island (TESTING.md §3I step 7)
     func testStartEndsWhatWasUpAndKeepsItsOwn() {
-        let fake = FakeActivities(up: ["orphan"])
-        let p = PomodoroService()
+        let fake = FakePomodoroActivities(up: ["orphan"])
+        let p = PomodoroService().onFakes()
         p.activities = fake
         defer { p.stop() }
 
@@ -1508,8 +1540,8 @@ final class PomodoroLiveActivityTests: XCTestCase {
     /// alone would pass if nothing were ever ended after a start; seam=PomodoroService.activities;
     /// no_claim=ActivityKit dismissing it from the Lock Screen
     func testStopEndsTheSessionsActivity() {
-        let fake = FakeActivities(up: [])
-        let p = PomodoroService()
+        let fake = FakePomodoroActivities()
+        let p = PomodoroService().onFakes()
         p.activities = fake
 
         p.start()
@@ -1519,6 +1551,46 @@ final class PomodoroLiveActivityTests: XCTestCase {
     }
 }
 #endif
+
+// MARK: - Pomodoro phase-end notification
+
+/// The chime only sounds while the app renders audio, so a quiet notification marks each phase's
+/// end for a backgrounded session (FOCUS-MODE-SPEC R5). It goes through
+/// `PomodoroService.notifications`, so this reads what a session leaves pending.
+@MainActor
+final class PomodoroPhaseEndNotificationTests: XCTestCase {
+    // Value: protects=a session keeps one notification pending, for the end of the phase it's in, and Stop removes it; fails_when=PomodoroService calls UNUserNotificationCenter directly again (the Pomodoro suites would post real ones), a boundary doesn't reschedule for the new phase, or stop() leaves one pending; why_new=the notification had no test, and the suites around it scheduled real ones; seam=PomodoroService.notifications; no_claim=iOS delivering it, provisional auth, the copy's long-break wording
+    func testASessionKeepsItsPhasesNotificationPendingAndStopRemovesIt() throws {
+        XCTAssertTrue(PomodoroService().notifications is LivePomodoroNotifications, "the app posts real ones")
+        let fake = FakePomodoroNotifications()
+        let p = PomodoroService().onFakes()
+        p.notifications = fake
+        defer { p.stop() }
+        let id = PomodoroService.phaseNotifId
+
+        p.start()
+        let workEnd = try XCTUnwrap(p.phaseEnd)
+        let atWorkEnd = try XCTUnwrap(fake.pending[id])
+        XCTAssertEqual(fake.pending.count, 1)
+        XCTAssertEqual(atWorkEnd.content.title, "Focus interval finished")
+        let workTrigger = try XCTUnwrap(atWorkEnd.trigger as? UNTimeIntervalNotificationTrigger)
+        XCTAssertEqual(workTrigger.timeInterval, workEnd.timeIntervalSinceNow, accuracy: 1)
+
+        p.handleTick(at: workEnd.addingTimeInterval(1))     // into the break
+        let breakEnd = try XCTUnwrap(p.phaseEnd)
+        let atBreakEnd = try XCTUnwrap(fake.pending[id])
+        XCTAssertEqual(fake.pending.count, 1, "the work interval's notification is replaced")
+        XCTAssertEqual(atBreakEnd.content.title, "Break's over")
+        let breakTrigger = try XCTUnwrap(atBreakEnd.trigger as? UNTimeIntervalNotificationTrigger)
+        XCTAssertEqual(breakTrigger.timeInterval, breakEnd.timeIntervalSinceNow, accuracy: 1)
+        XCTAssertEqual(fake.authorizationRequests, 1, "asked once, not at every boundary")
+
+        fake.removedDelivered = []                          // start() opened with a stop() too
+        p.stop()
+        XCTAssertTrue(fake.pending.isEmpty)
+        XCTAssertEqual(fake.removedDelivered, [id], "and one already delivered is cleared")
+    }
+}
 
 // MARK: - Resume / persistence integrity
 
@@ -2291,7 +2363,7 @@ final class ModeSwitchConsequenceTests: XCTestCase {
 
     func testSwitchingToSleepStopsThePomodoro() {
         let e = AudioEngine(); e.focusMode = true
-        e.pomodoro.start()
+        e.pomodoro.onFakes().start()
         XCTAssertTrue(e.pomodoro.isRunning)
         e.focusMode = false
         XCTAssertFalse(e.pomodoro.isRunning)
