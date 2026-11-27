@@ -101,6 +101,15 @@ Why the rules:
   bound matters because the app copies an episode's id and address into the plist.
 - After a restore, a queue or library today's types can't decode shows empty and stays on disk; the
   next edit saves over it, as at launch.
+- The playback log's files (`LogFile`, 2026-11-27): the export used to read only this process's
+  unified log (`OSLogStore(scope: .currentProcessIdentifier)`), so a failure at 3 a.m. was gone
+  after a relaunch, and diagnosing the 2026-11-13 morning needed a USB cable, `devicectl` and
+  `sudo log collect`. `Log` kept `Logger`'s call syntax so the call sites didn't change; a line is
+  built eagerly (cheap at event level), which is why nothing in the render block or the tap may log.
+- Recent nights (2026-11-27): the verdicts were read only by the asks and the read-back, so the
+  phone couldn't say how a night went. The journal gained `interrupted` because a `.person` end
+  covers a person's stop, a queue that ran out and an alarm alike; the page says "stopped", never
+  "you stopped it".
 
 ## Audio + state invariants
 

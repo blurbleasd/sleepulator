@@ -10,6 +10,10 @@ struct SleepulatorApp: App {
     @StateObject private var tips = TipStore(startStoreKit: !AppInfo.isUnitTestHost)
 
     init() {
+        // Each launch in the playback log's files, so the morning after shows where a night's app
+        // died and started again (LogFile).
+        Log.app.notice("launch: Sleepulator \(AppInfo.versionBuild, privacy: .public), iOS \(ProcessInfo.processInfo.operatingSystemVersionString, privacy: .public)")
+
         // MetricKit only accumulates while a subscriber is registered — register at launch,
         // exactly once. Payloads land ~daily; see MetricsCollector for storage + Settings UI.
         MetricsCollector.shared.start()

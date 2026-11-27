@@ -5919,10 +5919,11 @@ final class RateRowRuleTests: XCTestCase {
 @MainActor
 final class FeedbackMessageTests: XCTestCase {
     func testTheBodyListsWhatsAttachedWithoutLinks() {
-        let body = FeedbackMessage.body(nightSummary: "Last 2 nights: 1 clean.", nightFiles: 2,
+        let body = FeedbackMessage.body(nightSummary: "Last 2 nights: 1 clean.", nightFiles: 2, logFiles: 2,
                                         reportsSince: Date(timeIntervalSince1970: 1_800_000_000),
                                         version: "1.0", build: "7", iOS: "26.3", device: "iPhone")
-        XCTAssertTrue(body.contains("Attached: the last 2 nights' playback events (no web addresses) and iOS reports since"))
+        XCTAssertTrue(body.contains("Attached: the last 2 nights' playback events, the playback log (up to 3 days) and iOS reports since"), body)
+        XCTAssertTrue(body.contains(". No web addresses in the events or the log."), body)
         XCTAssertTrue(body.contains("Last 2 nights: 1 clean."))
         XCTAssertTrue(body.contains("Sleepulator 1.0 (7) · iOS 26.3 · iPhone"))
         XCTAssertFalse(body.contains("://"))
@@ -5930,10 +5931,18 @@ final class FeedbackMessageTests: XCTestCase {
     }
 
     func testNothingAttachedYet() {
-        let body = FeedbackMessage.body(nightSummary: "No night recorded yet.", nightFiles: 0, reportsSince: nil,
-                                        version: "1.0", build: "1", iOS: "26", device: "iPhone")
+        let body = FeedbackMessage.body(nightSummary: "No night recorded yet.", nightFiles: 0, logFiles: 0,
+                                        reportsSince: nil, version: "1.0", build: "1", iOS: "26", device: "iPhone")
         XCTAssertTrue(body.contains("Attached: nothing yet."))
+        XCTAssertFalse(body.contains("web addresses"))
         XCTAssertTrue(body.contains("No night recorded yet."))
+    }
+
+    /// The playback log alone (no night recorded yet, no reports): said, with its no-links note.
+    func testTheLogAloneIsNamed() {
+        let body = FeedbackMessage.body(nightSummary: "No night recorded yet.", nightFiles: 0, logFiles: 1,
+                                        reportsSince: nil, version: "1.0", build: "1", iOS: "26", device: "iPhone")
+        XCTAssertTrue(body.contains("Attached: the playback log (up to 3 days). No web addresses in the log."), body)
     }
 
     func testTheShareTextCarriesTheAddress() {
@@ -6039,5 +6048,430 @@ final class ResumeSkipsFinishedEpisodeTests: XCTestCase {
         engine.resumeMix(snapshot)
         XCTAssertEqual(engine.loadedEpisode?.id, next.id, "Resume must move on, not replay the finished episode")
         XCTAssertEqual(engine.queueManager.queue.first?.id, next.id, "the finished episode leaves the head")
+    }
+}
+
+// MARK: - Recent nights, a night's interruption, and the playback log's files
+
+/// Settings ▸ Backup & support ▸ Recent nights: each session's verdict in plain words, grouped by
+/// the evening its night began, newest first.
+// Value: protects=every row says how long sound played, how it ended and clean-or-why in a person's words; fails_when=a raw taint key or reason reaches the page, a 1 a.m. bedtime files under the wrong night, or the wording drifts from NightRules.isClean; why_new=nothing listed the verdicts; seam=none; no_claim=the page's look and VoiceOver on a device
+final class RecentNightsTests: XCTestCase {
+    private var calendar: Calendar = {
+        var c = Calendar(identifier: .gregorian)
+        c.timeZone = TimeZone(identifier: "UTC")!
+        c.locale = Locale(identifier: "en_US")
+        return c
+    }()
+
+    private func at(day: Int, _ hour: Int, _ minute: Int = 0) -> Date {
+        calendar.date(from: DateComponents(year: 2026, month: 11, day: day, hour: hour, minute: minute))!
+    }
+
+    /// The clock time as the rule writes it (ICU's, whose spaces differ between runtimes).
+    private func clock(_ date: Date) -> String {
+        date.formatted(Date.FormatStyle(date: .omitted, time: .shortened, locale: calendar.locale!,
+                                        calendar: calendar, timeZone: calendar.timeZone))
+    }
+
+    /// 23:04 on the 25th to 06:40 on the 26th, 7 hr 12 min of sound, the timer's end: clean.
+    private func night(id: String = "n", start: Date? = nil, end: Date? = nil, live: TimeInterval = 7 * 3600 + 12 * 60,
+                       clean: Bool = true, by: NightEndReason = .timer, taints: [String] = [],
+                       interrupted: Bool? = nil) -> NightVerdict {
+        NightVerdict(id: id, start: start ?? at(day: 25, 23, 4), end: end ?? at(day: 26, 6, 40), live: live,
+                     clean: clean, endedBy: by, taints: taints, interrupted: interrupted)
+    }
+
+    private func row(_ v: NightVerdict) -> RecentNights.Session { RecentNights.session(v, calendar: calendar) }
+
+    func testARowSaysTheSpanTheSoundAndHowItEnded() {
+        let r = row(night())
+        XCTAssertEqual(r.played, "7 hr 12 min of sound")
+        XCTAssertEqual(r.detail, "\(clock(at(day: 25, 23, 4))) – \(clock(at(day: 26, 6, 40))) · the timer eased it out")
+        XCTAssertEqual(r.status, .clean)
+        XCTAssertEqual(r.status.text, "Clean")
+    }
+
+    func testEachEndingReadsInPlainWords() {
+        XCTAssertEqual(RecentNights.ending(night(by: .timer)), "the timer eased it out")
+        XCTAssertEqual(RecentNights.ending(night(by: .episodeEnd)), "ended with the episode")
+        XCTAssertEqual(RecentNights.ending(night(by: .person, interrupted: false)), "stopped")
+        // Recorded before the journal told the two apart: says only that it stopped.
+        XCTAssertEqual(RecentNights.ending(night(by: .person, interrupted: nil)), "stopped")
+        XCTAssertEqual(RecentNights.ending(night(by: .person, interrupted: true)),
+                       "interrupted, and the sound didn't come back")
+        XCTAssertEqual(RecentNights.ending(night(by: .focusSwitch)), "switched to Focus")
+        XCTAssertEqual(RecentNights.ending(night(by: .died)), "the app stopped while playing")
+    }
+
+    func testANightNotCleanSaysWhatSpoiledItOrWhatItFellShortOf() {
+        let spoiled = RecentNights.status(night(clean: false, by: .person,
+                                                taints: [NightRules.playerRebuilt, NightRules.streamLost,
+                                                         NightRules.playerRebuilt]))
+        XCTAssertEqual(spoiled.text, "Not clean: the podcast player restarted twice and the podcast stream was lost")
+        XCTAssertTrue(spoiled.isFailure)
+        // Died: the ending says why.
+        let died = RecentNights.status(night(clean: false, by: .died))
+        XCTAssertEqual(died.text, "Not clean")
+        XCTAssertTrue(died.isFailure)
+        // Fell short, nothing went wrong: said, not flagged.
+        let blip = RecentNights.status(night(live: 30, clean: false, by: .timer))
+        XCTAssertEqual(blip.text, "Not clean: under a minute of sound")
+        XCTAssertFalse(blip.isFailure)
+        let short = RecentNights.status(night(live: 2 * 3600, clean: false, by: .person))
+        XCTAssertEqual(short.text, "Not clean: under 3 hours of sound")
+        XCTAssertFalse(short.isFailure)
+        let late = RecentNights.status(night(live: 20 * 60, clean: false, by: .timer))
+        XCTAssertEqual(late.text, "Not clean: the timer ran out while nothing was playing")
+        XCTAssertFalse(late.isFailure)
+    }
+
+    /// The reasons are read off the verdict, so they must follow `NightRules.isClean`: every way
+    /// its rules make a night unclean, through `NightRules.verdict`, gets its own words.
+    func testTheWordingFollowsTheJournalsOwnRules() {
+        func verdict(_ by: NightEndReason, live: TimeInterval, reconciled: Bool = false,
+                     taints: [String] = []) -> NightVerdict {
+            var s = NightSummary(id: "n", start: at(day: 25, 23), lastEventAt: at(day: 25, 23))
+            s.end = at(day: 26, 6)
+            s.endedBy = by
+            s.live = live
+            s.reconciled = reconciled
+            s.taints = taints
+            return NightRules.verdict(s)!
+        }
+        XCTAssertEqual(RecentNights.status(verdict(.timer, live: 3600)), .clean)
+        XCTAssertEqual(RecentNights.status(verdict(.person, live: NightRules.allNightThreshold)), .clean)
+        XCTAssertEqual(RecentNights.status(verdict(.timer, live: 3600, reconciled: true)).text,
+                       "Not clean: the timer ran out while nothing was playing")
+        XCTAssertEqual(RecentNights.status(verdict(.episodeEnd, live: NightRules.timedNightMinimumLive - 1)).text,
+                       "Not clean: under a minute of sound")
+        XCTAssertEqual(RecentNights.status(verdict(.focusSwitch, live: NightRules.allNightThreshold - 1)).text,
+                       "Not clean: under 3 hours of sound")
+        XCTAssertEqual(RecentNights.status(verdict(.timer, live: 3600, taints: [NightRules.podcastFailed])).text,
+                       "Not clean: an episode wouldn't play")
+    }
+
+    /// Every taint the senders write has its own words; an unknown one never shows its key.
+    func testEveryTaintKeyReadsInPlainWords() {
+        let keys = [NightRules.playerRebuilt, NightRules.streamLost, NightRules.silentAfterRebuild,
+                    NightRules.podcastFailed, NightRules.soundEngineError,
+                    NightRules.pipelineDied + NightRules.itemFailed,
+                    NightRules.pipelineDied + NightRules.mediaServicesReset]
+        let phrases = keys.map(RecentNights.phrase)
+        XCTAssertEqual(Set(phrases).count, phrases.count, "two keys share words: \(phrases)")
+        for (key, phrase) in zip(keys, phrases) {
+            XCTAssertNotEqual(phrase, key)
+            XCTAssertNotEqual(phrase, "something else went wrong", key)
+        }
+        XCTAssertEqual(RecentNights.phrase(NightRules.pipelineDied + NightRules.mediaServicesReset), "iOS reset its audio")
+        XCTAssertEqual(RecentNights.phrase("[link] went odd"), "something else went wrong")
+        XCTAssertEqual(RecentNights.failures(Array(repeating: NightRules.podcastFailed, count: 3)),
+                       "an episode wouldn't play 3 times")
+        XCTAssertEqual(RecentNights.joined(["a", "b", "c"]), "a, b and c")
+    }
+
+    func testSoundUnderAMinuteAndVoiceOverInWords() {
+        XCTAssertEqual(row(night(live: 0, clean: false)).played, "Under a minute of sound")
+        let spoken = row(night()).spoken
+        XCTAssertTrue(spoken.hasPrefix("7 hours, 12 minutes of sound."), spoken)
+        XCTAssertFalse(spoken.contains("hr"), spoken)
+        XCTAssertFalse(spoken.contains("–"), spoken)
+        XCTAssertTrue(spoken.hasSuffix("the timer eased it out. Clean."), spoken)
+    }
+
+    /// Grouped by the evening a night began (a session before 05:00 is the night before's), newest
+    /// first, its sessions newest first: a 00:30 session the app died in and the 02:10 restart are
+    /// one night, the afternoon's rest the next day's.
+    func testSessionsGroupByTheEveningTheirNightBegan() {
+        let verdicts = [
+            night(id: "a", start: at(day: 24, 22), end: at(day: 25, 6)),
+            night(id: "b", start: at(day: 26, 0, 30), end: at(day: 26, 2), clean: false, by: .died),
+            night(id: "c", start: at(day: 26, 2, 10), end: at(day: 26, 7)),
+            night(id: "d", start: at(day: 26, 14), end: at(day: 26, 15), live: 3600, clean: false, by: .person),
+        ]
+        let nights = RecentNights.nights(verdicts.shuffled(), calendar: calendar)
+        XCTAssertEqual(nights.map(\.id), ["2026-11-26", "2026-11-25", "2026-11-24"])
+        XCTAssertEqual(nights.map { $0.sessions.map(\.id) }, [["d"], ["c", "b"], ["a"]])
+        XCTAssertEqual(nights[1].title, at(day: 25, 12).formatted(Date.FormatStyle(locale: calendar.locale!, calendar: calendar,
+                                                                                    timeZone: calendar.timeZone)
+            .weekday(.abbreviated).month(.abbreviated).day()))
+        XCTAssertTrue(nights[1].title.contains("25"), nights[1].title)
+        XCTAssertTrue(RecentNights.nights([], calendar: calendar).isEmpty)
+    }
+}
+
+/// The journal tells an interruption's pause (an alarm, a call) from a stop, so Recent nights can
+/// say a night was interrupted. Observe-only: nothing about the night's verdict changes.
+// Value: protects=a night an alarm or call ended reads "interrupted", across a relaunch, while a person's stop and older verdicts read "stopped"; fails_when=the flag isn't set, cleared on resume, carried through a recovery, or breaks decoding the stored verdicts; why_new=the verdict couldn't tell the two apart; seam=NightJournal(directory:now:), AudioEngine.handleInterruption; no_claim=a real alarm on a device
+extension NightJournalTests {
+    func testAnInterruptionThatNeverResumesEndsTheNightInterrupted() {
+        let j = journal()
+        j.sessionStarted()
+        play(j, seconds: 120)
+        j.sessionStopped(interruption: true)
+        let pausedAt = clock
+        clock += UntimedNight.resumeWindow + 1
+        j.closeLapsedPause()
+        XCTAssertEqual(j.verdicts.last?.endedBy, .person)
+        XCTAssertEqual(j.verdicts.last?.end, pausedAt)
+        XCTAssertEqual(j.verdicts.last?.interrupted, true)
+        XCTAssertTrue(fileText(j).contains(" interrupted\""), fileText(j))   // the closing line says so
+    }
+
+    func testAPersonsStopIsNotAnInterruptionNorIsAResumedOne() {
+        let j = journal()
+        j.sessionStarted()
+        play(j, seconds: 60)
+        j.sessionStopped(interruption: true)
+        clock += 60
+        j.sessionStarted()                                    // the call ended: same night
+        XCTAssertEqual(j.open?.pauseWasInterruption, false)
+        play(j, seconds: 60)
+        j.sessionStopped()                                    // then the person's stop
+        clock += UntimedNight.resumeWindow + 1
+        j.closeLapsedPause()
+        XCTAssertEqual(j.verdicts.last?.interrupted, false)
+        XCTAssertFalse(fileText(j).contains("interrupted"))
+    }
+
+    /// Only a `.person` end carries the flag; a timer's end has none to give.
+    func testATimersEndCarriesNoInterruption() {
+        let j = journal()
+        j.sessionStarted()
+        play(j, seconds: 120)
+        j.timerStopped(episode: false, reconciled: false, endedAt: clock)
+        XCTAssertEqual(j.verdicts.last?.endedBy, .timer)
+        XCTAssertNil(j.verdicts.last?.interrupted)
+    }
+
+    /// The app ended while an interruption held the night (iOS ends a suspended app): the next
+    /// launch closes it where it paused, still interrupted, from the file.
+    func testTheFlagSurvivesARelaunch() {
+        let first = journal()
+        first.sessionStarted()
+        play(first, seconds: 120)
+        first.sessionStopped(interruption: true)
+        first.drain()
+        clock += UntimedNight.resumeWindow + 1
+        let second = journal()
+        XCTAssertNil(second.open)
+        XCTAssertEqual(second.verdicts.last?.endedBy, .person)
+        XCTAssertEqual(second.verdicts.last?.interrupted, true)
+    }
+
+    /// Verdicts written before the flag existed carry no key, and still decode (as nil).
+    func testVerdictsWithoutTheFlagStillDecode() throws {
+        let old = NightVerdict(id: "n", start: clock, end: clock + 3600, live: 3600, clean: true,
+                               endedBy: .person, taints: [])
+        let data = try JSONEncoder().encode([old])
+        XCTAssertFalse(String(decoding: data, as: UTF8.self).contains("interrupted"))
+        let decoded = try JSONDecoder().decode([NightVerdict].self, from: data)
+        XCTAssertEqual(decoded, [old])
+        XCTAssertNil(decoded.first?.interrupted)
+    }
+}
+
+extension NightJournalWiringTests {
+    /// The engine's interruption marks the night's pause as one; a switch turned off doesn't.
+    func testAnInterruptionsPauseIsMarkedAndAStopIsNot() {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("njw-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let engine = engineWithJournal(dir)
+        engine.restartBedAfterInterruption = { true }         // not the simulator's audio
+        engine.noiseOn = true
+        engine.handleInterruption(note: interruption(.began))
+        XCTAssertEqual(engine.nightJournal.open?.pauseWasInterruption, true)
+        engine.handleInterruption(note: interruption(.ended, shouldResume: true))
+        XCTAssertEqual(engine.nightJournal.open?.pauseWasInterruption, false)
+        engine.noiseOn = false
+        XCTAssertNotNil(engine.nightJournal.open?.pausedAt)
+        XCTAssertEqual(engine.nightJournal.open?.pauseWasInterruption, false)
+        engine.nightJournal.drain()
+    }
+}
+
+/// The playback log's files: lines from every launch, a file per day, scrubbed of URLs, rolled by
+/// size and age, written off the caller's thread with a bounded backlog.
+// Value: protects=last night's log lines survive a relaunch, carry no URL, and the files stay within 3 days and 1 MB; fails_when=lines don't reach the file, a URL or secret is written, a relaunch truncates, rotation or pruning breaks, or a backed-up writer grows without bound; why_new=the export only read the running process's unified log; seam=LogFile(directory:limits:calendar:now:), suspendWriter; no_claim=writes while the phone is locked, on a device
+final class LogFileTests: XCTestCase {
+    private var dir: URL!
+    private let utc: Calendar = {
+        var c = Calendar(identifier: .gregorian)
+        c.timeZone = TimeZone(identifier: "UTC")!
+        return c
+    }()
+
+    /// A clock the writer's queue can read and the test can move (moved only between flushes).
+    private final class Clock: @unchecked Sendable {
+        var now: Date
+        init(_ now: Date) { self.now = now }
+    }
+
+    override func setUp() {
+        super.setUp()
+        dir = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("log-\(UUID().uuidString)")
+    }
+
+    override func tearDown() {
+        try? FileManager.default.removeItem(at: dir)
+        super.tearDown()
+    }
+
+    private func at(day: Int, _ hour: Int, _ minute: Int = 0, _ second: Int = 0) -> Date {
+        utc.date(from: DateComponents(year: 2026, month: 11, day: day, hour: hour, minute: minute, second: second))!
+    }
+
+    private func log(_ clock: Clock, limits: LogRetention.Limits = .standard) -> LogFile {
+        LogFile(directory: dir, limits: limits, calendar: utc, now: { clock.now })
+    }
+
+    private func names() -> [String] {
+        ((try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []).sorted()
+    }
+
+    func testLinesLandInTheDaysFileStampedAndScrubbed() throws {
+        let clock = Clock(at(day: 27, 3, 12, 45))
+        let f = log(clock)
+        f.append(.error, category: "audio", "stream lost at https://feeds.example.com/p?token=secret, advancing")
+        f.append(.notice, category: "timer", "two\nlines")
+        f.flush()
+        XCTAssertEqual(names(), ["playback-2026-11-27.log"])
+        let text = try String(contentsOf: dir.appendingPathComponent("playback-2026-11-27.log"), encoding: .utf8)
+        XCTAssertEqual(text, """
+            2026-11-27 03:12:45.000 [audio] error: stream lost at [link] advancing
+            2026-11-27 03:12:45.000 [timer] notice: two lines
+
+            """)
+        XCTAssertFalse(text.contains("secret"))
+        XCTAssertEqual(try dir.resourceValues(forKeys: [.isExcludedFromBackupKey]).isExcludedFromBackup, true)
+    }
+
+    /// The point of the files: a relaunch keeps last night's lines, and the export reads both.
+    func testARelaunchKeepsTheLinesBeforeIt() {
+        let clock = Clock(at(day: 27, 3))
+        let before = log(clock)
+        before.append(.error, category: "audio", "podcast stream lost")
+        before.flush()
+        clock.now = at(day: 27, 7)
+        let after = log(clock)
+        after.append(.notice, category: "app", "launch: Sleepulator 1.0 (1)")
+        let text = after.exportText() ?? ""
+        let lost = text.range(of: "podcast stream lost"), launch = text.range(of: "launch: Sleepulator")
+        XCTAssertNotNil(lost, text)
+        XCTAssertNotNil(launch, text)
+        if let lost, let launch { XCTAssertLessThan(lost.lowerBound, launch.lowerBound) }
+        XCTAssertEqual(names(), ["playback-2026-11-27.log"])
+    }
+
+    func testAFullFileStartsANewPartAndANewDayANewFile() {
+        let clock = Clock(at(day: 27, 3))
+        var limits = LogRetention.Limits.standard
+        limits.maxFileBytes = 200
+        let f = log(clock, limits: limits)
+        for i in 0..<6 {
+            f.append(.notice, category: "timer", "line \(i) with some words to fill the file")
+            f.flush()
+        }
+        XCTAssertTrue(names().contains("playback-2026-11-27.log"))
+        XCTAssertTrue(names().contains("playback-2026-11-27.2.log"), "\(names())")
+        clock.now = at(day: 28, 0, 5)
+        f.append(.notice, category: "timer", "after midnight")
+        f.flush()
+        XCTAssertTrue(names().contains("playback-2026-11-28.log"), "\(names())")
+        XCTAssertTrue(f.files().last?.lastPathComponent == "playback-2026-11-28.log")
+    }
+
+    /// Files past 3 days go when a new file starts (here, the first write of a launch).
+    func testOldFilesGoOnTheDisk() throws {
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let old = dir.appendingPathComponent("playback-2026-11-20.log")
+        try Data("old\n".utf8).write(to: old)
+        try FileManager.default.setAttributes([.modificationDate: at(day: 20, 23)], ofItemAtPath: old.path)
+        let notOurs = dir.appendingPathComponent("notes.txt")
+        try Data("keep\n".utf8).write(to: notOurs)
+        try FileManager.default.setAttributes([.modificationDate: at(day: 1, 0)], ofItemAtPath: notOurs.path)
+        let f = log(Clock(at(day: 27, 3)))
+        f.append(.notice, category: "app", "launch")
+        f.flush()
+        XCTAssertEqual(names(), ["notes.txt", "playback-2026-11-27.log"])
+    }
+
+    /// A writer that can't keep up keeps at most `maxPending` lines and says how many it dropped,
+    /// rather than growing all night.
+    func testABackedUpWriterCountsWhatItDrops() throws {
+        var limits = LogRetention.Limits.standard
+        limits.maxPending = 3
+        let f = log(Clock(at(day: 27, 3)), limits: limits)
+        f.suspendWriter()
+        for i in 0..<5 { f.append(.notice, category: "scene", "line \(i)") }
+        f.resumeWriter()
+        let text = f.exportText() ?? ""
+        XCTAssertTrue(text.contains("line 2"), text)
+        XCTAssertFalse(text.contains("line 3"), text)
+        XCTAssertTrue(text.contains("[log] notice: 2 lines dropped: the log fell behind"), text)
+    }
+
+    func testFileNamesParseAndTheTargetRolls() {
+        XCTAssertEqual(LogRetention.name(day: "2026-11-27", part: 1), "playback-2026-11-27.log")
+        XCTAssertEqual(LogRetention.name(day: "2026-11-27", part: 3), "playback-2026-11-27.3.log")
+        XCTAssertEqual(LogRetention.parse("playback-2026-11-27.log")?.part, 1)
+        XCTAssertEqual(LogRetention.parse("playback-2026-11-27.3.log")?.part, 3)
+        XCTAssertEqual(LogRetention.parse("playback-2026-11-27.3.log")?.day, "2026-11-27")
+        XCTAssertNil(LogRetention.parse("playback-2026-11-27.1.log"))
+        XCTAssertNil(LogRetention.parse("notes.log"))
+        XCTAssertNil(LogRetention.parse("playback-2026-11-27.txt"))
+
+        var limits = LogRetention.Limits.standard
+        limits.maxFileBytes = 200
+        let t = Date()
+        func file(_ name: String, _ bytes: Int) -> LogRetention.FileInfo { .init(name: name, bytes: bytes, modified: t) }
+        XCTAssertEqual(LogRetention.target(day: "2026-11-27", existing: [], adding: 50, limits: limits),
+                       "playback-2026-11-27.log")
+        let day = [file("playback-2026-11-26.log", 10), file("playback-2026-11-27.log", 100)]
+        XCTAssertEqual(LogRetention.target(day: "2026-11-27", existing: day, adding: 100, limits: limits),
+                       "playback-2026-11-27.log")
+        XCTAssertEqual(LogRetention.target(day: "2026-11-27", existing: day, adding: 101, limits: limits),
+                       "playback-2026-11-27.2.log")
+        // An empty file takes even an oversized batch, rather than starting part after part.
+        XCTAssertEqual(LogRetention.target(day: "2026-11-27", existing: [file("playback-2026-11-27.log", 0)],
+                                           adding: 500, limits: limits), "playback-2026-11-27.log")
+    }
+
+    func testExpiryTakesTheOldThenTheOldestPastTheCap() {
+        let now = at(day: 27, 7)
+        let kb = 1024
+        func file(_ name: String, _ bytes: Int, daysAgo: Double) -> LogRetention.FileInfo {
+            .init(name: name, bytes: bytes, modified: now.addingTimeInterval(-daysAgo * 86_400))
+        }
+        let files = [file("playback-2026-11-22.log", 10 * kb, daysAgo: 5),       // past 3 days
+                     file("playback-2026-11-25.log", 600 * kb, daysAgo: 2),
+                     file("playback-2026-11-26.log", 300 * kb, daysAgo: 1),
+                     file("playback-2026-11-27.log", 300 * kb, daysAgo: 0),
+                     file("notes.txt", 5000 * kb, daysAgo: 30)]                  // not the log's
+        XCTAssertEqual(LogRetention.expired(files, now: now, keep: "playback-2026-11-27.log", limits: .standard),
+                       ["playback-2026-11-22.log", "playback-2026-11-25.log"])
+        // The file being written is never taken, however old.
+        XCTAssertEqual(LogRetention.expired([file("playback-2026-11-22.log", 10, daysAgo: 5)], now: now,
+                                            keep: "playback-2026-11-22.log", limits: .standard), [])
+    }
+}
+
+/// `Log`'s lines keep `Logger`'s call syntax and privacy, and reach the playback log's files.
+// Value: protects=a value not marked public never reaches the log in clear, and a Log call lands in the (test host's own) file; fails_when=the interpolation changes privacy defaults or formats, or LogChannel stops feeding LogFile, or the test host writes the phone's real log; why_new=Log was bare Loggers; seam=LogFile.shared in the test host's temp folder; no_claim=the unified log's own output (Console)
+final class LogMessageTests: XCTestCase {
+    func testInterpolationKeepsLoggersPrivacy() {
+        let token = "feed-token"
+        let m: LogMessage = "a=\(token) b=\(token, privacy: .public) n=\(42) on=\(true) d=\(0.5) f=\(Float(0.25)) x=\(Optional(1) as Int?)"
+        XCTAssertEqual(m.text, "a=<private> b=feed-token n=42 on=true d=0.5 f=0.25 x=<private>")
+        let plain: LogMessage = "no values"
+        XCTAssertEqual(plain.text, "no values")
+    }
+
+    func testALogLineReachesTheTestHostsOwnFile() {
+        XCTAssertTrue(LogFile.shared.directory.path.contains("sleepulator-test-logs"), LogFile.shared.directory.path)
+        let marker = UUID().uuidString
+        Log.audio.notice("marker \(marker, privacy: .public) https://example.com/secret")
+        let text = LogFile.shared.exportText() ?? ""
+        XCTAssertTrue(text.contains("[audio] notice: marker \(marker) [link]"), String(text.suffix(400)))
     }
 }

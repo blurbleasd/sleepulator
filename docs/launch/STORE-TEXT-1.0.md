@@ -154,13 +154,17 @@ data from the app.
   (a call or an alarm) or the audio output changed (headphones out), and whether playback ran
   into a problem. The last two nights are kept in detail and the last 30 as a one-line result.
   It never contains web addresses. The app uses it to show a one-line note on the Sleep screen
-  the morning after a night that played without a problem, to decide when to ask for a rating or
-  show the tip card, and to attach to feedback you choose to send.
+  the morning after a night that played without a problem, to list your recent nights (Settings ▸
+  Backup & support ▸ Recent nights), to decide when to ask for a rating or show the tip card, and
+  to attach to feedback you choose to send.
+- The app's playback log for the last 3 days: what played and what went wrong (a stream that
+  stalled, a player that restarted), without web addresses. It leaves your iPhone only when you
+  export it or attach it to feedback you send.
 - The battery and crash reports iOS provides to the app (Settings ▸ Backup & support ▸ Reports
   from iOS).
 
-Downloaded episodes, the night record and the iOS reports are kept out of iCloud and computer
-backups. Your library and settings are part of your iPhone's own backup, like any app's data.
+Downloaded episodes, the night record, the playback log and the iOS reports are kept out of
+iCloud and computer backups. Your library and settings are part of your iPhone's own backup, like any app's data.
 "Export a backup" makes a file that you save wherever you choose.
 
 ## What leaves your iPhone
