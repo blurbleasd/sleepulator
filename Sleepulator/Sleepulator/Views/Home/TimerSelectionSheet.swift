@@ -57,6 +57,16 @@ struct TimerSelectionSheet: View {
                 Text("Sleep timer")
                     .font(.title2.bold())
                     .foregroundColor(pal.text)
+                    .multilineTextAlignment(.center)
+                    // Swipe-only before. The close every sheet has: it keeps nothing picked here,
+                    // which only the commit below does (why it isn't a "Done"). The title keeps
+                    // clear of it on both sides, so at large text it wraps, centred, under neither.
+                    .padding(.horizontal, 44 + UI.md)
+                    .frame(maxWidth: .infinity)
+                    .overlay(alignment: .trailing) {
+                        SheetCloseButton(pal: pal) { isPresented = false }
+                            .padding(.trailing, UI.md)
+                    }
 
                 // One confident value — the slider and the presets both drive this number. Replaces a
                 // "Fade out smoothly over…" caption *and* a separate "N minutes" line saying it twice.

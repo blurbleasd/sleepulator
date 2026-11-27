@@ -118,11 +118,7 @@ struct TipSheet: View {
             .background(pal.bg)
             .navigationTitle(TipCopy.sheetTitle)
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Close") { dismiss() }
-                }
-            }
+            .toolbar { SheetCloseToolbarItem(pal: pal) { dismiss() } }
         }
         .task { if tips.products.isEmpty { await tips.loadProducts() } }
     }

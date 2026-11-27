@@ -265,16 +265,13 @@ struct NowPlayingSheet: View {
         let artSize: CGFloat = (night ? 150 : 250) * (typeSize.isAccessibilitySize ? 0.6 : 1)
         ScrollView {
             VStack(spacing: UI.xxl) {
-                // The system's drag indicator (ContentView) replaces a hand-drawn one; Done is
-                // the way out for anyone who doesn't swipe.
+                // The system's drag indicator (ContentView) replaces a hand-drawn one; the close at
+                // the top right is the way out for anyone who doesn't swipe, as on every sheet.
                 HStack {
                     Spacer()
-                    Button("Done") { onInteraction(); isPresented = false }
-                        .font(.body.weight(.semibold))
-                        .foregroundColor(pal.accent)
-                        .frame(minWidth: 44, minHeight: 44)
+                    SheetCloseButton(pal: pal) { onInteraction(); isPresented = false }
                 }
-                .padding(.horizontal, UI.xl)
+                .padding(.horizontal, UI.md)
 
                 // Sleep: a smaller, desaturated cover under a dark scrim, so the show's (often
                 // near-white) art no longer outshines everything else at 2am. Focus keeps it full.

@@ -79,19 +79,19 @@ final class HomeLayoutUITests: XCTestCase {
         // hit point; seam=none
         // Recorded here, checked after the switch to Sleep, so a failure still leaves the app in Sleep.
         let podcastsTab = app.tabBars.buttons["Podcasts"]
-        let nowPlayingDone = app.buttons["Done"]
+        let nowPlayingClose = app.buttons["Close"]   // the sheet's xmark (SheetCloseButton)
         // CI sometimes drops a synthesized tap, so each tap that matters checks its effect and goes
         // round again; the effect is re-read before each tap, so a late one isn't doubled.
         var barTapActed = false
         if miniPlayer.waitForExistence(timeout: 5) {
-            let acted = { podcastsTab.isSelected || nowPlayingDone.exists }
+            let acted = { podcastsTab.isSelected || nowPlayingClose.exists }
             for _ in 0..<3 where !barTapActed {
                 if !acted(), miniPlayer.exists { miniPlayer.tap() }
                 barTapActed = waitUntil(timeout: 3, acted)
             }
             // Back to Focus Home: close Now Playing, or leave Podcasts.
             for _ in 0..<3 where acted() {
-                if nowPlayingDone.exists { nowPlayingDone.tap() } else { app.tabBars.buttons["Focus"].tap() }
+                if nowPlayingClose.exists { nowPlayingClose.tap() } else { app.tabBars.buttons["Focus"].tap() }
                 _ = waitUntil(timeout: 3) { !acted() }
             }
             _ = session.waitForExistence(timeout: 5)
@@ -303,7 +303,7 @@ final class HomeLayoutUITests: XCTestCase {
     @MainActor
     private static func leaveInSleep(_ app: XCUIApplication) {
         guard app.state == .runningForeground else { return }
-        let done = app.buttons["Done"]
+        let close = app.buttons["Close"]   // any sheet's xmark: Now Playing, Build mix
         let homeTab = app.tabBars.buttons.matching(NSPredicate(format: "label IN %@", ["Focus", "Sleep"])).firstMatch
         let wake = app.buttons["Show controls"]
         let stop = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Stop focus session")).firstMatch
@@ -311,7 +311,7 @@ final class HomeLayoutUITests: XCTestCase {
         let sleep = app.buttons["Sleep mode"]
         for _ in 0..<3 where !(sleep.exists && sleep.isSelected) {
             if confirm.exists { confirm.tap(); _ = confirm.waitForNonExistence(timeout: 3); continue }
-            if done.exists { done.tap(); _ = done.waitForNonExistence(timeout: 3) }
+            if close.exists { close.tap(); _ = close.waitForNonExistence(timeout: 3) }
             if homeTab.exists, !homeTab.isSelected { homeTab.tap() }
             if wake.exists { wake.tap() }
             if stop.exists { stop.tap() }

@@ -426,3 +426,52 @@ struct EmberButtonStyle: ButtonStyle {
             .opacity(configuration.isPressed ? 0.6 : 1)
     }
 }
+
+// MARK: - Sheet close
+
+/// How every sheet closes, besides a swipe down: an xmark at the top right in a faint disc, dim,
+/// never a word in the accent. The 2026-11-07 critique found four ways (swipe only, Cancel on the
+/// left, Done on the right, Close). It means close and nothing more, which suits every sheet: the
+/// timer sheet's picked length is kept only by its commit, and a "Done" there would have promised
+/// otherwise. Breathing's full-screen covers already closed with an xmark at the top right.
+struct SheetCloseButton: View {
+    let pal: Palette
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "xmark")
+                .font(.footnote.weight(.bold))
+                .foregroundColor(pal.dim)
+                .padding(UI.sm)
+                .background(Circle().fill(pal.text.opacity(0.08)))
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .dynamicTypeSize(...DynamicTypeSize.accessibility2)
+        .accessibilityShowsLargeContentViewer()
+        .accessibilityLabel("Close")
+    }
+}
+
+/// The same close in a sheet with a navigation bar. The bare glyph: iOS 26 draws its own glass disc
+/// around a bar button, and the disc above would sit inside it. At the top right, like the rest;
+/// only a sheet whose commit sits in the bar (Import Shows) puts it at the top left, the
+/// cancellation side, so the two don't share a corner.
+struct SheetCloseToolbarItem: ToolbarContent {
+    let pal: Palette
+    var placement: ToolbarItemPlacement = .topBarTrailing
+    let action: () -> Void
+
+    var body: some ToolbarContent {
+        ToolbarItem(placement: placement) {
+            Button(action: action) {
+                Image(systemName: "xmark")
+                    .fontWeight(.semibold)
+                    .foregroundStyle(pal.dim)
+            }
+            .accessibilityLabel("Close")
+        }
+    }
+}

@@ -546,12 +546,9 @@ struct AddPodcastSheet: View {
             }
             .navigationTitle("Add Podcast")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                // The sheet could only be swiped away before.
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                }
-            }
+            // The sheet could only be swiped away before; then a Cancel on the left. Now the close
+            // every sheet has: each add is its own commit, so there is nothing here to cancel.
+            .toolbar { SheetCloseToolbarItem(pal: pal) { dismiss() } }
         }
         .tint(pal.accent)
         .onAppear { fieldFocused = true }

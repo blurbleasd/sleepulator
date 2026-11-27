@@ -49,9 +49,8 @@ struct OPMLSelectionView: View {
             .navigationTitle("Import Shows")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                }
+                // The close every sheet has; on the left here, since Import takes the right.
+                SheetCloseToolbarItem(pal: pal, placement: .cancellationAction) { dismiss() }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Import") {
                         onImport(feeds.filter { selectedUrls.contains($0.url) })
