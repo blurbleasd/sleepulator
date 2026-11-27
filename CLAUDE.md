@@ -30,9 +30,11 @@ code a rule protects. If the two disagree, this file wins.
     (`Views/Home/`); `NowPlayingState`, `PlayerClock`, `NightLineCopy`
     (`Views/NowPlayingState.swift`); `LimiterChoice`, `StereoWidth`, `SettingsOrder`
     (`Views/SettingsRules.swift`); `RateRowRule`, `FeedbackMessage` (`Views/TipJar.swift`);
+    `RecentNights` (`Views/RecentNightsView.swift`); `LogRetention` (`Services/LogFile.swift`);
     `Models/PodcastText.swift`, `Models/TonightShelf.swift`.
   - Also: `Views/TonightShelfView.swift` (Podcasts' Tonight shelf), `Views/BackupSupportView.swift`
-    (Settings ▸ Backup & support), the tip card (`CoachmarkContent.tip` in `FirstRunCoachmark`),
+    (Settings ▸ Backup & support; its `RecentNightsView` lists the night journal's verdicts in plain
+    words, read-only), the tip card (`CoachmarkContent.tip` in `FirstRunCoachmark`),
     the scenes (`AmbientScene`), `MiniPlayerClearance`, `SoundNames`, `Theme`, `Components`.
     `BackupController` (`Views/BackupControls.swift`) is owned by `SettingsView`, so a restore
     finishes if its page closes.
@@ -81,7 +83,19 @@ code a rule protects. If the two disagree, this file wins.
 - `NightJournal`: one record per Sleep session (a night can hold several), on this phone only:
   per-session `.jsonl` event files (the last 2, in Application Support/Sleepulator/nights,
   excluded from backup) and `night-verdicts.json` (the last 30). Clean nights pace the asks; Send
-  feedback attaches the files; the morning read-back reads every session of last night.
+  feedback attaches the files; the morning read-back reads every session of last night; Settings ▸
+  Backup & support ▸ Recent nights lists the verdicts (`RecentNights`, its words pinned by tests:
+  a new taint gets a `NightRules` constant and a phrase there).
+- `Log` + `LogFile`: the playback log. `Log.<category>` is a `LogChannel` with `Logger`'s calls
+  and `privacy:` interpolation (`LogMessage`: unmarked strings read `<private>`). Each line goes to
+  the unified log and to `LogFile`, which appends it, scrubbed by `NightRules.scrub`, to
+  Application Support/Sleepulator/logs (`playback-<day>.log`, excluded from backup; a new part past
+  256 KB, files past 3 days or 1 MB in all dropped, `LogRetention`). `append` only takes a lock
+  around an array append; the writes are on a utility queue, best effort, with a bounded backlog.
+  "Export the playback log" (`LogExport`) and Send feedback read the files (the unified log only as
+  the export's fallback), so a 3 a.m. failure survives a relaunch. `LogFile` never calls `Log` (a
+  failure would feed itself). Each launch logs a `[app] launch:` line. Test hosts write a temp
+  folder (`AppInfo.isUnitTestHost`/`isUITestRun`, nonisolated for it).
 - `TipStore`: StoreKit 2 consumable tips, started at launch (`SleepulatorApp`); listens to
   `Transaction.updates`, finishes every transaction, maps outcomes through the pure `TipFlow`. A
   tip unlocks nothing.
@@ -110,7 +124,8 @@ code a rule protects. If the two disagree, this file wins.
 
 ## Audio + state invariants (the hard-won stuff — change with care)
 - **Never block the render thread.** No locks, allocation or `DispatchQueue` work inside the
-  `AVAudioSourceNode` render block; hand-offs are atomic.
+  `AVAudioSourceNode` render block; hand-offs are atomic. No `Log` call there or in the podcast
+  tap's callbacks either: a log line allocates and takes `LogFile`'s lock (none does today).
 - **`AudioEngine` is a coarse `ObservableObject`**: any `@Published` change invalidates every
   observing view. Keep high-frequency values out of `@Published` (`rmsPower` is a plain property;
   the timer republishes at 1 Hz in `SleepTimerService.tick`). Give a view `@ObservedObject var
@@ -200,6 +215,9 @@ code a rule protects. If the two disagree, this file wins.
     no ambient tail, ended at the deadline). A deadline from before the open night discards it.
   - Late news is filed by when it happened, into the night whose span holds it, else dropped. A
     record found open at launch while playing is `died`.
+  - An interruption's pause is marked (`sessionStopped(interruption: true)`, "<live> interruption"
+    in the file); a `.person` close over it records `NightVerdict.interrupted` (nil on older
+    verdicts and other endings). Only Recent nights reads it.
   - Nothing written may carry a URL (`NightRules.scrub`). Writes are off main and best-effort;
     audio never waits on them.
 - **The asks are rare and daytime.** Rating after 3 clean nights, tip card after 5

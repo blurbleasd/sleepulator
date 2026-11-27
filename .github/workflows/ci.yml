@@ -119,22 +119,39 @@ jobs:
       # TEST_RUNNER_SLEEPULATOR_CI reaches the tests as SLEEPULATOR_CI: TipStoreTests (StoreKitTest)
       # skip on CI, visibly. Most runs load no products anyway (Apple's SKTestSession Code=3 bug),
       # and on the simulator that did load them (2026-10-13) purchases took up to 121 s and flaked.
+      # On a loaded runner xcodebuild can find no simulators at all, though simctl has just listed
+      # both as booted: "Unable to find a device", exit 70, before any test runs (PR #50,
+      # 2026-11-27). So it searches longer (the default is 30 s), and on exit 70 alone it tries
+      # again, up to three times, each a fresh search. Any other exit, a test failure (65)
+      # included, ends the step at once. The result bundle is written even on exit 70, and a
+      # second run refuses an existing one, so each try starts without it.
       - name: Test
         env:
           TEST_RUNNER_SLEEPULATOR_CI: "1"
         run: |
-          set -o pipefail
           DESTINATIONS=(-destination "id=${{ steps.sim.outputs.guard }}")
           if [ "${{ steps.sim.outputs.latest }}" != "${{ steps.sim.outputs.guard }}" ]; then
             DESTINATIONS+=(-destination "id=${{ steps.sim.outputs.latest }}")
           fi
-          xcodebuild test-without-building \
-            -project Sleepulator/Sleepulator.xcodeproj \
-            -scheme Sleepulator \
-            "${DESTINATIONS[@]}" \
-            -maximum-concurrent-test-simulator-destinations 1 \
-            -resultBundlePath TestResults.xcresult \
-            CODE_SIGNING_ALLOWED=NO
+          for attempt in 1 2 3; do
+            rm -rf TestResults.xcresult
+            status=0
+            xcodebuild test-without-building \
+              -project Sleepulator/Sleepulator.xcodeproj \
+              -scheme Sleepulator \
+              "${DESTINATIONS[@]}" \
+              -destination-timeout 180 \
+              -maximum-concurrent-test-simulator-destinations 1 \
+              -resultBundlePath TestResults.xcresult \
+              CODE_SIGNING_ALLOWED=NO || status=$?
+            if [ "$status" -ne 70 ]; then
+              exit "$status"
+            fi
+            echo "::warning::xcodebuild found no simulator (exit 70) on try $attempt of 3"
+            xcrun simctl list devices booted
+            sleep 30
+          done
+          exit 70
 
       - name: Upload test results
         if: always()

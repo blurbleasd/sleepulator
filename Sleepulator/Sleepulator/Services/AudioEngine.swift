@@ -645,7 +645,7 @@ final class AudioEngine: ObservableObject {
             DispatchQueue.main.async {
                 self?.playbackNote = msg
                 // The bed is most nights' sound: a night it failed in isn't clean.
-                self?.nightJournal.taint("sound engine error", at: at)
+                self?.nightJournal.taint(NightRules.soundEngineError, at: at)
             }
         }
 
@@ -972,7 +972,7 @@ final class AudioEngine: ObservableObject {
     func handlePodcastFailure(episodeId: String?, at: Date = Date()) {
         guard episodeId == nil || episodeId == loadedEpisode?.id else { return }
         // Any failure spoils the night (conservative: a stop it caused isn't a person's).
-        nightJournal.taint("podcast failed", at: at)
+        nightJournal.taint(NightRules.podcastFailed, at: at)
         // The system's reason ("The operation could not be completed") is logged by the player;
         // on screen it only alarmed. The player views offer Try again / Play next.
         playbackNote = NowPlayingState.failedCopy
@@ -1572,7 +1572,7 @@ final class AudioEngine: ObservableObject {
             nightJournal.note("interruption began")
             // The bed's switches stay on through it, so no session edge reports this stop: the
             // night pauses here (a podcast alone also pauses through its edge, below).
-            nightJournal.sessionStopped(at: at)
+            nightJournal.sessionStopped(at: at, interruption: true)
             podWasPlayingBeforeInterruption = podWasPlayingBeforeInterruption || podActive
             genEngine.handleInterruption(shouldResume: false)
             if podActive { podPlayer.pause() }

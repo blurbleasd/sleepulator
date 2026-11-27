@@ -162,16 +162,25 @@ enum FeedbackMessage {
         "\(subject) (\(version), build \(build))"
     }
 
-    static func body(nightSummary: String, nightFiles: Int, reportsSince: Date?, version: String,
-                     build: String, iOS: String, device: String) -> String {
+    static func body(nightSummary: String, nightFiles: Int, logFiles: Int, reportsSince: Date?,
+                     version: String, build: String, iOS: String, device: String) -> String {
         var attached: [String] = []
         if nightFiles > 0 {
-            attached.append("the last \(nightFiles == 1 ? "night's" : "\(nightFiles) nights'") playback events (no web addresses)")
+            attached.append("the last \(nightFiles == 1 ? "night's" : "\(nightFiles) nights'") playback events")
+        }
+        if logFiles > 0 {
+            attached.append("the playback log (up to 3 days)")
         }
         if let since = reportsSince {
             attached.append("iOS reports since \(since.formatted(date: .abbreviated, time: .omitted))")
         }
-        let attachedLine = attached.isEmpty ? "Attached: nothing yet." : "Attached: " + attached.joined(separator: " and ") + "."
+        var attachedLine = attached.isEmpty ? "Attached: nothing yet." : "Attached: " + RecentNights.joined(attached) + "."
+        switch (nightFiles > 0, logFiles > 0) {
+        case (true, true): attachedLine += " No web addresses in the events or the log."
+        case (true, false): attachedLine += " No web addresses in the events."
+        case (false, true): attachedLine += " No web addresses in the log."
+        case (false, false): break
+        }
         return """
 
 
@@ -189,22 +198,25 @@ enum FeedbackMessage {
     }
 }
 
-/// What "Send feedback" gathers: the kept night files and the newest iOS reports, newest first,
-/// within a 2 MB total (eng Section 4 #2), noting anything left out.
+/// What "Send feedback" gathers: the kept night files, the playback log's files and the newest
+/// iOS reports, in that order, each newest first, within a 2 MB total (eng Section 4 #2), noting
+/// anything left out.
 struct FeedbackBundle {
     let files: [URL]
     let body: String
 
     static let byteCap = 2 * 1024 * 1024
 
-    static func gather(journal: NightJournal) -> FeedbackBundle {
+    static func gather(journal: NightJournal, log: LogFile = .shared) -> FeedbackBundle {
         journal.drain()
+        log.flush()
         let nights = journal.nightFiles()
+        let logs = Array(log.files().reversed())
         let reports = MetricsCollector.shared.payloadFiles()
         var files: [URL] = []
         var total = 0
         var leftOut = 0
-        for url in nights + reports {
+        for url in nights + logs + reports {
             let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
             if total + size > byteCap { leftOut += 1; continue }
             total += size
@@ -216,6 +228,7 @@ struct FeedbackBundle {
         let since = attachedReports.last.flatMap { try? $0.resourceValues(forKeys: [.creationDateKey]).creationDate }
         var body = FeedbackMessage.body(nightSummary: journal.summaryLine(),
                                         nightFiles: files.filter { nights.contains($0) }.count,
+                                        logFiles: files.filter { logs.contains($0) }.count,
                                         reportsSince: attachedReports.isEmpty ? nil : since,
                                         version: AppInfo.version, build: AppInfo.build,
                                         iOS: UIDevice.current.systemVersion, device: UIDevice.current.model)
@@ -274,8 +287,8 @@ struct SendFeedbackRow: View {
     let pal: Palette
     @State private var bundle: FeedbackBundle?
 
-    // "Playback events", as the mail says: the page's "Export the playback log" is another file.
-    private static let note = "Email with the last \(NightRules.keptNightFiles) nights' playback events."
+    // "Playback events", as the mail says; the playback log is the page's "Export" file.
+    private static let note = "Email with the last \(NightRules.keptNightFiles) nights' playback events and the playback log."
 
     var body: some View {
         Button {

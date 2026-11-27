@@ -806,7 +806,7 @@ final class PodcastPlayer: NSObject {
             Log.audio.error("podcast stream lost (stalled ~\((attempt + 1) * 30, privacy: .public)s) — advancing")
             // The night hears it here, observe-only: this path keeps its own note and advance, not
             // onPlaybackFailed's failure UI (Try again), so it doesn't go through that channel.
-            self.onPipelineEvent?("stream lost", Date())
+            self.onPipelineEvent?(NightRules.streamLost, Date())
             self.onPlaybackNote?("Podcast stream lost — the ambient sounds continue")
             self.onQueueAdvance?(lostId, false)   // advance, but do NOT mark it played
         }
@@ -849,7 +849,7 @@ final class PodcastPlayer: NSObject {
             guard let self, let current = self.currentItem,
                   failedItem == ObjectIdentifier(current) else { return }   // a stale item's news
             Log.audio.error("podcast failed to play to end (\(reason, privacy: .public)) — AVPlayer will be rebuilt on next play")
-            self.markPipelineDead(NightRules.pipelineDied + " (item failed)", at: detectedAt)
+            self.markPipelineDead(NightRules.pipelineDied + NightRules.itemFailed, at: detectedAt)
         }
     }
 
@@ -859,7 +859,7 @@ final class PodcastPlayer: NSObject {
         guard player != nil else { return }
         let wasPlaying = pausedAt == nil && !didPlayToEnd
         Log.audio.error("media services reset — podcast AVPlayer will be rebuilt (wasPlaying=\(wasPlaying, privacy: .public))")
-        markPipelineDead(NightRules.pipelineDied + " (media services reset)", at: Date())
+        markPipelineDead(NightRules.pipelineDied + NightRules.mediaServicesReset, at: Date())
         if wasPlaying { resume() }
     }
 
@@ -932,7 +932,7 @@ final class PodcastPlayer: NSObject {
                 rebuildPlayer(at: currentPositionSeconds)
             } else {
                 Log.audio.error("podcast still silent after a rebuild — watchdog standing down; next pause/play rebuilds")
-                onPipelineEvent?("silent after a rebuild", Date())
+                onPipelineEvent?(NightRules.silentAfterRebuild, Date())
                 needsRebuild = true          // also idles the watchdog (see `eligible`)
                 onPlaybackNote?("No podcast audio? Pause and play to restart it")
             }

@@ -59,6 +59,9 @@ nonisolated struct NightSummary: Codable, Equatable {
     var pausedAt: Date?
     /// The time of the last event written, so a died night can be closed where it stopped.
     var lastEventAt: Date
+    /// The current pause came from an interruption (an alarm, a call, Siri), not a stop: a night
+    /// it ends ended "interrupted" (Settings ▸ Backup & support ▸ Recent nights).
+    var pauseWasInterruption = false
 }
 
 /// What the asks, the feedback summary and the morning read-back need from a closed session (a
@@ -71,6 +74,10 @@ nonisolated struct NightVerdict: Codable, Equatable {
     let clean: Bool
     let endedBy: NightEndReason
     let taints: [String]
+    /// A `.person` end where the sound stopped for an interruption that never resumed (an alarm,
+    /// a call), not a stop. Nil on verdicts recorded before the journal told the two apart, and
+    /// on every other ending. Read only by Recent nights; the asks and the read-back ignore it.
+    var interrupted: Bool? = nil
 }
 
 /// The night's rules, pure.
@@ -89,6 +96,15 @@ nonisolated enum NightRules {
     /// reads them, so a rewording can't quietly end the grace.
     static let playerRebuilt = "player rebuilt"
     static let pipelineDied = "pipeline died"
+    /// The other news that spoils a night. Named here, as the two above, so Recent nights'
+    /// plain words (`RecentNights.phrase`) can't drift from what the senders write.
+    static let streamLost = "stream lost"
+    static let silentAfterRebuild = "silent after a rebuild"
+    static let podcastFailed = "podcast failed"
+    static let soundEngineError = "sound engine error"
+    /// `pipelineDied`'s two reasons, as `PodcastPlayer` appends them.
+    static let itemFailed = " (item failed)"
+    static let mediaServicesReset = " (media services reset)"
 
     /// Only a dead or rebuilt player is a pause's aftermath. A failed episode, a lost stream,
     /// silence after a rebuild or the noise engine's error spoil a night whatever their timing.
@@ -134,8 +150,10 @@ nonisolated enum NightRules {
 
     static func verdict(_ s: NightSummary) -> NightVerdict? {
         guard let end = s.end, let endedBy = s.endedBy else { return nil }
+        // A `.person` close over a pause ends where it paused: interrupted if that pause was one.
+        let interrupted: Bool? = endedBy == .person ? (s.pausedAt != nil && s.pauseWasInterruption) : nil
         return NightVerdict(id: s.id, start: s.start, end: end, live: s.live, clean: isClean(s),
-                            endedBy: endedBy, taints: s.taints)
+                            endedBy: endedBy, taints: s.taints, interrupted: interrupted)
     }
 
     /// Text safe for the trail: anything shaped like a URL becomes "[link]".
@@ -169,9 +187,14 @@ nonisolated extension NightSummary {
         lastEventAt = max(lastEventAt, e.at)
         switch e.kind {
         case "paused":
+            // "<live>", or "<live> interruption" for an interruption's pause.
+            let parts = (e.detail ?? "").split(separator: " ").map(String.init)
             pausedAt = e.at
-            live = max(live, Double(e.detail ?? "") ?? live)
-        case "resumed": pausedAt = nil
+            pauseWasInterruption = parts.contains("interruption")
+            if let l = parts.first.flatMap(Double.init) { live = max(live, l) }
+        case "resumed":
+            pausedAt = nil
+            pauseWasInterruption = false
         case "live", "threshold": live = max(live, Double(e.detail ?? "") ?? live)
         case "taint": if let d = e.detail { taints.append(d) }
         case "closed":
@@ -281,6 +304,7 @@ final class NightJournal {
         if var night = open, let pausedAt = night.pausedAt {
             if t.timeIntervalSince(pausedAt) < UntimedNight.resumeWindow {
                 night.pausedAt = nil
+                night.pauseWasInterruption = false
                 open = night
                 soundStartedAt = t
                 write(NightEvent(at: t, kind: "resumed"), essential: true)
@@ -306,13 +330,17 @@ final class NightJournal {
 
     /// The Sleep session's sound stopped (a pause, a call, headphones out, the timer's own stop).
     /// `at` is when it stopped, if known before the hop to main (an interruption's own time).
-    func sessionStopped(at: Date? = nil) {
+    /// `interruption`: an audio interruption stopped it (an alarm, a call), not a stop; a night
+    /// that ends over this pause ended interrupted (`NightVerdict.interrupted`).
+    func sessionStopped(at: Date? = nil, interruption: Bool = false) {
         guard var night = open, night.pausedAt == nil else { return }
         let t = max(at ?? now(), night.start)
         night.pausedAt = t
+        night.pauseWasInterruption = interruption
         open = night
         lastTick = nil
-        write(NightEvent(at: t, kind: "paused", detail: liveText(night.live)), essential: true)
+        let detail = liveText(night.live) + (interruption ? " interruption" : "")
+        write(NightEvent(at: t, kind: "paused", detail: detail), essential: true)
     }
 
     /// Live audio: the RMS tap and the player clock, both on main, ~20 Hz while sound renders.
@@ -404,7 +432,8 @@ final class NightJournal {
         }
         let old = verdicts[index]
         verdicts[index] = NightVerdict(id: old.id, start: old.start, end: old.end, live: old.live,
-                                       clean: false, endedBy: old.endedBy, taints: old.taints + [kind])
+                                       clean: false, endedBy: old.endedBy, taints: old.taints + [kind],
+                                       interrupted: old.interrupted)
         storage.save(verdicts, to: Self.verdictsFile)
         append(NightEvent(at: at, kind: "taint", detail: kind), toNight: old.id)
     }
@@ -451,6 +480,8 @@ final class NightJournal {
         night.reconciled = reconciled
         var detail = "\(reason.rawValue) \(Int(night.live))"
         if reconciled { detail += " reconciled" }
+        // For the reader of the file; the verdict takes it from the pause (`NightRules.verdict`).
+        if reason == .person, night.pausedAt != nil, night.pauseWasInterruption { detail += " interrupted" }
         append(NightEvent(at: end, kind: "closed", detail: detail), toNight: night.id, flush: flush)
         open = nil
         lastTick = nil

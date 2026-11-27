@@ -9,9 +9,10 @@ import Foundation
 /// footer: glance at Settings and confirm the phone is running the build you just made.
 enum AppInfo {
     /// Running as a unit-test host: services that would write the real stores (the night
-    /// journal, the tip store's transaction listener) use throwaway ones. Debug builds only, so
-    /// no test path can reach a shipped build.
-    static var isUnitTestHost: Bool {
+    /// journal, the playback log, the tip store's transaction listener) use throwaway ones. Debug
+    /// builds only, so no test path can reach a shipped build. Nonisolated, as `isUITestRun`: the
+    /// playback log's writer reads them from any thread (both read thread-safe stores).
+    nonisolated static var isUnitTestHost: Bool {
         #if DEBUG
         ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
         #else
@@ -21,7 +22,7 @@ enum AppInfo {
 
     /// Launched by a UI test (`-uiTestIsolated <true/>`): a throwaway night journal and no rating
     /// prompt, so a dev simulator's own nights can't reach the run, nor the run's reach them.
-    static var isUITestRun: Bool {
+    nonisolated static var isUITestRun: Bool {
         #if DEBUG
         UserDefaults.standard.bool(forKey: "uiTestIsolated")
         #else
