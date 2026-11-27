@@ -269,6 +269,12 @@ code a rule protects. If the two disagree, this file wins.
     §M7's veil step for the mini-player).
 - **One name per sound**, through `SoundNames` (binaurals are "Deep", "Drift", …, never "Delta" /
   "Theta").
+- **One way to close, one switch tint.** Every sheet closes by a swipe or an xmark at the top right
+  (`SheetCloseButton`; `SheetCloseToolbarItem` in a sheet with a nav bar, on the left only where the
+  bar's right holds a commit, Import Shows). No Done / Cancel / Close words: a "Done" promised the
+  timer sheet kept a pick that only its commit keeps. Every switch tints `pal.controlTint`. A status
+  that can't be tapped (the sounds under the orb, `LayerPills`) is a dim line, never a capsule.
+  Night menus may keep a red Delete (long-press, swipe); night confirms may not.
 - **Podcasts is split by depth.** The library and its Tonight shelf follow the 2am rules (artwork
   dimmed to 0.78 in Sleep, `EmberButtonStyle`, no solid accent slabs); a show's page and the Add
   sheet are the brighter surfaces. Tint swipe actions `pal.actionFill`, never `pal.accent`. The

@@ -1041,6 +1041,39 @@ night, Lamplight selected (Build mix → Backdrop), Brown playing.
    Overnight with the veil on: ✅ battery comparable to Night sky (a full-screen shader at 30 fps
    while the street is in sight; nothing renders under the veil).
 
+### AA. Sleep conventions: the first-run card, confirms, closing a sheet, switches, the layer line (added 2026-11-27, unit-tested only)
+The last two issues of the Sleep usability critique (2026-11-07, 27/40). The first-run card ("Tap
+the orb to begin") now leaves when the orb begins a session (`CoachmarkContent.startRetiresFirstRun`);
+a pause leaves it. Night confirms have no red button and none is a popover. Every sheet closes the
+same way: swipe down, or an xmark in a faint disc at the top right (`SheetCloseButton`; Import Shows
+puts it on the left, since Import has the right). Every switch is copper in Sleep. The sounds under
+the orb are a dim line, not pills that looked tappable. Nothing here was looked at on a screen; unit
+tests and the Home UI tests cover the rules. Sleep mode, room dim, brightness as at night.
+
+1. **The first-run card leaves on Play.** It's long retired on a used phone, so bring it back for
+   one launch: in Xcode, Edit Scheme ▸ Run ▸ Arguments, add `-showFirstRunTips YES`, run, then take
+   the argument out again (Debug builds only). With nothing playing, ✅ the card shows under the
+   night line. Tap the orb. ✅ The card fades out as the sound starts, and ✅ it stays gone after
+   pausing and after a relaunch without the argument. With Settings' "Start with a minute of
+   breathing" on, ✅ it leaves at the tap, before the breathing minute.
+2. **A pause doesn't spend it.** Again with the argument: start a podcast from the Podcasts tab, go
+   back to Home. ✅ The card is up. Tap the orb to pause. ✅ The card stays; tap it again to play
+   and ✅ it leaves.
+3. **No red at night.** Build mix ▸ Save mix, name it the same as a saved mix. ✅ "Replace this
+   mix?" has Replace and Cancel, neither in red. On a show page, Play All with episodes already
+   queued: ✅ "Replace your queue?" is a centred alert, not a popover, with Replace Queue, Add to End
+   and Cancel.
+4. **One way to close.** Open each in turn: Build mix, the timer sheet (the night line), Now
+   Playing (the mini-player), Add Podcast, the tip sheet if it's due. ✅ Each has the same dim xmark
+   at the top right, and swiping down still closes it. In the timer sheet, pick 45m and tap the
+   xmark: ✅ the night line still shows the length it had (only the commit keeps a choice). At the
+   largest text size, ✅ the xmark doesn't overlap "Sleep timer" or "Your mix".
+5. **One switch colour.** ✅ The mixer's layer switches (Build mix) and Settings' switches are the
+   same copper when on; in Focus ✅ both are the blue accent.
+6. **The sounds under the orb read as a status.** Play Brown + Deep. ✅ Under the night line, a dim
+   "Brown · Deep" with no capsule around it, a step quieter than the night line and its chevron.
+   With VoiceOver on, ✅ it reads "Active sounds: Brown, Deep" as one stop, not a button.
+
 ---
 
 ## Quick release checklist
