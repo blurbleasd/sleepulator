@@ -90,15 +90,20 @@ jobs:
             nohup xcrun simctl boot "$udid" > "boot-$udid.log" 2>&1 &
           done
 
-      # Builds the app + widget + tests once (the compile gate, incl. Metal shaders); both
-      # simulators are arm64 iOS Simulator, so the one build serves both.
+      # Builds the app + widget + tests once (the compile gate, incl. Metal shaders) for the generic
+      # simulator, not a named one. Both simulators are still on their first boot here, and naming
+      # one failed the build three times (PRs #21, #28, #50): xcodebuild found no simulators at all,
+      # "Unable to find a device", exit 70, with nothing compiled. The generic target is always
+      # there. Both simulators are arm64, so ARCHS=arm64 (a generic build would compile x86_64 too)
+      # and the one build serves both. The Test step names them, after Wait for simulators.
       - name: Build for testing
         run: |
           set -o pipefail
           xcodebuild build-for-testing \
             -project Sleepulator/Sleepulator.xcodeproj \
             -scheme Sleepulator \
-            -destination "id=${{ steps.sim.outputs.guard }}" \
+            -destination "generic/platform=iOS Simulator" \
+            ARCHS=arm64 \
             CODE_SIGNING_ALLOWED=NO
 
       - name: Wait for simulators
