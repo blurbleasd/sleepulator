@@ -19,6 +19,8 @@ struct BackupSupportView: View {
     @State private var logExportFailed = false
     @State private var logName = "sleepulator-log"
 
+    private static let recentNightsNote = "How long each night played and how it ended."
+
     var body: some View {
         List {
             Group {
@@ -33,6 +35,13 @@ struct BackupSupportView: View {
                 Section {
                     // First: the way to reach a person (design D4), with last night attached.
                     SendFeedbackRow(journal: journal, pal: pal)
+                    // How each night went, read on the phone the morning after (no cable, no log).
+                    NavigationLink { RecentNightsView(journal: journal, pal: pal) } label: {
+                        SettingActionRow(title: "Recent nights", systemImage: "moon.zzz",
+                                         note: Self.recentNightsNote, pal: pal)
+                    }
+                    .accessibilityLabel("Recent nights")
+                    .accessibilityHint(Self.recentNightsNote)
                     NavigationLink { DiagnosticsListView(pal: pal) } label: {
                         SettingActionRow(title: "Reports from iOS", systemImage: "waveform.path.ecg",
                                          note: "Battery and crash reports, about one a day. Kept on this iPhone.", pal: pal)
