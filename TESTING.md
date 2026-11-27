@@ -1119,6 +1119,20 @@ tests and the Home UI tests cover the rules. Sleep mode, room dim, brightness as
    "Brown · Deep" with no capsule around it, a step quieter than the night line and its chevron.
    With VoiceOver on, ✅ it reads "Active sounds: Brown, Deep" as one stop, not a button.
 
+### AB. Focus hidden: a Sleep-only app (added 2026-11-27, unit-tested only)
+`AppConfig.focusModeEnabled` is off. The UI tests turn Focus back on, so only the phone shows the
+switcher-less Home. A Debug build installed over the last one, not from Xcode's run button.
+1. **Home.** ✅ No Sleep/Focus switcher at the top; the orb sits a little higher, still centred
+   between the top and the controls below, nothing overlapping the status bar or the coachmark
+   band. At the largest text size ✅ the same.
+2. **Settings.** ✅ No "Focus settings" row; every Sleep section is there as before.
+3. **A phone left in Focus** (only if the build before this one was left in Focus, or set it up
+   with a Focus-enabled build first: Focus, White + Beta). Install this build and open it.
+   ✅ It opens in Sleep, warm, with your last Sleep sounds (not White, not the first in the list),
+   and no Pomodoro or its Live Activity running. Force-quit and open again: ✅ the same sounds.
+4. **Nothing else reaches Focus.** Lock-screen controls, the Resume widget, the Siri shortcuts
+   and a restore from a backup made in Focus: ✅ each leaves the app in Sleep.
+
 ---
 
 ## Quick release checklist

@@ -495,24 +495,28 @@ struct HomeView: View {
             // "Build mix" control that opens the full mixer in a drawer. Everything detailed
             // is deliberately tucked away.
             VStack(spacing: 0) {
-                ModeSwitcher(focusMode: audio.focusMode, pal: pal,
-                             quiet: !audio.focusMode && (sessionActive || audio.sleepTimer.timerRemaining > 0),
-                             onSelect: requestMode)
-                    // An alert, not a confirmation dialog: iOS 26 draws that as a popover and drops
-                    // its cancel button, which left one red "Switch to Focus" on a dark screen. An
-                    // alert always shows the way back ("Stay in Sleep"), and nothing here is red:
-                    // the switch is reversible, and red is the loudest light in the room at 2am.
-                    .alert(modeSwitchTitle,
-                           isPresented: Binding(get: { modeSwitchRequest != nil },
-                                                set: { if !$0 { modeSwitchRequest = nil } }),
-                           presenting: modeSwitchRequest) { request in
-                        Button(request.warning.confirm) { applyMode(request.toFocus) }
-                        Button(request.warning.cancel, role: .cancel) {}
-                    } message: { request in
-                        Text(request.warning.message)
-                    }
-                    .padding(.horizontal, 40)
-                    .padding(.top, 6)
+                // No switcher while Focus is hidden (AppConfig.focusModeEnabled): Home is Sleep's
+                // alone, and the orb settles to the middle of the room the switcher left.
+                if AppConfig.focusModeEnabled {
+                    ModeSwitcher(focusMode: audio.focusMode, pal: pal,
+                                 quiet: !audio.focusMode && (sessionActive || audio.sleepTimer.timerRemaining > 0),
+                                 onSelect: requestMode)
+                        // An alert, not a confirmation dialog: iOS 26 draws that as a popover and drops
+                        // its cancel button, which left one red "Switch to Focus" on a dark screen. An
+                        // alert always shows the way back ("Stay in Sleep"), and nothing here is red:
+                        // the switch is reversible, and red is the loudest light in the room at 2am.
+                        .alert(modeSwitchTitle,
+                               isPresented: Binding(get: { modeSwitchRequest != nil },
+                                                    set: { if !$0 { modeSwitchRequest = nil } }),
+                               presenting: modeSwitchRequest) { request in
+                            Button(request.warning.confirm) { applyMode(request.toFocus) }
+                            Button(request.warning.cancel, role: .cancel) {}
+                        } message: { request in
+                            Text(request.warning.message)
+                        }
+                        .padding(.horizontal, 40)
+                        .padding(.top, 6)
+                }
 
                 if let note = audio.playbackNote {
                     HStack(alignment: .firstTextBaseline, spacing: 6) {

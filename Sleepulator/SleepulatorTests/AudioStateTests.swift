@@ -2378,6 +2378,37 @@ final class ModeSwitchConsequenceTests: XCTestCase {
         XCTAssertFalse(UserDefaults.standard.bool(forKey: "focusMode"))
         XCTAssertTrue(Palette(focusMode: false).warm)
     }
+
+    // Value: protects=while Focus is hidden, a phone left in Focus opens in Sleep with Sleep's own picks, saved, and Focus's picks kept for its return; fails_when=init keeps the persisted Focus mode, skips the pick restore (White playing in Sleep, or the palette's first sound instead of Sleep's pick), or doesn't save what it restored (property observers don't run in init, so the next launch would read White again); why_new=AppConfig.focusModeEnabled and AudioEngine.leaveHiddenFocus are new; seam=none (the shared defaults, saved and put back); no_claim=that the hosted app's own launch does this (same init), the Pomodoro's Live Activity on a device
+    func testAPhoneLeftInFocusOpensInSleepWhileFocusIsHidden() throws {
+        try XCTSkipIf(AppConfig.focusModeEnabled, "Focus is offered in this build, so nothing is hidden")
+        let d = UserDefaults.standard
+        let keys = ["focusMode", "noiseType", "binauralPreset", "extraLayers",
+                    AudioEngine.pickKey("noise", focus: false), AudioEngine.pickKey("binaural", focus: false),
+                    AudioEngine.pickKey("noise", focus: true), AudioEngine.pickKey("binaural", focus: true)]
+        let saved = keys.map { d.object(forKey: $0) }
+        defer { for (key, value) in zip(keys, saved) { if let value { d.set(value, forKey: key) } else { d.removeObject(forKey: key) } } }
+        // Left in Focus on White and Beta, with Rain and Theta as Sleep's last picks.
+        d.set(true, forKey: "focusMode")
+        d.set("white", forKey: "noiseType")
+        d.set("beta", forKey: "binauralPreset")
+        d.removeObject(forKey: "extraLayers")
+        d.set("rain", forKey: AudioEngine.pickKey("noise", focus: false))
+        d.set("theta", forKey: AudioEngine.pickKey("binaural", focus: false))
+
+        let e = AudioEngine()
+
+        XCTAssertFalse(e.focusMode, "the phone opened in Focus while Focus is hidden")
+        XCTAssertEqual(e.noiseType, "rain", "Sleep's own noise pick didn't come back")
+        XCTAssertEqual(e.binauralPreset, "theta", "Sleep's own binaural pick didn't come back")
+        XCTAssertFalse(e.pomodoro.isRunning)
+        XCTAssertEqual(d.object(forKey: "focusMode") as? Bool, false, "Settings and the palettes read Focus")
+        XCTAssertEqual(d.string(forKey: "noiseType"), "rain", "the next launch would read White back")
+        XCTAssertEqual(d.string(forKey: "binauralPreset"), "theta")
+        XCTAssertEqual(d.string(forKey: AudioEngine.pickKey("noise", focus: true)), "white",
+                       "Focus's pick wasn't kept for when it comes back")
+        XCTAssertEqual(d.string(forKey: AudioEngine.pickKey("binaural", focus: true)), "beta")
+    }
 }
 
 /// Default preset names use the mixer's words ("Deep", not "Delta").
@@ -4513,10 +4544,20 @@ final class SettingsRulesTests: XCTestCase {
 
     func testEverySectionAppearsExactlyOnceInEachMode() {
         for focus in [false, true] {
-            let all = SettingsOrder.shown(focus: focus) + SettingsOrder.folded(focus: focus)
+            let all = SettingsOrder.shown(focus: focus) + SettingsOrder.folded(focus: focus, focusAvailable: true)
             XCTAssertEqual(all.count, SettingsSection.allCases.count)
             XCTAssertEqual(Set(all), Set(SettingsSection.allCases))
         }
+    }
+
+    // Value: protects=with Focus hidden, Sleep's Settings has no "Focus settings" fold and every Sleep section still shows; fails_when=folded ignores focusAvailable (a fold opens Pomodoro lengths for a mode nobody can reach) or drops Sleep's fold for a phone somehow in Focus; why_new=AppConfig.focusModeEnabled is new; seam=none; no_claim=the SettingsView wiring (it shows the fold row only when this is non-empty)
+    func testWithFocusHiddenSleepFoldsNothing() {
+        XCTAssertEqual(SettingsOrder.folded(focus: false, focusAvailable: false), [])
+        XCTAssertEqual(SettingsOrder.folded(focus: true, focusAvailable: false), [.sleep, .nightPodcasts],
+                       "a phone in Focus keeps the way to Sleep's settings")
+        let sleep = SettingsOrder.shown(focus: false)
+        XCTAssertEqual(Set(sleep), Set(SettingsSection.allCases).subtracting([.focus]),
+                       "every section but Focus's still shows in Sleep")
     }
 
     func testSleepKeepsItsPodcastSectionsTogether() throws {

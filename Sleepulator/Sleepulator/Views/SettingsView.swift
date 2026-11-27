@@ -162,9 +162,12 @@ struct SettingsView: View {
             List {
                 Group {
                     ForEach(SettingsOrder.shown(focus: focusMode)) { section($0) }
-                    otherModeRow
-                    if showOtherMode {
-                        ForEach(SettingsOrder.folded(focus: focusMode)) { section($0) }
+                    let folded = SettingsOrder.folded(focus: focusMode, focusAvailable: AppConfig.focusModeEnabled)
+                    if !folded.isEmpty {
+                        otherModeRow
+                        if showOtherMode {
+                            ForEach(folded) { section($0) }
+                        }
                     }
                     Section {
                         NavigationLink {
