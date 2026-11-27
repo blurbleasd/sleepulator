@@ -85,7 +85,8 @@ struct Palette {
 
     /// Fill for swipe actions and other system controls with a fixed white label.
     var actionFill: Color { warm ? Theme.emberDeep : Theme.focusDeep }
-    /// Tint for Settings' switches and bars: copper in Sleep (`Theme.copper`), the accent in Focus.
+    /// Tint for every switch (Settings, the mixer's layers, Backup) and Settings' bars: copper in
+    /// Sleep (`Theme.copper`), the accent in Focus. One colour for one control.
     var controlTint: Color { warm ? Theme.copper : accent }
     /// Cover art opacity: dimmed in Sleep (artwork is the brightest block on a 2am list), full in
     /// Focus.

@@ -176,7 +176,7 @@ struct AppleMusicMixRow: View {
                     set: { _ in audio.toggleAppleMusic() }
                 ))
                 .labelsHidden()
-                .tint(pal.accent)
+                .tint(pal.controlTint)   // every switch's one tint (Palette.controlTint)
             }
             .frame(minHeight: 44)
             .accessibilityElement(children: .combine)
